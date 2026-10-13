@@ -16,7 +16,7 @@ public sealed class ServerTests : IAsyncLifetime
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -425,14 +425,15 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    public void Each_server_is_an_IBeadServer_with_RequireCredential_and_ShareLegBSession()
     {
         Start(Timeout.InfiniteTimeSpan);
 
         var server = Assert.IsAssignableFrom<IBeadServer<string>>(Server);
 
         Assert.Same(_transport, server.Transport);
-        Assert.Same(Server.RequireSessionOrCredential, server.RequireSessionOrCredential);
+        Assert.Same(Server.RequireCredential, server.RequireCredential);
+        Assert.Same(Server.ShareLegBSession, server.ShareLegBSession);
         Assert.Same(Server.RequireSession, server.RequireSession);
         Assert.Same(Server.Services, server.Services);
     }
@@ -581,27 +582,50 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSession.Refusal!.Code);
     }
 
+    // spec 14.3.1
     [Fact]
-    public void Admits_a_call_in_a_session_or_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_any_other_in_none_SESSION_REQUIRED()
+    public void RequireCredential_admits_a_call_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_none_and_OPAQUE_in_a_session_or_in_none_ACCESS_DENIED_with_its_detail()
     {
         Start(new ServerOptions());
 
-        var requireSessionOrCredential = Server.RequireSessionOrCredential;
+        var requireCredential = Server.RequireCredential;
+        var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
+        var opaque = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        Credential?[] credentials = [null, Credential.None, opaque, Credential.Jwt("not even a token"), Credential.Elsewhere()];
+
+        Assert.Equal(
+            [[false, false], [false, false], [false, false], [true, true], [true, true]],
+            credentials.Select((credential) =>
+            {
+                var request = new AdmissionRequest(Handle, header with { Credential = credential });
+
+                return new[] { requireCredential.Admits(request with { Session = new CallSession() }), requireCredential.Admits(request) };
+            }));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "a relay admits by default only a credential it forwards"), requireCredential.Refusal);
+    }
+
+    // spec 14.3.1
+    [Fact]
+    public void ShareLegBSession_admits_a_call_in_a_session_or_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_any_other_in_none_SESSION_REQUIRED()
+    {
+        Start(new ServerOptions());
+
+        var shareLegBSession = Server.ShareLegBSession;
         var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
         var inNone = new AdmissionRequest(Handle, header);
 
-        Assert.True(requireSessionOrCredential.Admits(inNone with { Session = new CallSession() }));
-        Assert.True(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Jwt("not even a token") } }));
-        Assert.True(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Elsewhere() } }));
-        Assert.False(requireSessionOrCredential.Admits(inNone));
-        Assert.False(requireSessionOrCredential.Admits(inNone with { Header = header with { Credential = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })) } }));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSessionOrCredential.Refusal!.Code);
+        Assert.True(shareLegBSession.Admits(inNone with { Session = new CallSession() }));
+        Assert.True(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Jwt("not even a token") } }));
+        Assert.True(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Elsewhere() } }));
+        Assert.False(shareLegBSession.Admits(inNone));
+        Assert.False(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })) } }));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, shareLegBSession.Refusal!.Code);
     }
 
     [Fact]
-    public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_requireSessionOrCredential_where_it_gives_none()
+    public async Task Relays_as_its_options_say_its_own_admission_and_timeout_kept_requireCredential_where_it_gives_none()
     {
-        const string device = "type=WS;ip=127.0.0.1;port=50002";
+        const string device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
         var admitting = new BeforeRequest((_) =>
         {
             return true;
@@ -622,8 +646,9 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(new FailureHeader { CallId = 1 }, lost.Header);
         Assert.Equal((ushort)ProtocolCode.DestinationLost, lost.Failure!.Code);
 
-        // none of its own: the server's RequireSessionOrCredential, which refuses a call in none, and
-        // lets a JWT by on its scheme alone, for its destination to verify — one of no audience here
+        // none of its own: the server's RequireCredential, which refuses a call presenting none, in
+        // none or in a session, and lets a JWT by on its scheme alone, for its destination to verify
+        // — one of no audience here
         await DisposeServer();
         _transport.Sent.Clear();
         Start(new ServerOptions { Relay = new RelayOptions { Timeout = TimeSpan.FromMilliseconds(250) } });
@@ -631,16 +656,68 @@ public sealed class ServerTests : IAsyncLifetime
         _transport.Open(device);
         Server.Router.RegisterDestination(new ConnectionTarget(device), new DestinationOptions { DestinationId = 7 });
         await Deliver(RelayedOf(1));
+        Server.Sessions.Set(Server.Sessions.Create(Handle));
+        await Deliver(RelayedOf(3));
 
-        var jwt = RelayedOf(3);
+        var jwt = RelayedOf(5);
 
         await Deliver(new Envelope { Header = (RequestHeader)jwt.Header with { Credential = Credential.Jwt("a.b.c") }, Payload = jwt.Payload });
         Assert.Equal(
-            [(ushort)ProtocolCode.SessionRequired, (ushort)ProtocolCode.DestinationUnreachable],
+            [
+                ((ushort)ProtocolCode.AccessDenied, "a relay admits by default only a credential it forwards"),
+                ((ushort)ProtocolCode.AccessDenied, "a relay admits by default only a credential it forwards"),
+                ((ushort)ProtocolCode.DestinationUnreachable, _transport.Read(2).Failure!.Detail),
+            ],
             _transport.Sent.Select((_, index) =>
             {
-                return _transport.Read(index).Failure!.Code;
+                var failure = _transport.Read(index).Failure!;
+
+                return (failure.Code, failure.Detail);
             }));
+    }
+
+    // spec 14.7
+    [Fact]
+    public async Task A_beforeRoute_that_reads_the_destination_admits_a_requester_in_a_session_only_to_the_destinations_its_session_names()
+    {
+        const string door = "type=WS;ip=127.0.0.1;port=50002;ordinal=2";
+        const string window = "type=WS;ip=127.0.0.1;port=50003;ordinal=3";
+        BeforeRequest? requireCredential = null;
+
+        // a requester reaches a destination its session names, or forwards a credential its
+        // destination verifies
+        var isAdmitted = new BeforeRequest((request) =>
+        {
+            var named = request.Session?.Data is string devices && devices.Split(',').Contains($"{request.Header.DestinationId}");
+
+            return requireCredential!.Admits(request) || named;
+        });
+
+        Start(new ServerOptions { Relay = new RelayOptions { BeforeRoute = isAdmitted } });
+        requireCredential = Server.RequireCredential;
+        _transport.Open(Handle);
+        _transport.Open(door);
+        _transport.Open(window);
+        Server.Router.RegisterDestination(new ConnectionTarget(door), new DestinationOptions { DestinationId = 7 });
+        Server.Router.RegisterDestination(new ConnectionTarget(window), new DestinationOptions { DestinationId = 8 });
+
+        // in none, refused; in a session that names 7, through to 7 alone
+        await Deliver(RelayedOf(1));
+        Server.Sessions.Set(Server.Sessions.Create(Handle) with { Data = "7" });
+        await Deliver(RelayedOf(3));
+
+        var toWindow = RelayedOf(5);
+
+        await Deliver(new Envelope { Header = (RequestHeader)toWindow.Header with { DestinationId = 8 }, Payload = toWindow.Payload });
+
+        Assert.Equal([Handle, door, Handle], _transport.SentTo);
+        Assert.Equal(
+            [(ushort?)ProtocolCode.AccessDenied, null, (ushort?)ProtocolCode.AccessDenied],
+            _transport.Sent.Select((_, index) =>
+            {
+                return _transport.Read(index).Failure?.Code;
+            }));
+        Assert.IsType<RequestHeader>(_transport.Read(1).Header);
     }
 
     [Fact]
@@ -698,6 +775,40 @@ public sealed class ServerTests : IAsyncLifetime
     public void A_transport_counts_nothing_unless_it_says_so()
     {
         Assert.Null(((IServerTransport)new Uncounted()).Gauges());
+    }
+
+    [Fact]
+    public void Hears_its_transport_s_error_and_refusal_through_the_server_s_transport()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+
+        var thrown = new InvalidOperationException("a listener that throws");
+        var refusal = new TransportServerRefusal("127.0.0.1", "rebind.example:8080", null, 50_000, "host-refused", 403);
+        var heard = new List<string>();
+
+        // the server gives its transport as IServerTransport, which carries both, whichever
+        // transport it was built on: no listener on the concrete transport is needed
+        Server.Transport.Error += (reason, connectionHandle) =>
+        {
+            heard.Add($"error {reason.Message} on {connectionHandle}");
+        };
+        Server.Transport.Refusal += (told) =>
+        {
+            heard.Add($"refusal {told.Status} {told.Reason} of {told.Authority}");
+        };
+
+        _transport.Report(thrown, Handle);
+        _transport.Refuse(refusal);
+        // a refusal's listener's throw, reported with the empty handle
+        _transport.Report(thrown, string.Empty);
+
+        Assert.Equal(
+            [
+                $"error a listener that throws on {Handle}",
+                "refusal 403 host-refused of rebind.example:8080",
+                "error a listener that throws on ",
+            ],
+            heard);
     }
 
     [Fact]
@@ -1033,7 +1144,14 @@ public sealed class ServerTests : IAsyncLifetime
 
         public event Action<bool, string>? Listen;
 
+        public event Action<TransportServerRefusal>? Refusal;
+
+        public event Action<Exception, string>? Error;
+
         public List<ReadOnlyMemory<byte>> Sent { get; } = [];
+
+        // the connection each of what it sent went to, in the same order
+        public List<string> SentTo { get; } = [];
 
         public List<string> Closed { get; } = [];
 
@@ -1079,6 +1197,18 @@ public sealed class ServerTests : IAsyncLifetime
             Listen?.Invoke(isHeld, Handle);
         }
 
+        // what a listener of its events threw, as a transport reports it
+        public void Report(Exception reason, string connectionHandle)
+        {
+            Error?.Invoke(reason, connectionHandle);
+        }
+
+        // a request it refused of its own, as a transport tells it
+        public void Refuse(TransportServerRefusal refusal)
+        {
+            Refusal?.Invoke(refusal);
+        }
+
         public void Deliver(byte[] bytes)
         {
             Message?.Invoke(new TransportMessage(bytes, false), Handle);
@@ -1101,6 +1231,11 @@ public sealed class ServerTests : IAsyncLifetime
             var failing = Failing;
 
             Failing = Failing.None;
+
+            if (failing == Failing.None)
+            {
+                SentTo.Add(connectionHandle);
+            }
 
             return failing switch
             {

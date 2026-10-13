@@ -49,7 +49,10 @@ export interface IExchange {
   readonly localPort: number | undefined;
   readonly reader: IResponseReader;
   destroy(): void;
-  /** The next thing the server sends on its WebSocket, or none within `within` milliseconds. */
+  /**
+   * The next thing the server sends on its WebSocket, or none within `within` milliseconds; rejects
+   * once a frame of a reserved opcode came, which ends the socket.
+   */
   next(within: number): Promise<Heard | undefined>;
   /** Writes frames on its WebSocket, each masked, as a client's must be. */
   send(frames: readonly IFrame[]): void;
@@ -57,12 +60,16 @@ export interface IExchange {
 
 // types
 
-/** What the server sends on a WebSocket, each as it comes: a message whole, a close, a ping, the end. */
+/**
+ * What the server sends on a WebSocket, each as it comes: a message whole, a close, a ping, a pong,
+ * the end.
+ */
 export type Heard =
   | { binary: Uint8Array }
   | { close: number }
   | { end: true }
   | { ping: Uint8Array }
+  | { pong: Uint8Array }
   | { text: string };
 
 // constants
@@ -79,6 +86,9 @@ export const OPCODES = Object.freeze({
   PONG: 0xa,
   TEXT: 0x1,
 });
+
+// every opcode RFC 6455 5.2 defines; the others are reserved, and a peer fails the connection on one
+const DEFINED_OPCODES: ReadonlySet<number> = new Set(Object.values(OPCODES));
 
 // the masking key of RFC 6455's examples, 5.7: fixed, so what the peer writes is the same each run
 const MASK = Uint8Array.of(0x37, 0xfa, 0x21, 0x3d);
@@ -316,7 +326,8 @@ export const createResponseReader = (
 
 /**
  * A reader of the frames a server sends, RFC 6455 5: a message's frames assembled, each thing heard
- * handed to `hear` as it comes whole, and each control frame to `answer`, which may answer it.
+ * handed to `hear` as it comes whole, and each control frame to `answer`, which may answer it. A
+ * frame of a reserved opcode throws.
  */
 const createFrameReader = ({
   answer,
@@ -330,6 +341,10 @@ const createFrameReader = ({
 
   const onFrame = (frame: IFrame): void => {
     const { fin, opcode, payload } = frame;
+
+    if (!DEFINED_OPCODES.has(opcode)) {
+      throw new Error(`the server sent a frame of reserved opcode 0x${opcode.toString(16)}`);
+    }
 
     if (opcode === OPCODES.CLOSE) {
       const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
@@ -347,11 +362,17 @@ const createFrameReader = ({
       return;
     }
 
+    if (opcode === OPCODES.PONG) {
+      hear({ pong: payload });
+
+      return;
+    }
+
     if (opcode === OPCODES.BINARY || opcode === OPCODES.TEXT) {
       message = { opcode, parts: [] };
     }
 
-    if (message === undefined || opcode === OPCODES.PONG) {
+    if (message === undefined) {
       return;
     }
 
@@ -423,14 +444,15 @@ export const openExchange = (
   request: Uint8Array
 ): IExchange => {
   const socket = connect({ host, port });
-  const heard: Heard[] = [];
-  let waiting: ((each: Heard) => void) | undefined;
+  // what came, in order, a frame the peer fails on among it
+  const heard: (Heard | Error)[] = [];
+  let waiting: ((each: Heard | Error) => void) | undefined;
   let frames: ReturnType<typeof createFrameReader> | undefined;
   let hasClosed = false;
   let hasEnded = false;
   let localPort: number | undefined;
 
-  const hear = (each: Heard): void => {
+  const hear = (each: Heard | Error): void => {
     const taker = waiting;
 
     waiting = undefined;
@@ -459,10 +481,21 @@ export const openExchange = (
     }
   };
 
+  // a frame of a reserved opcode fails the connection, RFC 6455 5.2: heard as the failure it is,
+  // the socket ended behind it
+  const feedFrames = (bytes: Uint8Array): void => {
+    try {
+      frames?.feed(bytes);
+    } catch (error) {
+      hear(toError(error));
+      socket.destroy();
+    }
+  };
+
   const reader = createResponseReader((response, rest) => {
     if (response.status === 101) {
       frames = createFrameReader({ answer, hear });
-      frames.feed(rest);
+      feedFrames(rest);
     }
   });
 
@@ -482,7 +515,7 @@ export const openExchange = (
     if (frames === undefined) {
       reader.feed(bytes);
     } else {
-      frames.feed(bytes);
+      feedFrames(bytes);
     }
   });
   socket.on('error', (error) => {
@@ -504,10 +537,10 @@ export const openExchange = (
       const first = heard.shift();
 
       if (first !== undefined) {
-        return Promise.resolve(first);
+        return first instanceof Error ? Promise.reject(first) : Promise.resolve(first);
       }
 
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           waiting = undefined;
           resolve(undefined);
@@ -515,7 +548,12 @@ export const openExchange = (
 
         waiting = (each) => {
           clearTimeout(timer);
-          resolve(each);
+
+          if (each instanceof Error) {
+            reject(each);
+          } else {
+            resolve(each);
+          }
         };
       });
     },

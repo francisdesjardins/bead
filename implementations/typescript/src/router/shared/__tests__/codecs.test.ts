@@ -2,13 +2,14 @@
 
 // Bead's codecs, `spec/codecs.json`, played against the TypeScript side's: each payload read, and
 // written back or refused, and each value written or refused, through its encoding's codec —
-// `proto`'s made by `payloadCodecOf` over the generated `Probe`. The C# side plays the same file.
+// `proto`'s over the generated `Probe`, as generated code makes one. The C# side plays the same file.
 
 // dependencies
 
 import { readFileSync } from 'node:fs';
 import { create, fromBinary, type MessageInitShape, toBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
+import { checkProtoRecords } from '../../../proto/records';
 import { type IPayloadCodec, PAYLOAD_CODECS, payloadCodecOf } from '../payloads';
 import { type Probe, ProbeSchema } from './codecs_pb';
 
@@ -37,11 +38,19 @@ interface IPayloadEntry extends IEntry {
   read?: IProbeRead;
 }
 
-/** What a `proto` reader read of the top `Probe`: its text in UTF-16 code units, number, depth. */
-interface IProbeRead {
+/** What a `proto` reader read of a `Probe`: its text in UTF-16 code units, number, depth below it. */
+interface IProbeHeld {
   nested: number;
   number: number;
   text: string;
+}
+
+/** What a `proto` reader read of the top `Probe`: what it holds, each field where it holds any. */
+interface IProbeRead extends IProbeHeld {
+  children?: Record<string, IProbeHeld>;
+  counts?: number[];
+  delimited?: IProbeHeld;
+  stamps?: number[];
 }
 
 /** A `Probe` given to a writer, one field set or none: its text as UTF-16 code units. */
@@ -77,11 +86,14 @@ const LANGUAGE = 'TypeScript';
 const LONE_SURROGATE = `a${String.fromCharCode(0xd800)}b`;
 
 /**
- * `Probe`'s codec, as generated code makes a `proto` binding's: protobuf-es's reader with spec
- * 17.9.3's bound, and its writer over the initializer it takes.
+ * `Probe`'s codec, as generated code makes a `proto` binding's: its records checked against its
+ * descriptor, then protobuf-es's reader with spec 17.9.3's bound, and its writer over the
+ * initializer it takes.
  */
 const PROBE_CODEC = payloadCodecOf<Probe, MessageInitShape<typeof ProbeSchema>>({
   decode: (bytes) => {
+    checkProtoRecords(bytes, ProbeSchema);
+
     // ! protobuf-es counts the top message: 101 is spec 17.9's 100 below it
     return fromBinary(ProbeSchema, bytes, { recursionLimit: 101 });
   },
@@ -129,15 +141,50 @@ const unitsOf = (text: string): string => {
   }).join(' ');
 };
 
-/** What a read of `probe` gives, as the file writes it: how many messages nest below it. */
-const readOf = (probe: Probe): IProbeRead => {
-  let nested = 0;
+/**
+ * How deep messages nest below `probe`, at the deepest: through `child` and `delimited`, and
+ * through each of `children`, its entry counting as a message and its value as another.
+ */
+const nestedBelow = (probe: Probe): number => {
+  let deepest = 0;
 
-  for (let child = probe.child; child !== undefined; child = child.child) {
-    nested += 1;
+  for (const below of [probe.child, probe.delimited]) {
+    if (below !== undefined) {
+      deepest = Math.max(deepest, 1 + nestedBelow(below));
+    }
   }
 
-  return { nested, number: probe.number, text: unitsOf(probe.text) };
+  for (const value of Object.values(probe.children)) {
+    deepest = Math.max(deepest, 2 + nestedBelow(value));
+  }
+
+  return deepest;
+};
+
+/** What a read of a `Probe` the top one holds gives, as the file writes it. */
+const heldOf = (probe: Probe): IProbeHeld => {
+  return { nested: nestedBelow(probe), number: probe.number, text: unitsOf(probe.text) };
+};
+
+/** What a read of `probe` gives, as the file writes it: each field it holds any of, beside its own. */
+const readOf = (probe: Probe): IProbeRead => {
+  const keys = Object.keys(probe.children).toSorted();
+
+  return {
+    ...heldOf(probe),
+    ...(probe.counts.length === 0 ? {} : { counts: [...probe.counts] }),
+    ...(probe.stamps.length === 0 ? {} : { stamps: [...probe.stamps] }),
+    ...(keys.length === 0
+      ? {}
+      : {
+          children: Object.fromEntries(
+            keys.map((key) => {
+              return [unitsOf(key), heldOf(probe.children[key] as Probe)];
+            })
+          ),
+        }),
+    ...(probe.delimited === undefined ? {} : { delimited: heldOf(probe.delimited) }),
+  };
 };
 
 /** A `Probe`'s initializer, as a row gives one. */
@@ -236,15 +283,7 @@ test.describe('the codecs', () => {
         .map(({ name }) => {
           return name;
         })
-    ).toEqual([
-      "a string's leading U+FEFF",
-      'an unknown varint of 11 bytes',
-      'an unknown record past the end of its message',
-      'a string past the end of its message',
-      'a length past 32 bits',
-      'a length past 32 bits, a field after',
-      'an object naming a member twice',
-    ]);
+    ).toEqual(["a string's leading U+FEFF", 'an object naming a member twice']);
   });
 
   test('plays every encoding of the file through a codec of its own, and no other', () => {
@@ -318,8 +357,7 @@ test.describe('the codecs', () => {
     });
   }
 
-  // * the matrix's rows of protobuf-es: where it parts from 17.9.1 and 17.9.4, and where Bead states
-  // no rule
+  // * the matrix's rows of protobuf-es: where it parts from 17.9.4, and where Bead states no rule
 
   test("a string's leading U+FEFF in a proto payload, as protobuf-es strips it", () => {
     expect(readOf(PROBE_CODEC.decode(bytesOf('0A 04 EF BB BF 61')))).toEqual({
@@ -329,57 +367,13 @@ test.describe('the codecs', () => {
     });
   });
 
-  test('a proto field at another wire type, as protobuf-es reads it', () => {
-    // its text at the varint wire type, and its number at the fixed32 one, refused; its number at
-    // the length-delimited one, an empty run, read as the number 0
-    expect(
-      thrownBy(() => {
-        return PROBE_CODEC.decode(bytesOf('08 61'));
-      })
-    ).toBeInstanceOf(Error);
-    expect(readOf(PROBE_CODEC.decode(bytesOf('12 00')))).toEqual({
-      nested: 0,
-      number: 0,
-      text: '',
-    });
-    expect(
-      thrownBy(() => {
-        return PROBE_CODEC.decode(bytesOf('15 01 02 03 04'));
-      })
-    ).toBeInstanceOf(Error);
-  });
-
-  test('a proto record past the end of its message, and an unknown varint of more than 10 bytes, as protobuf-es reads them', () => {
-    // the child's unknown fixed32 takes the parent's last four bytes, and its text the parent's three
-    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 01 61 1A 02 25 00 0A 01 62')))).toEqual({
-      nested: 1,
-      number: 0,
-      text: '0061',
-    });
-    expect(PROBE_CODEC.decode(bytesOf('1A 02 0A 03 61 62 63')).child?.text).toBe('abc');
-    expect(readOf(PROBE_CODEC.decode(bytesOf(`48${' 80'.repeat(10)} 00`)))).toEqual({
-      nested: 0,
-      number: 0,
-      text: '',
-    });
-  });
-
-  test('a proto length past 32 bits, as protobuf-es reads it', () => {
-    // a length's fifth byte keeps 4 bits, so 0x80 0x80 0x80 0x80 0x10 is read as a length of 0
-    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 80 80 80 80 10')))).toEqual({
-      nested: 0,
-      number: 0,
-      text: '',
-    });
-    expect(readOf(PROBE_CODEC.decode(bytesOf('0A 80 80 80 80 10 10 07')))).toEqual({
-      nested: 0,
-      number: 7,
-      text: '',
-    });
-  });
-
   test('a proto string holding a surrogate alone, as protobuf-es writes it', () => {
     // U+FFFD in its place, where a text or a json writer refuses it
     expect(hexOf(PROBE_CODEC.encode({ text: LONE_SURROGATE }))).toBe('0A 05 61 EF BF BD 62');
+  });
+
+  test("a proto map's entry, its key at its default, as protobuf-es writes it", () => {
+    // * the empty key written, where Google.Protobuf leaves it out as any field at its default
+    expect(hexOf(PROBE_CODEC.encode({ children: { '': {} } }))).toBe('62 04 0A 00 12 00');
   });
 });

@@ -199,12 +199,20 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
 
         // refuses the handshake with a status of its own, which the client's error names, and hangs up
-        public static async Task Refuse(TcpClient peer, int status)
+        public static Task Refuse(TcpClient peer, int status)
         {
+            return Refuse(peer, (status, null));
+        }
+
+        // and with its mark, when it is a refusal of the transport's own
+        public static async Task Refuse(TcpClient peer, (int Status, string? Reason) refusal)
+        {
+            var mark = refusal.Reason is { } reason ? $"Bead-Refusal: {reason}\r\n" : "";
+
             using (peer)
             {
                 await peer.GetStream().WriteAsync(
-                    Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                    Encoding.ASCII.GetBytes($"HTTP/1.1 {refusal.Status} Refused\r\n{mark}Content-Length: 0\r\nConnection: close\r\n\r\n"),
                     Cancelled);
             }
         }
@@ -370,18 +378,53 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Single(_server.ConnectionHandles);
     }
 
+    // spec 15.2
+    [Fact]
+    public async Task Writes_no_Origin_on_its_upgrade()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+        }
+
+        var lines = Encoding.ASCII.GetString(head).Split("\r\n");
+
+        // a page's browser writes its own, which the server judges; the client, none
+        Assert.StartsWith("GET ", lines[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(lines, (line) =>
+        {
+            return line.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     [Fact]
     public async Task Refuses_a_connect_while_its_close_is_under_way_and_connects_again_once_closed()
     {
-        await _client.Connect(Target, Cancelled);
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
 
-        var closing = _client.CloseConnection();
-
-        Assert.Equal("the transport client is already closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
         {
-            return _client.Connect(Target, Cancelled);
-        })).Message);
-        await closing.WaitAsync(Patience, Cancelled);
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            // under way as long as the server's end reads nothing, whatever the machine's pace
+            var closing = _client.CloseConnection();
+
+            Assert.Equal("the transport client is already closing", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return _client.Connect(Target, Cancelled);
+            })).Message);
+            Assert.Equal(WebSocketMessageType.Close, (await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled)).MessageType);
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+        }
 
         await _client.Connect(Target, Cancelled);
 
@@ -1271,6 +1314,41 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Reconnects_though_a_reconnect_listener_throws_the_throw_reported_the_next_listener_told()
+    {
+        var thrown = new InvalidOperationException("a reconnect listener that throws");
+        var reported = new List<Exception>();
+        var told = 0;
+
+        ((IRouterClientTransport)_client).Reconnect += () =>
+        {
+            throw thrown;
+        };
+        ((IRouterClientTransport)_client).Reconnect += () =>
+        {
+            Interlocked.Increment(ref told);
+        };
+        _client.Error += (reason) =>
+        {
+            lock (reported)
+            {
+                reported.Add(reason);
+            }
+        };
+
+        await _client.Connect(Target, Cancelled);
+        await _client.Reconnect().WaitAsync(Patience, Cancelled);
+
+        // the reconnection went on to its attempt, which opened
+        Assert.Equal(ReadyState.Open, _client.ReadyState);
+        Assert.Equal(1, told);
+        lock (reported)
+        {
+            Assert.Equal([thrown], reported);
+        }
+    }
+
+    [Fact]
     public async Task Makes_its_first_attempt_at_once()
     {
         // a clock that never moves: a first attempt that waited would wait for ever
@@ -1428,6 +1506,63 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Equal(
             [(null, 1), (TimeSpan.FromMilliseconds(10), 2), (TimeSpan.FromMilliseconds(20), 3)],
             seen);
+    }
+
+    [Fact]
+    public async Task Names_the_status_and_the_reason_of_an_upgrade_refused()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var failures = new List<(string Message, WebSocketError Error, Type? Inner)>();
+
+        // marked, as a server's refusal of its own; then unmarked, a gateway's
+        foreach (var refusal in new (int, string?)[] { (403, "host-refused"), (502, null) })
+        {
+            await using var client = new WebSocketTransportClient();
+            var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            var (peer, _) = await listener.Next();
+
+            await Listener.Refuse(peer, refusal);
+
+            var thrown = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            failures.Add((thrown.Message, thrown.WebSocketErrorCode, thrown.InnerException?.GetType()));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+
+        // the platform's own failure kept as its cause
+        Assert.Equal(
+            [
+                ("the server refused the upgrade: 403 host-refused", WebSocketError.NotAWebSocket, typeof(WebSocketException)),
+                ("the server refused the upgrade: 502", WebSocketError.NotAWebSocket, typeof(WebSocketException)),
+            ],
+            failures);
+    }
+
+    [Fact]
+    public async Task Connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alone_whichever_it_is()
+    {
+        var connects = new List<(string Address, TimeSpan Took)>();
+
+        foreach (var address in Addresses.ReachedByLocalhost())
+        {
+            await using var server = new WebSocketTransportServer();
+            var port = (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Port;
+            await using var client = new WebSocketTransportClient();
+            var started = TimeProvider.System.GetTimestamp();
+
+            await client.Connect(new WebSocketConnectOptions { Host = "localhost", Port = port }, Cancelled).WaitAsync(Patience, Cancelled);
+            connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
+            Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
+        }
+
+        // the families raced: neither waits out the other's refusal, two seconds on Windows
+        Assert.All(connects, (connect) =>
+        {
+            Assert.True(connect.Took < TimeSpan.FromSeconds(1.5), $"{connect.Address}: {connect.Took}");
+        });
     }
 
     [Fact]

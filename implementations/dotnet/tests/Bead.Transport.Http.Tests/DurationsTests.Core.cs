@@ -12,7 +12,7 @@ public sealed partial class DurationsTests
 {
     // constants
 
-    private const string Other = "type=WS;ip=127.0.0.1;port=50002";
+    private const string Other = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
     private static readonly Procedure Echo = new()
     {
@@ -614,6 +614,11 @@ public sealed partial class DurationsTests
         public Task<uint> Subscribe(AnswerTarget target)
         {
             return Task.FromResult(target.Header.CallId);
+        }
+
+        public Failure? AnsweredOf(AnswerTarget target)
+        {
+            return null;
         }
 
         public bool HasNotification(INotificationLike notification)

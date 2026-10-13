@@ -14,14 +14,16 @@
 // blueprint beadc wrote outside spec/, every text changed before any is written; runs the
 // generators; dates [Unreleased] as the version, under a new empty one, and links it; then runs the
 // gate as a release, spec/check.py and the root's format check, naming one whose tool is absent;
-// and lists what it owes by hand: the CHANGELOG's line on a document's new tag, each waiver of CI's
-// `beadc breaking` step, moot once the release is tagged, and each of decision 0006's gates owed
-// that names the release.
+// on a hotfix, which starts from main, takes every waiver out of CI's `beadc breaking` step, each
+// moot since the release main holds; and lists what it owes by hand: the CHANGELOG's line on a
+// document's new tag, and each of decision 0006's gates owed that names the release.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v… and debugging-v… at the commit v<version> tags, for each document whose version no
-// tag names yet; runs the gate as main's run will, then over the branch checked out; and prints the
-// one push. Exit 1 on a refusal; exit 2 on a usage error.
+// tag names yet; runs the gate as main's run will, then over the branch checked out; takes out of
+// CI's `beadc breaking` step on the branch checked out, develop at its back-merge, each waiver the
+// tagged commit carries, which the release makes moot, and prints the commit that keeps it; and
+// prints the one push. Exit 1 on a refusal; exit 2 on a usage error.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
@@ -270,6 +272,12 @@ export const versionOf = (document, { stated, move, facts }) => {
 export const CI = '.github/workflows/ci.yml';
 export const GATES = 'docs/decisions/0006-a-rule-has-its-gate.md';
 
+// the records' index: a tree that keeps it owes its documents brought to each release
+export const RECORDS = 'docs/decisions/README.md';
+
+// a line that runs `beadc breaking`, read whole
+const BREAKING = /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/;
+
 // each `--except` of the lines that run `beadc breaking`, as written, its quotes dropped; a line
 // continued by a backslash is read whole, and a comment is no line that runs
 export const breakingWaivers = (text) => {
@@ -277,16 +285,47 @@ export const breakingWaivers = (text) => {
     .replace(/\\\n/g, ' ')
     .split('\n')
     .filter((line) => {
-      return (
-        !line.trimStart().startsWith('#') &&
-        /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/.test(line)
-      );
+      return !line.trimStart().startsWith('#') && BREAKING.test(line);
     })
     .flatMap((line) => {
       return [...line.matchAll(/--except[= ](?:'([^']*)'|"([^"]*)"|(\S+))/g)].map((match) => {
         return match[1] ?? match[2] ?? match[3];
       });
     });
+};
+
+// `text` with each of `waivers` taken out of the lines that run `beadc breaking`, as written, its
+// quotes or none; every other line, a comment's among them, as it was
+export const withoutWaivers = (text, waivers) => {
+  const lines = text.split('\n');
+  const out = [];
+  for (let first = 0; first < lines.length;) {
+    // a line, and those a backslash continues it on
+    let last = first;
+    while (last < lines.length - 1 && lines[last].endsWith('\\')) {
+      last += 1;
+    }
+    const command = lines.slice(first, last + 1);
+    const runs = !command[0].trimStart().startsWith('#') && BREAKING.test(command.join(' '));
+    for (const line of command) {
+      out.push(
+        runs
+          ? waivers.reduce((kept, waiver) => {
+              const escaped = waiver.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              return kept.replace(
+                new RegExp(
+                  `[ \\t]+--except[= ](?:'${escaped}'|"${escaped}"|${escaped})(?=\\s|$)`,
+                  'g'
+                ),
+                ''
+              );
+            }, line)
+          : line
+      );
+    }
+    first = last + 1;
+  }
+  return out.join('\n');
 };
 
 // the bullets of 0006's gates owed that name `version`, each by its words before its first
@@ -422,6 +461,12 @@ export const prepare = (root, options = {}) => {
     stage(BUILDER, (text) => withPackageVersion(text, product));
   }
   stage(PROPS, (text) => withPropsVersion(text, product));
+  // * a hotfix starts from main, whose CI keeps the waivers of the release it tags, all moot: the
+  // branch compares against that release, where none waives anything
+  const moot = kind === 'hotfix' ? breakingWaivers(readText(join(root, CI)) ?? '') : [];
+  if (moot.length > 0) {
+    stage(CI, (text) => withoutWaivers(text, moot));
+  }
   for (const document of DOCUMENTS.filter((document) => document.id in plan.documents)) {
     stage(document.path, (text) => withStatedVersion(text, plan.documents[document.id]));
   }
@@ -575,13 +620,16 @@ export const prepare = (root, options = {}) => {
   if (owed.length > 0) {
     log(`owed by hand: the [${product}] line on ${owed.join(' and ')}`);
   }
-  for (const waiver of breakingWaivers(readText(join(root, CI)) ?? '')) {
-    log(
-      `owed by hand: --except ${waiver}, a waiver of CI's beadc breaking step, which v${product} makes moot: take it out of ${CI} on develop once v${product} is pushed`
-    );
+  for (const waiver of moot) {
+    log(`taken out of ${CI}: --except ${waiver}, moot since the release main holds`);
   }
   for (const gate of gatesOwedAt(readText(join(root, GATES)) ?? '', product)) {
     log(`owed by hand: decision 0006's gate owed until ${product} moves to its table: ${gate}`);
+  }
+  if (existsSync(join(root, RECORDS))) {
+    log(
+      `owed by hand: the documents brought to ${product}, by the bead-release-documents workflow (.claude/workflows/README.md)`
+    );
   }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);
@@ -702,6 +750,19 @@ export const tag = (root, options = {}) => {
         `fix them, then run node tools/release.mjs tag again, which sets no tag twice, and push: ${push}`,
       ].join('\n')
     );
+  }
+
+  // * the waivers the tagged commit carries, moot once it is the release CI compares against: out
+  // of the branch checked out, develop at its back-merge, committed before the one push
+  const moot = breakingWaivers(show(CI) ?? '');
+  const ci = readText(join(root, CI));
+  const without = ci === null ? null : withoutWaivers(ci, moot);
+  if (ci !== null && without !== ci) {
+    writeFileSync(join(root, CI), without);
+    for (const waiver of moot) {
+      log(`taken out of ${CI}: --except ${waiver}, which ${name} makes moot`);
+    }
+    log(`next: git commit -m "ci: take out the waivers ${name} makes moot" -- ${CI}`);
   }
   log(`push: ${push}`);
   return { version, made, push };

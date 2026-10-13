@@ -1,7 +1,22 @@
 [
   {
     "rule": "PAYLOAD_TYPE_FIELD",
-    "line": 15,
+    "line": 16,
+    "column": 3
+  },
+  {
+    "rule": "PAYLOAD_TYPE_FIELD",
+    "line": 21,
+    "column": 3
+  },
+  {
+    "rule": "PAYLOAD_TYPE_FIELD",
+    "line": 32,
+    "column": 5
+  },
+  {
+    "rule": "PAYLOAD_TYPE_FIELD",
+    "line": 26,
     "column": 3
   }
 ]

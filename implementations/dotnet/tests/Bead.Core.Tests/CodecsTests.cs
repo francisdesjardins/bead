@@ -2,20 +2,22 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using Bead.Codecs.V1;
+using Bead.Protobuf;
 using Google.Protobuf;
 
 namespace Bead.Tests;
 
 /// <summary>
 /// Bead's codecs, <c>spec/codecs.json</c>, played whole through this side's (decisions 0016 and
-/// 0018): each payload read in its encoding, then refused, or written back to the bytes given, the
+/// 0031): each payload read in its encoding, then refused, or written back to the bytes given, the
 /// value read equal by <see cref="JsonElement.DeepEquals"/> to the value read of those bytes and its
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
 /// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the codec generated code makes
-/// of Google.Protobuf, then refused, or its fields those read; each value built from its form and
-/// written, to its bytes or refused. An entry a row of the support matrix excuses this side from, a
-/// value no <see cref="JsonElement"/> holds or a payload Google.Protobuf reads where protobuf refuses
-/// it, is counted and not played. The TypeScript side plays the same file.
+/// of Google.Protobuf, its records checked by <see cref="ProtoRecords"/> first (decision 0028), then
+/// refused, or its fields those read; each value built from its form and written, to its bytes or
+/// refused. An entry a row of the support matrix excuses this side from, a value no
+/// <see cref="JsonElement"/> holds, is counted and not played. The TypeScript side plays the same
+/// file.
 /// </summary>
 public sealed class CodecsTests
 {
@@ -24,6 +26,10 @@ public sealed class CodecsTests
     // the language a differs names to excuse this side
     private const string Language = "C#";
 
+    // the encodings this side reads and writes, each through a codec of its own: an entry of any other
+    // fails its test
+    private static readonly string[] Encodings = ["json", "proto", "raw", "text"];
+
     private static readonly JsonElement Root = Load();
 
     // * the codec generated code makes of a proto binding: Google.Protobuf's reader and writer, Bead's
@@ -31,6 +37,10 @@ public sealed class CodecsTests
     private static readonly IPayloadCodec<Probe> ProbeCodec = PayloadCodecs.Of(
         (bytes) =>
         {
+            // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+            // refuses where a stock library reads on (decision 0028)
+            ProtoRecords.Check(bytes.Span, Probe.Descriptor);
+
             // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
             // read as a message field holds one, after its length: the library then refuses a message
             // that ends before its bytes do, a stray end group among them, as its own parse of bytes
@@ -200,17 +210,70 @@ public sealed class CodecsTests
         return probe;
     }
 
-    // how many messages nest below a probe, through its child
+    // how deep messages nest below a probe, through child, delimited and children, a map's entry
+    // counting as a message and its value as another
     private static int NestedOf(Probe probe)
     {
         var nested = 0;
 
-        for (var child = probe.Child; child is not null; child = child.Child)
+        foreach (var message in new[] { probe.Child, probe.Delimited })
         {
-            nested += 1;
+            if (message is not null)
+            {
+                nested = Math.Max(nested, 1 + NestedOf(message));
+            }
+        }
+
+        foreach (var value in probe.Children.Values)
+        {
+            nested = Math.Max(nested, 2 + NestedOf(value));
         }
 
         return nested;
+    }
+
+    // what was read of a probe, as read gives it: its text, number and nested, and below the top
+    // probe its counts, stamps, children and delimited, where it holds any
+    private static JsonElement ReadOf((Probe Probe, bool IsTop) read)
+    {
+        var (probe, isTop) = read;
+        var fields = new Dictionary<string, object>
+        {
+            ["text"] = CodeUnitsOf(probe.Text),
+            ["number"] = probe.Number,
+            ["nested"] = NestedOf(probe),
+        };
+
+        if (isTop && probe.Counts.Count != 0)
+        {
+            fields["counts"] = probe.Counts.ToArray();
+        }
+
+        if (isTop && probe.Stamps.Count != 0)
+        {
+            fields["stamps"] = probe.Stamps.ToArray();
+        }
+
+        if (isTop && probe.Children.Count != 0)
+        {
+            fields["children"] = probe.Children.ToDictionary(
+                (child) =>
+                {
+                    return CodeUnitsOf(child.Key);
+                },
+                (child) =>
+                {
+                    return ReadOf((child.Value, false));
+                },
+                StringComparer.Ordinal);
+        }
+
+        if (isTop && probe.Delimited is not null)
+        {
+            fields["delimited"] = ReadOf((probe.Delimited, false));
+        }
+
+        return JsonSerializer.SerializeToElement(fields);
     }
 
     // what the writer of an encoding writes of a value given in its form
@@ -223,7 +286,8 @@ public sealed class CodecsTests
             "json" => Payloads.WriteJson(ElementOf(value)),
             "text" => Payloads.WriteText(TextOf(value)),
             "proto" => ProbeCodec.Encode(ProbeOf(value.GetProperty("probe"))),
-            _ => Payloads.WriteRaw(BytesOf(value.GetProperty("bytes"))),
+            "raw" => Payloads.WriteRaw(BytesOf(value.GetProperty("bytes"))),
+            var encoding => throw new InvalidOperationException($"no codec of this side writes the encoding {encoding}"),
         };
     }
 
@@ -286,25 +350,29 @@ public sealed class CodecsTests
             case "proto":
                 if (isRefused)
                 {
-                    Assert.Throws<InvalidProtocolBufferException>(() =>
+                    // * refused by the check, or past it by Google.Protobuf: a string that is not
+                    // UTF-8 is the library's to refuse
+                    var refusal = Assert.ThrowsAny<Exception>(() =>
                     {
                         return ProbeCodec.Decode(bytes);
                     });
 
+                    Assert.True(refusal is FormatException or InvalidProtocolBufferException, refusal.ToString());
+
                     return;
                 }
 
-                var probe = ProbeCodec.Decode(bytes);
-                var read = entry.GetProperty("read");
+                var read = ReadOf((ProbeCodec.Decode(bytes), true));
+                var expected = entry.GetProperty("read");
 
-                Assert.Equal(
-                    (read.GetProperty("text").GetString(), read.GetProperty("number").GetUInt32(), read.GetProperty("nested").GetInt32()),
-                    (CodeUnitsOf(probe.Text), probe.Number, NestedOf(probe)));
+                Assert.True(JsonElement.DeepEquals(expected, read), $"read {read.GetRawText()}, where the file reads {expected.GetRawText()}");
                 break;
-            default:
+            case "raw":
                 Assert.False(isRefused);
                 Assert.Equal(BytesOf(entry.GetProperty("written")), Payloads.WriteRaw(Payloads.ReadRaw(bytes)).ToArray());
                 break;
+            case var encoding:
+                throw new InvalidOperationException($"no codec of this side reads the encoding {encoding}");
         }
     }
 
@@ -328,50 +396,14 @@ public sealed class CodecsTests
     }
 
     [Fact]
-    public void A_proto_field_at_another_wire_type_as_Google_Protobuf_reads_it()
+    public void Plays_every_encoding_of_the_file_through_a_codec_of_its_own_and_no_other()
     {
-        // * text at the varint wire type, number at the length-delimited one, child at fixed32: each
-        // kept as an unknown field, and written back as it came
-        foreach (var given in new[] { "08 61", "12 00", "15 01 02 03 04" })
+        var encodings = Root.GetProperty("payloads").EnumerateArray().Concat(Root.GetProperty("values").EnumerateArray()).Select((entry) =>
         {
-            var bytes = Convert.FromHexString(given.Replace(" ", "", StringComparison.Ordinal));
-            var probe = ProbeCodec.Decode(bytes);
+            return entry.GetProperty("encoding").GetString()!;
+        });
 
-            Assert.Equal(("", 0u, (Probe?)null), (probe.Text, probe.Number, probe.Child));
-            Assert.Equal(bytes, ProbeCodec.Encode(probe).ToArray());
-        }
-    }
-
-    [Fact]
-    public void A_proto_tag_of_more_than_5_bytes_or_past_32_bits_as_Google_Protobuf_reads_it()
-    {
-        // * a tag's varint read to its 10 bytes, its low 32 bits kept, where protobuf's REQUIRED
-        // BadTag_* tests refuse it: field 2's number 7, written back in its own tag
-        foreach (var given in new[] { "90 80 80 80 80 00 07", "90 80 80 80 80 80 80 80 00 07", "90 80 80 80 40 07", "90 80 80 80 80 80 0F 07" })
-        {
-            var probe = ProbeCodec.Decode(Convert.FromHexString(given.Replace(" ", "", StringComparison.Ordinal)));
-
-            Assert.Equal(("", 7u, (Probe?)null), (probe.Text, probe.Number, probe.Child));
-            Assert.Equal(Convert.FromHexString("1007"), ProbeCodec.Encode(probe).ToArray());
-        }
-
-        // an unknown field of the number 536,870,911, written back in 5 bytes
-        var unknown = ProbeCodec.Decode(Convert.FromHexString("F8FFFFFF7F01"));
-
-        Assert.Equal(("", 0u, (Probe?)null), (unknown.Text, unknown.Number, unknown.Child));
-        Assert.Equal(Convert.FromHexString("F8FFFFFF0F01"), ProbeCodec.Encode(unknown).ToArray());
-    }
-
-    [Fact]
-    public void A_proto_length_past_32_bits_as_Google_Protobuf_reads_it()
-    {
-        // * a length's varint read to 32 bits, its fifth byte's bits past them dropped, where
-        // protobuf's REQUIRED BadLength_Varint32BitOverflow refuses it: an empty text, then the field after
-        var alone = ProbeCodec.Decode(Convert.FromHexString("0A8080808010"));
-        var followed = ProbeCodec.Decode(Convert.FromHexString("0A80808080101007"));
-
-        Assert.Equal(("", 0u, (Probe?)null), (alone.Text, alone.Number, alone.Child));
-        Assert.Equal(("", 7u, (Probe?)null), (followed.Text, followed.Number, followed.Child));
+        Assert.Equal(Encodings, encodings.Distinct().Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -384,23 +416,22 @@ public sealed class CodecsTests
     }
 
     [Fact]
+    public void A_proto_maps_entry_its_key_at_its_default_as_Google_Protobuf_writes_it()
+    {
+        var probe = new Probe { Children = { [""] = new Probe() } };
+
+        // * the empty key left out, as any field at its default, where protobuf-es writes it
+        Assert.Equal(Convert.FromHexString("62021200"), ProbeCodec.Encode(probe).ToArray());
+    }
+
+    [Fact]
     public void Plays_every_entry_of_the_file_but_those_a_row_of_the_matrix_excuses_this_side_from()
     {
         var payloads = Root.GetProperty("payloads").EnumerateArray().Where(IsExcused).ToList();
         var values = Root.GetProperty("values").EnumerateArray().Where(IsExcused).ToList();
 
         Assert.Equal(
-            [
-                "a tag of 6 bytes",
-                "a tag of 9 bytes",
-                "a tag of 5 bytes past 32 bits",
-                "a tag of 7 bytes past 32 bits",
-                "a tag past 32 bits, of an unknown field",
-                "a length past 32 bits",
-                "a length past 32 bits, a field after",
-                "NaN",
-                "Infinity",
-            ],
+            ["NaN", "Infinity"],
             payloads.Concat(values).Select((entry) =>
             {
                 return entry.GetProperty("name").GetString()!;

@@ -191,7 +191,7 @@ export const createTimers = (clock: IClock): ISessionManagerTimers => {
  *   sessions.delete(session.connectionHandle);
  * });
  *
- * const session = sessions.getOrElseSet('type=WS;ip=127.0.0.1;port=50000');
+ * const session = sessions.getOrElseSet('type=WS;ip=127.0.0.1;port=50000;ordinal=1');
  *
  * session.data = { username: 'guest' };
  * session.sessionInactivityTimeout = 10_000;

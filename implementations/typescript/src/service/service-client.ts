@@ -36,7 +36,9 @@ import { listedResponseOf, type ServiceResolverCallback, validated } from './ser
 export interface IServiceClient<S extends ServiceProcedures> {
   /** The notification of each procedure that notifies, at the window its caller gave, or none. */
   readonly notifications: {
-    readonly [Name in NotifyingName<S>]: INotification<
+    // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
+    // @deprecated with it
+    readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: INotification<
       GivenOf<S[Name]['request']>,
       ValueOf<NonNullable<S[Name]['notification']>>
     >;
@@ -46,7 +48,9 @@ export interface IServiceClient<S extends ServiceProcedures> {
    * procedure that notifies opens no subscription (spec 11.2).
    */
   readonly request: {
-    readonly [Name in AnsweredName<S>]: IRequest<
+    // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
+    // @deprecated with it
+    readonly [Name in keyof S as Name extends AnsweredName<S> ? Name : never]: IRequest<
       GivenOf<S[Name]['request']>,
       ValueOf<S[Name]['result']>,
       RouterClientConnectionHandle
@@ -72,7 +76,15 @@ export interface IServiceClientOptions<S extends ServiceProcedures> {
   /** Whether each requester runs its descriptor's `validate` before it encodes; not when none. */
   readonly validates?: boolean | undefined;
   /** The window of each procedure that notifies, a whole number above 0; one not given, unpaced. */
-  readonly windows?: { readonly [Name in NotifyingName<S>]?: number | undefined } | undefined;
+  readonly windows?:
+    | {
+        // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
+        // @deprecated with it
+        readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]?:
+          | number
+          | undefined;
+      }
+    | undefined;
 }
 
 // types

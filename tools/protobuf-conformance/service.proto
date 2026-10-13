@@ -1,0 +1,66 @@
+// The service tools/protobuf-conformance.mjs generates each side's testee from, with beadc: each test
+// message of protobuf's conformance suite, Probe of spec/codecs.proto, and the suite's own exchange,
+// each the request and the result of a procedure, so a testee reads and writes every one through the
+// codec its side generates. The tool ejects the suite's protos from the pinned runner and lays them
+// out as these imports name them; nothing of protobuf's is committed (decision 0028).
+syntax = "proto3";
+
+package bead.conformance.v1;
+
+import "bead/options.proto";
+import "codecs.proto";
+import "conformance/conformance.proto";
+import "protobuf_test_messages/test_messages_edition2023.proto";
+import "protobuf_test_messages/test_messages_proto2.proto";
+import "protobuf_test_messages/test_messages_proto2_editions.proto";
+import "protobuf_test_messages/test_messages_proto3.proto";
+import "protobuf_test_messages/test_messages_proto3_editions.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Each message a testee reads and writes back, by its full name.
+service ConformanceService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  // The suite's exchange: a request read, its response written.
+  rpc Conformance(.conformance.ConformanceRequest) returns (.conformance.ConformanceResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+
+  // protobuf_test_messages.proto3.TestAllTypesProto3.
+  rpc Proto3(protobuf_test_messages.proto3.TestAllTypesProto3) returns (protobuf_test_messages.proto3.TestAllTypesProto3) {
+    option (bead.procedure) = {id: 2};
+  }
+
+  // protobuf_test_messages.proto2.TestAllTypesProto2.
+  rpc Proto2(protobuf_test_messages.proto2.TestAllTypesProto2) returns (protobuf_test_messages.proto2.TestAllTypesProto2) {
+    option (bead.procedure) = {id: 3};
+  }
+
+  // protobuf_test_messages.editions.TestAllTypesEdition2023.
+  rpc Edition2023(protobuf_test_messages.editions.TestAllTypesEdition2023) returns (protobuf_test_messages.editions.TestAllTypesEdition2023) {
+    option (bead.procedure) = {id: 4};
+  }
+
+  // protobuf_test_messages.editions.proto2.TestAllTypesProto2.
+  rpc EditionsProto2(protobuf_test_messages.editions.proto2.TestAllTypesProto2) returns (protobuf_test_messages.editions.proto2.TestAllTypesProto2) {
+    option (bead.procedure) = {id: 5};
+  }
+
+  // protobuf_test_messages.editions.proto3.TestAllTypesProto3.
+  rpc EditionsProto3(protobuf_test_messages.editions.proto3.TestAllTypesProto3) returns (protobuf_test_messages.editions.proto3.TestAllTypesProto3) {
+    option (bead.procedure) = {id: 6};
+  }
+
+  // bead.codecs.v1.Probe, which the differential feeds both sides.
+  rpc Probe(bead.codecs.v1.Probe) returns (bead.codecs.v1.Probe) {
+    option (bead.procedure) = {id: 7};
+  }
+}

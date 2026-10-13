@@ -32,13 +32,13 @@ promise to be decided at once, on the day of the first release.
 2. **The spec**: its text and every conformance file move together, and are tagged `spec-v*`.
    `spec/spec.md` states their version, which each conformance file repeats as its `specVersion`, as
    CloudEvents names its own `specversion`. It follows Semantic Versioning at `0.x`, without
-   pre-releases: the minor moves when an implementation must change to keep passing — an expectation
-   changed, a field, a group or a file added — and the patch when a conforming implementation passes
-   unchanged — a vector or a conversation added for what the spec already requires, a clarification.
-   It moves in the release commit, as the product's version does, and a release whose spec moved
-   tags `spec-v` and that version beside its `v*`. The spec's companion, `spec/debugging.md`, which
-   states what a side traces, filters and counts beside the wire
-   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), runs on this axis under a
+   pre-releases: the minor moves when an implementation that conforms to the last version must
+   change to conform to this one — an expectation changed, a field, a group or a file added — and
+   the patch when one that conforms passes unchanged — a vector or a conversation added for what the
+   spec already requires, a clarification. It moves in the release commit, as the product's version
+   does, and a release whose spec moved tags `spec-v` and that version beside its `v*`. The spec's
+   companion, `spec/debugging.md`, which states what a side traces, filters and counts beside the
+   wire ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), runs on this axis under a
    version of its own: its files repeat it as their `debuggingVersion`, it moves by the same rule, a
    code the wire gains moving both, and a release whose companion moved tags `debugging-v` and that
    version.

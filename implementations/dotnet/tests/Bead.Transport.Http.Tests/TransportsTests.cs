@@ -157,7 +157,7 @@ public sealed class TransportsTests
                 "inactivityTimeout" => options with { InactivityTimeout = TimeOf(value) },
                 "hosts" => options with { Hosts = TextsOf(value) },
                 "origins" => options with { Origins = TextsOf(value) },
-                "isProxyTrusted" => options with { IsProxyTrusted = value.GetBoolean() },
+                "trustedProxies" => options with { TrustedProxies = TextsOf(value) },
 
                 // the server layer's, which ConnectionInactivityTimeoutOf reads
                 "connectionInactivityTimeout" => options,
@@ -295,7 +295,11 @@ public sealed class TransportsTests
             {
                 return (await transport.Start(Loopback, Cancelled)).Port;
             },
-            Stop = transport.Stop,
+            Transport = transport,
+            Stop = () =>
+            {
+                return server.DisposeAsync().AsTask();
+            },
         };
     }
 
@@ -333,7 +337,11 @@ public sealed class TransportsTests
             {
                 return (await transport.Start(WebSocketLoopback, Cancelled)).Port;
             },
-            Stop = transport.Stop,
+            Transport = transport,
+            Stop = () =>
+            {
+                return server.DisposeAsync().AsTask();
+            },
         };
     }
 
@@ -728,8 +736,9 @@ public sealed class TransportsTests
         });
     }
 
-    // the server under test, over either transport: its router, how its transport starts — giving
-    // its port — and stops, its gauges and its clients, its clock, and the server it lets go of
+    // the server under test, over either transport: its router; how its transport starts, giving its
+    // port; its gauges and its clients; its clock; and the server it lets go of, which a stop
+    // disposes, as the TypeScript side's runner does
     private sealed class Served : IAsyncDisposable
     {
         public required Func<IReadOnlyList<TransportServerClient>> Clients { get; init; }
@@ -746,6 +755,8 @@ public sealed class TransportsTests
 
         public required Func<Task> Stop { get; init; }
 
+        public required IServerTransport Transport { get; init; }
+
         public ValueTask DisposeAsync()
         {
             return Server.DisposeAsync();
@@ -753,8 +764,8 @@ public sealed class TransportsTests
     }
 
     // a case played: the server under test, the exchanges a peer of the test's own opened by name,
-    // the values it captured, and what the server reported that no step took yet, each with the
-    // connection it came with
+    // the values it captured, and what the server reported, and the refusals its transport told,
+    // that no step took yet, each report with the connection it came with
     private sealed class Peer : IDisposable
     {
         private readonly Served _served;
@@ -762,6 +773,7 @@ public sealed class TransportsTests
         private readonly Dictionary<string, Exchange> _exchanges = [];
         private readonly Dictionary<string, string> _captured = [];
         private readonly ConcurrentQueue<(string Report, string? ConnectionHandle)> _reports = new();
+        private readonly ConcurrentQueue<TransportServerRefusal> _refusals = new();
         private int _port;
 
         public Peer(Served served, bool isAnsweringPings)
@@ -774,6 +786,9 @@ public sealed class TransportsTests
             {
                 _reports.Enqueue((reason is FailureException failure ? failure.Code.ToString(CultureInfo.InvariantCulture) : "exception", connectionHandle));
             };
+
+            // what its transport tells of each refusal it judges (spec 15.1)
+            served.Transport.Refusal += _refusals.Enqueue;
         }
 
         // a step in a few words: what it does, and on which exchange
@@ -850,10 +865,23 @@ public sealed class TransportsTests
             }
         }
 
-        // the server reported nothing that no step took
+        // the server reported nothing, and told no refusal, that no step took
         public void NothingMore()
         {
             Assert.Empty(_reports);
+            Assert.True(_refusals.IsEmpty, $"told no refusal, and {string.Join("; ", _refusals.Select(TellingOf))}");
+        }
+
+        // a refusal told, written as a case writes what it expects
+        private static string TellingOf(TransportServerRefusal refusal)
+        {
+            return $"told {refusal.Status} {refusal.Reason}, authority {QuotedOf(refusal.Authority)}, origin {QuotedOf(refusal.Origin)}, from {refusal.Address}:{refusal.Port}";
+        }
+
+        // a string or none, as a case writes it
+        private static string QuotedOf(string? text)
+        {
+            return text is null ? "null" : JsonSerializer.Serialize(text);
         }
 
         public void Dispose()
@@ -867,7 +895,7 @@ public sealed class TransportsTests
         }
 
         // a request's octets, on a socket of its own: its head, the server's host and each value
-        // captured put in, then its body
+        // captured put in, a name nothing captured refused, then its body
         private async Task Send((JsonElement Request, string On) step)
         {
             var head = step.Request.GetProperty("head").GetString()!.Replace("{host}", $"{Host}:{_port}", StringComparison.Ordinal);
@@ -877,6 +905,12 @@ public sealed class TransportsTests
                 head = head.Replace($"{{{name}}}", value, StringComparison.Ordinal);
             }
 
+            // ! a name nothing captured fails the case, never goes out as it is written
+            if (Regex.Match(head, @"\{(\w+)\}") is { Success: true } uncaptured)
+            {
+                throw new InvalidOperationException($"nothing captured under {uncaptured.Groups[1].Value}");
+            }
+
             byte[] body = step.Request.TryGetProperty("body", out var given) ? BytesOf(given.GetString()!) : [];
 
             if (_exchanges.Remove(step.On, out var before))
@@ -884,7 +918,9 @@ public sealed class TransportsTests
                 before.Dispose();
             }
 
-            _exchanges[step.On] = await Exchange.Send((_port, [.. Encoding.ASCII.GetBytes(head), .. body], _isAnsweringPings));
+            // ! one octet per character, its code point (ISO-8859-1), as the file says: a character
+            // past U+007F is an octet past ASCII
+            _exchanges[step.On] = await Exchange.Send((_port, [.. Encoding.Latin1.GetBytes(head), .. body], _isAnsweringPings));
         }
 
         // a message on an exchange that is a WebSocket: binary or text, in one final frame; frames
@@ -993,6 +1029,60 @@ public sealed class TransportsTests
             {
                 Assert.Fail($"expected {wanted}\n    came {got}");
             }
+
+            if (response.TryGetProperty("told", out var told))
+            {
+                await Told((told, exchange));
+            }
+        }
+
+        // what the server's transport told of the refusal an exchange was answered: the next refusal
+        // told, within a patience, since it is told once the refusal is written; none when null
+        private async Task Told((JsonElement Told, Exchange Exchange) step)
+        {
+            var (told, exchange) = step;
+
+            if (told.ValueKind == JsonValueKind.Null)
+            {
+                Assert.True(_refusals.IsEmpty, $"told no refusal, and {string.Join("; ", _refusals.Select(TellingOf))}");
+
+                return;
+            }
+
+            var expected = TellingOf(new TransportServerRefusal(
+                told.GetProperty("address").GetString(),
+                Filled(told.GetProperty("authority").GetString()),
+                Filled(told.GetProperty("origin").GetString()),
+                told.GetProperty("port").GetString() == "{port}" ? exchange.Port : -1,
+                told.GetProperty("reason").GetString()!,
+                told.GetProperty("status").GetInt32()));
+            var watch = Stopwatch.StartNew();
+
+            while (_refusals.IsEmpty && watch.Elapsed < Patience)
+            {
+                await Task.Delay(5, Cancelled);
+            }
+
+            Assert.True(_refusals.TryDequeue(out var came), $"expected {expected}, and no refusal was told");
+            Assert.Equal(expected, TellingOf(came));
+        }
+
+        // a value of a case with the server's host, and each value captured, put in, as in a head
+        private string? Filled(string? text)
+        {
+            if (text is null)
+            {
+                return null;
+            }
+
+            var filled = text.Replace("{host}", $"{Host}:{_port}", StringComparison.Ordinal);
+
+            foreach (var (name, value) in _captured)
+            {
+                filled = filled.Replace($"{{{name}}}", value, StringComparison.Ordinal);
+            }
+
+            return filled;
         }
 
         // what the server sends next on an exchange that is a WebSocket, within its wait
@@ -1231,8 +1321,9 @@ public sealed class TransportsTests
 
         // once answered 101, what the server sends, frame by frame: a message whole, its fragments
         // put together; a ping, answered with a pong of its payload unless the case leaves it
-        // unanswered; a pong; a close, answered with its code unless the peer closed first; then the
-        // socket's end
+        // unanswered; a pong, which no case expects, so that it fails the step it comes in, as the
+        // TypeScript side's peer hears it; a close, answered with its code unless the peer closed
+        // first; then the socket's end. A reserved opcode fails the case
         private async Task HearAfter(Reader reader)
         {
             try
@@ -1272,6 +1363,13 @@ public sealed class TransportsTests
                             _heard.Writer.TryWrite(new Heard(kind, [.. message]));
                             message.Clear();
                         }
+                    }
+                    else if (opcode is not (Ping or Pong or Closing))
+                    {
+                        // ! an opcode RFC 6455 reserves fails the case at its next read of the socket
+                        _heard.Writer.TryComplete(new InvalidDataException($"the server sent a frame of the reserved opcode {opcode} (RFC 6455, section 5.2)"));
+
+                        return;
                     }
                 }
             }

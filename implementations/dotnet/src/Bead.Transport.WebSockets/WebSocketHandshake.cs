@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Primitives;
 
 namespace Bead.Transport.WebSockets;
@@ -78,8 +79,9 @@ internal static class WebSocketHandshake
         ["retry-after"] = "1",
     });
 
-    // a refusal HTTP makes of its own, unmarked (RFC 9112 §3.2)
-    private static readonly HandshakeRefusal BadHost = new(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" });
+    // a refusal HTTP makes of its own, unmarked (RFC 9112 §3.2), of a malformed field among them
+    // (RFC 9110 §5.5)
+    private static readonly HandshakeRefusal BadRequest = new(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" });
 
     private static readonly HandshakeRefusal HostRefused = new(StatusCodes.Status403Forbidden, WebSocketRefusals.Host, Refused);
 
@@ -201,12 +203,35 @@ internal static class WebSocketHandshake
             && headers.TransferEncoding.Count == 0;
     }
 
+    // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
+    // over HTTP/2, whose :authority Kestrel has put in the Host
+    private static string? TargetAuthorityOf(HttpRequest request)
+    {
+        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+
+        return isHttp1 ? HostsAndOrigins.TargetAuthorityOf(request.HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
+    }
+
     // definition
 
     /// <summary>
+    /// What a refusal tells of a request (spec 15.1), as the judgement reads it: the authority it
+    /// names, as it came (spec 15.12), an HTTP/1 request's absolute-form target's, else its
+    /// <c>Host</c>'s, without the whitespace around it, or none; and its <c>Origin</c>, its field
+    /// lines joined by <c>", "</c>, or none.
+    /// </summary>
+    public static (string? Authority, string? Origin) ToldOf(HttpRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return (HostsAndOrigins.AuthorityOf(request.Headers.Host, TargetAuthorityOf(request)), HostsAndOrigins.OriginOf(request.Headers.Origin));
+    }
+
+    /// <summary>
     /// What the server answers a request at its WebSocket's address, or none when it upgrades it:
-    /// what HTTP refuses of its own, a <c>Host</c> missing, repeated or no host, 400 unmarked; a
-    /// host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
+    /// what HTTP refuses of its own, a field value that holds a control character but HTAB or a
+    /// character past ASCII, a <c>Host</c> missing or repeated, or an authority that is no host, 400
+    /// unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
     /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, 400; an origin
     /// not taken, 403.
     /// </summary>
@@ -217,22 +242,41 @@ internal static class WebSocketHandshake
 
         var headers = request.Headers;
 
-        // HTTP's own, which Kestrel answers before the application runs; HTTP/2's authority is its
-        // server's
-        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
-
-        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, HttpProtocol.IsHttp11(request.Protocol)))
+        // * a field HTTP would call malformed before anything else is judged (spec 15.12): Kestrel
+        // refuses 400 an octet that is no UTF-8, and decodes the rest, a character past ASCII among
+        // them, and takes a control character, which this refuses as HTTP refuses a malformed field
+        var isVisible = headers.All((field) =>
         {
-            return BadHost;
+            return field.Value.All((value) =>
+            {
+                return HostsAndOrigins.IsVisibleField(value ?? "");
+            });
+        });
+
+        if (!isVisible)
+        {
+            return BadRequest;
         }
 
-        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
+        // HTTP's own, which Kestrel answers before the application runs: a Host's lines, and the
+        // authority of an absolute-form target judged in place of a Host's form, which Kestrel
+        // ignores beside one (RFC 9112 §3.2.2); over HTTP/2, Kestrel resets the stream of an
+        // authority that is no host before the application runs
+        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+        var targetAuthority = TargetAuthorityOf(request);
+
+        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, (HttpProtocol.IsHttp11(request.Protocol), targetAuthority)))
+        {
+            return BadRequest;
+        }
+
+        // ! the authority as it came, which a browser writes as it writes its Origin, an IDN in
         // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
-        var host = headers.Host.Count == 0 ? null : ValueOf(headers.Host[0]);
+        var authority = HostsAndOrigins.AuthorityOf(headers.Host, targetAuthority);
 
         // * the host before anything else is read: a page that rebinds its name reaches the address
         // with any method and no upgrade, and hosts refuses it on every transport alike
-        if (!HostsAndOrigins.IsTakenHost(host, options.Hosts))
+        if (!HostsAndOrigins.IsTakenHost(authority, options.Hosts))
         {
             return HostRefused;
         }
@@ -268,7 +312,11 @@ internal static class WebSocketHandshake
 
         var origin = headers.Origin;
 
-        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (host, options.Origins)))
+        // ! the own origin by a host taken by name alone: under *, a page that rebinds its name is
+        // its own origin by the very Host * did not check
+        var own = HostsAndOrigins.OwnAuthorityOf(authority, options.Hosts);
+
+        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (own, options.Origins)))
         {
             return OriginRefused;
         }

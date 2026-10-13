@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/bead",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP and a Web Worker transport, each a client and a server, a client and a server router with the service, session and notification managers, and the client and server over them.",
   "license": "Apache-2.0",
@@ -18,6 +18,7 @@
     "./http-transport-client": "./src/transport/client/http-transport-client.ts",
     "./http-transport-server": "./src/transport/server/http-transport-server.ts",
     "./notification-manager": "./src/router/server/notification-manager.ts",
+    "./proto": "./src/proto/records.ts",
     "./router-client": "./src/router/client/router-client.ts",
     "./router-server": "./src/router/server/router-server.ts",
     "./service": "./src/service/service.ts",
@@ -52,6 +53,7 @@
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
+    "test:browser": "playwright test --config playwright.browser.config.ts",
     "test:devtools": "playwright test --config playwright.devtools.config.ts",
     "type-check": "node node_modules/typescript-7/bin/tsc --noEmit",
     "verify:all": "yarn check && yarn test",
@@ -73,6 +75,14 @@
     "oxlint-tsgolint": "7.0.2003",
     "typescript-7": "npm:typescript@7.0.2",
     "ws": "^8.22.0"
+  },
+  "peerDependencies": {
+    "@bufbuild/protobuf": "^2.13.0"
+  },
+  "peerDependenciesMeta": {
+    "@bufbuild/protobuf": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=24.9"

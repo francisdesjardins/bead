@@ -4,16 +4,30 @@ Why Bead is shaped the way it is. One file per decision, each one readable on it
 
 A record states a decision that holds: what forced it, what it is, and what it costs. The spec says
 what an implementation does, and the code how; a record says why, so that a reason outlives the
-person who held it. Code, configuration and other records cite a record by its number, which names
-one decision for good: **a number never changes, and is never given to another decision.**
+person who held it. Code, configuration and other records cite a record by its number, and **a
+number, once given, names its decision for good: it is never given to another**, as an RFC's or a
+PEP's is not, since commits, tags and released CHANGELOG sections cite it where nothing can rewrite
+them. Between two releases, records are regrouped, moved in the index, normalized and renamed where
+that reads clearer, every citation moving with them; a record is never renumbered, and the index,
+not the numbers, gives the order to read them in. A record merged into another keeps its file, a
+short one whose Status says `merged into` its successor and links it, so that whoever comes by the
+old number finds where its decision went; the release's CHANGELOG section names each merge. Gaps in
+the numbering stay.
 
 **A decision is changed, not appended to.** A record is rewritten in place while its decision holds,
 so it reads as it stands: what changed, and when, is the CHANGELOG's and the commits'. A record that
 only grows, a date at a time, makes its reader replay every step to learn where things stand. A part
-that becomes a decision of its own takes the next number, and the record it leaves names it in its
-Scope, where a reader who comes by the old number looks. A decision that reverses keeps its number;
-its Status names what replaced it, and its successor is written beside it. A file's name stays
-unless it misleads.
+that becomes a decision of its own takes the next number never given, and the record it leaves
+names it in its Scope, where a reader who comes by the old number looks. A decision that reverses
+keeps its number; its Status names what replaced it, and its successor is written beside it. A
+file's name stays unless it misleads.
+
+**At each release, the records are brought to it.** A record is in the present, with its view on
+what is ahead: what it said was coming, and that the release carries, is stated as what holds; what
+it said of how things were leaves it; what is still ahead stays ahead. The `bead-release-documents`
+workflow does it, for the records as for every document that states where Bead goes, on the
+release branch before the finish, and `tools/release.mjs prepare` lists it among what a release
+owes by hand.
 
 ## Where Bead goes
 
@@ -24,38 +38,69 @@ transport, never a network of its own
 the conformance files and the interop. The records bind, in the present, parts the repository does
 not hold:
 
-- **HTTP/JSON transcoding**, which takes a call from HTTP and JSON as gRPC's transcoding does: the
-  credential it carries ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)) and the routes
-  a service's name scopes
-  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md));
 - **a topic-based publish/subscribe broker's transport**
   ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)), one core and one adapter a
   broker: what stands for a connection there
   ([0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)), what carries
   `ELSEWHERE` ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), what silence is
-  ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport
-  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)), and a relay that carries
-  a subscription, open ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)),
-  which a page across a broker needs;
+  ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport, and a
+  relay that carries a subscription, which a page across a broker needs
+  ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
+- **HTTP/JSON transcoding**, which takes a call from HTTP and JSON as gRPC's transcoding does: the
+  credential it carries ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), the routes a
+  service's name scopes
+  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)),
+  and one OpenAPI document written from the blueprint for every language
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
+- **payload validation**, protovalidate's rules carried from a `.proto` through the blueprint
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))
+  into the slot a typed descriptor keeps for it, after the decode on the side that answers and
+  before the encode on a client whose options say so
+  ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md));
+- **the transports' client part** of the conformance, with the outcomes the spec names for a
+  client's call ([0004](0004-one-behaviour-in-every-language.md)), the bound on a WebSocket client's
+  close ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)) and the defaults of a
+  client's durations ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md));
+- **a relay across languages in the interop**, one side's relay in front of the other's
+  destination, in the twin tests' place for a relay's two legs' limits and the session its
+  requesters share ([0004](0004-one-behaviour-in-every-language.md),
+  [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
+- **the DevTools extension on Firefox**, its own glue beside the core every browser shares
+  ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
 - **a latency bench**, which measures a counted call against one not counted on each side
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
 - **a constrained C side**, which builds debugging by its switches
-  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)) and polls deadlines on a 1 kHz
-  loop ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
+  ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
+  its range alone ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md))
+  and polls deadlines on a 1 kHz loop
+  ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
-The gates these parts owe are among [0006](0006-a-rule-has-its-gate.md)'s gates owed. A part that
-lands leaves this list, and its gates leave that one for 0006's table.
+Ahead besides, each by a decision of its own that meets the Tenth Man: `trustedProxies` on the
+WebSocket server, a hop bound for proxies whose address a deployment cannot name, and the rest
+[0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md) names; and a
+bound of the protocol's on the calls a peer holds open over a transport that keeps its connection,
+a WebSocket or a Web Worker (spec 8.3).
+
+A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
+table.
 
 ## The decisions
 
 ### The envelope and its calls
 
-| #                                                                    | Decision                                                                                                                                | Status   |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0001](0001-the-envelope-sits-at-fixed-offsets.md)                   | The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte                                              | accepted |
-| [0002](0002-a-subscription-goes-at-its-clients-pace.md)              | A client may pace its subscription, and what waits, waits by key                                                                        | accepted |
-| [0010](0010-a-request-presents-a-credential-of-a-scheme.md)          | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to                         | accepted |
-| [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md) | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
+| #                                                           | Decision                                                                                                        | Status   |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | -------- |
+| [0001](0001-the-envelope-sits-at-fixed-offsets.md)          | The envelope sits at fixed big-endian offsets, behind an 8-byte prefix and its layout byte                      | accepted |
+| [0002](0002-a-subscription-goes-at-its-clients-pace.md)     | A client may pace its subscription, and what waits, waits by key                                                | accepted |
+| [0010](0010-a-request-presents-a-credential-of-a-scheme.md) | A request presents a credential of a scheme, in the header's last block, and runs in the session it resolves to | accepted |
+
+### Payloads
+
+| #                                                                                                   | Decision                                                                                                                                | Status   |
+| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)                                | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
+| [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) | A `proto` payload's records are read against its message before its library reads them                                                  | accepted |
+| [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)                    | A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own | accepted |
 
 ### Services and their names
 
@@ -74,6 +119,17 @@ lands leaves this list, and its gates leave that one for 0006's table.
 | [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                            | accepted |
 | [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own | accepted |
 | [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began          | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                    | A transport draws each connection's handle, and gives none twice                                     | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL             | accepted |
+
+### A server's edge
+
+| #                                                                                         | Decision                                                                                                                                | Status   |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)   | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority | accepted |
+| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII             | accepted |
+| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)       | An HTTP server answers CORS to the origins it names, and to no other                                                                    | accepted |
+| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)         | A server believes `X-Forwarded-For` from the proxies it names alone                                                                     | accepted |
 
 ### Time
 
@@ -108,7 +164,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ## Writing one
 
-The next decision is 0024. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0032. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

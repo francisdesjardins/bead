@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
@@ -109,6 +110,24 @@ public sealed class HttpServerTests
         Assert.True(condition());
     }
 
+    // a server's options whose relay lends leg B's session to every requester in a session, its
+    // ShareLegBSession, read from the hub once it is built: a relay whose requesters log in at it
+    private static ServerOptions SharingLegBSession(StrongBox<HttpServer<string>> hub)
+    {
+        return new ServerOptions
+        {
+            Relay = new RelayOptions
+            {
+                BeforeRoute = new BeforeRequest(
+                    (request) =>
+                    {
+                        return hub.Value!.ShareLegBSession.Admits(request);
+                    },
+                    Failure.OfProtocol(ProtocolCode.SessionRequired)),
+            },
+        };
+    }
+
     // an HTTP server on a free port — a session opened by openSession, read behind it, upload
     // answering its payload's digest, slow waiting on its signal, news a subscription — and an HTTP
     // client connected to it
@@ -168,7 +187,7 @@ public sealed class HttpServerTests
     // definition
 
     [Fact]
-    public async Task Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    public async Task Each_server_is_an_IBeadServer_with_RequireCredential_and_ShareLegBSession()
     {
         await using var server = new HttpServer<string>();
 
@@ -177,8 +196,10 @@ public sealed class HttpServerTests
         Assert.Same(server.Transport, beadServer.Transport);
         Assert.Same(server.Router, beadServer.Router);
         Assert.Same(server.RequireSession, beadServer.RequireSession);
-        Assert.NotNull(server.RequireSessionOrCredential);
-        Assert.Same(server.RequireSessionOrCredential, beadServer.RequireSessionOrCredential);
+        Assert.NotNull(server.RequireCredential);
+        Assert.Same(server.RequireCredential, beadServer.RequireCredential);
+        Assert.NotNull(server.ShareLegBSession);
+        Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
     }
 
     [Fact]
@@ -389,10 +410,13 @@ public sealed class HttpServerTests
     [Fact]
     public async Task Bring_a_client_that_listens_what_the_server_sends_of_its_own_a_subscription_s_notifications_a_command_a_call_relayed_to_it()
     {
-        await using var connected = await ConnectHttp();
+        var hub = new StrongBox<HttpServer<string>>();
+        await using var connected = await ConnectHttp(SharingLegBSession(hub));
         var (client, server) = (connected.Client, connected.Server);
         var heard = new List<string>();
         var connectionHandle = server.Transport.ConnectionHandles.Single();
+
+        hub.Value = server;
         var notification = client.Services.GetNotification(News, new NotificationDependencies<string, string, string> { Serializer = Text });
 
         await using var subscribed = await notification.Register("subscribe", (news) =>
@@ -450,8 +474,11 @@ public sealed class HttpServerTests
         });
         await toTarget.Connect(new WebSocketConnectOptions { Host = Host, Port = targetAddress.Port }, Cancelled);
 
-        await using var connected = await ConnectHttp();
+        var hub = new StrongBox<HttpServer<string>>();
+        await using var connected = await ConnectHttp(SharingLegBSession(hub));
         var echoing = TextRequester(connected.Client.Services, Echo);
+
+        hub.Value = connected.Server;
 
         connected.Server.Router.RegisterDestination(toTarget.Router, new DestinationOptions { DestinationId = 7 });
         Assert.Equal((ushort)ProtocolCode.SessionRequired, (await Assert.ThrowsAsync<FailureException>(() =>
@@ -465,7 +492,10 @@ public sealed class HttpServerTests
     [Fact]
     public async Task Pass_nothing_on_to_a_connection_drawn_over_HTTP_whose_client_does_not_listen_which_takes_no_request_of_the_server_s()
     {
-        await using var connected = await ConnectHttp(null, false);
+        var hub = new StrongBox<HttpServer<string>>();
+        await using var connected = await ConnectHttp(SharingLegBSession(hub), false);
+
+        hub.Value = connected.Server;
 
         connected.Server.Router.RegisterDestination(new ConnectionTarget(connected.Server.Transport.ConnectionHandles.Single()), new DestinationOptions { DestinationId = 9 });
         await TextRequester(connected.Client.Services, OpenSession)("me")().WaitAsync(Patience, Cancelled);
@@ -481,13 +511,15 @@ public sealed class HttpServerTests
     [Fact]
     public async Task Relay_a_call_whose_leg_B_goes_over_HTTP_refused_there_nothing_tried_lost_there_it_may_have_run()
     {
-        await using var connected = await ConnectHttp();
+        var hub = new StrongBox<HttpServer<string>>();
+        await using var connected = await ConnectHttp(SharingLegBSession(hub));
         using var handler = new ScriptedHandler();
         await using var legB = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { Handler = handler, IsListening = false } });
         var connecting = legB.Connect(new HttpConnectOptions { Host = Host, Port = 1 }, Cancelled);
 
         (await handler.Next()).Answer.SetResult(ScriptedHandler.Drawn());
         await connecting.WaitAsync(Patience, Cancelled);
+        hub.Value = connected.Server;
         connected.Server.Router.RegisterDestination(legB.Router, new DestinationOptions { DestinationId = 7 });
         await TextRequester(connected.Client.Services, OpenSession)("me")().WaitAsync(Patience, Cancelled);
 

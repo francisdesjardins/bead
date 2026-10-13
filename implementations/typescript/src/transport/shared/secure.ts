@@ -40,11 +40,12 @@ const isLoopback = (host: string | undefined): boolean => {
 // definition
 
 /**
- * Whether a host a server listens on is on the loopback, as the W3C's Secure Contexts judges an
- * origin potentially trustworthy, by what it is given, never by what a name resolves to: the host as
- * the WHATWG URL Standard's host parser reads it — `localhost` or a name that ends in `.localhost`,
- * in ASCII lower case, an IPv4 address in 127.0.0.0/8, `127.0.0.1.` among them, or `::1`, bare or
- * bracketed. A host the parser refuses, one followed by a space among them, is none.
+ * Whether the address a server listens on is on the loopback (spec 13.4), as the W3C's Secure
+ * Contexts judges an origin potentially trustworthy, by what it is given, never by what a name
+ * resolves to: in 127.0.0.0/8, or `::1`, bare or bracketed. Read as the WHATWG URL Standard's host
+ * parser reads a host — `localhost` or a name that ends in `.localhost` among the loopback's, which
+ * a listening transport never takes (spec 15.12); a host the parser refuses, one followed by a
+ * space among them, is none.
  */
 export const isLoopbackHost = (host: string): boolean => {
   const bracketed = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;

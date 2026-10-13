@@ -35,11 +35,36 @@ import { createRouterServer, SERVER_FAILURES } from '../router-server';
 import { createSessionManager } from '../session-manager';
 import { type IConversation, playConversation, WALL_CLOCK } from './conversation-player';
 
+// interfaces
+
+/** What both sides' interop tests hold the interop service's own readers to, as its file states it. */
+interface IVerifiers {
+  elsewhere: {
+    rejection: string;
+    verdicts: {
+      after?: number;
+      carried: string;
+      end?: number;
+      sub?: string;
+      verdict: 'holds' | 'none' | 'rejects';
+    }[];
+  };
+  endSessionsOf: {
+    refusal: string;
+    refuses: unknown[];
+    takes: { issuer: string; request: unknown }[];
+  };
+}
+
 // constants
 
 const { conversations: CONVERSATIONS } = JSON.parse(
   readFileSync(new URL('../../../../../../spec/conversations.json', import.meta.url), 'utf8')
 ) as { conversations: IConversation[] };
+
+const { verifiers: VERIFIERS } = JSON.parse(
+  readFileSync(new URL('../../../../../../spec/interop-service.json', import.meta.url), 'utf8')
+) as { verifiers: IVerifiers };
 
 // helpers
 
@@ -111,7 +136,9 @@ test("every procedure of the interop service's API is offered, on the side its k
 
 test("slow waits on its server's clock, which its router runs on, and answers once it has passed", async () => {
   const clock = createTestClock();
-  const pipe = createPipedTransports({ connectionHandle: 'type=WS;ip=127.0.0.1;port=50001' });
+  const pipe = createPipedTransports({
+    connectionHandle: 'type=WS;ip=127.0.0.1;port=50001;ordinal=1',
+  });
   using router = createRouterServer(pipe.server, { clock });
   using sessions = createSessionManager<string>({ clock });
   using caller = createRouterClient(pipe.client);
@@ -151,36 +178,14 @@ test("slow waits on its server's clock, which its router runs on, and answers on
 test('the interop service’s ELSEWHERE verifier holds, refuses and fails each value as its words say, at its time on its server’s clock', async () => {
   const clock = createTestClock(Date.parse(WALL_CLOCK));
   const verify = interopVerifierOf(clock);
-  const letters = 'abcdefghijklmnopqrstuvwxyzabcdef';
-  // a value, and what it settles with: its sub and its end, none, or a rejection; and after how long
-  const rows: [string, unknown, number?][] = [
-    ['Interop sub=ada', ['ada', undefined]],
-    ['interop sub=ada', ['ada', undefined]],
-    ['INTEROP sub=ada', ['ada', undefined]],
-    ['Interop sub=a', ['a', undefined]],
-    [`Interop sub=${letters}`, [letters, undefined]],
-    [`Interop sub=${letters}a`, 'none'],
-    ['Interop sub=Ada', 'none'],
-    ['Interop  sub=ada', 'none'],
-    ['Interop sub=ada,after=1', 'none'],
-    ['Interop sub=ada, after=0', 'none'],
-    ['Interop sub=ada, after=2147483647', ['ada', undefined], 2_147_483_647],
-    ['Interop sub=ada, after=2147483648', 'none'],
-    ['Interop sub=ada, end=9007199254740991', ['ada', 9_007_199_254_740_991]],
-    ['Interop sub=ada, end=9007199254740992', 'none'],
-    ['Interop sub=ada, end=1, after=1', 'none'],
-    ['Interop sub=ada, SUB=x', 'none'],
-    ['Interop fail=true', 'rejects'],
-    ['Interop fail=true, after=5', 'rejects', 5],
-    ['Interop fail=TRUE', 'none'],
-    ['Interop sub=ada, fail=true', 'none'],
-    ['Interop', 'none'],
-    ['Interop ', 'none'],
-    ['Bearer mF_9.B5f-4.1JqM', 'none'],
-    ['Basic YWRh', 'none'],
-  ];
+  const { rejection, verdicts } = VERIFIERS.elsewhere;
 
-  for (const [carried, expected, after] of rows) {
+  expect(verdicts.length).toBeGreaterThan(0);
+
+  for (const { after, carried, end, sub, verdict } of verdicts) {
+    // what it settles with: its sub and its end, none, or a rejection
+    const expected = verdict === 'holds' ? [sub, end] : verdict;
+
     let outcome: unknown = 'pending';
 
     void verify(carried).then(
@@ -194,8 +199,7 @@ test('the interop service’s ELSEWHERE verifier holds, refuses and fails each v
               ];
       },
       (reason: unknown) => {
-        outcome =
-          (reason as Error).message === 'this verifier fails, on purpose' ? 'rejects' : reason;
+        outcome = (reason as Error).message === rejection ? 'rejects' : reason;
       }
     );
 
@@ -302,28 +306,19 @@ test("the interop service's key set answers each issuer it names as its words sa
 });
 
 test('the interop service’s endSessionsOf takes an issuer alone, a string, and throws for anything else', () => {
-  expect(issuerOf({ issuer: 'https://hs256.interop.bead.example' })).toBe(
-    'https://hs256.interop.bead.example'
-  );
-  expect(issuerOf({ issuer: '' })).toBe('');
+  const { refusal, refuses, takes } = VERIFIERS.endSessionsOf;
 
-  for (const request of [
-    null,
-    undefined,
-    7,
-    'https://hs256.interop.bead.example',
-    ['https://hs256.interop.bead.example'],
-    {},
-    { issuer: 7 },
-    { issuer: null },
-    { issuer: 'https://hs256.interop.bead.example', sub: 'grace' },
-    { iss: 'https://hs256.interop.bead.example' },
-  ]) {
+  expect([takes.length, refuses.length]).not.toContain(0);
+
+  for (const { issuer, request } of takes) {
+    expect(issuerOf(request), JSON.stringify(request)).toBe(issuer);
+  }
+
+  // undefined, which JSON cannot write, besides what the file refuses
+  for (const request of [...refuses, undefined]) {
     expect(() => {
       return issuerOf(request);
-    }, JSON.stringify(request)).toThrow(
-      'endSessionsOf names an issuer by {"issuer"} alone, a string'
-    );
+    }, JSON.stringify(request)).toThrow(refusal);
   }
 });
 

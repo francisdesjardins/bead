@@ -14,7 +14,8 @@
   "findings": [
     {
       "rule": "PROCEDURE_SAME_LIMIT",
-      "pointer": "/services/0/procedures/0/maximumPayloadBytes"
+      "pointer": "/services/0/procedures/0/maximumPayloadBytes",
+      "subject": "service:1/procedure:1"
     }
   ]
 }

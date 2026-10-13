@@ -1,0 +1,28 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "acme/v1/api.proto",
+            "package": "acme.v1"
+          }
+        ],
+        "messages": [
+          {
+            "fullName": "acme.v1.M",
+            "file": "other.proto"
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROTO_FILE",
+      "pointer": "/proto/messages/0/file"
+    }
+  ]
+}

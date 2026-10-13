@@ -174,7 +174,13 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.3.0, )"
+          "Bead.Core": "[0.4.0, )"
+        }
+      },
+      "bead.protobuf": {
+        "type": "Project",
+        "dependencies": {
+          "Google.Protobuf": "[3.36.2, )"
         }
       }
     }

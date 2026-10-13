@@ -8,7 +8,6 @@ import { createTestClock } from '../../shared/__tests__/fixtures';
 import { noop } from '../../shared/noop';
 import {
   createTransportServer,
-  generateDrawnHandle,
   generateHandle,
   ProgrammerError,
   type ITransportServerAddress,
@@ -16,8 +15,8 @@ import {
   type TransportServerConnectionHandle,
 } from '../transport-server';
 
-const A = generateHandle({ ip: '10.0.0.1', port: 1, type: 'WS' });
-const B = generateHandle({ ip: '10.0.0.2', port: 2, type: 'WS' });
+const A = generateHandle({ ip: '10.0.0.1', ordinal: 1, port: 1, type: 'WS' });
+const B = generateHandle({ ip: '10.0.0.2', ordinal: 2, port: 2, type: 'WS' });
 
 type StubDefineOptions = ITransportServerDefineOptions<{ id: string }, undefined>;
 
@@ -97,6 +96,7 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
       'CONNECTION_EVENT',
       'ERROR_EVENT',
       'MESSAGE_EVENT',
+      'REFUSAL_EVENT',
       'TRANSPORT_HTTP',
       'TRANSPORT_WS',
     ] as const) {
@@ -215,16 +215,16 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
     ]);
   });
 
-  test('names a connection by its type, address and port', () => {
-    expect(generateHandle({ ip: '127.0.0.1', port: 50_000, type: 'WS' })).toBe(
-      'type=WS;ip=127.0.0.1;port=50000'
-    );
-  });
-
-  test('names a connection it drew by its type, address and the rank it was drawn at', () => {
-    expect(generateDrawnHandle({ ip: '127.0.0.1', ordinal: 7, type: 'HTTP' })).toBe(
-      'type=HTTP;ip=127.0.0.1;ordinal=7'
-    );
+  test('names a connection by its type, its address, its peer’s port when it has a socket of its own, and the rank it was taken at', () => {
+    expect([
+      generateHandle({ ip: '127.0.0.1', ordinal: 3, port: 50_000, type: 'WS' }),
+      generateHandle({ ip: '127.0.0.1', ordinal: 7, type: 'HTTP' }),
+      generateHandle({ ip: 'local', ordinal: 1, port: undefined, type: 'WORKER' }),
+    ]).toEqual([
+      'type=WS;ip=127.0.0.1;port=50000;ordinal=3',
+      'type=HTTP;ip=127.0.0.1;ordinal=7',
+      'type=WORKER;ip=local;ordinal=1',
+    ]);
   });
 });
 
@@ -382,7 +382,7 @@ test.describe('createTransportServer', () => {
     expect(server.clients).toHaveLength(1);
 
     // in the order the connections came, whichever went in between; the copy taken before stays
-    const C = generateHandle({ ip: '10.0.0.0', port: 3, type: 'WS' });
+    const C = generateHandle({ ip: '10.0.0.0', ordinal: 3, port: 3, type: 'WS' });
     const before = server.clients;
     const handlesOf = (listed: typeof clients) => {
       return listed.map(({ connectionHandle }) => {
@@ -477,6 +477,39 @@ test.describe('createTransportServer', () => {
       [thrown, B],
     ]);
     expect(reported[0]?.[0]).toBe(thrown);
+  });
+
+  test('reports a throw of a listener told no connection with the empty handle', () => {
+    const { defineOptions, server } = createStubServer();
+    const thrown = new Error('a refusal listener that throws');
+    const refusal = {
+      address: '127.0.0.1',
+      authority: 'rebind.example',
+      origin: undefined,
+      port: 50_000,
+      reason: 'host-refused',
+      status: 403,
+    };
+    const told: unknown[] = [];
+    const reported: [Error, string][] = [];
+
+    expect(defineOptions.isHeard('refusal')).toBe(false);
+
+    server.on('refusal', () => {
+      throw thrown;
+    });
+    server.on('refusal', (given) => {
+      told.push(given);
+    });
+    server.on('error', (error, connectionHandle) => {
+      reported.push([error, connectionHandle]);
+    });
+
+    expect(defineOptions.isHeard('refusal')).toBe(true);
+    expect(defineOptions.tell('refusal', [refusal])).toBe(true);
+
+    expect(told).toEqual([refusal]);
+    expect(reported).toEqual([[thrown, '']]);
   });
 
   test('counts the connections it holds, and gives their handles, for no one outside the process', () => {

@@ -16,11 +16,13 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_HOOKS",
-      "pointer": "/services/0"
+      "pointer": "/services/0",
+      "subject": "service:1/hook:greeted"
     },
     {
       "rule": "PROCEDURE_ADMISSION_TIGHTENED",
-      "pointer": "/services/0/procedures/0/admission"
+      "pointer": "/services/0/procedures/0/admission",
+      "subject": "service:1/procedure:1"
     }
   ]
 }

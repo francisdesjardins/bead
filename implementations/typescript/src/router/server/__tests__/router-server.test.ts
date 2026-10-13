@@ -68,8 +68,8 @@ interface ISentEnvelope {
   envelope: Envelope | undefined;
 }
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: Handle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1136,7 +1136,7 @@ test.describe('createRouterServer', () => {
       const { deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
       const services = createServiceManager(router);
-      const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+      const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
 
       open(first);
       open(second);
@@ -1222,6 +1222,7 @@ test.describe('createRouterServer', () => {
       expect(seen).toContain(failure);
     });
 
+    // spec 11.7.3
     test('a connection that closes is no longer notified, and one that cannot take it keeps none from the others', async () => {
       const { close, control, deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
@@ -2131,6 +2132,7 @@ test.describe('createRouterServer', () => {
     expect(errors).toEqual([]);
   });
 
+  // debugging 5.1
   test('tells debug each envelope, with its connection and a copy of its header without its token', async () => {
     const { deliver, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
@@ -3332,7 +3334,7 @@ test.describe('createRouterServer, credentials', () => {
 });
 
 test.describe('createRouterServer, relaying', () => {
-  const device: Handle = 'type=WS;ip=127.0.0.1;port=50100';
+  const device: Handle = 'type=WS;ip=127.0.0.1;port=50100;ordinal=1';
   const failing: IProcedure = { ...echo, procedureId: 2, procedureName: 'failing' };
   const held: IProcedure = { ...echo, procedureId: 3, procedureName: 'held' };
   const admitting: IRelayOptions = {
@@ -4089,7 +4091,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
       return answersOf(scripted.sent.splice(0));
     };
 
-    return { ...scripted, errors, release, resolver, router, sentSince };
+    return { ...scripted, errors, release, resolver, router, sentSince, services };
   };
 
   /** The queued counts of `router`'s gauges. */
@@ -4275,6 +4277,57 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(errors).toEqual([]);
   });
 
+  // debugging 4.2
+  test('tells the failure its router answered in the resolver’s place', async () => {
+    const { deliver, errors, release, resolver, router, sentSince, services } = createPaced({
+      pacing: { maximumQueuedNotifications: 1 },
+    });
+    // the steps of the call in flight: their direction, what came in and went out, and why
+    const told: unknown[][] = [];
+
+    using _router = router;
+
+    services.on('debug', (error, { callId, direction, rx, tx }) => {
+      if (callId === 3) {
+        told.push([
+          direction,
+          rx,
+          tx,
+          error instanceof FailureError ? [error.code, error.detail, error.side] : error,
+        ]);
+      }
+    });
+    deliver(first, pacedOf(3, text.encode('hold')));
+    await sleep(0);
+
+    for (const word of ['a', 'b', 'c']) {
+      await resolver.notify(word);
+    }
+
+    release();
+    await sleep(0);
+
+    // its resolver's answer goes nowhere, told once with the failure that went in its place
+    expect(sentSince()).toEqual([
+      [first, EnvelopeKind.NOTIFICATION, 3, 'a'],
+      [first, 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(told).toEqual([
+      ['rx', 'hold', undefined, null],
+      [
+        'tx',
+        'hold',
+        'ok',
+        [
+          ProtocolCode.CAPACITY_EXCEEDED,
+          'the notifications queued for call 3 went past their bounds',
+          'server',
+        ],
+      ],
+    ]);
+    expect(errors).toEqual([]);
+  });
+
   test('reports the failure it could not send a call in flight whose queue went past its bounds', async () => {
     const { control, deliver, errors, release, resolver, router, sentSince } = createPaced({
       pacing: { maximumQueuedNotifications: 1 },
@@ -4296,9 +4349,10 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(router.notifications.subscriptions()).toEqual([]);
   });
 
+  // spec 11.7.3
   test('lets a queue go with its subscription: unsubscribed, cancelled, its session ended, its connection closed', async () => {
     const { close, deliver, resolver, router } = createPaced();
-    const third = 'type=WS;ip=127.0.0.1;port=50003';
+    const third = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
 
     using _router = router;
 
@@ -4381,6 +4435,7 @@ test.describe('createRouterServer, its metrics', () => {
     };
   };
 
+  // debugging 2.2 and 2.3
   test('a debug listener that throws on an envelope is reported with its connection, and the envelope and its call go on, every listener told', async () => {
     const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport);
@@ -4411,6 +4466,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
+  // debugging 9.7
   test('counts a command to a connection not open as started and closed in the turn it started', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { transport } = createScriptedTransport();
@@ -4431,6 +4487,7 @@ test.describe('createRouterServer, its metrics', () => {
     await expect(asking).rejects.toBeInstanceOf(DisconnectError);
   });
 
+  // debugging 9.2
   test('counts a notification it cannot hand to its transport as failed, and one its transport refuses once it has it as sent', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { control, deliver, open, transport } = createScriptedTransport();
@@ -4468,6 +4525,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
+  // spec 17.2.6
   test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, and reports why once', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, sent, transport } = createScriptedTransport();
@@ -4503,6 +4561,7 @@ test.describe('createRouterServer, its metrics', () => {
     ).toEqual(['bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 2']);
   });
 
+  // debugging 9.4.5
   test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, transport } = createScriptedTransport();
@@ -4609,7 +4668,7 @@ test.describe('createRouterServer, its metrics', () => {
     const metricsRegistry = createMetricsRegistry();
     const { close, deliver, open, transport } = createScriptedTransport();
     using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
-    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
     const droppedOf = () => {
       return countedOf(metricsRegistry).filter((line) => {
         return line.startsWith('bead_subscriptions_dropped_total');
@@ -4657,7 +4716,7 @@ test.describe('createRouterServer, its metrics', () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
-    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003';
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
     // a protocol code, a code of the procedure's own, and a code section 8 names none of
     const ending: [Handle, IFailure][] = [
       [first, SERVER_FAILURES.accessDenied],
@@ -4699,7 +4758,8 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
-  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded and its service at one revision', () => {
+  // spec 16.7
+  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded', () => {
     const { transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
       clock: createTestClock(),
@@ -4720,15 +4780,6 @@ test.describe('createRouterServer, its metrics', () => {
     }).toThrow(
       new ProgrammerError(
         'the metrics registry holds "echo" at 2/1, and is given "eCHO" at 2/2: its name at another address'
-      )
-    );
-
-    // its service at another revision
-    expect(() => {
-      resolve({ ...echo, procedureId: 3, procedureName: 'slow', serviceRevision: 4 });
-    }).toThrow(
-      new ProgrammerError(
-        'the metrics registry holds service 2 at revision 3, and is given 2/3 at revision 4: another revision of its service'
       )
     );
 

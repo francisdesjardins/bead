@@ -8,11 +8,12 @@
     "notifies: what a notification procedure notifies its subscribers.",
     "relay: what the interop server's relay admits, what it forwards, and whether it verifies what it forwards. Its destinations are its clients' connections, each registered by register, with the audience it verifies or with none, and taken out by unregister.",
     "credentials: what the interop server resolves a request's credential with, by its scheme. elsewhere is its ELSEWHERE verifier: what it reads, the grammar of the values it holds, in ABNF (RFC 5234, where a string is case-insensitive, and RFC 7405, where %s makes one case-sensitive), and what it settles with.",
-    "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's deadline at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other."
+    "credentials.jwt: what the interop server verifies a JWT with (sections 13.8, 13.9), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's deadline at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other.",
+    "verifiers: what both sides' interop tests hold the interop service's own readers to, read from here. elsewhere, each value its ELSEWHERE verifier is given, as its transport carried it, and its verdict: holds, with the sub its session takes as its id and in its data, and its end when it has one; none; or rejects, with its rejection; at once, or once after milliseconds passed on its server's clock. endSessionsOf, the requests it takes, each with the issuer it reads, and those it refuses, each by throwing its refusal."
   ],
-  "specVersion": "0.3.0",
+  "specVersion": "0.4.0",
   "relay": {
-    "admits": "requireSessionOrCredential, a server's relay's admission by default: a call in leg A's connection's session, or one whose header presents a JWT, or an ELSEWHERE its transport carried, read from its credential scheme alone; any other is refused with SESSION_REQUIRED. Before it, a scheme to come is refused with CREDENTIAL_UNSUPPORTED, detail \"OPAQUE, JWT, ELSEWHERE\", and an OPAQUE that does not hold, or an ELSEWHERE whose transport carried nothing, with SESSION_REQUIRED (section 14.3, step 1). A conversation's relay may give requireSession in its place, which tests the call's session, and so refuses every credential the relay forwards without verifying with ACCESS_DENIED, and a call in none that presented none with SESSION_REQUIRED (section 13.5)",
+    "admits": "requireCredential, a server's relay's admission by default: a call whose header presents a JWT, or an ELSEWHERE its transport carried, read from its credential scheme alone; any other, one that presents none or OPAQUE, is refused with ACCESS_DENIED, detail \"a relay admits by default only a credential it forwards\", in leg A's connection's session or in none. Before it, a scheme to come is refused with CREDENTIAL_UNSUPPORTED, detail \"OPAQUE, JWT, ELSEWHERE\", and an OPAQUE that does not hold, or an ELSEWHERE whose transport carried nothing, with SESSION_REQUIRED (section 14.3, step 1). A conversation's relay may give shareLegBSession in its place, which admits besides a call in any session of leg A's connection's, whatever its destination, and refuses a call in none that presented none with SESSION_REQUIRED, or requireSession, which tests the call's session, and so refuses every credential the relay forwards without verifying with ACCESS_DENIED, and a call in none that presented none with SESSION_REQUIRED (section 13.5)",
     "forwards": "what leg A presents, as section 14.2's table says: none for none or OPAQUE; a JWT, its same bytes, to a destination registered with the audience its aud names; an ELSEWHERE, the credential its transport carried moved to leg B's transport as it came, to a destination registered with an audience, over a connection whose transport carries one. A JWT or an ELSEWHERE it cannot so forward — to a destination of another audience or of none, over a connection that carries no credential, or in the clear off the machine — is refused with DESTINATION_UNREACHABLE (section 14.3, step 5)",
     "verifies": "nothing, unless a conversation's relay says it verifies: then it verifies a JWT with the server's credentials against the audiences its destinations were registered with, and an ELSEWHERE with the server's ELSEWHERE verifier, before its admission, which then reads the credential's session (section 14.3, step 1)"
   },
@@ -104,12 +105,12 @@
     {
       "procedureName": "endSession",
       "request": "a credential's session's identifier, an object of these members alone, each a string: a JWT's, {\"issuer\":i,\"sub\":s} or {\"issuer\":i,\"sid\":s}; an ELSEWHERE's, {\"id\":d}",
-      "answers": "null, once it ended the credential's session of that identifier on every connection that keeps it, each subscription it bounded failing SESSION_REQUIRED, and nothing else (section 13.9): an identifier no connection keeps ends nothing, and a credential that still holds opens its session anew. A request that names no identifier ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
+      "answers": "null, once it ended the credential's session of that identifier on every connection that keeps it, each subscription it bounded failing SESSION_REQUIRED, and nothing else (section 13.10): an identifier no connection keeps ends nothing, and a credential that still holds opens its session anew. A request that names no identifier ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
     },
     {
       "procedureName": "endSessionsOf",
       "request": "an issuer, an object of this member alone, a string: {\"issuer\":i}",
-      "answers": "null, once it ended every credential's session of that issuer on every connection that keeps one — each JWT's whose identifier's issuer is i, octet for octet, whatever its sid or sub — each subscription they bounded failing SESSION_REQUIRED, and nothing else (section 13.9): an issuer no session kept names ends nothing, an ELSEWHERE's session names no issuer, and a credential that still holds opens its session anew. A request that names no issuer ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
+      "answers": "null, once it ended every credential's session of that issuer on every connection that keeps one — each JWT's whose identifier's issuer is i, octet for octet, whatever its sid or sub — each subscription they bounded failing SESSION_REQUIRED, and nothing else (section 13.10): an issuer no session kept names ends nothing, an ELSEWHERE's session names no issuer, and a credential that still holds opens its session anew. A request that names no issuer ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
     }
   ],
   "credentials": {
@@ -167,12 +168,12 @@
                 }
               }
             ],
-            "answers": "its keys at the first ask its server makes, and no key at every ask after, as from an issuer that withdrew its key; each once 1,000 ms passed on the server's clock since it was asked, whatever its signal. Its key is RFC 7515's A.1 HMAC key under the kid of the first issuer's, so that a kid another issuer's key names plays (spec 13.8)"
+            "answers": "its keys at the first ask its server makes, and no key at every ask after, as from an issuer that withdrew its key; each once 1,000 ms passed on the server's clock since it was asked, whatever its signal. Its key is RFC 7515's A.1 HMAC key under the kid of the first issuer's, so that a kid another issuer's key names plays (spec 13.9)"
           },
           {
             "issuer": "https://stalled.interop.bead.example",
             "keys": [],
-            "answers": "nothing: its ask never settles, whatever its signal, and arms no timer, so it fails at its deadline (spec 13.8)"
+            "answers": "nothing: its ask never settles, whatever its signal, and arms no timer, so it fails at its deadline (spec 13.9)"
           },
           {
             "issuer": "https://kidless.interop.bead.example",
@@ -187,7 +188,7 @@
                 }
               }
             ],
-            "answers": "its keys, at every ask, once 1,000 ms passed on the server's clock since it was asked, whatever its signal. Its one key, RFC 7520's 3.5 HMAC key, carries no kid, nor do its tokens, so that a token without a kid waits on its issuer's keys while none serve, and finds its key by its issuer once they do (spec 13.8)"
+            "answers": "its keys, at every ask, once 1,000 ms passed on the server's clock since it was asked, whatever its signal. Its one key, RFC 7520's 3.5 HMAC key, carries no kid, nor do its tokens, so that a token without a kid waits on its issuer's keys while none serve, and finds its key by its issuer once they do (spec 13.9)"
           }
         ],
         "maximumWaitingCalls": 2,
@@ -205,7 +206,158 @@
         "after       = %x31-39 *9DIGIT  ; milliseconds, at most 2147483647, 2³¹ − 1 (spec 1.4)",
         "end         = %x31-39 *15DIGIT  ; milliseconds since the epoch, at most 9007199254740991, 2⁵³ − 1 (spec 1.2)"
       ],
-      "settles": "a value of holding with a credential's session: its id sub, its data the JSON object {\"sub\":sub}, given as each side gives a JWT's claims set (spec 13.8), and its end when the value gives one, none otherwise; a value of failing by rejecting, its error \"this verifier fails, on purpose\", which its server answers with PROCEDURE_FAILED and reports; either once after milliseconds passed, on a timer armed on the clock its server is given (decision 0011), whatever its signal, so that its settling may come once its call ended, which its server drops in silence (spec 10.2); without after, at once; any other value, an after or an end past its bound among them, with none: the credential does not hold, which its server refuses with SESSION_REQUIRED, detail \"the credential does not hold\", as it does a session whose end its wall clock has reached as the verifier settles (spec 13.10)"
+      "settles": "a value of holding with a credential's session: its id sub, its data the JSON object {\"sub\":sub}, given as each side gives a JWT's claims set (spec 13.8), and its end when the value gives one, none otherwise; a value of failing by rejecting, its error \"this verifier fails, on purpose\", which its server answers with PROCEDURE_FAILED and reports; either once after milliseconds passed, on a timer armed on the clock its server is given (decision 0011), whatever its signal, so that its settling may come once its call ended, which its server drops in silence (spec 10.2); without after, at once; any other value, an after or an end past its bound among them, with none: the credential does not hold, which its server refuses with SESSION_REQUIRED, detail \"the credential does not hold\", as it does a session whose end its wall clock has reached as the verifier settles (spec 13.11)"
+    }
+  },
+  "verifiers": {
+    "elsewhere": {
+      "rejection": "this verifier fails, on purpose",
+      "verdicts": [
+        {
+          "carried": "Interop sub=ada",
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "interop sub=ada",
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "INTEROP sub=ada",
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "Interop sub=a",
+          "verdict": "holds",
+          "sub": "a"
+        },
+        {
+          "carried": "Interop sub=abcdefghijklmnopqrstuvwxyzabcdef",
+          "verdict": "holds",
+          "sub": "abcdefghijklmnopqrstuvwxyzabcdef"
+        },
+        {
+          "carried": "Interop sub=abcdefghijklmnopqrstuvwxyzabcdefa",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=Ada",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop  sub=ada",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada,after=1",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, after=0",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, after=2147483647",
+          "after": 2147483647,
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "Interop sub=ada, after=2147483648",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, end=9007199254740991",
+          "verdict": "holds",
+          "sub": "ada",
+          "end": 9007199254740991
+        },
+        {
+          "carried": "Interop sub=ada, end=9007199254740992",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, end=1, after=1",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, SUB=x",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop fail=true",
+          "verdict": "rejects"
+        },
+        {
+          "carried": "Interop fail=true, after=5",
+          "after": 5,
+          "verdict": "rejects"
+        },
+        {
+          "carried": "Interop fail=TRUE",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, fail=true",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop ",
+          "verdict": "none"
+        },
+        {
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "verdict": "none"
+        },
+        {
+          "carried": "Basic YWRh",
+          "verdict": "none"
+        }
+      ]
+    },
+    "endSessionsOf": {
+      "takes": [
+        {
+          "request": {
+            "issuer": "https://hs256.interop.bead.example"
+          },
+          "issuer": "https://hs256.interop.bead.example"
+        },
+        {
+          "request": {
+            "issuer": ""
+          },
+          "issuer": ""
+        }
+      ],
+      "refuses": [
+        null,
+        7,
+        "https://hs256.interop.bead.example",
+        ["https://hs256.interop.bead.example"],
+        [],
+        {},
+        {
+          "issuer": 7
+        },
+        {
+          "issuer": null
+        },
+        {
+          "issuer": "https://hs256.interop.bead.example",
+          "sub": "grace"
+        },
+        {
+          "iss": "https://hs256.interop.bead.example"
+        }
+      ],
+      "refusal": "endSessionsOf names an issuer by {\"issuer\"} alone, a string"
     }
   }
 }

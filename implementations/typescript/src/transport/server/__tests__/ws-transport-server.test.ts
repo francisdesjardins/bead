@@ -21,6 +21,7 @@ import {
 } from '../../shared/__tests__/fixtures';
 import {
   ProgrammerError,
+  type ITransportServerRefusal,
   type TRANSPORT_SERVER_EVENTS,
   type TransportServerEventMap,
 } from '../transport-server';
@@ -28,12 +29,14 @@ import {
   createWSTransportServer,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
+  START_DEFAULTS,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   type IIncomingMessageLike,
   type IServerSocketLike,
   type IWSTransportServerOptions,
   type WSTransportServer,
 } from '../ws-transport-server';
+import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
 import { createFakeSocket, createFakeWebSocketServer } from './fake-websocket-server';
 
 type ServerEvents = TransportServerEventMap<IServerSocketLike, IIncomingMessageLike>;
@@ -123,6 +126,11 @@ const answerOf = async (port: number, head: string) => {
   socket.destroy();
 
   return answer;
+};
+
+// the rank a handle names
+const ordinalOf = (connectionHandle: string): number => {
+  return Number(/;ordinal=(?<ordinal>\d+)$/u.exec(connectionHandle)?.groups?.['ordinal']);
 };
 
 // where a scripted server's HTTP server listens: for real, on a port the system picked
@@ -306,7 +314,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         const { isRegistered, connectionHandle } = await seen;
 
         expect(isRegistered).toBe(true);
-        expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+$/);
+        expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$/u);
         expect(await greeted).toEqual([{ credential: undefined, data: 'hi' }]);
       });
 
@@ -434,7 +442,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       test('resolves for a handle nobody holds', async () => {
         await connectClient(client);
         await expect(
-          server.send({ data: 'hello' }, 'type=WS;ip=0.0.0.0;port=1')
+          server.send({ data: 'hello' }, 'type=WS;ip=0.0.0.0;port=1;ordinal=1')
         ).resolves.toBeUndefined();
       });
     });
@@ -454,7 +462,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('resolves false for a handle nobody holds', async () => {
-        await expect(server.close('type=WS;ip=0.0.0.0;port=1')).resolves.toBe(false);
+        await expect(server.close('type=WS;ip=0.0.0.0;port=1;ordinal=1')).resolves.toBe(false);
       });
 
       test('"closeAll" closes every connection', async () => {
@@ -508,13 +516,19 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('stops twice, then starts again on a new port', async () => {
+        const [, , before] = await connectClient(client);
+        const clientClosed = nextClientEvent(client, 'close');
+
         await server.stop();
         await server.stop();
+        await clientClosed;
 
         ({ port } = await server.start({ address: host, findOpenPort: true }));
-        await connectClient(client);
+        const [, , after] = await connectClient(client);
 
         expect(server.clients).toHaveLength(1);
+        // ranked after every connection taken before the stop: no handle is given twice
+        expect([before, after].map(ordinalOf)).toEqual([1, 2]);
       });
     });
   });
@@ -616,6 +630,28 @@ test.describe('WSTransportServer, on the wire', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(server.isClosed()).toBe(true);
     socket.destroy();
+  });
+
+  test('names a client that comes over IPv4 to a dual-stack listener by its IPv4 address', async () => {
+    const dualStack = createWSTransportServer({ WebSocketServer });
+    const { port: dualPort } = await dualStack.start({ address: '::', findOpenPort: true });
+    const connection = nextServerEvent(dualStack, 'connection');
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const socket = new TrackedWsWebSocket(`ws://127.0.0.1:${String(dualPort)}`);
+
+    try {
+      await once(socket, 'open');
+
+      const [, request, connectionHandle] = await connection;
+
+      // the socket's own address, IPv4 mapped into IPv6, read as the IPv4 address it carries
+      expect(request.socket.remoteAddress).toBe('::ffff:127.0.0.1');
+      expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=1$/u);
+      expect(dualStack.clients).toMatchObject([{ address: '127.0.0.1', connectionHandle }]);
+    } finally {
+      socket.close();
+      await dualStack.stop();
+    }
   });
 
   test('delivers binary as a Buffer with binaryType "nodebuffer", and text still as a string', async () => {
@@ -731,28 +767,51 @@ test.describe('WSTransportServer, its hosts and origins', () => {
     };
     const taken = ['HTTP/1.1 101 Switching Protocols', undefined];
     const refused = ['HTTP/1.1 403 Forbidden', 'host-refused'];
+    const notOwn = ['HTTP/1.1 403 Forbidden', 'origin-refused'];
 
     // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-    // and a Host of punycode that decodes to none, taken where no host is named
+    // and a Host of punycode that decodes to none, taken where every host is; under *, no page is
+    // the server's own by a host * alone takes (spec 15.12)
     const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
 
     expect(
-      await answersOf(undefined, [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
-    ).toEqual([taken, taken, taken, taken]);
+      await answersOf(
+        ['*'],
+        [page, ['xn--a', 'http://xn--a'], ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']]
+      )
+    ).toEqual([notOwn, notOwn, taken, taken, taken]);
 
-    // hosts name an IDN host as the field carries it, in punycode
+    // hosts name an IDN host as the field carries it, in punycode, and none past them is taken
     expect(
       await answersOf(
-        ['xn--bad-bma.test:8080'],
-        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test']]
+        ['xn--bad-bma.test'],
+        [page, ['XN--BAD-BMA.test:8080'], ['xn--a.test'], ['xn---bad-cpa.test'], ['xn--a']]
       )
-    ).toEqual([taken, taken, refused, refused]);
+    ).toEqual([taken, taken, refused, refused, refused]);
+  });
+
+  // spec 15.12
+  test('refuses as it is built a hosts entry with a port, and an origins entry that is * or null', () => {
+    const built = (options: Partial<IWSTransportServerOptions>) => {
+      return () => {
+        return createWSTransportServer({ ...options, WebSocketServer });
+      };
+    };
+
+    expect(built({ hosts: ['bead.test:8080'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['bead.test', '*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['https://bead.test/'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).toThrow(
+      ProgrammerError
+    );
+    expect(built({ hosts: ['*'], origins: ['https://bead.test'] })).not.toThrow();
   });
 });
 
 test.describe('WSTransportServer, its handshake', () => {
   test('refuses a method but GET or HEAD 405, after its host and before its upgrade is read, its Allow naming GET and HEAD, marked method-refused', async () => {
-    await using started = await startDated({ hosts: ['bead.test', 'bead.test:80'] });
+    await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
 
     // a handshake under another method, one of version 8 among them, or none at all; a CONNECT,
@@ -838,6 +897,7 @@ test.describe('WSTransportServer, its handshake', () => {
     expect(server.clients).toHaveLength(0);
   });
 
+  // spec 15.2.8
   test('refuses an upgrade that comes as it stops, 503 busy, told when to come back', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
@@ -1008,7 +1068,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     server.on('close', (...params) => {
       closes.push(params);
     });
-    fake.connect(silent, 40_000);
+    fake.connect(silent, { remotePort: 40_000, server });
 
     const stopping = server.stop();
 
@@ -1020,7 +1080,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     // a WebSocketServer that delivers a connection after its close, past the snapshot
     const late = createFakeSocket();
-    const lateHandle = fake.connect(late, 40_001);
+    const lateHandle = fake.connect(late, { remotePort: 40_001, server });
 
     await stopping;
 
@@ -1043,7 +1103,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       await starting;
 
       try {
-        return server.isSecure(fake.connect(createFakeSocket()));
+        return server.isSecure(fake.connect(createFakeSocket(), { server }));
       } finally {
         await server.stop();
       }
@@ -1121,7 +1181,41 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     expect(server.isClosed()).toBe(true);
   });
 
-  test('leaves the connection a newer socket took the handle of alone when the older one closes', async () => {
+  test('names each connection by its peer’s port and the rank it came at, two sockets from one address and port among them, and gives no handle twice', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = server.start(SCRIPTED);
+
+    fake.instances[0]?.emit('listening');
+    await starting;
+
+    const [first, second, third] = [createFakeSocket(), createFakeSocket(), createFakeSocket()];
+    // three sockets from one address and port, the first closed before the third came
+    const firstHandle = fake.connect(first, { server });
+    const secondHandle = fake.connect(second, { server });
+
+    first.terminate();
+
+    const thirdHandle = fake.connect(third, { server });
+
+    expect([firstHandle, secondHandle, thirdHandle]).toEqual([
+      'type=WS;ip=10.0.0.1;port=40000;ordinal=1',
+      'type=WS;ip=10.0.0.1;port=40000;ordinal=2',
+      'type=WS;ip=10.0.0.1;port=40000;ordinal=3',
+    ]);
+    expect(server.clients).toMatchObject([
+      { address: '10.0.0.1', connectionHandle: secondHandle, port: 40_000 },
+      { address: '10.0.0.1', connectionHandle: thirdHandle, port: 40_000 },
+    ]);
+
+    // each its own: a close reaches its socket alone, and the first's handle names none
+    await expect(server.close(firstHandle)).resolves.toBe(false);
+    await expect(server.close(secondHandle)).resolves.toBe(true);
+    expect([second.closeCodes, third.closeCodes]).toEqual([[1000], []]);
+    await server.stop();
+  });
+
+  test('closes each of two sockets from one address and port on its own, each its own close told', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
     const closes: unknown[] = [];
@@ -1135,18 +1229,21 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     const older = createFakeSocket();
     const newer = createFakeSocket();
-    // the same port given again: the same handle
-    const connectionHandle = fake.connect(older);
+    // the same port given again: another connection, another handle
+    const olderHandle = fake.connect(older, { server });
+    const newerHandle = fake.connect(newer, { server });
 
-    fake.connect(newer);
     older.terminate();
 
-    expect([closes, server.gauges().counts]).toEqual([[], { connections: 1 }]);
+    expect([closes, server.gauges().counts]).toEqual([[[false, olderHandle]], { connections: 1 }]);
 
     newer.terminate();
 
     expect([closes, server.gauges().counts]).toEqual([
-      [[false, connectionHandle]],
+      [
+        [false, olderHandle],
+        [false, newerHandle],
+      ],
       { connections: 0 },
     ]);
     await server.stop();
@@ -1167,7 +1264,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     const first = createFakeSocket();
     const second = createFakeSocket();
     const live = createFakeSocket();
-    const handle = fake.connect(live);
+    const handle = fake.connect(live, { server });
 
     fake.connectGone(first);
     fake.connectGone(second);
@@ -1196,7 +1293,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await starting;
 
     const silent = createFakeSocket({ onClose: 'ignore' });
-    fake.connect(silent);
+    fake.connect(silent, { server });
 
     const started = Date.now();
     await server.stop();
@@ -1220,7 +1317,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await starting;
 
     const silent = createFakeSocket({ onClose: 'ignore' });
-    const closing = server.close(fake.connect(silent));
+    const closing = server.close(fake.connect(silent, { server }));
 
     await sleep(50);
 
@@ -1246,7 +1343,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     const silent = createFakeSocket({ onClose: 'ignore' });
 
-    fake.connect(silent);
+    fake.connect(silent, { server });
     clock.tick(5);
     silent.hear('message', Buffer.from('bytes'), true);
 
@@ -1268,7 +1365,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await starting;
 
     const stubborn = createFakeSocket({ onClose: 'throw' });
-    const connectionHandle = fake.connect(stubborn);
+    const connectionHandle = fake.connect(stubborn, { server });
 
     await expect(server.close(connectionHandle)).resolves.toBe(true);
     expect(stubborn.wasTerminated).toBe(true);
@@ -1296,10 +1393,10 @@ test.describe('WSTransportServer, heartbeat', () => {
       closes.push([wasClean, connectionHandle]);
     });
 
-    fake.connect(answering, 40_001);
+    fake.connect(answering, { remotePort: 40_001, server });
 
-    const silentHandle = fake.connect(silent, 40_002);
-    const closingHandle = fake.connect(closing, 40_003);
+    const silentHandle = fake.connect(silent, { remotePort: 40_002, server });
+    const closingHandle = fake.connect(closing, { remotePort: 40_003, server });
 
     // a socket in its close handshake is sent no ping, and is dropped all the same
     (closing as { readyState: number }).readyState = 2;
@@ -1345,7 +1442,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
-    fake.connect(createFakeSocket());
+    fake.connect(createFakeSocket(), { server });
 
     expect(
       timers.armed.map(({ delay }) => {
@@ -1368,7 +1465,7 @@ test.describe('WSTransportServer, heartbeat', () => {
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
     await starting;
-    fake.connect(socket);
+    fake.connect(socket, { server });
 
     // no interval at all: Node would beat one of Infinity every millisecond
     expect([timers.armed, socket.pings, socket.wasTerminated]).toEqual([[], 0, false]);
@@ -1413,5 +1510,376 @@ test.describe('WSTransportServer, heartbeat', () => {
       await server.stop();
       await allClosed();
     }
+  });
+});
+
+/** What the server answers `head` on a socket of its own, as `answerOf` reads it, and that socket's port. */
+const answerFromOf = async (port: number, head: string) => {
+  const socket = await openTcp(port);
+  const { localPort } = socket;
+  const answer = { isClosed: false, text: '' };
+
+  socket.on('data', (chunk: Buffer) => {
+    answer.text += chunk.toString('latin1');
+  });
+  socket.on('error', () => {});
+  socket.on('close', () => {
+    answer.isClosed = true;
+  });
+  socket.write(Buffer.from(head, 'latin1'));
+  await expect
+    .poll(() => {
+      return answer.isClosed || answer.text.includes('\r\n\r\n');
+    })
+    .toBe(true);
+  socket.destroy();
+
+  return {
+    answer: [
+      Number(answer.text.split(' ')[1]),
+      /bead-refusal: (?<mark>.*)\r\n/u.exec(answer.text)?.groups?.['mark'] ?? null,
+    ],
+    // the names of the fields its head carries, in lower case
+    fields: answer.text
+      .split('\r\n\r\n')[0]
+      ?.split('\r\n')
+      .slice(1)
+      .map((line) => {
+        return (line.split(':')[0] ?? '').toLowerCase();
+      }),
+    localPort,
+  };
+};
+
+/** Each refusal `server` tells from now on. */
+const refusalsOf = (server: WSTransportServer) => {
+  const refusals: ITransportServerRefusal[] = [];
+
+  server.on('refusal', (refusal) => {
+    refusals.push(refusal);
+  });
+
+  return refusals;
+};
+
+test.describe('WSTransportServer, the refusals it tells', () => {
+  test('tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own, at its address', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const refusals = refusalsOf(server);
+    const told = (
+      localPort: number | undefined,
+      refusal: Pick<ITransportServerRefusal, 'reason' | 'status'> & Partial<ITransportServerRefusal>
+    ) => {
+      return {
+        address: host,
+        authority: 'bead.test',
+        origin: undefined,
+        port: localPort,
+        ...refusal,
+      };
+    };
+    const expected: unknown[] = [];
+
+    // each refusal of its own, in the order of its judgement, a CONNECT's among them
+    for (const [request, refusal] of [
+      [
+        requestOf('GET / HTTP/1.1', [
+          'Host: elsewhere.test:8080',
+          'Origin: http://elsewhere.test:8080',
+          'Origin: null',
+        ]),
+        {
+          authority: 'elsewhere.test:8080',
+          origin: 'http://elsewhere.test:8080, null',
+          reason: 'host-refused',
+          status: 403,
+        },
+      ],
+      [
+        requestOf('GET http://elsewhere.test:81/ HTTP/1.1'),
+        { authority: 'elsewhere.test:81', reason: 'host-refused', status: 403 },
+      ],
+      [requestOf('POST / HTTP/1.1'), { reason: 'method-refused', status: 405 }],
+      [
+        requestOf('CONNECT bead.test:80 HTTP/1.1', ['Host: bead.test:80']),
+        { authority: 'bead.test:80', reason: 'method-refused', status: 405 },
+      ],
+      [requestOf('GET / HTTP/1.1', [...NO_UPGRADE]), { reason: 'upgrade-required', status: 426 }],
+      [
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 8']),
+        { reason: 'version-refused', status: 426 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: dGVzdA==']),
+        { reason: 'malformed', status: 400 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', ['Origin: https://elsewhere.test']),
+        { origin: 'https://elsewhere.test', reason: 'origin-refused', status: 403 },
+      ],
+    ] as const) {
+      const { answer, localPort } = await answerFromOf(port, request);
+
+      expect(answer, request).toEqual([refusal.status, refusal.reason]);
+      expected.push(told(localPort, refusal));
+    }
+
+    // what HTTP refuses of its own, told by none: two hosts, an octet past ASCII
+    for (const request of [
+      requestOf('GET / HTTP/1.1', ['Host: bead.test', 'Host: elsewhere.test']),
+      requestOf('GET / HTTP/1.1', ['X-Other: café']),
+    ]) {
+      expect((await answerFromOf(port, request)).answer, request).toEqual([400, null]);
+    }
+
+    // nor an upgrade it takes
+    expect(await statusLineOf(port, requestOf('GET / HTTP/1.1'))).toBe(
+      'HTTP/1.1 101 Switching Protocols'
+    );
+    expect(refusals).toEqual(expected);
+
+    // the stop's 503, an upgrade's head in two writes, one each side of the stop
+    const socket = await openTcp(port);
+    const { localPort } = socket;
+    const head = requestOf('GET / HTTP/1.1');
+    const cut = head.indexOf('Sec-WebSocket-Version');
+    let isClosed = false;
+
+    socket.on('close', () => {
+      isClosed = true;
+    });
+    socket.on('data', () => {});
+    socket.write(head.slice(0, cut));
+    await sleep(100);
+    refusals.length = 0;
+    await server.stop();
+    socket.write(head.slice(cut));
+    await expect
+      .poll(() => {
+        return isClosed;
+      })
+      .toBe(true);
+
+    expect(refusals).toEqual([told(localPort, { reason: 'busy', status: 503 })]);
+  });
+
+  test('answers 400 unmarked, with none of the path’s fields, a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const refusals = refusalsOf(server);
+    // in Origin and in a field the transport never reads: an escape sequence, BEL, DEL, and an
+    // octet past ASCII, written as the one octet 0xE9; Node's parser answers the first three
+    const fields = [
+      'Origin: http://a.example\u001B[2J',
+      'X-Other: a\u0007b',
+      'Origin: http://a.example\u007F',
+      'Origin: http://café.example',
+      'X-Other: café',
+    ];
+
+    for (const field of fields) {
+      const request = requestOf('GET / HTTP/1.1', [field]);
+      const { answer, fields: names } = await answerFromOf(port, request);
+
+      expect(answer, request).toEqual([400, null]);
+      // none of what a refusal of the server's own carries
+      expect(
+        names?.filter((name) => {
+          return ['cache-control', 'vary', 'x-content-type-options'].includes(name);
+        }),
+        request
+      ).toEqual([]);
+    }
+
+    expect([refusals, server.clients]).toEqual([[], []]);
+
+    // a tab is taken, and the origin judged as any other
+    const tabbed = await answerFromOf(
+      port,
+      requestOf('GET / HTTP/1.1', ['Origin: http://a.example\tb'])
+    );
+
+    expect(tabbed.answer).toEqual([403, 'origin-refused']);
+    expect(refusals).toEqual([
+      {
+        address: host,
+        authority: 'bead.test',
+        origin: 'http://a.example\tb',
+        port: tabbed.localPort,
+        reason: 'origin-refused',
+        status: 403,
+      },
+    ]);
+  });
+
+  test('refuses as it would though a refusal listener throws, the throw reported with no connection', async () => {
+    await using started = await startDated({ hosts: ['bead.test'] });
+    const { port, server } = started;
+    const errors: ServerEvents['error'][] = [];
+
+    server.on('refusal', () => {
+      throw new Error('a refusal listener that throws');
+    });
+
+    // a listener after it is told all the same
+    const after = refusalsOf(server);
+
+    server.on('error', (...params) => {
+      errors.push(params);
+    });
+
+    expect(
+      (await answerFromOf(port, requestOf('GET / HTTP/1.1', ['Host: elsewhere.test']))).answer
+    ).toEqual([403, 'host-refused']);
+    expect((await answerFromOf(port, requestOf('POST / HTTP/1.1'))).answer).toEqual([
+      405,
+      'method-refused',
+    ]);
+    expect(after).toHaveLength(2);
+    expect(
+      errors.map(([error, connectionHandle]) => {
+        return [error.message, connectionHandle];
+      })
+    ).toEqual([
+      ['a refusal listener that throws', ''],
+      ['a refusal listener that throws', ''],
+    ]);
+    // and it upgrades as before
+    expect(await statusLineOf(port, requestOf('GET / HTTP/1.1'))).toBe(
+      'HTTP/1.1 101 Switching Protocols'
+    );
+  });
+});
+
+test.describe('WSTransportServer, the address it listens on', () => {
+  test('listens on 127.0.0.1, port 80, and beats every 30 seconds when told nothing', async () => {
+    using timers = spyIntervals();
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+
+    expect([server.address, server.port, START_DEFAULTS]).toEqual([
+      '127.0.0.1',
+      80,
+      { address: '127.0.0.1', findOpenPort: false, port: 80 },
+    ]);
+
+    const starting = server.start({ findOpenPort: true });
+
+    fake.instances[0]?.emit('listening');
+    await starting;
+    fake.connect(createFakeSocket(), { server });
+
+    expect([
+      server.address,
+      timers.armed.map(({ delay }) => {
+        return delay;
+      }),
+    ]).toEqual(['127.0.0.1', [30_000]]);
+
+    await server.stop();
+  });
+
+  test('listens on the loopback when given no address, reached by 127.0.0.1 and by localhost, and is secure there', async () => {
+    const server = createWSTransportServer({ WebSocketServer });
+    const clients: WSTransportClient[] = [];
+
+    try {
+      const { address, port } = await server.start({ findOpenPort: true });
+
+      expect(address).toBe('127.0.0.1');
+
+      for (const name of [host, 'localhost']) {
+        const client = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+        clients.push(client);
+        await client.connect({ host: name, port });
+      }
+
+      expect(
+        server.clients.map(({ address: from, connectionHandle }) => {
+          return [from, server.isSecure(connectionHandle)];
+        })
+      ).toEqual([
+        ['127.0.0.1', true],
+        ['127.0.0.1', true],
+      ]);
+    } finally {
+      for (const client of clients) {
+        await client.disconnect().catch(() => {});
+      }
+
+      await server.stop();
+      await allClosed();
+    }
+  });
+
+  test('refuses to start on an address that is no bare IP address, ending closed', async () => {
+    const startedOn = async (address: string) => {
+      const fake = createFakeWebSocketServer({ address: { address, port: 4_321 } });
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const starting = server.start({ address, findOpenPort: true });
+
+      fake.instances[0]?.emit('listening');
+
+      const outcome = await starting.then(
+        () => {
+          return 'listening';
+        },
+        (reason: unknown) => {
+          return reason instanceof ProgrammerError ? reason.message : String(reason);
+        }
+      );
+
+      await server.stop();
+
+      // a server refused opened nothing
+      return [address, outcome, server.isClosed(), fake.instances.length];
+    };
+
+    expect(await Promise.all(LISTENING_ADDRESSES.map(startedOn))).toEqual(
+      LISTENING_ADDRESSES.map((address) => {
+        return [address, 'listening', true, 1];
+      })
+    );
+    expect(await Promise.all(NO_LISTENING_ADDRESSES.map(startedOn))).toEqual(
+      NO_LISTENING_ADDRESSES.map((address) => {
+        return [
+          address,
+          address === '[::1]'
+            ? 'a server listens on an IP address, not "[::1]": write ::1, not [::1]'
+            : `a server listens on an IP address, not "${address}"`,
+          true,
+          0,
+        ];
+      })
+    );
+  });
+
+  test('is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not on a wildcard', async () => {
+    const securedOn = async (address: string) => {
+      const fake = createFakeWebSocketServer({ address: { address, port: 4_321 } });
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const starting = server.start({ address, findOpenPort: true });
+
+      fake.instances[0]?.emit('listening');
+      await starting;
+
+      try {
+        return [address, server.isSecure(fake.connect(createFakeSocket(), { server }))];
+      } finally {
+        await server.stop();
+      }
+    };
+
+    expect(
+      await Promise.all(['::1', '127.0.0.1', '127.0.0.2', '0.0.0.0', '::'].map(securedOn))
+    ).toEqual([
+      ['::1', true],
+      ['127.0.0.1', true],
+      ['127.0.0.2', true],
+      ['0.0.0.0', false],
+      ['::', false],
+    ]);
   });
 });

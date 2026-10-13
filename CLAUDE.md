@@ -2,7 +2,8 @@
 
 Bead is a binary wire protocol: its spec and conformance files in `spec/`, a TypeScript
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
-behavioural parity, and the demo. `README.md` says how each part builds and tests.
+behavioural parity, the builder, `beadc`, in `builder/`, an example in `examples/hello`, the demo
+and the DevTools extension. `README.md` says how each part builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
@@ -14,7 +15,11 @@ What a session needs beyond this file lives in `.claude/`:
   change of any size.
 
 The repository's documentation looks forward: it states what holds and where the project goes,
-in the present tense. Where something came from, and how it was before, stays out of it.
+in the present tense. Where something came from, and how it was before, stays out of it. At each
+release every document that states where Bead goes — the records, the spec, the READMEs, the
+matrix, this file — is brought to it by the `bead-release-documents` workflow: what landed in the
+present, what is ahead kept ahead, records regrouped or renamed where that reads clearer, a record's
+number never given to another.
 
 ## Language
 
@@ -54,8 +59,9 @@ the test that shows it, and a difference that can close is work to do.
 - A term renamed on one side is renamed on both, wherever it applies.
 - No implementation is the reference: the set evolves together, wherever it can. Where one does Y
   and another can do Y and Z, every one does Y: the second keeps to Y, or comes back to it, and Z
-  comes to all of them at once, by a decision that meets the Tenth Man. A divergence is put to the
-  user.
+  comes to all of them at once, by a decision that meets the Tenth Man. Where every side keeps to
+  what one platform can do and a standard allows more, that leveling is a row of `docs/support.md`'s
+  "Leveled down", to lift when the platform can. A divergence is put to the user.
 - The surface maps almost name for name across every language able to carry the protocol whole.
   What couples transports (one port for HTTP and WebSocket) stays outside the protocol, in a small
   local proxy.
@@ -110,7 +116,8 @@ options = null` when every member is optional, a `CancellationToken` inside it);
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
   most two parameters then at most one options object, always last, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
-  (`src/transport/create-promise.ts` → `src/transport/__tests__/create-promise.test.ts`).
+  (`src/transport/shared/create-promise.ts` →
+  `src/transport/shared/__tests__/create-promise.test.ts`).
 
 ## The Bead page
 

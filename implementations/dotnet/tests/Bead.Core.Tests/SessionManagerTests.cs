@@ -7,8 +7,8 @@ public sealed class SessionManagerTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
-    private const string Other = "type=WS;ip=127.0.0.1;port=50002";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
+    private const string Other = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
     // helpers
 
@@ -379,7 +379,7 @@ public sealed class SessionManagerTests
 
         for (var connection = 0; connection < 200; connection += 1)
         {
-            drawn.Add(sessions.Set(sessions.Create($"type=WS;ip=127.0.0.1;port={connection}")).SessionToken);
+            drawn.Add(sessions.Set(sessions.Create($"type=WS;ip=127.0.0.1;port={connection};ordinal=1")).SessionToken);
         }
 
         Assert.Equal(200, drawn.Count);
@@ -497,7 +497,7 @@ public sealed class SessionManagerTests
                 return session.ConnectionHandle;
             }).Order(StringComparer.Ordinal));
         Assert.True(sessions.Has(Other));
-        Assert.Null(sessions.Get("type=WS;ip=127.0.0.1;port=1"));
+        Assert.Null(sessions.Get("type=WS;ip=127.0.0.1;port=1;ordinal=1"));
     }
 
     [Fact]

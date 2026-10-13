@@ -45,6 +45,7 @@
       "@francisdesjardins/bead/notification-manager": [
         "../../src/router/server/notification-manager.ts"
       ],
+      "@francisdesjardins/bead/proto": ["../../src/proto/records.ts"],
       "@francisdesjardins/bead/router-client": ["../../src/router/client/router-client.ts"],
       "@francisdesjardins/bead/router-server": ["../../src/router/server/router-server.ts"],
       "@francisdesjardins/bead/service": ["../../src/service/service.ts"],

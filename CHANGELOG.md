@@ -7,6 +7,378 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-13
+
+### Added
+
+- Every server transport tells each refusal it judges of its own, the event `refusal`, `Refusal`, on
+  both sides: its status, its reason, the request's authority and origin as they came, and the
+  client's address and port, never its target, a token or a credential; the 404 that ends a listen
+  or an exchange as its connection closes is told by `close` alone (spec 15.1; decision 0026). Its
+  record is `ITransportServerRefusal` on the TypeScript side and `TransportServerRefusal` on the C#
+  side, `IServerTransport` gaining `Refusal`; a throw of its listener is reported through `error`
+  with the empty handle. `spec/transports.json` checks it at every marked refusal.
+- On the TypeScript side, `IHTTPResponseLike.stream`, through which an HTTP/2 stream is reset, and
+  `IHandshakeRequestLike.url`, the target an upgrade's authority is read from, both optional.
+- `.claude/workflows/bead-release-documents.js`: a release brings to itself every document that
+  states what holds and where Bead goes — the records, the spec and its companion, the READMEs, the
+  matrix, `CLAUDE.md` — what landed in the present and what is ahead kept ahead, the spec moving in
+  form alone, records regrouped, merged, split or renamed where that reads clearer, a number never
+  given again, every citation moved with them; `tools/release.mjs prepare` lists it among what a
+  release owes by hand.
+- `docs/support.md`'s "Leveled down": each place where every side keeps to what one platform can do
+  though a standard allows more, with the standard, what forces it, what would lift it and the tests
+  that hold it on each side.
+- `spec/units.txt` and `spec/debugging-units.txt`: every unit of each document, its front matter and
+  each section's lead included, whether an entry cites it or why none does, and the sha256 of its
+  text. `spec/check.py` holds each reason by its rule — a `lead` or a `defines` unit carries no key
+  word, a `twins` unit is named by its own number, `spec 15.10`, in a test's title or a comment just
+  above its declaration, on each side, a `builder` unit by beadc's, an `open` one by its document's
+  status line, an `owed` one printed — and fails when a unit's text moved, naming what plays it,
+  until `--write-units` acknowledges that unit by name. Each side's twin tests name the units they
+  hold.
+- The conversation `a cancel that crossed its answer is dropped, nothing reported` (spec 12.9.6).
+- beadc marks a deprecated procedure, service and failure at compile time, in both targets alike:
+  JSDoc's `@deprecated` and C#'s `[Obsolete]` with `DiagnosticId` `BEAD0001`, on every declaration
+  each target writes for it, with the blueprint's deprecation message or "No replacement is named.";
+  in TypeScript, a deprecated name passed to `on`, `of` or `is` is marked by its own overload.
+- A failure's deprecation in the blueprint, from protobuf's `deprecated` on its enum value.
+- `PROTO_FILE`: `beadc check` refuses a `proto` path off its form (`..`, an absolute path, a
+  backslash) or one `proto.files` does not list, and a service's `proto` in a blueprint with no
+  `proto`.
+- `beadc breaking` names each finding's subject, its entity by ids (`service:1/procedure:4`), in
+  text, `json` and `github`; `WAIVER_UNUSED`, a warning, says a waiver that waived nothing.
+- `AGAINST_BLUEPRINT`, a warning: an earlier's committed blueprint that its `.proto` contradicts, or
+  one named and missing.
+- `clean` in `beadc.yaml`, buf's opt-in removal of what `generate` no longer writes.
+- An HTTP server answers CORS to the origins `origins`, `Origins`, names, and to no other, on both
+  sides: their preflight is answered 204, `Access-Control-Allow-Methods: GET, POST, DELETE`,
+  `Access-Control-Allow-Headers` naming `Authorization` and the names the preflight asks, then `*`,
+  so a browser that caches no wildcard keeps the answer, `Access-Control-Max-Age: 7200`; every
+  answer to them once their origin is judged names it and exposes every field. A page of a listed
+  origin now connects, calls and listens over HTTP, as it did over WebSocket, its tracing's fields
+  among its requests, and presents `ELSEWHERE` in `Authorization`, which HTTP alone carries (spec 15.12;
+  decision 0027).
+- `yarn test:browser`, on the TypeScript side, in a Playwright config of its own: a page Chromium
+  loads from another origin calls each side's interop server over HTTP with the bundled HTTP client,
+  and CI's .NET job runs it against both. Both interop servers name the origins
+  `BEAD_INTEROP_ORIGINS` lists.
+- `protoRuntime` in a TypeScript output of `beadc.yaml`: the module a generated `proto` codec
+  imports `checkProtoRecords` from, `@francisdesjardins/bead/proto` by default, or a path relative
+  to the output, as `runtime` names its own.
+- Each side reads a `proto` payload's records against its message's descriptor before its stock
+  library does, and refuses what protobuf refuses where a library reads on: a record past the end of
+  its message, a packed record whose values do not end at its length, a varint of more than 10
+  bytes, a tag of more than 5 bytes or past 32 bits, a length past the bytes after it, a field at a
+  wire type its type does not take, and a map's entry with a field it does not declare (spec 17.9.5,
+  17.9.6; decision 0028). The check lives in `@francisdesjardins/bead/proto`, `checkProtoRecords`,
+  and in the `Bead.Protobuf` assembly, `ProtoRecords.Check`; the four open rows of the support
+  matrix where a stock library read what protobuf refuses close, and a known field at a wire type
+  its type does not take, and a map's entry's undeclared field, are two rows of its "Leveled down".
+- Each side's generated `proto` codec plays protobuf's conformance suite, v36.2, and both read one
+  corpus alike, in CI, through `tools/protobuf-conformance.mjs`, its runner fetched by its pin,
+  `tools/protobuf-conformance/runner.json`; Google.Protobuf's order of the unknown fields it writes
+  back, and its leaving out a map's entry's key at its default, which protobuf-es writes, are
+  platform rows of the support matrix.
+- The DevTools panel reads a call whole. Calls shows a row a call, its steps and its envelopes met by
+  its call id on its connection, its outcome in words, a command the server made read the right way
+  round, and its envelopes beneath it in words; a subscription keeps its last 50 notifications and
+  counts the others. A call's detail has five tabs: Overview, its failure whole; Payload, as a tree;
+  Exchange, its envelopes as beads on its thread in SVG, a third lane for a destination behind a
+  relay, a transfer's bytes against its credit; Diff, a notification against the one before it, an
+  answer against its procedure's last; and Trace, the stack that made it, each frame opened in
+  Sources. State rebuilds a client's session, calls in flight, subscriptions and their credit, and
+  transfers at any moment a cursor stands on, replaying nothing; Timeline draws every call on one
+  axis of time, and a span dragged across it bounds the list. The bar pauses (`Ctrl+E`), clears
+  (`Ctrl+L`), keeps the log across a reload, exports the records as JSON, `bead-devtools-log`, and
+  imports them back, and its Requests, Commands, Notifications and Failed buttons filter in one
+  click; the keyboard moves through the calls, and a call's context menu copies its payloads or a
+  snippet that makes it again by the page's own service manager. Metrics shows a row a procedure and
+  its calls a second over the last minute, a procedure's name showing its calls alone; Wire names
+  each procedure a client told, says a listen for a `POST` with no body, and copies an exchange as
+  the skeleton of an entry of `spec/conversations.json`, a credential's own bytes zeroed. An empty
+  panel says why and offers to reload the page.
+- The extension's hook, while a panel watches, tells the panel more of each call: a failure whole —
+  where it was raised, the relays it crossed, its destination, the call id its envelope named — the
+  call's options whole, `destinationId` and `closeOnTimeout` among them, each payload as a tree of
+  its preview's bounds beside its text, the stack that made each call made, and an envelope's time
+  as the page's time origin and its monotonic reading since. The hook's protocol stays 1, and a page
+  no panel inspects pays nothing.
+- `requireCredential`, `RequireCredential`, a server's relay's admission by default (spec 14.3).
+- `largestAddressConnections` among an HTTP server transport's gauges, under
+  `maximumConnectionsPerAddress`, on both sides: the health check warns at 80% of it, so a proxy
+  left off `trustedProxies` shows on `/health` before the first 503 (decision 0030).
+- `isCredentialWithdrawn`, `IsCredentialWithdrawn`, on a client's router: whether its default
+  credential stands withdrawn (spec 13.4).
+- `spec/transports.json` plays the client's address behind the proxies a server names: the walk
+  past two networks, a field from a socket no entry holds, an entry that is no address, a refusal
+  told behind a proxy, and an entry's node forms held in one form (spec 15.12).
+
+### Changed
+
+- The spec moves to 0.4.0 (`spec-v0.4.0`), and its companion, `spec/debugging.md`, to 0.2.0
+  (`debugging-v0.2.0`).
+- A decision record's number names its decision for good and is never given to another: records
+  are still regrouped, moved in the index and renamed between releases, but none is renumbered,
+  and one merged into another keeps a short file naming its successor (`docs/decisions/README.md`,
+  the `bead-release-documents` workflow).
+- The documents are brought to 0.4.0: the records, the spec and its companion in form alone, the
+  READMEs, the support matrix and `CLAUDE.md` state what holds and where Bead goes. What a `proto`
+  payload is, protobuf's format with Bead's own rules and its bound of 100, which decision 0018 held
+  beside the service layer, is a decision of its own, 0031; 0018 keeps the layer, and the index
+  groups 0016, 0028 and 0031 under Payloads. No record is renumbered.
+- A WebSocket server names each connection `type=WS;ip=…;port=…;ordinal=…`, by its peer's port and
+  the rank it was taken at, so no two connections share a handle. On the TypeScript side,
+  `generateHandle` takes `{ ip, ordinal, port, type }`, `port` optional, one
+  `ITransportServerHandleInfo` in place of `ITransportServerClientHandleInfo` and
+  `ITransportServerDrawnHandleInfo`; `generateDrawnHandle` goes, and the socket form of
+  `TransportServerConnectionHandle` ends in its ordinal (decision 0025).
+- `hosts`, `Hosts`, lists hosts without their port, taken besides `localhost`, the names under
+  `.localhost` and IP literals, which every server takes; each is compared by its host, the
+  request's port aside, so `bead.test` takes `bead.test:8443` and `bead.test:80`; `[]` takes those
+  every server takes; `['*']` takes every host. An entry with a port, an empty one, one that is no
+  host, or `*` beside another is refused as the transport is built (decision 0024).
+- `origins`, `Origins`, is checked as the transport is built: each entry is an origin as RFC 6454
+  serializes it; `*` and `null` are refused.
+- A request names its host by its absolute-form target, then over HTTP/2 by its `:authority`, then by
+  its `Host` (RFC 9112 §3.2.2, RFC 9113 §8.3.1), on both sides: the TypeScript side answered an
+  absolute-form target 404 and read `host` before `:authority`; the C# side answered 400 a `Host`
+  that differed from its absolute-form target. Such a target is read as it came, `http://` or
+  `https://` in lower case and an authority, a userinfo or a colon with no port answered 400; the
+  `Host` beside it is judged as one field line alone, which an HTTP/1.0 request may leave out.
+- Both sides answer a host holding a percent-encoded octet, `*`, `+`, `,`, `;` or `=` in a name, an
+  `IPvFuture` literal or a colon with no port 400 over HTTP/1.1 and with a stream reset over HTTP/2,
+  as the C# side's server did: the TypeScript side took them.
+- `spec.md` 15.1 states that a transport draws each connection's handle and gives none twice, 14.4
+  follows it, 15.12 states a request's authority, a host's grammar and the hosts every server takes,
+  and 15.13 goes: one point is open, section 8.3. `transports.json` adds nine cases, the hosts every
+  server takes, a list adding to them, `[]`, `*` and an absolute-form target, over HTTP and at a
+  WebSocket's address, and the forms a host is not to the 400 it answers; a step's request names
+  its version and its target, absolute-form among them.
+- The TypeScript side names a client that comes over IPv4 to a dual-stack listener by its IPv4
+  address, in its handle and its address, as the C# side does.
+- A server listens on `127.0.0.1` unless `start` is given an address, on both transports and both
+  sides, where it listened on `0.0.0.0`; a container, or any server another machine reaches, says
+  `0.0.0.0` or `::`. On its defaults a server is secure (spec 13.4). An address is an IP address
+  written bare, by RFC 3986's grammar: a name, `[::1]`, `127.1` or `0` fails the start on both sides
+  (spec 15.12; decision 0024).
+- A request whose field holds a control character other than HTAB, or an octet past ASCII, is
+  answered 400 unmarked on both sides, at both transports, before anything else of it is judged: the
+  C# side took the first, the TypeScript side the second (spec 15.12; decision 0026). Over HTTP/2
+  its stream is reset, but where Node's HTTP/2 parser drops a field holding a control character
+  before the TypeScript side's transport reads it, and where Kestrel ends the session of an octet
+  that is no UTF-8, both in one platform row of `docs/support.md`.
+- A WebSocket client names the status and the reason of an upgrade refused, over `ws` and on the C#
+  side; an HTTP client's connect names its reason. The global `WebSocket` reads nothing of a refused
+  upgrade. On the TypeScript side, `IWebSocketLike.on` takes `unexpected-response`, `ws`'s, its
+  response an `IUpgradeResponseLike`.
+- The C# clients race the address families of a name, as RFC 8305 asks: a connect by `localhost` to
+  a server on one family no longer waits two seconds on Windows.
+- `spec.md` 15.1 states the refusal a server tells, 15.6 what a client names of one, 15.12 the octets
+  a field holds, the address a server listens on and a client's port, and 13.4 judges a server by
+  the address it listens on alone. `transports.json` gives every marked refusal what its server
+  tells of it, `told`, its port `{port}`, which each runner fills with the port its step sent from,
+  reads a head's characters as one octet each, and adds three cases: a listen held, answered the 404
+  of its connection's close and told by none, and a field past visible ASCII, over HTTP and at a
+  WebSocket's address.
+- The conformance files cite the units they play and left uncited: 4.2 by the vectors of a kept
+  bit, 5.1 by those that fail two checks, 5.2 by the header refusals whose detail says which check
+  failed, 9.6 by the entries of the gate, 12.6 by the transfers placed out of order or delivered
+  whole, 13.10.4, 14.5.3 and 17.2 by the entries that play them; `metrics.json` cites the rows of
+  the companion's 7.2, 7.6, 8.1 and 11.3 its expositions write.
+- `spec/conversations.json` pins the interop's failure details, fail's, ticks', denied's, logout's
+  and register's, and each credit's `paced`, which its schema requires and `metrics.json`'s exits
+  repeat; the generators take each interop code from the blueprint's catalogue, and `spec/check.py`
+  holds each "code N" of `interop-service.json`'s prose to it; `interop-service.json`'s `verifiers`
+  holds the ELSEWHERE verifier's verdicts and what `endSessionsOf` takes and refuses, which both
+  sides' interop tests read; the runners play `stop`, pongs, reserved opcodes and an uncaptured
+  `{name}` alike, and the C# codecs runner refuses an encoding it does not name.
+- Every response on an HTTP server's path carries `Vary: Origin`, but HTTP's own 400.
+- A preflight from an origin `origins` names, refused 405 `method-refused` and told, is answered;
+  any other `OPTIONS` is still refused 405.
+- On the TypeScript side, `IHTTPResponseLike` requires `setHeader`, which Node's responses have.
+- `spec.md` 15.12 states the CORS answer, 15.6 a preflight in its order, its 204 and `vary: Origin`,
+  and 15.12's fields rule HTTP's own 400 with none of the path's fields. `transports.json` adds four
+  cases over HTTP, a listed origin's preflight and answers, a preflight judged before its origin,
+  and an `OPTIONS` that is no preflight; its steps of HTTP's own 400 hold it to none of the path's
+  fields, over HTTP and at a WebSocket's address, and an upgrade from a taken origin to none of
+  CORS's.
+- A listen over HTTP carries its cursor and its wait in the fields `bead-after` and `bead-wait`, at
+  the connection's one URL, on both sides; a listen without `bead-after` is refused 400
+  `malformed`, and no exchange's query is read. A page of another origin preflights its
+  connection's opening, not every batch (spec 15.9; decision 0029).
+- `bead-after`, `bead-wait`, `bead-listen` and `bead-sequence` are read as RFC 9651 Items, their
+  parameters ignored.
+- `spec.md` 15.9 states the listen's fields and their grammar, 15.8 `bead-listen` as an Item, 15.6's
+  400 a listen without `bead-after`, and 15.12 a field value's ends and the preflight's
+  `Access-Control-Allow-Headers`. `transports.json` writes every listen's counts in its fields and
+  adds two cases over HTTP, a count in two field lines or as a list, and a listen without
+  `bead-after` whatever its target holds; the case of a count that does not parse widens to RFC
+  9651's grammar, its parameters ignored, and `bead-listen`'s case to a parameter.
+- `spec.md` 13.8's key set is a clause of its own, 13.9, each of its rules an item, 13.9.1 to
+  13.9.7, and 13.9 and 13.10 are 13.10 and 13.11; 15.2's order at a WebSocket's address is its
+  items, 15.2.1 to 15.2.8, the stop's 503 the last. `conversations.json` and `transports.json` cite
+  the item each entry plays, and name in their `$comment` both of the interop's files.
+- A document's minor moves when an implementation that conforms to its last version must change to
+  conform to this one (decision 0008); `spec.md` names the interop's blueprint and what its service
+  does as files of its version; the companion moves by `spec.md`'s rule, under a version of its own;
+  a blueprint matter of the interop's moves the spec's version, one of the builder alone the
+  builder's (decision 0017).
+
+- `--except <RULE>@<scope>` names a finding's subject of the rule's kind; a pointer is refused, and
+  so is `--except WAIVER_UNUSED`. `SERVICE_SAME_HOOKS` finds once a hook, and `RESERVED_NO_DELETE`'s
+  subject is the earlier's range, whatever part of it the current released.
+- `generate` removes nothing unless `clean` is set; with it, a file of a kind beadc writes, read by
+  its header in both targets, and prints each.
+- Every C# file beadc writes opens with `#pragma warning disable CS0612, CS0618, BEAD0001`, and a
+  TypeScript file that marks a declaration or names a deprecated message with `/* eslint-disable */`.
+- The TypeScript side's service layer keeps each mapped member linked to its descriptor, so a
+  deprecation reaches a notification, a command, a notifier, a resolver's key and a window.
+- A `SERVICE_REVISION` reads a file's syntax, edition, features and `csharp_namespace`, and no other
+  language's option.
+- The blueprint schema holds `services[].proto.file` and `proto.messages[].file` to the path form of
+  `proto.files[].path`.
+- `init` takes buf's lower snake case alone, and writes `clean: true`.
+- CI's `beadc breaking` step compares against the newest `vX.Y.Z` whose commit is not HEAD's, and
+  fails on every warning; `tools/release.mjs tag` writes `ci.yml` without the waivers the release
+  makes moot, and `prepare` on a hotfix without every waiver.
+- `spec/codecs.proto` is edition 2023, and `Probe` gains a packed field, a repeated fixed32, a map
+  and a delimited field, `counts`, `stamps`, `children` and `delimited`; a `proto` row's `read`
+  gives each where it holds any, and how deep messages nest below it through each; `codecs.json`
+  gains 20 `proto` payloads and excuses no side from a `proto` payload but
+  `a string's leading U+FEFF`. Spec 17.9.3 counts a group and a map's entry as a message toward the
+  depth bound.
+- Generated code names `GENERATED_CODE_SUPPORTS_VERSION_3`, `GeneratedCode.SupportsVersion3`, and
+  its `proto` codec checks a payload's records before its library reads them; a C# project that
+  binds `proto` references `Bead.Protobuf`. The runtimes no longer carry version 2, so code
+  generated before 0.4.0 must be regenerated.
+- A client transport calls each listener of its `reconnect`, `Reconnect` on the C# side, within its
+  guard, on both sides: a throw is reported through its `error`, the next listener is told and the
+  reconnection goes on; `spec.md` 15.1 names a reconnection among the events it guards (decision
+  0023).
+- A server's transport, as the server gives it, carries `error` and `refusal` alike, so an
+  application hears both through `server.transport`, `server.Transport`, whichever transport it
+  built: `IServerTransportLike` gains `error` and `refusal`, and `IServerTransport` gains `Error`.
+- A router tells its service manager the failure it answered a request with in its resolver's
+  place: `IRouterLike` gains `answeredOf`, `AnsweredOf` on the C# side, which a router of the
+  application's own implements (decision 0013).
+- The DevTools panel shows a call a row, its envelopes beneath it, and Envelopes is a mode of
+  Calls; a filter refused keeps the last that held, as debugging 6.9 keeps one given in place, the
+  field marked and its reason said; a selection the filter or the client hides is let go with a
+  word; the page's state stays apart from the records let go; and below 720 pixels the panel folds
+  its detail under its list.
+- The DevTools extension holds what every browser shares — the hook, the panel and its model, the
+  wire's and the registry's readers, the messages — apart from Chrome's glue, in
+  `implementations/typescript/devtools/chrome/`: its manifest, its bridge, its background, its
+  DevTools page, and the panel's host made of Chrome's API.
+- `requireSessionOrCredential`, `RequireSessionOrCredential`, is `shareLegBSession`,
+  `ShareLegBSession`, named for what it lends: leg B's session, to every session of leg A's, at
+  every destination. `spec/conversations.json`'s relay conversations that log in at the relay and present
+  none through it name it, and its schema's `beforeRoute` is `requireCredential`, `shareLegBSession`
+  or `requireSession`; the transports' relay cases present a `JWT`.
+- **Breaking:** a call that needs no identity, and the call that renews a withdrawn default, present
+  none, `{ scheme: NONE }`, `Credential.None`: once the default is withdrawn, one that gives no
+  credential of its own fails before it goes, where it went out without one.
+- `spec.md` 15.2 and 15.5 state that a client writes no `Origin`, a page's browser writing its own,
+  as both sides' clients already do; a client of another library that writes its target as its
+  `Origin` is refused under `hosts: ['*']` by a name `hosts` does not list (decision 0024).
+
+### Removed
+
+- `spec/uncited.txt`, `spec/debugging-uncited.txt` and `--write-uncited`, which the ledgers replace.
+- `GENERATED_CODE_SUPPORTS_VERSION_2` and `GeneratedCode.SupportsVersion2`: the runtime no longer
+  serves code generated before 0.4.0, which reads a `proto` payload unchecked (decision 0028).
+- `isProxyTrusted`, `IsProxyTrusted`, which `trustedProxies` replaces; the loopback is trusted only
+  when listed.
+
+### Fixed
+
+- Over HTTP/2, a request whose field value starts or ends with a space or a tab is malformed on both
+  sides, its stream reset `PROTOCOL_ERROR` (RFC 9113 §8.2.1); the C# side took it and read the
+  value padded.
+- On the C# side, HTTP's own 400 at an HTTP server's path carries no `Cache-Control` nor
+  `X-Content-Type-Options`, as the TypeScript side's, Node's and Kestrel's own never did.
+- A `.proto` message marked `deprecated` no longer fails a C# consumer's build through beadc's file,
+  nor a TypeScript consumer's lint.
+- beadc makes its temporary folders, `breaking`'s and protoc's, under the project's `.beadc/` where a
+  `beadc.yaml` is read, which `init`'s `.gitignore` and the repository's ignore.
+- An earlier's root that holds no `.proto` is refused, named as its `beadc.yaml` names it, `git
+archive` writing a submodule as an empty folder.
+- An archive's pax `size` overrides its ustar size, as GNU tar and bsdtar read it; an empty or NUL
+  path, and an entry over an earlier one, are refused.
+- buf's finding on a deleted file is placed at the earlier's path, and a `buf:` waiver is held to the
+  rules its category runs.
+- `check` reads an extension's field, of a file or a message, nested or not, and names a map's field
+  by its own name; a blueprint with no service, or a service with no procedure, is said in its words.
+- A file-system error is one line, exit 2; a write makes its folder, and one that fails leaves no
+  `.tmp` behind.
+- `--against-ref`, given to beadc on Node, is refused, naming the pipe that does its work.
+- `init` names the cause of a file Windows PowerShell's `>` wrote, and the README labels its pwsh
+  block.
+- `spec.md` states what was left to a reader: a listener's return and its `error` listener are their
+  platform's (15.1, decision 0023); a server's stop (15.1, 15.3); the 503 of an upgrade once a stop
+  began closes its connection and is told, as the other refusals at a WebSocket's address (15.2); a
+  client may wait what a `Retry-After` asks, which Bead's own clients do not read (15.7); what the
+  HTTP connection's token is worth in the clear, TLS off the machine being the deployment's (15.4,
+  decision 0020); the side sending a result's transfer reports its stall (12.7); BCP 14's key words,
+  verbatim, and "is never" for what "may not" forbade; the core rules of RFC 5234 in every grammar,
+  the filter's terminals Unicode scalar values; 9.10 beside 9.4 in 15.1, and records 0022 and 0026
+  in the index.
+- `debugging.md` 8.1 names where its families part from OpenTelemetry's RPC conventions, and the
+  shape their `_handled_total` families take; each of its references to a unit of `spec.md` names
+  it.
+- The C# exposition reads each series' counts once, its handled before its started, and writes the
+  series' lines from that reading, so its `_count` is the sum of its handled counts and its started
+  never below them at every exposition; `debugging.md` 8.5 and 11.2 state each series at one
+  reading, and across series each at its own instant (decision 0013).
+- The trace tells the failure a router answered in the resolver's place: a `tx` step whose request
+  its router already answered, its subscription's queue past its bounds, carries the
+  `CAPACITY_EXCEEDED` it answered, where it told an answer with no error (`debugging.md` 4.2;
+  decision 0013).
+- A registry counts a service declared at a second revision into its series, where it refused it:
+  `spec.md` 16.7's MUST holds one name an address and one address a name, its SHOULD one revision a
+  service, and `debugging.md` 7.3 no longer refuses `another revision of its service`, its
+  `past the ceiling` now 7.3.3. `metrics.json` plays a service at three revisions on three routers,
+  and its schema drops the reason (decision 0017).
+
+### Security
+
+- A server takes, besides the hosts it lists, only `localhost`, the names under `.localhost` and IP
+  literals, over HTTP and at a WebSocket's address, on both sides. A page that rebinds its name to a
+  server's address is refused 403 `host-refused`, as is a request that names no host. A server
+  reached by a name, a public one, one behind a proxy that keeps the `Host`, or a service reached by
+  its in-cluster name, now names it in `hosts`, or refuses it. The refusal is told on the wire, by
+  every client that can read it, and by the server's `refusal` event; a page's WebSocket sees only
+  its close.
+- A server is no longer reachable from the network by default: it listens on the loopback.
+- A WebSocket server no longer takes two sockets from one address and port, to two of its addresses,
+  as one connection: each is its own, in its own session, and a stop closes both, 1001.
+- No HTTP answer carries `Access-Control-Allow-Credentials`, so no cookie goes across origins, and a
+  page of an origin no `origins` names reads nothing. A page of the public network reaching a server
+  on the loopback or a private address needs, besides, the permission its browser asks of its user.
+- A server's relay admits by default only a credential it forwards, `requireCredential`,
+  `RequireCredential`: a call presenting none or `OPAQUE` is refused `ACCESS_DENIED`, its detail
+  naming the default, where any requester in a session at the relay ran at the destination in leg
+  B's session. A relay whose requesters log in at it gives a `beforeRoute` that checks the
+  destination against the requester's session (spec 14.3, 14.7; decision 0019).
+- `origins`, `Origins`, refuses `null` as the transport is built, as it refuses `*`: a browser sends
+  it for every page that has no origin of its own, a sandboxed frame of any site among them, which
+  naming it let drive the server and read every answer (spec 15.12; decisions 0024, 0027).
+- An HTTP server believes `X-Forwarded-For` from the proxies it is told of alone, `trustedProxies`,
+  `TrustedProxies`, each an address or a network (RFC 4632, RFC 4291), refused as built otherwise, a
+  network of prefix 0 among them, the field walked from the right past each of them, each entry read
+  in RFC 7239's node forms and held in one form; a proxy off the loopback, a container's or an
+  ingress, was ignored under `isProxyTrusted`, every client behind it one address, refused 503 past
+  64 (spec 15.12; decision 0030).
+- Under `hosts: ['*']`, a server's own origin is no longer its request's authority: a page that
+  rebinds its name to the server's address, which `*` takes, was its own origin by that same `Host`,
+  and is now refused 403 `origin-refused`; a page of the application's own under `*` names its host
+  in `hosts` or its origin in `origins` (spec 15.2, 15.12; decision 0024).
+- A client whose default credential was withdrawn fails before it goes each call that would present
+  it, `SESSION_REQUIRED`, until its application gives one again, or none, where it presented none
+  and ran in its connection's session, or in none, in silence; a call that gives its own credential,
+  or none, goes (spec 13.4; decision 0010).
+
 ## [0.3.0] - 2026-10-12
 
 ### Added
@@ -853,7 +1225,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.3.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.0...develop
+[0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/francisdesjardins/bead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0

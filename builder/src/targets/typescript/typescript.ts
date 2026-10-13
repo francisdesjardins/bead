@@ -2,9 +2,11 @@
 
 // The TypeScript target, a protoplugin plugin run in beadc's process (decision 0022): protoc's
 // plugin request built from buf's set, its files in their order and the services' files to
-// generate, or empty for a blueprint alone; one `<file>_bead.ts` for each `.proto` file that
-// declares a service, at its path under the output, or `<name>_bead.ts` at the output's root for a
-// service a blueprint alone declares; each under beadc's header.
+// generate, or empty for a blueprint alone; one `<file>_bead.ts` for each file a service's `proto`
+// member names, at its path under the output whichever the source, as protoc and buf write a file
+// at the path its descriptor names, or `<name>_bead.ts` at the output's root for a service with no
+// `proto` member; each under beadc's header, and `/* eslint-disable */` where it marks a deprecation
+// or names a message protobuf deprecates.
 
 // dependencies
 
@@ -20,6 +22,7 @@ import {
   type IGeneratedFile,
   type ITarget,
   type ITargetInput,
+  marksDeprecation,
   Messages,
   sourceNameOf,
 } from '../target.ts';
@@ -31,17 +34,45 @@ import { printService } from './templates.ts';
 // a path, as an import names it
 const RELATIVE = /^\.{1,2}\//u;
 
+// ! protoc-gen-es's own directive, which oxlint and ESLint read alike: a rule-named one fails ESLint
+// where typescript-eslint is not loaded
+const LINT_OFF = '/* eslint-disable */';
+
 // helpers
 
 const lowerFirst = (name: string): string => {
   return `${name.slice(0, 1).toLowerCase()}${name.slice(1)}`;
 };
 
-// the file a service is written in, under the output's folder
+// the file a service is written in, under the output's folder: its `proto` member's, whichever the
+// source, which the blueprint's schema and PROTO_FILE hold to a path under its root
 const fileNameOf = (service: IServiceEntry): string => {
   return service.proto === undefined
     ? `${lowerFirst(service.serviceName)}_bead.ts`
     : service.proto.file.replace(/\.proto$/u, '_bead.ts');
+};
+
+// whether protobuf deprecates `message`, itself or through a message it is nested in, as
+// protoplugin reads a deprecated parent
+const isDeprecated = (message: DescMessage): boolean => {
+  for (let at: DescMessage | undefined = message; at !== undefined; at = at.parent) {
+    if (at.deprecated) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+// the full names of the messages `service` binds
+const boundOf = (service: IServiceEntry): string[] => {
+  return service.procedures.flatMap((procedure) => {
+    return [procedure.request, procedure.result, procedure.notification].flatMap((binding) => {
+      return binding?.encoding === 'proto' && binding.message !== undefined
+        ? [binding.message]
+        : [];
+    });
+  });
 };
 
 // the plugin's parameter: TypeScript, its imports' extension, and the messages' folder when external
@@ -70,7 +101,13 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
       input.set === undefined ? undefined : fromBinary(FileDescriptorSetSchema, input.set);
     // ! protoplugin changes the extension of a relative import that ends in `.js` alone
     const runtime = RELATIVE.test(options.runtime) ? `${options.runtime}.js` : options.runtime;
+    const protoRuntime = RELATIVE.test(options.protoRuntime)
+      ? `${options.protoRuntime}.js`
+      : options.protoRuntime;
     const files = new Map<string, IServiceEntry[]>();
+    // * the files that mark a deprecation or name a message protobuf deprecates: their own uses are
+    // silenced, and only theirs, so the TypeScript side's lint holds every other file to its rules
+    const silenced = new Set<string>();
 
     for (const service of blueprint.services) {
       const name = fileNameOf(service);
@@ -96,15 +133,28 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
         for (const [name, services] of files) {
           const f = schema.generateFile(name);
 
+          if (
+            services.some((service) => {
+              return (
+                marksDeprecation(service) ||
+                boundOf(service).some((fullName) => {
+                  return isDeprecated(messageOf(fullName));
+                })
+              );
+            })
+          ) {
+            silenced.add(name);
+          }
+
           for (const service of services) {
-            printService(f, { service, runtime, messageOf });
+            printService(f, { service, runtime, protoRuntime, messageOf });
           }
 
           f.print();
           f.print(
             '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here'
           );
-          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_2', runtime), ';');
+          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_3', runtime), ';');
         }
       },
     });
@@ -141,7 +191,12 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           : {}),
       });
 
-      return { name: file.name, content: `${header}${file.content}` };
+      return {
+        name: file.name,
+        content: silenced.has(file.name)
+          ? `${header.trimEnd()}\n${LINT_OFF}\n\n${file.content}`
+          : `${header}${file.content}`,
+      };
     });
   },
 });

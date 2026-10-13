@@ -1,0 +1,31 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "acme/v1/api.proto",
+            "package": "acme.v1"
+          }
+        ],
+        "messages": []
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/proto",
+      "value": {
+        "file": "/abs/x.proto",
+        "fullName": "acme.v1.InteropService"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "PROTO_FILE",
+      "pointer": "/services/0/proto/file"
+    }
+  ]
+}

@@ -26,8 +26,9 @@ import {
   FailureError,
   type IRelayOptions,
   type PacingLimitsOptions,
+  requireCredential,
   requireSession,
-  requireSessionOrCredential,
+  shareLegBSession,
 } from '../router-server';
 import {
   announcedTokenOf,
@@ -75,7 +76,10 @@ export interface IConversation {
   pacing?: PacingLimitsOptions;
   name: string;
   /** The server's relay's options, its admission by the name both sides give it. */
-  relay?: { beforeRoute?: 'requireSession' | 'requireSessionOrCredential'; verifies?: true };
+  relay?: {
+    beforeRoute?: 'requireCredential' | 'requireSession' | 'shareLegBSession';
+    verifies?: true;
+  };
   steps: IStep[];
 }
 
@@ -107,7 +111,7 @@ const PATIENCE = 3_000;
 const POLL = 5;
 
 // a relay's admission, by the name a conversation gives it
-const ADMISSIONS = Object.freeze({ requireSession, requireSessionOrCredential });
+const ADMISSIONS = Object.freeze({ requireCredential, requireSession, shareLegBSession });
 
 // a token named in a send, between angle brackets
 const TOKEN_NAME = /<([a-z][a-z0-9]*)>/g;
@@ -158,7 +162,7 @@ const createConnections = () => {
   const sent = new Map<TransportServerConnectionHandle, ISent[]>();
   const handleOf = (name: string): TransportServerConnectionHandle => {
     const port = 50_001 + handles.size;
-    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port}` as const);
+    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port};ordinal=1` as const);
 
     handles.set(name, handle);
 

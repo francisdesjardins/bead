@@ -745,7 +745,8 @@ test.describe('createRouterClient', () => {
       }
     });
 
-    test('withdraws its default once a call that presented it is refused SESSION_REQUIRED: the next call presents none, and credentialWithdrawn fires once, its scheme alone', async () => {
+    // spec 13.4
+    test('withdraws its default once a call that presented it is refused SESSION_REQUIRED: the next call that would present it fails before it goes, SESSION_REQUIRED, nothing sent, and credentialWithdrawn fires once, its scheme alone', async () => {
       const scripted = createScriptedTransport();
       using router = createRouterClient(scripted.transport, { credential: JWT });
       const withdrawn: unknown[][] = [];
@@ -765,17 +766,86 @@ test.describe('createRouterClient', () => {
       });
       await expect(alike).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
 
-      const next = router.request(new Uint8Array(0), { options, procedure: service });
-
-      scripted.deliver(resultOf(5));
-      await next;
+      // never to its connection's session, nor to none, in silence: it fails, and withdraws nothing
+      await expect(
+        router.request(new Uint8Array(0), { options, procedure: service })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        detail: 'the default credential was withdrawn',
+        origin: 'local',
+        side: 'client',
+      });
 
       expect(withdrawn).toEqual([[CredentialScheme.JWT]]);
-      expect(router.credential).toBeUndefined();
+      expect([router.credential, router.isCredentialWithdrawn]).toEqual([undefined, true]);
       expect(presentedOf(scripted)).toEqual([
         [1, JWT, undefined],
         [3, JWT, undefined],
+      ]);
+    });
+
+    // spec 13.4
+    test('after a withdrawal, a call that gives its own credential or NONE goes, and a default given again, or none given, ends the withdrawal', async () => {
+      const scripted = createScriptedTransport();
+      using router = createRouterClient(scripted.transport, { credential: JWT });
+      const withdrawn: unknown[][] = [];
+
+      router.on('credentialWithdrawn', (...told) => {
+        withdrawn.push(told);
+      });
+
+      expect(router.isCredentialWithdrawn).toBe(false);
+
+      const refused = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(sessionRequiredOf(1));
+      await expect(refused).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      expect(router.isCredentialWithdrawn).toBe(true);
+
+      // its own credential, or none, given: the renewal goes, and the withdrawal stays
+      const calls = [RENEWED_JWT, { scheme: CredentialScheme.NONE }].map((credential) => {
+        return router.request(new Uint8Array(0), {
+          options: { ...options, credential },
+          procedure: service,
+        });
+      });
+
+      scripted.deliver(resultOf(3));
+      scripted.deliver(resultOf(5));
+      await Promise.all(calls);
+      expect(router.isCredentialWithdrawn).toBe(true);
+
+      // a default given again ends it
+      router.credential = RENEWED_JWT;
+      expect(router.isCredentialWithdrawn).toBe(false);
+
+      const renewed = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(resultOf(7));
+      await renewed;
+
+      // withdrawn again, then none given, in writing: calls present none, and go
+      const refusedAgain = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(sessionRequiredOf(9));
+      await expect(refusedAgain).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      expect(router.isCredentialWithdrawn).toBe(true);
+      router.credential = undefined;
+      expect(router.isCredentialWithdrawn).toBe(false);
+
+      const anonymous = router.request(new Uint8Array(0), { options, procedure: service });
+
+      scripted.deliver(resultOf(11));
+      await anonymous;
+
+      expect(withdrawn).toEqual([[CredentialScheme.JWT], [CredentialScheme.JWT]]);
+      expect(presentedOf(scripted)).toEqual([
+        [1, JWT, undefined],
+        [3, RENEWED_JWT, undefined],
         [5, undefined, undefined],
+        [7, RENEWED_JWT, undefined],
+        [9, RENEWED_JWT, undefined],
+        [11, undefined, undefined],
       ]);
     });
 
@@ -801,6 +871,18 @@ test.describe('createRouterClient', () => {
 
       expect(withdrawn).toEqual([[CredentialScheme.ELSEWHERE]]);
       expect(router.credential).toBeUndefined();
+      // the next call that would present it fails alike, before it goes
+      await expect(
+        router.request(new Uint8Array(0), {
+          options: { ...options, destinationId: 7 },
+          procedure: service,
+        })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        destinationId: 7,
+        origin: 'local',
+      });
+      expect(scripted.sent).toHaveLength(1);
     });
 
     test('withdraws nothing, and fires nothing, on the refusal of a call that presented a default since given anew', async () => {
@@ -1199,6 +1281,7 @@ test.describe('createRouterClient', () => {
       expect(sent).toEqual([]);
     });
 
+    // spec 11.7, 12.9.2 and 12.9.3
     test('keeps the call id of a subscription let go of a while, silent on what comes under it, then reports it', async () => {
       const { deliver, transport } = createScriptedTransport();
       const clock = createTestClock();
@@ -1390,6 +1473,7 @@ test.describe('createRouterClient', () => {
       expect(triggered).toEqual([Uint8Array.of(5)]);
     });
 
+    // spec 11.7 and 12.9.3
     test('reports a notification under no subscription, and one whose callback throws', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -1425,6 +1509,7 @@ test.describe('createRouterClient', () => {
       expect(activity).not.toContain('notification');
     });
 
+    // spec 12.9.2
     test('a failure after its result ends the subscription: no call unknown, the notification told, the next registration asks anew', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -1546,6 +1631,7 @@ test.describe('createRouterClient', () => {
       }).toThrow(ProgrammerError);
     });
 
+    // spec 11.7.3
     test('forgets each notification when its connection closes, is replaced, or it is disposed, and tells it', async () => {
       const { close, deliver, emitter, transport } = createScriptedTransport();
       const router = createRouterClient(transport);
@@ -1729,6 +1815,7 @@ test.describe('createRouterClient', () => {
       };
     };
 
+    // spec 11.11
     test('asks for its subscription paced, and credits each notification once its callbacks settled', async () => {
       const { creditsOf, deliver, done, errors, router, sent, subscribe, triggered } =
         createPaced(1);
@@ -1761,6 +1848,7 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([]);
     });
 
+    // spec 11.11
     test('opens its window once subscribed, and renews it once half a window settled', async () => {
       const { creditsOf, deliver, done, router, subscribe } = createPaced(4);
 
@@ -1792,6 +1880,7 @@ test.describe('createRouterClient', () => {
       expect(creditsOf()).toEqual([4, 6, 8]);
     });
 
+    // spec 11.11
     test('credits a notification ahead of its result, and its window after, no further than it reaches', async () => {
       const { creditsOf, deliver, done, router, subscribe } = createPaced(2);
 
@@ -2317,6 +2406,7 @@ test.describe('createRouterClient', () => {
   });
 
   test.describe('debug', () => {
+    // debugging 5.1
     test('tells each envelope out and in, with its connection, server, a copy of its header, and never its session token', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2343,6 +2433,7 @@ test.describe('createRouterClient', () => {
       expect(JSON.stringify(seen)).not.toContain(TOKEN);
     });
 
+    // debugging 2.2 and 2.3
     test('a debug listener that throws on an envelope is reported, and the envelope and its call go on, every listener told', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2367,6 +2458,7 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([failure, failure]);
     });
 
+    // debugging 4.4
     test('tells a call’s steps with the call id its REQUEST carries', async () => {
       const { deliver, transport } = createScriptedTransport();
       // a payload past 1,000 bytes goes as a transfer
@@ -2411,6 +2503,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 4.4
     test('two calls to one procedure started in one millisecond and answered in one batch name each its own call id', async () => {
       const start = Date.UTC(2026, 0, 1);
       const { deliver, transport } = createScriptedTransport();
@@ -2458,6 +2551,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 4.4
     test('a subscribing call binds its subscription before debug hears its tx step', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2495,6 +2589,7 @@ test.describe('createRouterClient', () => {
       return `bead_client_call_${rest.replace('{}', `{${labels}}`).replace('{outcome', `{${labels},outcome`)}`;
     };
 
+    // debugging 9.3, 9.6.1 and 9.6.2
     test('counts a call refused before it goes, SESSION_REQUIRED or DESTINATION_UNREACHABLE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { transport } = createScriptedTransport({ carriesCredential: false });
@@ -2547,6 +2642,7 @@ test.describe('createRouterClient', () => {
       ).toEqual([ProtocolCode.SESSION_REQUIRED, ProtocolCode.DESTINATION_UNREACHABLE]);
     });
 
+    // debugging 9.6.11
     test('counts a call its caller cancels as cancelled, and one its transport refuses as an error', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { control, transport } = createScriptedTransport();
@@ -2576,6 +2672,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 9.1.6, 10.2 and 10.3.3
     test('counts a notification heard under a subscription it holds, and a subscription dropped at this end by the failure that ends it or with its connection, never by its own cancel', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { close, deliver, transport } = createScriptedTransport();

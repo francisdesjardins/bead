@@ -56,19 +56,34 @@ public sealed record WebSocketTransportServerOptions
     public bool? Secure { get; init; }
 
     /// <summary>
-    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host
-    /// in punycode, checked before anything else of the request but its <c>Host</c>'s form; any when
-    /// none. The server judges its own origin by the request's <c>Host</c>, so this is what refuses a
-    /// page that rebinds its name to the server's address, whatever it sends.
+    /// The hosts a request may name besides those every server takes — <c>localhost</c>, a name
+    /// under <c>.localhost</c>, an IPv6 address in brackets and an IPv4 address — each a host
+    /// without its port, taken on any port, in any ASCII case, in the form the field carries, an IDN
+    /// host in punycode, checked before anything else of the request but its authority's form: none
+    /// besides when none or empty. A request names its host by its authority: an absolute-form
+    /// target's, else its <c>Host</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one
+    /// and none, and makes none of their origins its own: the server's own origin is its request's
+    /// authority only when its host is taken by name, one every server takes or one listed here, so
+    /// under <c>*</c> a page that rebinds its name to the server's address is refused 403,
+    /// <c>origin-refused</c>, and a page of the application's own is taken only when
+    /// <see cref="Origins"/> names it. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another
+    /// are an <see cref="ArgumentException"/> as the transport is built. A server reached by a name,
+    /// a public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in
+    /// a cluster, names it here, or refuses it 403, <c>host-refused</c>, which a page's WebSocket
+    /// cannot read and the transport tells through <see cref="WebSocketTransportServer.Refusal"/>.
     /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
     /// <summary>
     /// The origins an upgrade that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly, checked
-    /// once its version and its form are a handshake's: none by default. <c>null</c> among them
-    /// takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of an
-    /// origin named here is served outright.
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
+    /// by name, never by <c>*</c>, each compared exactly,
+    /// checked once its version and its form are a handshake's: none by default. No same-origin
+    /// policy guards an upgrade, so a page of an origin named here is served outright. A WebSocket
+    /// answers no CORS, which no browser asks of an upgrade. Each is an origin as RFC 6454 §6.2
+    /// serializes it; <c>*</c>, which no origin is, <c>null</c>, which a browser sends for every page
+    /// with no origin of its own, a sandboxed frame of any site among them, and any other entry are
+    /// an <see cref="ArgumentException"/> as the transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 }
@@ -76,8 +91,14 @@ public sealed record WebSocketTransportServerOptions
 /// <summary>Where a transport server listens.</summary>
 public sealed record WebSocketTransportStartOptions
 {
-    /// <summary>The address it listens on.</summary>
-    public string Address { get; init; } = "0.0.0.0";
+    /// <summary>
+    /// The address it listens on (spec 15.12), an IP address written bare: <c>127.0.0.1</c>, the
+    /// loopback, by default; <c>0.0.0.0</c> or <c>::</c> for every interface, which a container, or any
+    /// server another machine reaches, needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or
+    /// <c>IPv6address</c>, with no brackets, no zone, and not IPv4-mapped; a name or any other form is
+    /// an <see cref="ArgumentException"/> as it starts, which ends Closed.
+    /// </summary>
+    public string Address { get; init; } = "127.0.0.1";
 
     /// <summary>The port it listens on.</summary>
     public int Port { get; init; } = 80;
@@ -88,7 +109,9 @@ public sealed record WebSocketTransportStartOptions
 
 /// <summary>
 /// A transport server over WebSocket connections, on Kestrel: one envelope per binary message, a
-/// connection named <c>type=WS;ip=…;port=…</c>, each pinged every <see
+/// connection named <c>type=WS;ip=…;port=…;ordinal=…</c>, by its peer's address and port and the
+/// rank it was taken at, from 1, never reset, so no handle is given twice (spec 15.1); a client
+/// over IPv4 to a dual-stack listener named by its IPv4 address; each pinged every <see
 /// cref="WebSocketTransportServerOptions.Heartbeat"/>. A text message is delivered as text, which
 /// a router reports. What goes out to one connection goes in order, one message at a time. It goes
 /// from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed,
@@ -111,19 +134,22 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // whether its connections are secure: as its application says what stands in front of it, or,
     // when it says nothing, bound to the loopback as it starts, since it takes no TLS of its own
     private volatile bool _isSecure;
-    // how many connections came, which ranks each: the dictionary keeps no order
+    // how many connections were taken, which ranks each, its handle by it: the dictionary keeps no order
     private long _arrivals;
     // how its events are told: what a listener throws is reported through Error, with its connection
     private readonly ListenerGuard _listeners;
 
     /// <summary>
     /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
-    /// holds is an <see cref="ArgumentOutOfRangeException"/>.
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>; an entry of its hosts or origins
+    /// neither takes, an <see cref="ArgumentException"/> naming it.
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
         var given = options ?? new WebSocketTransportServerOptions();
 
+        HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
+        HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
         _options = given with
         {
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
@@ -147,9 +173,18 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public event Action<bool, string>? Close;
 
     /// <summary>
+    /// Each refusal it judges of its own at its address (spec 15.1), every one an upgrade's as it
+    /// arrives, in the order spec 15.2 states, a stop's 503 among them, each marked; never what HTTP
+    /// refuses of its own, unmarked. Told as the refusal is written, and built only when a listener
+    /// listens.
+    /// </summary>
+    public event Action<TransportServerRefusal>? Refusal;
+
+    /// <summary>
     /// What went wrong on a connection, with its handle: its socket's failure, or what a listener of
-    /// its events threw, the transport going on as if it returned (spec 15.1). Never the server's
-    /// own, with an empty handle, as the TypeScript side's can be: Kestrel tells a failure after it
+    /// its events threw, the transport going on as if it returned (spec 15.1). With an empty handle
+    /// for a throw of a <see cref="Refusal"/> listener alone, which names no connection; never the
+    /// server's own failure, as the TypeScript side's can be: Kestrel tells a failure after it
     /// listens only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
@@ -164,8 +199,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     internal event Action? Stopped;
 
     /// <summary>
-    /// What a connection is made of, from the socket accepted and the handle its peer gives: the
-    /// tests' way to give one a socket of theirs, or a handle another holds.
+    /// What a connection is made of, from the socket accepted and the handle drawn for it: the
+    /// tests' way to give one a socket of theirs.
     /// </summary>
     internal Func<WebSocket, string, (WebSocket Socket, string ConnectionHandle)>? Accepted { get; init; }
 
@@ -270,6 +305,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         WebApplication? application = null;
         TransportServerAddress bound;
 
+        // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
+        // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
+        HostsAndOrigins.AssertAddress(start.Address, nameof(WebSocketTransportStartOptions.Address));
+
         try
         {
             var builder = WebApplication.CreateSlimBuilder();
@@ -283,6 +322,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             {
                 kestrel.Listen(IPAddress.Parse(start.Address), start.FindOpenPort ? 0 : start.Port);
                 kestrel.AddServerHeader = false;
+
+                // * an origin server MUST take an absolute-form target's authority over its Host (RFC
+                // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
+                kestrel.AllowHostHeaderOverride = true;
             });
             application = builder.Build();
             Built?.Invoke(application);
@@ -422,9 +465,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the
-    // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be
-    private void Refuse(HttpResponse response, HandshakeRefusal refusal)
+    // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be;
+    // then, marked, told (spec 15.1)
+    private void Refuse(HttpContext context, HandshakeRefusal refusal)
     {
+        var response = context.Response;
+
         response.StatusCode = refusal.Status;
 
         foreach (var (name, value) in refusal.Fields)
@@ -432,15 +478,31 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             response.Headers[name] = value;
         }
 
-        if (refusal.Refusal is { } reason)
+        if (refusal.Refusal is { } mark)
         {
-            response.Headers[HostsAndOrigins.RefusalHeader] = reason;
+            response.Headers[HostsAndOrigins.RefusalHeader] = mark;
         }
 
         // ! Kestrel keeps the date and the length the application writes: without the length it
         // leaves it out of a HEAD's answer
         response.Headers.Date = _clock.GetUtcNow().ToString("r", CultureInfo.InvariantCulture);
         response.ContentLength = 0;
+
+        // * built only when a listener listens
+        if (refusal.Refusal is { } reason && Refusal is { } listeners)
+        {
+            var address = context.Connection.RemoteIpAddress;
+            var (authority, origin) = WebSocketHandshake.ToldOf(context.Request);
+            var told = new TransportServerRefusal(
+                (address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address)?.ToString(),
+                authority,
+                origin,
+                context.Connection.RemotePort,
+                reason,
+                refusal.Status);
+
+            _listeners.Tell(listeners, told);
+        }
     }
 
     // a request: one that upgrades becomes a connection, until its socket closes; any other is
@@ -450,7 +512,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     {
         if (WebSocketHandshake.RefusalOf(context.Request, _options) is { } refusal)
         {
-            Refuse(context.Response, refusal);
+            Refuse(context, refusal);
 
             return;
         }
@@ -458,14 +520,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         // ! a guard: what the judgement takes Kestrel upgrades, and its accept throws on any other
         if (!context.WebSockets.IsWebSocketRequest)
         {
-            Refuse(context.Response, WebSocketHandshake.Malformed);
+            Refuse(context, WebSocketHandshake.Malformed);
 
             return;
         }
 
         if (_life.IsStopping)
         {
-            Refuse(context.Response, WebSocketHandshake.Busy);
+            Refuse(context, WebSocketHandshake.Busy);
 
             return;
         }
@@ -474,19 +536,30 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var address = context.Connection.RemoteIpAddress;
         var ip = (address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address)?.ToString() ?? "";
         var port = context.Connection.RemotePort;
-        var peerHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port}";
-        var (socket, connectionHandle) = Accepted?.Invoke(accepted, peerHandle) ?? (accepted, peerHandle);
+
+        // * the handle drawn as the connection is taken, by the rank it came at: the peer's address
+        // and port, which another connection may share (RFC 9293 §3.4.1), never name it alone, and
+        // its port ties it to the network's records
+        var arrival = Interlocked.Increment(ref _arrivals);
+        var drawnHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port};ordinal={arrival}";
+        var (socket, connectionHandle) = Accepted?.Invoke(accepted, drawnHandle) ?? (accepted, drawnHandle);
         var connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = new Held
         {
-            Arrival = Interlocked.Increment(ref _arrivals),
+            Arrival = arrival,
             Client = new TransportServerClient(ip, connectionHandle, null, port, TransportTypes.WebSocket),
             Closed = closed.Task,
             Connection = connection,
         };
 
-        _connections[connectionHandle] = held;
+        // ! no handle is given twice: one already held is a bug of the draw, and the socket goes
+        if (!_connections.TryAdd(connectionHandle, held))
+        {
+            socket.Abort();
+
+            throw new InvalidOperationException($"the handle {connectionHandle} names a connection already held");
+        }
 
         // ! a stop that began as this registered, past its snapshot, closes it with its own, going
         // away: its close is sent on its own, the read below driving the handshake to its end, and
@@ -517,7 +590,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             try
             {
-                // a socket whose handle a newer one took closes no connection: the handle names the newer one
+                // a connection the registry no longer holds tells no close: the stop's clear took it
                 if (_connections.TryRemove(new KeyValuePair<string, Held>(connectionHandle, held)))
                 {
                     _listeners.Tell(Close, (socket.CloseStatus == WebSocketCloseStatus.NormalClosure, connectionHandle));

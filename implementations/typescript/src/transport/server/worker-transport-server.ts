@@ -12,7 +12,7 @@ import {
 import { ProgrammerError } from '../shared/errors';
 import { transferableOf } from '../shared/transferable';
 import type { IWorkerMessageEventLike, IWorkerPortLike } from '../shared/types';
-import { createTransportServer, generateDrawnHandle } from './transport-server';
+import { createTransportServer, generateHandle } from './transport-server';
 import type {
   ITransportServerClientAware,
   ITransportServerStartOptions,
@@ -75,7 +75,7 @@ export const createWorkerTransportServer = ({
 
     // a connect: the port it carries is the connection, accepted on it
     const onConnect = (port: IWorkerPortLike): void => {
-      const connectionHandle = generateDrawnHandle({
+      const connectionHandle = generateHandle({
         ip: 'local',
         ordinal: (ordinal += 1),
         type: TRANSPORT_WORKER,

@@ -6,7 +6,10 @@
   "compilerOptions": {
     "allowImportingTsExtensions": true,
     "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
-    "types": ["node"]
+    "types": ["node"],
+    // ! the runtime comes by a portal, a link to its folder, where nothing is installed: read through
+    // the link, its imports resolve here, as an installed package's do
+    "preserveSymlinks": true
   },
   "include": ["src/**/*"]
 }

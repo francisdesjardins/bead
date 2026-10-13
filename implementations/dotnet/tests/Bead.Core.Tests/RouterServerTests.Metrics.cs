@@ -26,6 +26,7 @@ public sealed partial class RouterServerTests
 
     // definition
 
+    // debugging 9.2
     [Fact]
     public async Task Counts_a_notification_it_cannot_hand_to_its_transport_as_failed_and_one_its_transport_refuses_once_it_has_it_as_sent()
     {
@@ -61,6 +62,7 @@ public sealed partial class RouterServerTests
             }));
     }
 
+    // spec 17.2.6
     [Fact]
     public async Task Counts_a_notification_whose_value_does_not_write_failed_for_each_subscription_it_was_for_reports_it_once_and_fails_no_caller()
     {
@@ -111,6 +113,7 @@ public sealed partial class RouterServerTests
             }));
     }
 
+    // debugging 9.4.5
     [Fact]
     public async Task Counts_a_call_whose_admission_fails_PROCEDURE_FAILED_and_one_whose_subscription_its_connection_cannot_carry_back_SUBSCRIPTION_UNSUPPORTED()
     {
@@ -157,6 +160,7 @@ public sealed partial class RouterServerTests
         });
     }
 
+    // debugging 9.7
     [Fact]
     public async Task Counts_a_command_to_a_connection_not_open_as_started_and_closed_in_the_turn_it_started()
     {
@@ -216,6 +220,7 @@ public sealed partial class RouterServerTests
             CountedOf((registry, "other")));
     }
 
+    // debugging 2.2 and 2.3
     [Fact]
     public async Task A_debug_listener_that_throws_on_an_envelope_is_reported_with_its_connection_and_the_envelope_and_its_call_go_on_every_listener_told()
     {

@@ -37,11 +37,13 @@ import { createWSTransportClient } from '../../transport/client/ws-transport-cli
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
 import { createFakeWebSocket } from '../../transport/client/__tests__/fake-websocket';
 import {
+  AFTER_HEADER,
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
   createHTTPTransportServer,
   type IHTTPTransportServerOptions,
   LISTEN_HEADER,
+  WAIT_HEADER,
 } from '../../transport/server/http-transport-server';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createWSTransportServer } from '../../transport/server/ws-transport-server';
@@ -121,8 +123,8 @@ type SessionTimeout = 'connectionInactivityTimeout' | 'sessionInactivityTimeout'
 
 // constants
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
-const second: Handle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 const host = '127.0.0.1';
 
 const echo: IProcedure = Object.freeze({
@@ -270,6 +272,9 @@ const createFakeRouter = () => {
     clock: createTestClock(),
     failures: SERVER_FAILURES,
 
+    answeredOf: () => {
+      return undefined;
+    },
     declareRequester: () => {
       return undefined;
     },
@@ -822,9 +827,12 @@ const maximumWaitOfOptions: Way = (given) => {
       },
       measured: (fake, connectionToken) => {
         fake.exchange({
-          headers: { [CONNECTION_TOKEN_HEADER]: connectionToken },
+          headers: {
+            [AFTER_HEADER]: '0',
+            [CONNECTION_TOKEN_HEADER]: connectionToken,
+            [WAIT_HEADER]: '999999999999999',
+          },
           method: 'GET',
-          url: '/bead?wait=999999999999999',
         });
       },
     },
@@ -893,7 +901,7 @@ const waitOfOptions: Way = async (given) => {
   }
 
   const { client, fake } = listening;
-  const asked = new URL(fake.calls[1]?.url ?? '').searchParams.get('wait');
+  const asked = fake.calls[1]?.init.headers[WAIT_HEADER];
 
   await client.disconnect({ isQuick: true });
 

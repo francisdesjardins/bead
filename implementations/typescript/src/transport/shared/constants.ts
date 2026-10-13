@@ -6,6 +6,7 @@ export const ERROR_EVENT = 'error';
 export const LISTEN_EVENT = 'listen';
 export const MESSAGE_EVENT = 'message';
 export const RECONNECT_EVENT = 'reconnect';
+export const REFUSAL_EVENT = 'refusal';
 
 export const TRANSPORT_HTTP = 'HTTP';
 export const TRANSPORT_WORKER = 'WORKER';
@@ -29,17 +30,27 @@ export const CONNECTION_TOKEN_HEADER = 'bead-connection-token';
 
 /**
  * The header a connect carries when its client listens for what the server sends of its own: `?1`,
- * a boolean structured field (RFC 9651 §3.3.6). The server's 201 carries it back when it takes the
- * listen, as a WebSocket server names the subprotocol it chose; either way, it holds for the
- * connection's life.
+ * an Item of RFC 9651 whose bare item is a Boolean (§3.3.6), its parameters ignored (§2.3). The
+ * server's 201 carries it back when it takes the listen, as a WebSocket server names the subprotocol
+ * it chose; either way, it holds for the connection's life.
  */
 export const LISTEN_HEADER = 'bead-listen';
 
 /**
- * The header that numbers a batch's first envelope, the others following one by one; a listen
- * acknowledges by `after` the last one its client heard whole.
+ * The header that numbers a batch's first envelope, the others following one by one: an Item of
+ * RFC 9651 whose bare item is an Integer, 1 or more. A listen acknowledges by `bead-after` the last
+ * one its client heard whole.
  */
 export const SEQUENCE_HEADER = 'bead-sequence';
+
+/**
+ * The header a listen acknowledges in: the number of the last envelope its client heard whole; an
+ * Item whose bare item is an Integer of RFC 9651, 0 or more.
+ */
+export const AFTER_HEADER = 'bead-after';
+
+/** The header a listen asks the server to hold it in, in milliseconds; 0 when left out. */
+export const WAIT_HEADER = 'bead-wait';
 
 /**
  * The header that marks each refusal of the HTTP transport's own, with its reason, among the
@@ -71,6 +82,7 @@ export type ERROR_EVENT = typeof ERROR_EVENT;
 export type LISTEN_EVENT = typeof LISTEN_EVENT;
 export type MESSAGE_EVENT = typeof MESSAGE_EVENT;
 export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
+export type REFUSAL_EVENT = typeof REFUSAL_EVENT;
 
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;

@@ -507,7 +507,7 @@
     },
     "credit": {
       "type": "object",
-      "required": ["kind", "callId", "creditEnd"],
+      "required": ["kind", "callId", "paced", "creditEnd"],
       "additionalProperties": false,
       "properties": {
         "kind": {
@@ -515,6 +515,10 @@
         },
         "callId": {
           "$ref": "common.schema.json#/$defs/u32"
+        },
+        "paced": {
+          "description": "Whether the credit carries PACED, counting notifications; clear, it counts bytes (spec 4.8, 12.4).",
+          "type": "boolean"
         },
         "creditEnd": {
           "$ref": "common.schema.json#/$defs/u53"
@@ -554,8 +558,8 @@
           "const": true
         },
         "beforeRoute": {
-          "description": "The relay's admission, by the name both sides give it: requireSessionOrCredential, its default, or requireSession.",
-          "enum": ["requireSessionOrCredential", "requireSession"]
+          "description": "The relay's admission, by the name both sides give it: requireCredential, its default, shareLegBSession or requireSession.",
+          "enum": ["requireCredential", "shareLegBSession", "requireSession"]
         }
       }
     },

@@ -11,7 +11,13 @@
     "paths": {
       "@francisdesjardins/bead/service": [
         "../../../../implementations/typescript/src/service/service.ts"
-      ]
+      ],
+      "@francisdesjardins/bead/proto": [
+        "../../../../implementations/typescript/src/proto/records.ts"
+      ],
+      // ! the runtime's source imports protobuf-es's types from its own folder, where no install is
+      // in CI: its import is the builder's install, as every other here
+      "@bufbuild/protobuf": ["../../../node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"]
     }
   },
   "include": ["**/*.ts"]

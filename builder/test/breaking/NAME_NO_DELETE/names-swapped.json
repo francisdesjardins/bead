@@ -19,19 +19,23 @@
   "findings": [
     {
       "rule": "PROCEDURE_SAME_NAME",
-      "pointer": "/services/0/procedures/0/procedureName"
+      "pointer": "/services/0/procedures/0/procedureName",
+      "subject": "service:1/procedure:1"
     },
     {
       "rule": "PROCEDURE_SAME_NAME",
-      "pointer": "/services/0/procedures/1/procedureName"
+      "pointer": "/services/0/procedures/1/procedureName",
+      "subject": "service:1/procedure:2"
     },
     {
       "rule": "NAME_NO_DELETE",
-      "pointer": "/services/0/reserved/procedureNames"
+      "pointer": "/services/0/reserved/procedureNames",
+      "subject": "service:1/procedure:1"
     },
     {
       "rule": "NAME_NO_DELETE",
-      "pointer": "/services/0/reserved/procedureNames"
+      "pointer": "/services/0/reserved/procedureNames",
+      "subject": "service:1/procedure:2"
     }
   ]
 }

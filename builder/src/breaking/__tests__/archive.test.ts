@@ -91,3 +91,122 @@ test('an absolute path, a .. and a truncated archive are refused', () => {
     return extractArchive(off, { into });
   }).toThrow(/checksum/u);
 });
+
+// a tar's entry as ustar writes it: its header, `name` and `type`, the size its header states, then
+// `data` in whole blocks
+const entryOf = (
+  name: string,
+  details: { readonly type: string; readonly data?: string; readonly stated?: number }
+): Uint8Array => {
+  const data = new TextEncoder().encode(details.data ?? '');
+  const header = new Uint8Array(BLOCK);
+  const field = (offset: number, text: string): void => {
+    header.set(new TextEncoder().encode(text), offset);
+  };
+
+  field(0, name);
+  field(100, '0000644\0');
+  field(108, '0000000\0');
+  field(116, '0000000\0');
+  field(124, `${(details.stated ?? data.length).toString(8).padStart(11, '0')}\0`);
+  field(136, '00000000000\0');
+  field(148, '        ');
+  field(156, details.type);
+  field(257, 'ustar\0');
+  field(263, '00');
+
+  const sum = header.reduce((total, byte) => {
+    return total + byte;
+  }, 0);
+
+  field(148, `${sum.toString(8).padStart(6, '0')}\0 `);
+
+  const entry = new Uint8Array(BLOCK + Math.ceil(data.length / BLOCK) * BLOCK);
+
+  entry.set(header, 0);
+  entry.set(data, BLOCK);
+  return entry;
+};
+
+// a pax extended header of `records`, each `<length> <key>=<value>\n`, its length its own
+const paxOf = (records: Readonly<Record<string, string>>): Uint8Array => {
+  const data = Object.entries(records)
+    .map(([key, value]) => {
+      const body = ` ${key}=${value}\n`;
+      let length = body.length + 1;
+
+      while (`${String(length)}${body}`.length !== length) {
+        length += 1;
+      }
+
+      return `${String(length)}${body}`;
+    })
+    .join('');
+
+  return entryOf('PaxHeader', { type: 'x', data });
+};
+
+// a tar of `entries`, ended by two zero blocks
+const tarOf = (entries: readonly Uint8Array[]): Uint8Array => {
+  const tar = new Uint8Array(
+    entries.reduce((total, entry) => {
+      return total + entry.length;
+    }, 2 * BLOCK)
+  );
+  let at = 0;
+
+  for (const entry of entries) {
+    tar.set(entry, at);
+    at += entry.length;
+  }
+
+  return tar;
+};
+
+test("a pax header's size is the entry's, over its ustar header's, as GNU tar and bsdtar read it", () => {
+  const into = test.info().outputPath('sized');
+  const text = 'A file whose ustar header states no size, which its pax header gives.\n';
+
+  expect(
+    extractArchive(
+      tarOf([
+        paxOf({ size: String(text.length) }),
+        entryOf('sized.txt', { type: '0', data: text, stated: 0 }),
+      ]),
+      { into }
+    )
+  ).toEqual(['sized.txt']);
+  expect(readFileSync(join(into, 'sized.txt'), 'utf8')).toBe(text);
+  expect(() => {
+    return extractArchive(
+      tarOf([paxOf({ size: '-1' }), entryOf('sized.txt', { type: '0', data: text })]),
+      { into }
+    );
+  }).toThrow(/a size that is no whole number/u);
+});
+
+test('an empty or a NUL path, and a path an earlier entry holds, are refused', () => {
+  const into = test.info().outputPath('refused');
+
+  for (const entries of [
+    [entryOf('', { type: '0', data: 'no name\n' })],
+    [entryOf('./', { type: '0', data: 'no name\n' })],
+    [paxOf({ path: 'a\0b.txt' }), entryOf('a.txt', { type: '0', data: 'a NUL\n' })],
+  ]) {
+    expect(() => {
+      return extractArchive(tarOf(entries), { into });
+    }).toThrow(/a path that names no file/u);
+  }
+
+  for (const entries of [
+    [
+      entryOf('twice.txt', { type: '0', data: 'one\n' }),
+      entryOf('twice.txt', { type: '0', data: 'two\n' }),
+    ],
+    [entryOf('both/', { type: '5' }), entryOf('both', { type: '0', data: 'a file\n' })],
+  ]) {
+    expect(() => {
+      return extractArchive(tarOf(entries), { into });
+    }).toThrow(/twice, an entry over an earlier one/u);
+  }
+});

@@ -12,8 +12,9 @@ the client answers; and `countDown`, which fails past 10 with `TOO_FAR`, notifie
 to a client that asks for them at a window of 1, and is admitted by its hook, `greeted`, once the
 connection said hello. Both halves serve and call it over WebSocket.
 
-This example takes every host, the default spec 15.13 holds open: while it runs, a page that
-rebinds its name to 127.0.0.1 reaches it. A server a browser can reach names its hosts.
+Its servers listen on `127.0.0.1`, as every server does by default, and name no hosts: every server
+takes `127.0.0.1`, which its clients connect to, and refuses a page that rebinds its name to it
+(spec 15.12).
 
 ## Its files
 
@@ -46,8 +47,8 @@ failure, the client answering an empty name the second time it is asked.
 ## Generating
 
 `generate` writes what beadc generates from `beadc.yaml`, and `generate --check` finds nothing to
-change. Until a release pushes the image the wrappers name, beadc runs on Node from this
-repository, or from an image built here:
+change. In this repository, beadc runs on Node, or from an image built here, which `BEADC_IMAGE`
+gives the wrappers in place of the one they name:
 
 ```sh
 # beadc on Node, from the repository: protoc at its pin, then beadc
@@ -69,7 +70,7 @@ docker build -f ../../builder/Dockerfile -t beadc:local ../..
 $env:BEADC_IMAGE = 'beadc:local'; ./beadc.ps1 generate
 ```
 
-Once a release has pushed it, the wrappers run the image they name:
+Given no `BEADC_IMAGE`, the wrappers run the image they name, as the engine finds it:
 
 ```sh
 ./beadc.sh generate            # or ./beadc.ps1 generate, in PowerShell 7.6
@@ -113,10 +114,13 @@ and neither writes to its standard error. CI's `examples` job runs all of it, on
 
 ## What a project outside this repository writes instead
 
-The example reaches each runtime from its source, as no runtime is published yet: the TypeScript
-half by Yarn's `portal:` protocol, the C# half by a `ProjectReference`. A project of its own names
-the published package instead, `"@francisdesjardins/bead": "<version>"` and
-`<PackageReference Include="Bead.Transport.WebSockets" Version="<version>" />`, once they are.
+The example reaches each runtime from its source, as no runtime is published: the TypeScript half
+by Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assembly it uses,
+`Bead.Protobuf` among them, whose check its generated `proto` codecs call. A project of its own
+names each runtime as a package, by its name and a version:
+`"@francisdesjardins/bead": "<version>"`,
+`<PackageReference Include="Bead.Transport.WebSockets" Version="<version>" />` and
+`<PackageReference Include="Bead.Protobuf" Version="<version>" />`.
 
 From source, the TypeScript runtime is its `.ts` files, which a consumer's compiler compiles under
 the consumer's options. [`typescript/tsconfig.consumer.json`](typescript/tsconfig.consumer.json)

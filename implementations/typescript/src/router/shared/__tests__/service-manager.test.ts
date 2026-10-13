@@ -85,7 +85,7 @@ const echo: IProcedure = {
 };
 /** A request's header, as the router hands it over. */
 const header: IRequestHeader = { callId: 7, kind: 0x10, procedureId: 1, serviceId: 2 };
-const connectionHandle = 'type=WS;ip=127.0.0.1;port=50001';
+const connectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 
 /** A request as its router hands it to a resolver: on `header`, carrying `payload`. */
 const propsOf = (
@@ -165,6 +165,9 @@ const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PLATFORM_
     clock,
     failures: failureTableOf(side),
 
+    answeredOf: () => {
+      return undefined;
+    },
     declareRequester: (procedure) => {
       calls.declareRequester.push(procedure.procedureName);
 
@@ -464,6 +467,7 @@ test.describe('createServiceManager', () => {
       expect(calls.request[0]?.request.options.connectionHandle).toBe(connectionHandle);
     });
 
+    // debugging 4.1.7
     test('hands its router the credential a call presents and leaves it out of its trace', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -491,6 +495,7 @@ test.describe('createServiceManager', () => {
       expect(JSON.stringify(seen)).not.toContain('secret');
     });
 
+    // debugging 4.1.9
     test('rethrows what the router rejects with, and tells debug its failure, and only a failure’s', async () => {
       const { control, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -525,6 +530,7 @@ test.describe('createServiceManager', () => {
       expect(seen[3]?.info.rx).toBeUndefined();
     });
 
+    // spec 17.2.4; debugging 4.3
     test('a call whose value does not write fails before anything goes: nothing requested, traced or deprecated', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -626,6 +632,7 @@ test.describe('createServiceManager', () => {
       expect(manager.isDebugging).toBe(false);
     });
 
+    // debugging 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6 and 4.1.8
     test('tells each step of a request, with copies and, once answered, a duration', async () => {
       const manager = createServiceManager(createFakeRouter().router);
       const seen = recordDebug(manager);
@@ -653,6 +660,7 @@ test.describe('createServiceManager', () => {
       });
     });
 
+    // debugging 4.1.10, 4.2.1 and 4.2.2
     test('tells a call made and its answer with the call id its router drew, and their connection', async () => {
       const client = createFakeRouter('client');
       const server = createFakeRouter('server');
@@ -686,6 +694,7 @@ test.describe('createServiceManager', () => {
       expect(taken).toEqual([1, 1]);
     });
 
+    // debugging 4.2.1 and 4.4
     test('tells a call its router refuses before drawing an id with none, its tx step then its rx step', async () => {
       const { control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
@@ -708,6 +717,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // debugging 4.4
     test('tells a call made over a router that draws no id with none, its tx step then its rx step', async () => {
       const { control, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -749,6 +759,7 @@ test.describe('createServiceManager', () => {
       expect(heard).toEqual(['deprecated', 'tx', 'rx']);
     });
 
+    // debugging 3.2, 4.1.5 and 4.1.6
     test("reads its router's clock: a call's start on the wall clock, its duration on the monotonic reading", async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       const { control, router } = createFakeRouter('server', clock);
@@ -780,6 +791,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // debugging 4.1.6
     test('tells a duration in whole milliseconds, its fraction dropped', async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       const { control, router } = createFakeRouter('server', clock);
@@ -806,6 +818,7 @@ test.describe('createServiceManager', () => {
       ).toEqual([undefined, 30]);
     });
 
+    // debugging 4.1.5, 4.2.5 and 4.2.6
     test('a notification starts as it is heard or sent, and a failed notify tells its failure at that same start', async () => {
       const start = Date.UTC(2026, 0, 1);
       const clock = createTestClock(start);
@@ -858,6 +871,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // debugging 3.1, 3.2 and 3.4
     test('reads no clock for a call made, a request answered, a notification sent and one heard while nobody listens, and three for a call with a listener', async () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       const client = createFakeRouter('client', clock);
@@ -938,6 +952,7 @@ test.describe('createServiceManager', () => {
       );
     });
 
+    // debugging 2.2 and 2.3
     test('a debug listener that throws on the answer is reported through the router, and the call resolves with its result, each step told', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -965,6 +980,7 @@ test.describe('createServiceManager', () => {
       expect(calls.report).toEqual([{ connectionHandle: undefined, error: failure }]);
     });
 
+    // debugging 2.2 and 2.3
     test('a request is answered as a debug listener throws on its rx step, the error reported through the router with its connection', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -991,6 +1007,7 @@ test.describe('createServiceManager', () => {
       expect(calls.report).toEqual([{ connectionHandle, error: failure }]);
     });
 
+    // spec 17.2.2
     test('an answer that does not decode fails the call here, with its header and its call', async () => {
       const { control, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
@@ -1310,6 +1327,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // spec 17.2.5
     test('an answer that cannot go out leaves the request to be answered as failed', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -1448,6 +1466,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // debugging 4.1.10, 4.2.3 and 4.2.4
     test('tells the request it received and the answer it sent with that request’s call id and connection', async () => {
       const manager = createServiceManager(createFakeRouter().router);
       const seen = recordDebug(manager);
@@ -1511,6 +1530,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // debugging 4.2, 4.2.4 and 4.3
     test('tells a callback that fails before it answers as an answer that did not go, with why beside it; nothing more for one that fails once it answered, nor for an admission that fails', async () => {
       const start = Date.UTC(2026, 0, 1);
       const clock = createTestClock(start);
@@ -1583,6 +1603,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // debugging 4.2 and 4.2.4
     test('tells an answer its router cannot send again at its start, with why beside it', async () => {
       const start = Date.UTC(2026, 0, 1);
       const clock = createTestClock(start);
@@ -1633,6 +1654,7 @@ test.describe('createServiceManager', () => {
       ).toEqual([SERVER_FAILURES.procedureFailed]);
     });
 
+    // debugging 4.2
     test('tells nothing more than its request for a callback that fails on its signal, its call cancelled or gone with its connection', async () => {
       const manager = createServiceManager(createFakeRouter().router);
       const seen = recordDebug(manager);
@@ -1994,6 +2016,7 @@ test.describe('createServiceManager', () => {
       ).toEqual([7, 'seven']);
     });
 
+    // spec 17.2.6
     test("a notification whose value does not write goes to its router in its payload's place, its failure told at its start, and resolves", async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
@@ -2627,6 +2650,7 @@ test.describe('createServiceManager', () => {
       }).toThrow(ProgrammerError);
     });
 
+    // debugging 4.1.10, 4.2.5 and 4.2.6
     test('tells a notification sent or heard with no call id', async () => {
       const { deliver, router } = createFakeRouter('client');
       const manager = createServiceManager(router);
@@ -2665,6 +2689,7 @@ test.describe('createServiceManager', () => {
       ]);
     });
 
+    // spec 17.2.3
     test('a notification that does not decode fails here, for the router to report', async () => {
       const { router } = createFakeRouter('client');
       const manager = createServiceManager(router);
@@ -2765,6 +2790,7 @@ test.describe('createServiceManager', () => {
       ).toEqual({ reached: [], response: { failure: SERVER_FAILURES.accessDenied } });
     });
 
+    // debugging 4.3
     test('is asked before the payload is read: a request refused is refused undecodable, and never traced', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);

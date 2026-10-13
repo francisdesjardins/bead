@@ -87,8 +87,9 @@ internal static class ConversationPlayer
     }
 
     // the server's relay, the conversation's where it gives it: whether it verifies, and its
-    // admission, requireSession in place of the server's default, which the server built gives
-    private static RelayOptions? RelayOf((JsonElement Conversation, Func<BeforeRequest> RequireSession) given)
+    // admission, requireCredential, the server's default, which the server built gives, or
+    // shareLegBSession or requireSession in its place, the server's once it is built
+    private static RelayOptions? RelayOf((JsonElement Conversation, Func<Server<string>> Built) given)
     {
         if (!given.Conversation.TryGetProperty("relay", out var relay))
         {
@@ -97,19 +98,32 @@ internal static class ConversationPlayer
 
         var options = new RelayOptions { Verifies = relay.TryGetProperty("verifies", out var verifies) && verifies.GetBoolean() };
 
-        return relay.TryGetProperty("beforeRoute", out var beforeRoute) switch
+        // an admission of the server's, read once it is built, with the refusal it gives
+        RelayOptions Admitting(Func<Server<string>, BeforeRequest> admission)
         {
-            false => options,
-            true when beforeRoute.GetString() == "requireSessionOrCredential" => options,
-            true when beforeRoute.GetString() == "requireSession" => options with
+            return options with
             {
                 BeforeRoute = new BeforeRequest(
                     (request) =>
                     {
-                        return given.RequireSession().Admits(request);
+                        return admission(given.Built()).Admits(request);
                     },
                     Failure.OfProtocol(ProtocolCode.SessionRequired)),
-            },
+            };
+        }
+
+        return relay.TryGetProperty("beforeRoute", out var beforeRoute) switch
+        {
+            false => options,
+            true when beforeRoute.GetString() == "requireCredential" => options,
+            true when beforeRoute.GetString() == "shareLegBSession" => Admitting((server) =>
+            {
+                return server.ShareLegBSession;
+            }),
+            true when beforeRoute.GetString() == "requireSession" => Admitting((server) =>
+            {
+                return server.RequireSession;
+            }),
             _ => throw new ArgumentException($"a conversation's relay admits by a name no test reads: {beforeRoute}", nameof(given)),
         };
     }
@@ -178,7 +192,7 @@ internal static class ConversationPlayer
             ResultHeader { Total: { } total } => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential} total {total}",
             ResultHeader or NotificationHeader => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential}",
             ChunkHeader chunk => $"{kind} {callId} from {chunk.Offset}{(chunk.IsLast ? " last" : "")} {Convert.ToHexString(envelope.Payload.Span)}",
-            CreditHeader credit => $"{kind} {callId} credit {credit.CreditEnd}",
+            CreditHeader credit => $"{kind} {callId}{(credit.Paced ? " paced" : "")} credit {credit.CreditEnd}",
 
             // a command the server sends its client, with its flags, the envelope's byte 2 as sent,
             // the credential it presents, and what its transport carried beside it
@@ -277,7 +291,7 @@ internal static class ConversationPlayer
 
         if (expected.TryGetProperty("creditEnd", out var creditEnd))
         {
-            return $"{kind} {callId} credit {creditEnd.GetInt64()}";
+            return $"{kind} {callId}{(expected.GetProperty("paced").GetBoolean() ? " paced" : "")} credit {creditEnd.GetInt64()}";
         }
 
         var total = expected.TryGetProperty("total", out var declared) ? $" total {declared.GetInt64()}" : "";
@@ -326,10 +340,10 @@ internal static class ConversationPlayer
         var limits = LimitsOf(conversation);
         Server<string>? built = null;
 
-        // the admission a conversation's relay may name, the server's once it is built
-        BeforeRequest RequireSession()
+        // the server a conversation's relay takes an admission of, once it is built
+        Server<string> Built()
         {
-            return built!.RequireSession;
+            return built!;
         }
 
         await using var server = new Server<string>(
@@ -340,7 +354,7 @@ internal static class ConversationPlayer
                 Limits = limits,
                 MetricsRegistry = options.MetricsRegistry,
                 Pacing = PacingOf(conversation),
-                Relay = RelayOf((conversation, RequireSession)),
+                Relay = RelayOf((conversation, Built)),
                 ResolverScheduler = scheduler,
                 Scheduler = scheduler,
             });
@@ -560,7 +574,7 @@ internal static class ConversationPlayer
         {
             if (!_handles.TryGetValue(name, out var handle))
             {
-                handle = $"type=WS;ip=127.0.0.1;port={50001 + _handles.Count}";
+                handle = $"type=WS;ip=127.0.0.1;port={50001 + _handles.Count};ordinal=1";
                 _handles[name] = handle;
                 _names[handle] = name;
             }

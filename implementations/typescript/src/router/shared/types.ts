@@ -240,10 +240,10 @@ export type Credential =
 export type DestinationId = number;
 
 /**
- * A credential's session's identifier (spec 13.9): a record of its credential scheme and its claim —
- * a `JWT`'s `iss` with its `sid`, else with its `sub`; an `ELSEWHERE`'s verifier's `id`. Two are one
- * when their scheme, their claim's name and their values are equal, octet for octet, so one `sub`
- * under two issuers names two sessions.
+ * A credential's session's identifier (spec 13.10): a record of its credential scheme and its
+ * claim — a `JWT`'s `iss` with its `sid`, else with its `sub`; an `ELSEWHERE`'s verifier's `id`. Two
+ * are one when their scheme, their claim's name and their values are equal, octet for octet, so one
+ * `sub` under two issuers names two sessions.
  */
 export type SessionIdentifier =
   | Readonly<{ id: string; scheme: typeof CredentialScheme.ELSEWHERE }>
@@ -349,7 +349,7 @@ export interface ICallSession {
    */
   readonly data: unknown;
   /**
-   * A credential's session's end, in whole milliseconds since the epoch (spec 13.9): the end its
+   * A credential's session's end, in whole milliseconds since the epoch (spec 13.10): the end its
    * connection keeps for its identifier, when it keeps one, else its own; none for a connection's
    * session, and for an `ELSEWHERE` whose verifier gave none.
    */
@@ -510,6 +510,12 @@ export interface IRouterCore<Handle extends string> {
   /** What it reads, writes and holds by: its options', {@link LIMIT_DEFAULTS}' where they say nothing. */
   readonly limits: IRouterLimits;
 
+  /**
+   * The failure the call of a request this side dispatched was answered with, kept once its call
+   * closed: so its resolver, answering after it, finds the failure its router answered in its place.
+   * None for a request answered otherwise, not yet answered, or never dispatched.
+   */
+  answeredOf(request: { connectionHandle: Handle; header: IRequestHeader }): IFailure | undefined;
   /**
    * Cancels a call this side opened: one still waiting is rejected with a {@link CancelError}, the
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
@@ -803,6 +809,14 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   readonly failures: IRouterFailures;
 
   /**
+   * The failure the router answered a request with in its resolver's place — a server's, as the
+   * subscription the request opens queued past its bounds (spec 11.10) — read as its resolver
+   * answers, whose answer then goes nowhere; none while the request is its resolver's to answer.
+   */
+  answeredOf(
+    request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
+  ): IFailure | undefined;
+  /**
    * Declares a requester of `procedure` to the router's metrics, as it is made, and gives the series
    * each of its calls carries to `request`; none when the router counts nothing. A procedure off
    * spec section 16, refused first, or a declaration its registry refuses, is a
@@ -954,7 +968,7 @@ export type DefaultCredential =
   | Readonly<{ scheme: typeof CredentialScheme.JWT; token: string }>;
 
 /**
- * What an `ELSEWHERE`'s verifier settles with for a credential that holds (spec 13.10): its `id`,
+ * What an `ELSEWHERE`'s verifier settles with for a credential that holds (spec 13.11): its `id`,
  * which names its session with the scheme, its data, which the call carries, and its end, in
  * milliseconds since the epoch, held rounded up to a whole one; none for a session without one.
  */
@@ -980,7 +994,7 @@ export interface ICredentials {
   readonly audience?: string | undefined;
   /** The keys a `JWT` is verified with (spec 13.8), held for good. */
   readonly keys?: readonly IJwtKey[] | undefined;
-  /** The key set the side asks for the keys of the issuers it names (spec 13.8). */
+  /** The key set the side asks for the keys of the issuers it names (spec 13.9). */
   readonly keySet?: IJwtKeySet | undefined;
   /**
    * The `ELSEWHERE` verifier: given what its call's transport carried, whole, and its call's signal,
@@ -1007,7 +1021,7 @@ export interface ICredentials {
  * throws or rejects, answers what is not keys shaped for their algorithms, or is unsettled as its
  * deadline is reached fails the calls that wait on it, and replaces no key held. A call past the
  * `maximumWaitingCalls` that wait for one issuer's deadline is refused `CAPACITY_EXCEEDED`, and
- * nothing is reported (spec 13.8).
+ * nothing is reported (spec 13.9).
  */
 export interface IJwtKeySet {
   /** Asked for one of its issuers, with a signal, that issuer's keys, which it may wait for. */

@@ -16,8 +16,8 @@ const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
 const PAIR = 'test/breaking/buf';
 const ARCHIVE = new URL('../../test/breaking/archive/archive.tar', import.meta.url);
 
-// beadc as a user runs it: Node, src/cli.ts as written, from builder/ or the folder given, after
-// the modules `node` is given to load first, `input` on its standard input
+// beadc as a user runs it, outside a workflow: Node, src/cli.ts as written, from builder/ or the
+// folder given, after the modules `node` is given to load first, `input` on its standard input
 const beadc = (
   args: readonly string[],
   options: {
@@ -38,6 +38,8 @@ const beadc = (
     {
       cwd: options.cwd ?? BUILDER,
       encoding: 'utf8',
+      // ! CI's runner sets GITHUB_WORKSPACE, which moves every file the github format names
+      env: { ...process.env, GITHUB_WORKSPACE: '' },
       ...(options.input === undefined ? {} : { input: options.input }),
     }
   );
@@ -259,7 +261,7 @@ test('check, blueprint, breaking and version load no TypeScript compiler', () =>
   expect(compilersOf(['generate'], folder)).toContain('typescript');
 });
 
-test('breaking exits 0 against itself, 1 on a finding, 0 once a scoped --except names it', () => {
+test('breaking exits 0 against itself, 1 on a finding, 0 once a scoped --except names its subject', () => {
   const limited = test.info().outputPath('limited.json');
 
   // echo states a limit, the revision moved: PROCEDURE_SAME_LIMIT alone
@@ -285,19 +287,24 @@ test('breaking exits 0 against itself, 1 on a finding, 0 once a scoped --except 
       '--against',
       INTEROP,
       '--except',
-      'PROCEDURE_SAME_LIMIT@/services/0/procedures/0',
+      'PROCEDURE_SAME_LIMIT@service:1/procedure:1',
     ]).status
   ).toBe(0);
-  expect(
-    beadc([
-      'breaking',
-      limited,
-      '--against',
-      INTEROP,
-      '--except',
-      'PROCEDURE_SAME_LIMIT@/services/0/procedures/1',
-    ]).status
-  ).toBe(1);
+
+  // * another procedure's subject waives nothing: the finding stands, and the waiver is said
+  const other = beadc([
+    'breaking',
+    limited,
+    '--against',
+    INTEROP,
+    '--except',
+    'PROCEDURE_SAME_LIMIT@service:1/procedure:2',
+  ]);
+
+  expect(other.status).toBe(1);
+  expect(other.stdout).toContain(
+    'warning WAIVER_UNUSED: --except PROCEDURE_SAME_LIMIT@service:1/procedure:2 waived nothing: take it out'
+  );
   expect(beadc(['breaking', limited, '--against', INTEROP, '--category', 'WIRE']).status).toBe(1);
 });
 
@@ -310,6 +317,19 @@ test('breaking refuses --against missing, --category other than WIRE or API, --e
     ['breaking', INTEROP, '--against', INTEROP, '--category', 'WIRE', '--except', 'NAME_NO_DELETE'],
     ['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:NO_SUCH_RULE'],
     ['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:RPC_NO_DELETE'],
+    [
+      'breaking',
+      INTEROP,
+      '--against',
+      INTEROP,
+      '--category',
+      'WIRE',
+      '--except',
+      'buf:FIELD_SAME_TYPE',
+    ],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'PROCEDURE_SAME_NAME@/services/0'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'PROCEDURE_SAME_NAME@service:1'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'WAIVER_UNUSED'],
     ['breaking', INTEROP, '--against', 'no-such-earlier'],
     ['check', INTEROP, '--against', INTEROP],
     ['check', INTEROP, '--category', 'WIRE'],
@@ -322,13 +342,21 @@ test('breaking refuses --against missing, --category other than WIRE or API, --e
     expect(run.stderr, args.join(' ')).toMatch(/^beadc: /u);
   }
 
-  // a warning of check's, or a rule of buf's it runs, is no refusal
-  expect(
-    beadc(['breaking', INTEROP, '--against', INTEROP, '--except', 'SPEC_VERSION_NEWER']).status
-  ).toBe(0);
-  expect(
-    beadc(['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:FIELD_SAME_TYPE']).status
-  ).toBe(0);
+  // a warning of check's, or a rule of buf's it runs, is no refusal: each waives nothing here,
+  // which WAIVER_UNUSED says, a warning that --fail-on-warning refuses
+  for (const except of ['SPEC_VERSION_NEWER', 'buf:FIELD_SAME_TYPE']) {
+    const unused = beadc(['breaking', INTEROP, '--against', INTEROP, '--except', except]);
+
+    expect(unused.status, except).toBe(0);
+    expect(unused.stdout, except).toContain(
+      `warning WAIVER_UNUSED: --except ${except} waived nothing`
+    );
+    expect(
+      beadc(['breaking', INTEROP, '--against', INTEROP, '--except', except, '--fail-on-warning'])
+        .status,
+      except
+    ).toBe(1);
+  }
 });
 
 test("breaking over a .proto prints Bead's finding at the rpc's span and buf's at the field's", () => {
@@ -342,16 +370,18 @@ test("breaking over a .proto prints Bead's finding at the rpc's span and buf's a
 
   expect(run.status).toBe(1);
   expect(run.stdout).toContain(renamed);
-  expect(run.stdout).toContain('(at /services/0/procedures/0/procedureName)');
+  expect(run.stdout).toContain(
+    '(at /services/0/procedures/0/procedureName) [service:1/procedure:1]'
+  );
   expect(run.stdout).toContain(field);
 
-  // * each waived at its scope, its pointer or its file, and the other findings kept
+  // * each waived at its scope, its subject or its file, and the other findings kept
   const waived = beadc([
     ...pair,
     '--except',
     'buf:FIELD_SAME_TYPE@parcel/v1/parcel.proto',
     '--except',
-    'PROCEDURE_SAME_NAME@/services/0/procedures/0',
+    'PROCEDURE_SAME_NAME@service:1/procedure:1',
   ]);
 
   expect(waived.status).toBe(1);
@@ -359,9 +389,9 @@ test("breaking over a .proto prints Bead's finding at the rpc's span and buf's a
   expect(waived.stdout).not.toContain(field);
   expect(waived.stdout).toContain('error NAME_NO_DELETE: ');
   expect(waived.stdout).toContain('error buf:FIELD_NO_DELETE: ');
-  expect(beadc([...pair, '--except', 'PROCEDURE_SAME_NAME@/services/0/reserved']).stdout).toContain(
-    renamed
-  );
+  expect(
+    beadc([...pair, '--except', 'PROCEDURE_SAME_NAME@service:1/procedure:2']).stdout
+  ).toContain(renamed);
   expect(beadc([...pair, '--except', 'buf:FIELD_SAME_TYPE@parcel/v1/other.proto']).status).toBe(2);
 });
 
@@ -392,4 +422,62 @@ test('--against - reads a tar from standard input, and refuses a terminal', asyn
       Object.defineProperty(process.stdin, 'isTTY', descriptor);
     }
   }
+});
+
+test("prints each breaking finding's subject, in text, json and github", () => {
+  test.setTimeout(60_000);
+
+  const pair = ['breaking', `${PAIR}/current`, '--against', `${PAIR}/earlier`];
+  const [text] = beadc(pair).stdout.split('\n');
+  const [json] = beadc([...pair, '--error-format', 'json']).stdout.split('\n');
+  // * GitHub's annotation names its file from the workspace, wherever beadc ran
+  const github = spawnSync(process.execPath, [CLI, ...pair, '--error-format', 'github'], {
+    cwd: BUILDER,
+    encoding: 'utf8',
+    env: { ...process.env, GITHUB_WORKSPACE: join(BUILDER, '..') },
+  }).stdout.split('\n')[0];
+
+  expect(text).toMatch(
+    / \(at \/services\/0\/procedures\/0\/procedureName\) \[service:1\/procedure:1\]$/u
+  );
+  expect(JSON.parse(String(json))).toMatchObject({
+    rule: 'PROCEDURE_SAME_NAME',
+    subject: 'service:1/procedure:1',
+  });
+  expect(github).toMatch(
+    /^::error file=builder\/test\/breaking\/buf\/current\/parcel\/v1\/parcel\.proto,line=22,col=7,title=PROCEDURE_SAME_NAME::.* \[service:1\/procedure:1\]$/u
+  );
+});
+
+test('--against-ref is refused on Node, naming the pipe that does its work, exit 2', () => {
+  for (const args of [
+    ['breaking', INTEROP, '--against-ref', 'v0.3.0'],
+    ['breaking', INTEROP, '--against-ref=v0.3.0'],
+  ]) {
+    const run = beadc(args);
+
+    expect(run.status, args.join(' ')).toBe(2);
+    expect(run.stderr).toBe(
+      "beadc: --against-ref is the wrappers' own: on Node, pipe git archive <ref> into --against -\n"
+    );
+  }
+});
+
+test('a path the file system refuses is one line, exit 2; a folder the output names is made', () => {
+  const folder = test.info().outputPath('written');
+  const file = join(folder, 'file');
+
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(file, 'a file, where a folder is meant\n');
+
+  const refused = beadc(['blueprint', INTEROP, '-o', join(file, 'interop.json')]);
+
+  expect(refused.status).toBe(2);
+  expect(refused.stderr).toMatch(/^beadc: .+: E[A-Z]+ on \w+, which the file system refuses\n$/u);
+  expect(existsSync(`${join(file, 'interop.json')}.tmp`)).toBe(false);
+
+  const made = join(folder, 'made', 'interop.json');
+
+  expect(beadc(['blueprint', INTEROP, '-o', made]).status).toBe(0);
+  expect(readFileSync(made, 'utf8')).toBe(readFileSync(INTEROP, 'utf8').replaceAll('\r\n', '\n'));
 });

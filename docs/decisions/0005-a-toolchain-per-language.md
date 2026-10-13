@@ -43,10 +43,15 @@ which git ignores. The builder and the examples are placed by
 [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
 `examples/` holds projects written as a consumer writes one, each language's half under its own
 toolchain, the house's rules by reference where its platform can and a copy held to them where it
-cannot. The root's tools are Node scripts without dependencies. The spec's are Python 3.14's: its
-generators use the standard library alone, and its check, `spec/check.py`, needs `jsonschema`,
-which `spec/requirements.in` names and `spec/requirements.txt` locks with every hash, installed
-with `--require-hashes --only-binary=:all:`.
+cannot. The root's tools are Node scripts without dependencies; one that needs a program fetches it
+by a pin and checks it before it runs it, as `tools/protobuf-conformance.mjs` fetches protobuf's
+conformance runner by `tools/protobuf-conformance/runner.json`, its sha512, and
+`builder/tools/fetch-protoc.mjs` protoc by `builder/protoc.json`, its sha256, into a folder git
+ignores, with no manifest and no lockfile
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+The spec's are Python 3.14's: its generators use the standard library alone, and its check,
+`spec/check.py`, needs `jsonschema`, which `spec/requirements.in` names and `spec/requirements.txt`
+locks with every hash, installed with `--require-hashes --only-binary=:all:`.
 
 **A language that joins comes the same way**: a folder under `implementations/`, its own native
 toolchain, and a CI job of its own. A part every language uses that is neither an implementation nor

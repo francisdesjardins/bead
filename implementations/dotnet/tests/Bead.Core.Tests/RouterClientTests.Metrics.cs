@@ -71,6 +71,7 @@ public sealed partial class RouterClientTests
         Assert.Equal(expected.Order(StringComparer.Ordinal), CallCountsOf(registry));
     }
 
+    // debugging 2.2 and 2.3
     [Fact]
     public async Task A_debug_listener_that_throws_on_an_envelope_is_reported_and_the_envelope_and_its_call_go_on_every_listener_told()
     {
@@ -137,6 +138,7 @@ public sealed partial class RouterClientTests
             CallCountsOf(registry));
     }
 
+    // debugging 9.3, 9.6.1 and 9.6.2
     [Fact]
     public async Task Counts_a_call_refused_before_it_goes_SESSION_REQUIRED_or_DESTINATION_UNREACHABLE_as_started_and_ended_in_the_turn_it_started_and_a_programmer_s_error_or_an_aborted_signal_as_nothing()
     {
@@ -185,6 +187,7 @@ public sealed partial class RouterClientTests
             }));
     }
 
+    // debugging 9.6.11
     [Fact]
     public async Task Counts_a_call_its_caller_cancels_as_cancelled_and_one_its_transport_refuses_as_an_error()
     {
@@ -218,6 +221,7 @@ public sealed partial class RouterClientTests
             }).Order(StringComparer.Ordinal));
     }
 
+    // debugging 9.1.6, 10.2 and 10.3.3
     [Fact]
     public async Task Counts_a_notification_heard_under_a_subscription_it_holds_and_a_subscription_dropped_at_this_end_by_the_failure_that_ends_it_or_with_its_connection_never_by_its_own_cancel()
     {

@@ -1,14 +1,14 @@
 """Writes spec/codecs.json: what each encoding of spec section 17 reads of bytes, and what it writes back
 of them or why it refuses them; and what a writer writes of a value, or why it refuses it (decisions
-0016 and 0018).
+0016 and 0031).
 
 Each outcome is section 17 played here a third time, beside the two sides, never written by hand: a
 reader that refuses as 17.5 says, in the order the TypeScript reader checks, the depth counted over the
 text before it is parsed; and a writer of RFC 8785's canonical form, ECMAScript's Number::toString from
 repr's shortest digits, its strings as JSON.stringify writes a well-formed one, its names sorted by their
 UTF-16 code units. A proto payload is read by a reader of Probe, spec/codecs.proto, written from
-protobuf's Encoding guide and 17.9.2 to 17.9.4, and a proto value written one field at a time; where
-protobuf states no rule, the reader stops, and no row may hold it. A row that would be refused for two
+protobuf's Encoding guide and 17.9.2 to 17.9.6, its packed records, its map's entries and its group
+among them, and a proto value written one field at a time. A row that would be refused for two
 reasons fails here, as does a written form that does not read back to itself. A backslash is chr(92),
 so that no escape this file builds is read before it is built."""
 import json
@@ -38,7 +38,8 @@ A_SURROGATE_ALONE, PAST_A_DOUBLE, NESTED_PAST = 'a surrogate alone', 'a number p
 NOT_FINITE, NO_JSON_VALUE = 'not a finite number', 'no JSON value'
 NOT_ITS_MESSAGE, PROTO_NESTED_PAST = 'not its message', 'nested past 100'
 
-# 17.9.3: a proto message nested more than this below the top one is refused
+# 17.9.3: a proto message nested more than this below the top one is refused, a group and a map's
+# entry each counting as a message
 PROTO_DEPTH = 100
 
 # the row of docs/support.md a value crosses that a side's type cannot hold
@@ -46,13 +47,6 @@ NOT_HELD = "A value a side's type cannot hold"
 
 # the row of docs/support.md a proto string's leading U+FEFF crosses, which a stock library strips
 LEADING_FEFF = "A string's leading U+FEFF in a proto payload"
-
-# the rows of docs/support.md a stock library crosses where it reads bytes that are no encoding of the
-# message, against protobuf's own rules
-PAST_ITS_MESSAGE = 'A proto record past the end of its message'
-LONG_UNKNOWN_VARINT = 'An unknown proto varint of more than 10 bytes'
-LONG_TAG = 'A proto tag of more than 5 bytes, or past 32 bits'
-LONG_LENGTH = 'A proto length past 32 bits'
 
 
 class Members(list):
@@ -293,8 +287,21 @@ def text_read(data):
 # the wire types of protobuf's Encoding guide, "Message Structure"
 VARINT, I64, LEN, SGROUP, EGROUP, I32 = 0, 1, 2, 3, 4, 5
 
-# Probe's fields by number, as spec/codecs.proto declares them: its name, its type, and its wire type
-FIELDS = {1: ('text', 'string', LEN), 2: ('number', 'uint32', VARINT), 3: ('child', 'Probe', LEN)}
+# Probe's fields by number, as spec/codecs.proto declares them: its name, its type, and the wire types
+# its records take, a repeated scalar of a numeric type its own and the length-delimited, packed or not
+# (17.9.5), and a delimited message the start group's
+FIELDS = {
+    1: ('text', 'string', (LEN,)),
+    2: ('number', 'uint32', (VARINT,)),
+    3: ('child', 'Probe', (LEN,)),
+    10: ('counts', 'repeated uint32', (VARINT, LEN)),
+    11: ('stamps', 'repeated fixed32', (I32, LEN)),
+    12: ('children', 'map<string, Probe>', (LEN,)),
+    13: ('delimited', 'Probe', (SGROUP,)),
+}
+
+# a map's entry, as it is on the wire: a message of its key at 1 and its value at 2 (Encoding, "Maps")
+ENTRY = {1: ('key', 'string', (LEN,)), 2: ('value', 'Probe', (LEN,))}
 
 # the 64 bits a varint holds, and the 32 of them a uint32 keeps, truncated as protobuf reads one
 UINT32 = 0xFFFF_FFFF
@@ -302,25 +309,23 @@ UINT64 = 0xFFFF_FFFF_FFFF_FFFF
 
 
 class NotItsMessage(Exception):
-    """Bytes that are no encoding of Probe (17.9.1)."""
+    """Bytes that are no encoding of Probe (17.9.1), or that 17.9.5 or 17.9.6 refuses."""
 
 
 class NestedPast(Exception):
-    """A message nested more than 100 deep below the top one (17.9.3)."""
-
-
-class NoRule(Exception):
-    """What protobuf states no rule of: no row holds it, and the support matrix says what each library
-    does."""
+    """A message nested more than 100 deep below the top one, a group and a map's entry each counting
+    as a message (17.9.3)."""
 
 
 def declared_fields():
-    """Probe's fields as spec/codecs.proto declares them, each by its number: its name and its type."""
+    """Probe's fields as spec/codecs.proto declares them, each by its number: its name, its type, and
+    whether it is delimited, a group on the wire."""
     with open(ROOT + 'codecs.proto', encoding='utf-8') as file:
         found = re.search(r'^message Probe \{\n(.*?)^\}', file.read(), re.MULTILINE | re.DOTALL)
 
-    return {int(number): (name, kind) for kind, name, number in re.findall(r'^ +(\w+) (\w+) = (\d+);$',
-                                                                           found.group(1), re.MULTILINE)}
+    return {int(number): (name, kind, bool(delimited)) for kind, name, number, delimited in re.findall(
+        r'^ +((?:repeated )?(?:map<\w+, \w+>|\w+)) (\w+) = (\d+)( \[features\.message_encoding = DELIMITED\])?;$',
+        found.group(1), re.MULTILINE)}
 
 
 def proto_varint(data, at):
@@ -355,51 +360,20 @@ def proto_tag(data, at):
     return tag, end
 
 
-def proto_skip(data, at, number, wire):
-    """Where an unknown field of `number` and `wire` ends, its value skipped (Encoding, "Message
-    Structure"), a group to the end group of its number."""
-    if wire == VARINT:
-        return proto_varint(data, at)[1]
-
-    if wire == SGROUP:
-        while True:
-            tag, at = proto_tag(data, at)
-
-            if tag >> 3 == 0:
-                raise NotItsMessage('field number 0')
-
-            if tag & 7 == EGROUP:
-                if tag >> 3 != number:
-                    raise NotItsMessage('an end group of another group')
-
-                return at
-
-            at = proto_skip(data, at, tag >> 3, tag & 7)
-
-    if wire == LEN:
-        length, at = proto_varint(data, at)
-    elif wire in (I64, I32):
-        length = 8 if wire == I64 else 4
-    else:
-        # 6 and 7, which are no wire type: an end group is met by its group, or refused where it opens none
-        raise NotItsMessage(f'the wire type {wire} where a field starts')
+def proto_length(data, at):
+    """A length-delimited record's bytes, after its length, and where it ends, within the bytes."""
+    length, at = proto_varint(data, at)
 
     if at + length > len(data):
         raise NotItsMessage('a length past the bytes')
 
-    return at + length
+    return data[at:at + length], at + length
 
 
-def probe_of():
-    """A Probe with no field set: proto3's defaults, and its child not set."""
-    return {'text': '', 'number': 0, 'child': None}
-
-
-def proto_read_into(probe, data, depth):
-    """Reads `data` into `probe`, `depth` messages below the top one: a scalar given twice its last, a
-    message given twice merged, as protobuf parses it (Encoding, "Last One Wins")."""
-    at = 0
-
+def proto_fields(data, at, group):
+    """The fields of the message whose records start at `at`, each its number, its wire type and where
+    its value starts, to the end of `data`, or for a group of the number `group` to its end group; then
+    None and where the message ended. Each send gives where the field's value ended."""
     while at < len(data):
         tag, at = proto_tag(data, at)
         number, wire = tag >> 3, tag & 7
@@ -407,43 +381,185 @@ def proto_read_into(probe, data, depth):
         if number == 0:
             raise NotItsMessage('field number 0')
 
-        # an end group here closes no group, whatever its number, and 6 and 7 are no wire type
+        if wire == EGROUP and number == group:
+            yield None, None, at
+            return
+
+        # an end group closes no group but its own, and 6 and 7 are no wire type
         if wire in (EGROUP, 6, 7):
             raise NotItsMessage(f'the wire type {wire} where a field starts')
 
+        at = yield number, wire, at
+
+    if group is not None:
+        raise NotItsMessage('a group never closed')
+
+    yield None, None, at
+
+
+def proto_skip(data, at, number, wire, depth):
+    """Where an unknown field of `number` and `wire` ends, `depth` messages below the top, its value
+    skipped (Encoding, "Message Structure"): a length-delimited record whole, a group as a message to
+    its own end group."""
+    if wire == VARINT:
+        return proto_varint(data, at)[1]
+
+    if wire == LEN:
+        return proto_length(data, at)[1]
+
+    if wire == SGROUP:
+        if depth + 1 > PROTO_DEPTH:
+            raise NestedPast()
+
+        fields = proto_fields(data, at, number)
+        number, wire, at = next(fields)
+
+        while number is not None:
+            number, wire, at = fields.send(proto_skip(data, at, number, wire, depth + 1))
+
+        return at
+
+    width = 8 if wire == I64 else 4
+
+    if at + width > len(data):
+        raise NotItsMessage('a fixed value past the bytes')
+
+    return at + width
+
+
+def probe_of():
+    """A Probe with no field set: its defaults, and its fields of messages not set."""
+    return {'text': '', 'number': 0, 'child': None, 'counts': [], 'stamps': [], 'children': {}, 'delimited': None}
+
+
+def text_at(data, at):
+    """A string's record and where it ends, read strictly, a leading U+FEFF kept as a character (17.9.4),
+    as 'utf-8' keeps it."""
+    field, at = proto_length(data, at)
+
+    try:
+        return field.decode('utf-8'), at
+    except UnicodeDecodeError as error:
+        raise NotItsMessage('a string that is not UTF-8') from error
+
+
+def packed(data, at, width):
+    """A packed record's values and where it ends: its fixed width dividing its length, or each varint
+    ending within it, the last at its end (Encoding, "Packed Repeated Fields")."""
+    field, at = proto_length(data, at)
+
+    if width is not None and len(field) % width:
+        raise NotItsMessage('a packed record whose length its values do not divide')
+
+    if width is not None:
+        return [int.from_bytes(field[index:index + width], 'little') for index in range(0, len(field), width)], at
+
+    values, within = [], 0
+
+    while within < len(field):
+        # * a varint cut short at the record's end is one that runs past it
+        value, within = proto_varint(field, within)
+        values.append(value & UINT32)
+
+    return values, at
+
+
+def message_at(probe, data, at, depth):
+    """Reads the length-delimited message at `at` into `probe`, `depth` messages below the top, and
+    where its record ends."""
+    field, at = proto_length(data, at)
+
+    if depth > PROTO_DEPTH:
+        raise NestedPast()
+
+    proto_read_into(probe, field, 0, depth, None)
+    return at
+
+
+def entry_at(data, at, depth):
+    """A map's entry, read as the message it is on the wire, `depth` messages below the top, its key, its
+    value and where its record ends: each at a wire type its type takes (17.9.5), and no other field
+    (17.9.6); a key or a value not given its default, a value given twice merged."""
+    field, at = proto_length(data, at)
+
+    if depth > PROTO_DEPTH:
+        raise NestedPast()
+
+    key, value = '', None
+    fields = proto_fields(field, 0, None)
+    number, wire, within = next(fields)
+
+    while number is not None:
+        if number not in ENTRY:
+            raise NotItsMessage("a field a map's entry does not declare")
+
+        if wire not in ENTRY[number][2]:
+            raise NotItsMessage('a field at a wire type its type does not take')
+
+        if number == 1:
+            key, within = text_at(field, within)
+        else:
+            value = value or probe_of()
+            within = message_at(value, field, within, depth + 1)
+
+        number, wire, within = fields.send(within)
+
+    return key, value or probe_of(), at
+
+
+def proto_read_into(probe, data, at, depth, group):
+    """Reads the records from `at` into `probe`, `depth` messages below the top, to the end of `data`, or
+    for a group of the number `group` to its end group, and where they ended: a scalar given twice its
+    last, a message given twice merged, a repeated field's values appended, packed or not, and a map's
+    key given twice its last value, as protobuf parses them (Encoding, "Last One Wins")."""
+    fields = proto_fields(data, at, group)
+    number, wire, at = next(fields)
+
+    while number is not None:
         if number not in FIELDS:
-            at = proto_skip(data, at, number, wire)
+            number, wire, at = fields.send(proto_skip(data, at, number, wire, depth))
             continue
 
-        name, _, its_wire = FIELDS[number]
+        name, _, wires = FIELDS[number]
 
-        # ! a known field at a wire type not its own is no rule of protobuf's: a platform row
-        if wire != its_wire:
-            raise NoRule(f'{name} at the wire type {wire}')
-
-        if wire == VARINT:
-            value, at = proto_varint(data, at)
-            probe[name] = value & UINT32
-            continue
-
-        length, at = proto_varint(data, at)
-
-        if at + length > len(data):
-            raise NotItsMessage('a length past the bytes')
-
-        field, at = data[at:at + length], at + length
+        # * 17.9.5: a field at a wire type its type does not take, which protobuf's reference parsers
+        # keep as an unknown field and one stock library reads as its declared type
+        if wire not in wires:
+            raise NotItsMessage('a field at a wire type its type does not take')
 
         if name == 'text':
-            try:
-                # * strict, and a leading U+FEFF kept as a character (17.9.4), as 'utf-8' keeps it
-                probe['text'] = field.decode('utf-8')
-            except UnicodeDecodeError as error:
-                raise NotItsMessage('a string that is not UTF-8') from error
-        elif depth + 1 > PROTO_DEPTH:
-            raise NestedPast()
-        else:
+            probe['text'], at = text_at(data, at)
+        elif name == 'number':
+            value, at = proto_varint(data, at)
+            probe['number'] = value & UINT32
+        elif name == 'counts' and wire == VARINT:
+            value, at = proto_varint(data, at)
+            probe['counts'].append(value & UINT32)
+        elif name == 'stamps' and wire == I32:
+            if at + 4 > len(data):
+                raise NotItsMessage('a fixed value past the bytes')
+
+            probe['stamps'].append(int.from_bytes(data[at:at + 4], 'little'))
+            at += 4
+        elif name in ('counts', 'stamps'):
+            values, at = packed(data, at, 4 if name == 'stamps' else None)
+            probe[name].extend(values)
+        elif name == 'children':
+            key, value, at = entry_at(data, at, depth + 1)
+            probe['children'][key] = value
+        elif name == 'child':
             probe['child'] = probe['child'] or probe_of()
-            proto_read_into(probe['child'], field, depth + 1)
+            at = message_at(probe['child'], data, at, depth + 1)
+        else:
+            if depth + 1 > PROTO_DEPTH:
+                raise NestedPast()
+
+            probe['delimited'] = probe['delimited'] or probe_of()
+            at = proto_read_into(probe['delimited'], data, at, depth + 1, number)
+
+        number, wire, at = fields.send(at)
+
+    return at
 
 
 def code_units(text):
@@ -458,33 +574,53 @@ def text_of(units):
 
 
 def nested_below(probe):
-    """How many messages nest below `probe` through child."""
-    count = 0
+    """How deep messages nest below `probe`, at the deepest: through child and delimited, and through each
+    map's entry and its value, an entry counting as a message (17.9.3)."""
+    deepest = 0
 
-    while probe['child'] is not None:
-        count, probe = count + 1, probe['child']
+    for below in (probe['child'], probe['delimited']):
+        if below is not None:
+            deepest = max(deepest, 1 + nested_below(below))
 
-    return count
+    for value in probe['children'].values():
+        deepest = max(deepest, 2 + nested_below(value))
+
+    return deepest
+
+
+def held(probe):
+    """What was read of a Probe: its text, as UTF-16 code units, its number, and how deep messages nest
+    below it."""
+    return {'text': code_units(probe['text']), 'number': probe['number'], 'nested': nested_below(probe)}
 
 
 def proto_read(data):
-    """The one reason 17.9 refuses the bytes for, or what was read of them: the top Probe's text, as
-    UTF-16 code units, its number, and how many messages nest below it."""
+    """The one reason 17.9 refuses the bytes for, or what was read of them: the top Probe's text, its
+    number and how deep messages nest below it; counts and stamps, where it holds any; children, where
+    it holds any, each key's code units to what was read of its value; and what was read of delimited,
+    where it is set."""
     probe = probe_of()
 
     try:
-        proto_read_into(probe, data, 0)
+        proto_read_into(probe, data, 0, 0, None)
     except NotItsMessage:
         return [NOT_ITS_MESSAGE], None
     except NestedPast:
         return [PROTO_NESTED_PAST], None
 
-    return [], {'text': code_units(probe['text']), 'number': probe['number'], 'nested': nested_below(probe)}
+    read = held(probe)
 
+    for name in ('counts', 'stamps'):
+        if probe[name]:
+            read[name] = probe[name]
 
-def proto_length(data):
-    """A length-delimited value's varint length and the value."""
-    return proto_varint_of(len(data)) + data
+    if probe['children']:
+        read['children'] = {code_units(key): held(probe['children'][key]) for key in sorted(probe['children'])}
+
+    if probe['delimited'] is not None:
+        read['delimited'] = held(probe['delimited'])
+
+    return [], read
 
 
 def proto_varint_of(value):
@@ -498,19 +634,25 @@ def proto_varint_of(value):
     return bytes(written + bytes([value]))
 
 
+def proto_record(number, wire, value):
+    """A record: its tag, then its value, a length-delimited one after its length."""
+    return proto_varint_of(number << 3 | wire) + (proto_varint_of(len(value)) + value if wire == LEN else value)
+
+
 def proto_write(probe):
-    """A Probe's bytes, its fields in their numbers' order: a scalar at its default not written, its
-    presence implicit in proto3, and child written where it is set, an empty message included."""
+    """The bytes of a Probe given one field or none, its fields in their numbers' order: a scalar at its
+    default not written, its presence implicit, and child written where it is set, an empty message
+    included."""
     written = b''
 
     if probe['text']:
-        written += proto_varint_of(1 << 3 | LEN) + proto_length(probe['text'].encode('utf-8'))
+        written += proto_record(1, LEN, probe['text'].encode('utf-8'))
 
     if probe['number']:
-        written += proto_varint_of(2 << 3 | VARINT) + proto_varint_of(probe['number'])
+        written += proto_record(2, VARINT, proto_varint_of(probe['number']))
 
     if probe['child'] is not None:
-        written += proto_varint_of(3 << 3 | LEN) + proto_length(proto_write(probe['child']))
+        written += proto_record(3, LEN, proto_write(probe['child']))
 
     return written
 
@@ -523,6 +665,18 @@ def chain(below):
         probe = {**probe_of(), 'child': probe}
 
     return probe
+
+
+def map_chain(entries):
+    """The bytes of a Probe with that many maps' entries nested below it, each holding the next Probe as
+    its value under the key '', the last with no field set: twice as many messages below the top, each
+    entry counting as one."""
+    written = b''
+
+    for _ in range(entries):
+        written = proto_record(12, LEN, proto_record(2, LEN, written))
+
+    return written
 
 
 # ── The payloads ────────────────────────────────────────────────────────────────────────────────
@@ -689,28 +843,55 @@ PAYLOADS = [
     # a length is an int32 varint: protobuf's BadLength_Varint32BitOverflow
     ('a length past 32 bits', 'proto', ['17.9.1'], bytes.fromhex('0A 80 80 80 80 10')),
     ('a length past 32 bits, a field after', 'proto', ['17.9.1'], bytes.fromhex('0A 80 80 80 80 10 10 07')),
+    # a field Probe declares, at a wire type its type does not take: refused, its map's entries' included
+    ('a string at the varint wire type', 'proto', ['17.9.5'], bytes.fromhex('08 61')),
+    ('a uint32 at the length-delimited wire type', 'proto', ['17.9.5'], bytes.fromhex('12 00')),
+    ('a uint32 at the fixed32 wire type', 'proto', ['17.9.5'], bytes.fromhex('15 01 02 03 04')),
+    # * one stock library reads 03 as the child's length, and the text after as the child's, past it
+    ('a message at the varint wire type, a string after', 'proto', ['17.9.5'],
+     bytes.fromhex('18 03 0A 05 61 62 63 64 65')),
+    ('stamps at the varint wire type', 'proto', ['17.9.5'], bytes.fromhex('58 01')),
+    ('delimited at the length-delimited wire type', 'proto', ['17.9.5'], bytes.fromhex('6A 03 0A 01 61')),
+    # * one stock library reads 02 as the key's length, and the value's record as the key
+    ("a map's key at the varint wire type", 'proto', ['17.9.5'], bytes.fromhex('62 04 08 02 12 00')),
+    # * one stock library reads the undeclared field's bytes as the entry's key and value: z to abcd, where
+    # protobuf's reference parsers skip it and read '' to an empty Probe
+    ("a map's entry with a field it does not declare", 'proto', ['17.9.6'],
+     bytes.fromhex('62 0C 1A 0A 01 7A 12 06 0A 04 61 62 63 64')),
     ('an end group no group opened', 'proto', ['17.9.1'], bytes.fromhex('24')),
     ('an unknown group, closed', 'proto', ['17.9'], bytes.fromhex('23 24')),
     ('an unknown group never closed', 'proto', ['17.9.1'], bytes.fromhex('23')),
+    # a repeated scalar of a numeric type, packed or not, and a packed record's values ending at its end
+    ('counts packed', 'proto', ['17.9'], bytes.fromhex('52 03 01 02 03')),
+    ('counts unpacked and packed, in one message', 'proto', ['17.9'], bytes.fromhex('50 01 52 02 02 03')),
+    ('stamps unpacked', 'proto', ['17.9'], bytes.fromhex('5D 01 00 00 00')),
+    ('stamps packed', 'proto', ['17.9'], bytes.fromhex('5A 08 01 00 00 00 02 00 00 00')),
+    ('a packed fixed32 whose length is no multiple of 4', 'proto', ['17.9.1'],
+     bytes.fromhex('5A 05 01 00 00 00 02')),
+    # * one stock library reads 81 01 as a value, past the record, then 10 07 as the number 7
+    ('a packed uint32 whose last varint runs past its record, a field after', 'proto', ['17.9.1'],
+     bytes.fromhex('52 02 05 81 01 10 07')),
+    # a map's entry, a message on the wire, whatever the order of its fields
+    ("a map's entry, its value before its key", 'proto', ['17.9'], bytes.fromhex('62 07 12 03 0A 01 78 0A 00')),
+    # a group: delimited, closed by an end group of its own number
+    ('a group closed by its own end group', 'proto', ['17.9'], bytes.fromhex('6B 0A 01 61 6C')),
+    ("a group closed by another number's end group", 'proto', ['17.9.1'], bytes.fromhex('6B 0A 01 61 44')),
+    ('a group never closed', 'proto', ['17.9.1'], bytes.fromhex('6B 0A 01 61')),
     ('99 messages below the top', 'proto', ['17.9.3'], proto_write(chain(PROTO_DEPTH - 1))),
     ('100 messages below the top', 'proto', ['17.9.3'], proto_write(chain(PROTO_DEPTH))),
     ('101 messages below the top', 'proto', ['17.9.3'], proto_write(chain(PROTO_DEPTH + 1))),
+    # * each entry counts as a message, so 50 deep is 100 below the top and 51 is 102, which one stock
+    # library, counting a map's value alone, reads
+    ('50 maps deep, 100 messages below the top, each entry counted', 'proto', ['17.9.3'],
+     map_chain(PROTO_DEPTH // 2)),
+    ('51 maps deep, 102 messages below the top, each entry counted', 'proto', ['17.9.3'],
+     map_chain(PROTO_DEPTH // 2 + 1)),
 ]
 
 # the payloads a stock library reads otherwise than 17.9 says, each by the rows it crosses and the
 # languages they excuse
 PROTO_DIFFERS = {
     "a string's leading U+FEFF": [(LEADING_FEFF, 'TypeScript')],
-    'an unknown varint of 11 bytes': [(LONG_UNKNOWN_VARINT, 'TypeScript')],
-    'an unknown record past the end of its message': [(PAST_ITS_MESSAGE, 'TypeScript')],
-    'a string past the end of its message': [(PAST_ITS_MESSAGE, 'TypeScript')],
-    'a tag of 6 bytes': [(LONG_TAG, 'C#')],
-    'a tag of 9 bytes': [(LONG_TAG, 'C#')],
-    'a tag of 5 bytes past 32 bits': [(LONG_TAG, 'C#')],
-    'a tag of 7 bytes past 32 bits': [(LONG_TAG, 'C#')],
-    'a tag past 32 bits, of an unknown field': [(LONG_TAG, 'C#')],
-    'a length past 32 bits': [(LONG_LENGTH, 'TypeScript'), (LONG_LENGTH, 'C#')],
-    'a length past 32 bits, a field after': [(LONG_LENGTH, 'TypeScript'), (LONG_LENGTH, 'C#')],
 }
 
 
@@ -874,8 +1055,7 @@ def value_outcome(encoding, value):
 
         # what is written reads back to the value given: its text, its number, and its child's presence
         reasons, read = proto_read(written)
-        assert not reasons and read == {'text': code_units(value['text']), 'number': value['number'],
-                                        'nested': nested_below(value)}, written
+        assert not reasons and read == held(value), written
 
         return {'written': hexadecimal(written)}
 
@@ -895,8 +1075,10 @@ def value_outcome(encoding, value):
 
 
 def value_entry(name, encoding, clauses, value, excused):
-    return {'name': name, 'encoding': encoding, 'clauses': clauses, 'value': value,
-            **value_outcome(encoding, given(value)),
+    outcome = value_outcome(encoding, given(value))
+    # a value refused plays 17.2 besides its own clause: a writer never writes what a reader refuses
+    cited = ['17.2', *clauses] if 'refused' in outcome else clauses
+    return {'name': name, 'encoding': encoding, 'clauses': cited, 'value': value, **outcome,
             **({'differs': [{'row': NOT_HELD, 'language': excused}]} if excused else {})}
 
 
@@ -907,16 +1089,24 @@ for bits, name, written in APPENDIX_B:
 assert bits_of(float(tie())) == TIE_LOW and bits_of(float(past_the_tie())) == TIE_HIGH
 assert len(utf8(tie())) == 774
 
-# the reader's fields are the ones spec/codecs.proto declares
-assert declared_fields() == {number: (name, kind) for number, (name, kind, _) in FIELDS.items()}, declared_fields()
+# the reader's fields are the ones spec/codecs.proto declares, its delimited one alone a group on the wire
+assert declared_fields() == {number: (name, kind, wires == (SGROUP,)) for number, (name, kind, wires) in FIELDS.items()},     declared_fields()
 
 payloads = [payload_entry(*entry) for entry in PAYLOADS]
 values = [value_entry(*entry) for entry in VALUES]
 
-assert len(payloads) == 112 and len(values) == 44
+assert len(payloads) == 132 and len(values) == 44
 
-# the proto rows as 0018 states them, each taken with its text, its number and how many nest below the
-# top, or refused for its reason; and the deep rows' bytes as protobuf's writers write them
+
+
+def taken(text, number, nested, **more):
+    """A proto row taken: what was read of the top Probe, its text, its number, how deep messages nest
+    below it, and what else it holds."""
+    return {'text': text, 'number': number, 'nested': nested, **more}
+
+
+# the proto rows as 0031 and 0028 state them, each taken with what was read, or refused for its reason;
+# and the deep rows' bytes as protobuf's writers write them
 FEFF_A, A_FEFF = code_units(chr(0xFEFF) + 'a'), code_units('a' + chr(0xFEFF))
 PROTO_RECORD = {
     'an empty payload': ('', 0, 0), 'a string and a number': ('0061', 7, 0),
@@ -940,9 +1130,25 @@ PROTO_RECORD = {
     'an unknown group, closed': ('', 0, 0), 'an unknown group never closed': NOT_ITS_MESSAGE,
     '99 messages below the top': ('', 0, 99), '100 messages below the top': ('', 0, 100),
     '101 messages below the top': PROTO_NESTED_PAST,
+    'a string at the varint wire type': NOT_ITS_MESSAGE, 'a uint32 at the length-delimited wire type': NOT_ITS_MESSAGE,
+    'a uint32 at the fixed32 wire type': NOT_ITS_MESSAGE,
+    'a message at the varint wire type, a string after': NOT_ITS_MESSAGE,
+    'stamps at the varint wire type': NOT_ITS_MESSAGE, 'delimited at the length-delimited wire type': NOT_ITS_MESSAGE,
+    "a map's key at the varint wire type": NOT_ITS_MESSAGE,
+    "a map's entry with a field it does not declare": NOT_ITS_MESSAGE,
+    'counts packed': taken('', 0, 0, counts=[1, 2, 3]),
+    'counts unpacked and packed, in one message': taken('', 0, 0, counts=[1, 2, 3]),
+    'stamps unpacked': taken('', 0, 0, stamps=[1]), 'stamps packed': taken('', 0, 0, stamps=[1, 2]),
+    'a packed fixed32 whose length is no multiple of 4': NOT_ITS_MESSAGE,
+    'a packed uint32 whose last varint runs past its record, a field after': NOT_ITS_MESSAGE,
+    "a map's entry, its value before its key": taken('', 0, 2, children={'': taken('0078', 0, 0)}),
+    'a group closed by its own end group': taken('', 0, 1, delimited=taken('0061', 0, 0)),
+    "a group closed by another number's end group": NOT_ITS_MESSAGE, 'a group never closed': NOT_ITS_MESSAGE,
+    '50 maps deep, 100 messages below the top, each entry counted': taken('', 0, 100, children={'': taken('', 0, 98)}),
+    '51 maps deep, 102 messages below the top, each entry counted': PROTO_NESTED_PAST,
 }
-outcomes = {entry['name']: entry.get('refused') or tuple(entry['read'].values())
-            for entry in payloads if entry['encoding'] == 'proto'}
+PROTO_RECORD = {name: taken(*outcome) if isinstance(outcome, tuple) else outcome for name, outcome in PROTO_RECORD.items()}
+outcomes = {entry['name']: entry.get('refused') or entry['read'] for entry in payloads if entry['encoding'] == 'proto'}
 
 assert outcomes == PROTO_RECORD, {name: outcome for name, outcome in outcomes.items() if PROTO_RECORD.get(name) != outcome}
 assert [entry['bytes'][:8] for entry in payloads if entry['name'].endswith('below the top')] == [
@@ -954,9 +1160,9 @@ assert {entry['name']: entry['written'] for entry in values if entry['encoding']
 document = {
     '$schema': 'schemas/codecs.schema.json',
     '$comment': [
-        "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0018), which every implementation's harness plays through its side's codecs.",
+        "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
         'payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.',
-        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, the bound of 17.9.3 set in the call as generated code sets it. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; and nested, how many messages nest below it through child. A harness checks those three and nothing else, since protobuf fixes no message's bytes whole.",
+        "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), and the bound of 17.9.3 set in the call. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; and delimited, where it is set, what was read of it, its text, number and nested. A harness checks these and nothing else, since protobuf fixes no message's bytes whole.",
         'values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.',
         'json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file.',
         'double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity.',

@@ -605,10 +605,14 @@ const showExposition = (details: HTMLDetailsElement, text: string): void => {
   written.textContent = text;
 };
 
+// a public read needs no identity: it presents none, so a token withdrawn neither fails it nor is
+// withdrawn by it
+const PUBLIC = Object.freeze({ credential: { scheme: CredentialScheme.NONE }, timeout: 5_000 });
+
 // read once at a time, however often the timer asks
 const refreshStats = mergedOf(async () => {
   try {
-    showStats(JSON.parse(await calls.stats('')({ timeout: 5_000 })) as IServerStats);
+    showStats(JSON.parse(await calls.stats('')(PUBLIC)) as IServerStats);
   } catch (reason) {
     shown.health.dataset['status'] = 'unread';
     shown.health.textContent = `unread: ${reasonOf(reason)}`;
@@ -623,7 +627,7 @@ const refreshMetrics = mergedOf(async () => {
   showExposition(shown.clientExposition, mine);
 
   try {
-    const theirs = await calls.metrics('')({ timeout: 5_000 });
+    const theirs = await calls.metrics('')(PUBLIC);
     const rows = metricsOf(theirs, READ_NAMES);
 
     showAnswered(answeredOf(rows));
@@ -721,7 +725,11 @@ const ACTIONS: Readonly<Record<string, () => Promise<string>>> = Object.freeze({
     return `counter at ${await calls.increment('')()}`;
   },
   logout: async () => {
-    await calls.logout('')();
+    // a token withdrawn holds no session to end: the page forgets it alone, in writing
+    if (!client.router.isCredentialWithdrawn) {
+      await calls.logout('')();
+    }
+
     client.router.credential = undefined;
     showIdentity('logged out');
 
@@ -834,9 +842,12 @@ client.router.on('debug', (info) => {
   }
 });
 
-// a token the server refused, SESSION_REQUIRED, is presented no more: the page signs in again
+// a token the server refused, SESSION_REQUIRED, is presented no more: a call that would present
+// it fails before it goes until the page signs in again, or out
 client.router.on('credentialWithdrawn', () => {
-  showIdentity('logged out: the server refused the token — log in again');
+  showIdentity(
+    'logged out: the server refused the token — log in again; calls that need it fail until then'
+  );
 });
 
 // a subscription the server ended — its session at its end, or ended by a logout — is held no more,

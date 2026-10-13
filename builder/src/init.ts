@@ -50,8 +50,17 @@ export interface IInitialized {
 
 // constants
 
-// a proto package's part, lower snake case, as buf's STANDARD lint asks
-const NAME = /^[a-z][a-z0-9_]*$/u;
+// a proto package's part, buf's lower snake case: words of lower-case letters and digits, each
+// after the first parted by one underscore, a letter first
+const NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/u;
+
+// what Windows PowerShell's `>` writes, which pwsh does not: a UTF-16 or a UTF-8 byte order mark,
+// and CRLF
+const UTF16_BOMS: readonly (readonly [number, number])[] = [
+  [0xff, 0xfe],
+  [0xfe, 0xff],
+];
+const UTF8_BOM = [0xef, 0xbb, 0xbf] as const;
 
 const LANGUAGES: readonly string[] = Object.values(Language);
 
@@ -64,6 +73,24 @@ const OUT: Readonly<Record<Language, string>> = Object.freeze({
 });
 
 // helpers
+
+// why a wrapper's bytes differ, where Windows PowerShell's `>` gives the cause: none otherwise
+const causeOf = (bytes: Uint8Array): string => {
+  const [first, second, third] = bytes;
+  const cause = UTF16_BOMS.some(([one, two]) => {
+    return first === one && second === two;
+  })
+    ? 'a UTF-16 byte order mark'
+    : first === UTF8_BOM[0] && second === UTF8_BOM[1] && third === UTF8_BOM[2]
+      ? 'a UTF-8 byte order mark'
+      : Buffer.from(bytes).includes('\r\n')
+        ? 'CRLF'
+        : undefined;
+
+  return cause === undefined
+    ? ''
+    : `, by ${cause}: Windows PowerShell's > wrote it; run the line in PowerShell 7.6 (pwsh)`;
+};
 
 // `hello_world` as a type's name: HelloWorld
 const pascalOf = (name: string): string => {
@@ -108,6 +135,8 @@ const configOf = (name: string, languages: readonly Language[]): string => {
         ? ['  - language: typescript', `    out: ${OUT[language]}`, '    importExtension: ts']
         : ['  - language: csharp', `    out: ${OUT[language]}`];
     }),
+    "# the output folders are beadc's own: generate takes out what it no longer writes there",
+    'clean: true',
     '',
   ].join('\n');
 };
@@ -231,7 +260,7 @@ export const initProject = (
 
   if (!NAME.test(name)) {
     throw new InputError(
-      `init ${name}: a proto package's part is due, a lower-case letter, then lower-case letters, digits and _`
+      `init ${name}: a proto package's part is due, buf's lower snake case: words of lower-case letters and digits, one _ between two, a letter first`
     );
   }
 
@@ -265,9 +294,11 @@ export const initProject = (
       return [];
     }
 
-    if (readFileSync(path, 'utf8') !== text) {
+    const bytes = readFileSync(path);
+
+    if (bytes.toString('utf8') !== text) {
       throw new InputError(
-        `init writes ${wrapper}, which is there and differs from beadc ${version}'s: init writes over no file`
+        `init writes ${wrapper}, which is there and differs from beadc ${version}'s${causeOf(bytes)}: init writes over no file`
       );
     }
 

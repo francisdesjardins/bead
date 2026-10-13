@@ -12,7 +12,7 @@ public sealed class ServiceManagerTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -296,6 +296,7 @@ public sealed class ServiceManagerTests
         Assert.Equal(Handle, Assert.Single(router.Requests).Request.Options.ConnectionHandle);
     }
 
+    // debugging 4.1.9 and 4.2.2
     [Fact]
     public async Task Rethrows_what_the_router_rejects_with_and_tells_debug_its_failure_and_only_a_failure_one()
     {
@@ -338,6 +339,7 @@ public sealed class ServiceManagerTests
         Assert.Null(seen[3].Event.Rx);
     }
 
+    // spec 17.2.4; debugging 4.3
     [Fact]
     public async Task Makes_no_call_of_a_request_whose_value_does_not_write_tracing_deprecating_and_sending_nothing()
     {
@@ -433,6 +435,7 @@ public sealed class ServiceManagerTests
         Assert.False(manager.IsDebugging);
     }
 
+    // debugging 4.1 and 4.1.8
     [Fact]
     public async Task Tells_each_step_with_its_payloads_as_they_are_the_call_s_own_and_no_copy()
     {
@@ -462,6 +465,7 @@ public sealed class ServiceManagerTests
         Assert.Same(answer, seen[3].Event.Tx);
     }
 
+    // debugging 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.5, 4.1.6, 4.1.7 and 4.1.8
     [Fact]
     public async Task Tells_each_step_of_a_request_and_once_answered_its_duration()
     {
@@ -506,6 +510,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.1.10, 4.2.1 and 4.2.2
     [Fact]
     public async Task Tells_a_call_made_and_its_answer_with_the_call_id_its_router_drew_and_their_connection()
     {
@@ -543,6 +548,7 @@ public sealed class ServiceManagerTests
         Assert.Equal([1, 1], taken);
     }
 
+    // debugging 4.2.1 and 4.4
     [Fact]
     public async Task Tells_a_call_its_router_refuses_before_drawing_an_id_with_none_its_tx_step_then_its_rx_step()
     {
@@ -570,6 +576,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.4
     [Fact]
     public async Task Tells_a_call_made_over_a_router_that_draws_no_id_with_none_its_tx_step_then_its_rx_step()
     {
@@ -649,6 +656,7 @@ public sealed class ServiceManagerTests
         Assert.Equal<(uint?, bool)>([(7, true)], told);
     }
 
+    // debugging 3.2, 4.1.5 and 4.1.6
     [Fact]
     public async Task Reads_its_router_s_clock_a_call_s_start_on_the_wall_clock_its_duration_on_the_monotonic_reading()
     {
@@ -675,6 +683,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.1.6
     [Fact]
     public async Task Tells_a_duration_in_whole_milliseconds_its_fraction_dropped()
     {
@@ -702,6 +711,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.1.5, 4.2.5 and 4.2.6
     [Fact]
     public async Task A_notification_starts_as_it_is_heard_or_sent_and_a_failed_notify_tells_its_failure_at_that_same_start()
     {
@@ -748,6 +758,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 2.2 and 2.3
     [Fact]
     public async Task A_debug_listener_that_throws_on_the_answer_is_reported_through_the_router_and_the_call_resolves_with_its_result_each_step_told()
     {
@@ -782,6 +793,7 @@ public sealed class ServiceManagerTests
         }));
     }
 
+    // debugging 2.2 and 2.3
     [Fact]
     public async Task A_request_is_answered_as_a_debug_listener_throws_on_its_rx_step_the_error_reported_through_the_router_with_its_connection()
     {
@@ -811,6 +823,7 @@ public sealed class ServiceManagerTests
         }));
     }
 
+    // debugging 3.1, 3.2 and 3.4
     [Fact]
     public async Task Reads_no_clock_for_a_call_made_a_request_answered_a_notification_sent_and_one_heard_while_nobody_listens_and_three_for_a_call_with_a_listener()
     {
@@ -878,6 +891,7 @@ public sealed class ServiceManagerTests
         Assert.Equal([(1, 2), (1, 2), (1, 0), (1, 0)], listened);
     }
 
+    // debugging 3.1 and 3.4
     [Fact]
     public async Task Allocates_for_a_call_made_a_request_answered_and_a_notification_sent_or_heard_the_same_while_nobody_listens_whoever_listened_before_and_less_than_with_a_listener()
     {
@@ -966,6 +980,7 @@ public sealed class ServiceManagerTests
         });
     }
 
+    // spec 17.2.2
     [Fact]
     public async Task An_answer_that_does_not_decode_fails_the_call_here_with_its_header_and_its_call()
     {
@@ -1259,6 +1274,7 @@ public sealed class ServiceManagerTests
             router.Responses);
     }
 
+    // spec 17.2.5
     [Fact]
     public async Task An_answer_that_cannot_go_out_leaves_the_request_to_be_answered_as_failed()
     {
@@ -1374,6 +1390,7 @@ public sealed class ServiceManagerTests
         Assert.Equal([new Responded(Target, new Text("hi"), null)], router.Responses);
     }
 
+    // debugging 4.1.10, 4.2.3 and 4.2.4
     [Fact]
     public async Task Tells_the_request_it_received_and_the_answer_it_sent_with_that_request_s_call_id_and_connection()
     {
@@ -1411,6 +1428,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.2, 4.2.4 and 4.3
     [Fact]
     public async Task Tells_a_callback_that_fails_before_it_answers_as_an_answer_that_did_not_go_with_why_beside_it_nothing_more_for_one_that_fails_once_it_answered_nor_for_an_admission_that_fails()
     {
@@ -1470,6 +1488,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.2 and 4.2.4
     [Fact]
     public async Task Tells_an_answer_its_router_cannot_send_again_at_its_start_with_why_beside_it()
     {
@@ -1517,6 +1536,75 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.2; the C# side's alone, whose router answers in its resolver's place on its own
+    // thread while the resolver's answer goes to it
+    [Fact]
+    public async Task Tells_again_at_its_start_the_failure_its_router_answered_in_its_place_as_its_answer_went_to_it()
+    {
+        var time = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var exceeded = Failure.OfProtocol(ProtocolCode.CapacityExceeded, "the notifications queued for call 7 went past their bounds");
+        Failure? held = null;
+
+        // its router answers in its place 5 ms after its answer was told, before that answer reaches it
+        router.FailureAnswered = (target) =>
+        {
+            return ReferenceEquals(target.Header, Header) ? held : null;
+        };
+        router.RespondError = (_) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(5));
+            held = exceeded;
+
+            return null;
+        };
+
+        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        var told = Assert.IsType<FailureException>(seen[^1].Error);
+
+        Assert.Same(exceeded, told.Failure);
+        Assert.Equal((FailureOrigin.Local, (RouterSide?)RouterSide.Server), (told.Origin, told.Side));
+        Assert.Equal<IEnvelopeHeader?>(new FailureHeader { CallId = 7 }, told.Header);
+        Assert.Equal<(DebugDirection, bool, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, false, null, Started, null),
+                (DebugDirection.Tx, false, new Text("hi"), Started, TimeSpan.FromMilliseconds(10)),
+                (DebugDirection.Tx, true, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
+            ],
+            seen.Select((step) =>
+            {
+                return (step.Event.Direction, step.Error is not null, step.Event.Tx, step.Event.StartedAt, step.Event.Duration);
+            }));
+
+        // a failure its own resolver answered is never told again
+        held = null;
+        router.RespondError = (answer) =>
+        {
+            held = answer.Failure;
+
+            return null;
+        };
+        seen.Clear();
+
+        await manager.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "fail" }, Answered())((_, response) =>
+        {
+            return response.Fail(Failure.OfApplication(7));
+        }).Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([(DebugDirection.Rx, DebugType.Request), (DebugDirection.Tx, DebugType.Request)], StepsOf(seen));
+    }
+
+    // debugging 4.2
     [Fact]
     public async Task Tells_nothing_more_than_its_request_for_a_callback_that_fails_on_its_signal_its_call_cancelled_or_gone_with_its_connection()
     {
@@ -1717,6 +1805,7 @@ public sealed class ServiceManagerTests
         Assert.Equal(new NotifyRequest { Procedure = Echo.Address }, request);
     }
 
+    // spec 17.2.6
     [Fact]
     public async Task A_notification_whose_value_does_not_write_goes_to_its_router_in_its_payload_s_place_its_failure_told_at_its_start_and_resolves()
     {
@@ -2367,6 +2456,7 @@ public sealed class ServiceManagerTests
         });
     }
 
+    // debugging 4.1.10, 4.2.5 and 4.2.6
     [Fact]
     public async Task Tells_a_notification_sent_or_heard_with_no_call_id()
     {
@@ -2396,6 +2486,7 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // spec 17.2.3
     [Fact]
     public async Task A_notification_that_does_not_decode_fails_here_for_the_router_to_report()
     {
@@ -2476,6 +2567,7 @@ public sealed class ServiceManagerTests
         Assert.Empty(reached);
     }
 
+    // debugging 4.3
     [Fact]
     public async Task Is_asked_before_the_payload_is_read_a_request_refused_is_refused_undecodable_and_never_traced()
     {
@@ -2562,6 +2654,7 @@ public sealed class ServiceManagerTests
         Assert.Equal(["ada", null, "bob"], received);
     }
 
+    // debugging 4.1.7
     [Fact]
     public async Task Hands_its_router_the_credential_a_call_presents_and_leaves_it_out_of_its_trace()
     {
@@ -2833,6 +2926,12 @@ public sealed class ServiceManagerTests
             return null;
         };
 
+        // the failure it answered a request with in its resolver's place; none unless a test says
+        public Func<AnswerTarget, Failure?> FailureAnswered { get; set; } = (_) =>
+        {
+            return null;
+        };
+
         // what a notify waits on once recorded, before it settles, and what it then fails with
         public Task NotifyGate { get; set; } = Task.CompletedTask;
 
@@ -2954,6 +3053,11 @@ public sealed class ServiceManagerTests
             }
 
             return Task.FromResult(target.Header.CallId);
+        }
+
+        public Failure? AnsweredOf(AnswerTarget target)
+        {
+            return FailureAnswered(target);
         }
 
         public bool HasNotification(INotificationLike notification)

@@ -98,12 +98,21 @@ public sealed class HttpServer<TData> : IBeadServer<TData>
         }
     }
 
-    /// <summary>A relay's admission by default, as <see cref="Server{TData}.RequireSessionOrCredential"/> says.</summary>
-    public BeforeRequest RequireSessionOrCredential
+    /// <summary>A relay's admission by default, as <see cref="Server{TData}.RequireCredential"/> says.</summary>
+    public BeforeRequest RequireCredential
     {
         get
         {
-            return _server.RequireSessionOrCredential;
+            return _server.RequireCredential;
+        }
+    }
+
+    /// <summary>A relay's admission that lends leg B's session, as <see cref="Server{TData}.ShareLegBSession"/> says.</summary>
+    public BeforeRequest ShareLegBSession
+    {
+        get
+        {
+            return _server.ShareLegBSession;
         }
     }
 

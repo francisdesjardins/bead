@@ -13,11 +13,13 @@
   "findings": [
     {
       "rule": "PROCEDURE_NO_DELETE",
-      "pointer": "/services/0/reserved/procedureIds"
+      "pointer": "/services/0/reserved/procedureIds",
+      "subject": "service:1/procedure:8"
     },
     {
       "rule": "NAME_NO_DELETE",
-      "pointer": "/services/0/reserved/procedureNames"
+      "pointer": "/services/0/reserved/procedureNames",
+      "subject": "service:1/procedure:8"
     }
   ]
 }

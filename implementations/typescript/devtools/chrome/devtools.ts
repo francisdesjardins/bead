@@ -4,7 +4,7 @@
 
 // dependencies
 
-import { chromeOf } from './chrome';
+import { chromeOf } from './api';
 
 // definition
 

@@ -2,8 +2,9 @@
 
 // The rules at a blueprint's level that span entries, over a blueprint the format's schema took: one
 // id and one name a scope, folded as spec 16.6 folds; the reservations; a binding's encoding its
-// message's; a notification's result; a failure its service lacks; a `proto` binding's source; and
-// the names every official target generates or reserves, and the descriptions every one writes.
+// message's; a notification's result; a failure its service lacks; a `proto` binding's source, and a
+// `proto` path's file; and the names every official target generates or reserves, and the
+// descriptions every one writes.
 
 // dependencies
 
@@ -67,6 +68,11 @@ export const checkBlueprint = (
       return message.fullName;
     })
   );
+  const protoFiles = new Set(
+    (blueprint.proto?.files ?? []).map((file) => {
+      return file.path;
+    })
+  );
   // a description every official target writes: C#'s documentation comments are XML, which holds
   // no C0 control but tab, LF and CR, nor U+FFFE and U+FFFF, raw or by reference
   const checkDescription = (description: string | undefined, at: string): void => {
@@ -114,6 +120,18 @@ export const checkBlueprint = (
       });
     }
   };
+
+  // * a path a blueprint carries names a file the front end read, and nothing else: compared
+  // exactly, since a path is never folded
+  const checkProtoFile = (file: string, at: string): void => {
+    if (!protoFiles.has(file)) {
+      report('PROTO_FILE', { at, message: `${file} is no file proto.files lists` });
+    }
+  };
+
+  (blueprint.proto?.messages ?? []).forEach((message, at) => {
+    checkProtoFile(message.file, `/proto/messages/${String(at)}/file`);
+  });
 
   const checkService = (service: IServiceEntry, index: number): void => {
     const place = `/services/${String(index)}`;
@@ -184,6 +202,18 @@ export const checkBlueprint = (
     }
 
     checkDescription(service.description, `${place}/description`);
+
+    if (service.proto !== undefined) {
+      if (blueprint.proto === undefined) {
+        report('PROTO_FILE', {
+          at: `${place}/proto`,
+          message:
+            'a service read from a .proto, in a blueprint with no proto: its file is listed nowhere',
+        });
+      } else {
+        checkProtoFile(service.proto.file, `${place}/proto/file`);
+      }
+    }
 
     for (const key of ['procedureIds', 'failureCodes'] as const) {
       service.reserved[key].forEach((range, at) => {

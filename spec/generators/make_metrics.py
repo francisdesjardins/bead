@@ -103,8 +103,6 @@ class Registry:
     def __init__(self, maximum=1000):
         self.maximum = maximum
         self.names = {}
-        # the revision each service is held at (7.3)
-        self.revisions = {}
         # the addresses each group of families names, for its ceiling (7.4)
         self.declared = {'client': set(), 'server': set(), 'notification': set()}
         # (role, address, type) -> {'started', 'handled': {(outcome, code): n}, 'buckets', 'sum', 'count'}
@@ -124,19 +122,16 @@ class Registry:
         for role in ('client', 'server'):
             self.call_series(role, None, TYPES[(role, router)], EVERY_CODE)
 
-    def declare(self, router, way, address, name, notifies=False, revision=1):
+    def declare(self, router, way, address, name, notifies=False):
         """A procedure declared on a router of that side (7.2), or Refused with its reason (7.3): its name
         at its address compared exactly, at another address of its service as spec 16.6 makes two names
-        one."""
+        one. Its service's revision keys no series, so one declared at another revision takes the same."""
         if address in self.names and self.names[address] != name:
             raise Refused('another name at its address')
 
         if any(folded(held) == folded(name) and other[0] == address[0] and other != address
                for other, held in self.names.items()):
             raise Refused('its name at another address')
-
-        if self.revisions.get(address[0], revision) != revision:
-            raise Refused('another revision of its service')
 
         groups = {'resolver': ['server'] + (['notification'] if notifies else []),
                   'requester': ['client'], 'notification': ['notification']}[way]
@@ -145,7 +140,6 @@ class Registry:
             raise Refused('past the ceiling')
 
         self.names[address] = name
-        self.revisions[address[0]] = revision
 
         for group in groups:
             self.declared[group].add(address)
@@ -286,10 +280,17 @@ assert series_count(counted) == 73 + 74
 # the units of spec/debugging.md each entry checks
 REGISTRY, DECLARED, DECLARED_REFUSED, CEILING, MADE_AHEAD, CODES_OF, SERIES_COUNTS = (
     '7.1', '7.2', '7.3', '7.4', '7.5', '7.6', '7.7')
-ANOTHER_NAME, ANOTHER_ADDRESS, ANOTHER_REVISION, PAST_CEILING = '7.3.1', '7.3.2', '7.3.3', '7.3.4'
+ANOTHER_NAME, ANOTHER_ADDRESS, PAST_CEILING = '7.3.1', '7.3.2', '7.3.3'
 NOTIFIER_DROPS = '10.3.5'
 FAMILY_TABLE, ROLES, LABELED, OUTCOME, UNDER_WAY = '8.1', '8.2', '8.3', '8.4', '8.5'
 DURATION, OBSERVED, BUCKETS = '11.1', '11.2', '11.3'
+# the rows of a table an exposition writes whole: 7.2's items, a declaration's families by its role; 7.6's,
+# the codes of a procedure's families; 8.1's, the nine families, their help and their type; 11.3's, the
+# buckets' bounds, each its le
+AS_RESOLVER, AS_REQUESTER, AS_HEARER = '7.2.1', '7.2.2', '7.2.3'
+CODES_SERVER, CODES_CLIENT, CODES_NOTIFIER, CODES_HEARER = '7.6.1', '7.6.2', '7.6.3', '7.6.4'
+FAMILY_ROWS = [f'{FAMILY_TABLE}.{row}' for row in range(1, 10)]
+BUCKET_ROWS = [f'{BUCKETS}.{row}' for row in range(1, 15)]
 EXPOSED, GROUPED, ORDERED, LABELS, NUMBERS, LINES = '12.1', '12.2', '12.3', '12.4', '12.5', '12.6'
 
 
@@ -348,7 +349,7 @@ def play(routers, declarations, counts, maximum=None):
         try:
             registry.declare(routers[declaration['router']], declaration['as'],
                              (declaration['serviceId'], declaration['procedureId']), declaration['procedureName'],
-                             declaration.get('notifies', False), declaration.get('serviceRevision', 1))
+                             declaration.get('notifies', False))
         except Refused as refused:
             assert declaration.get('refused') == str(refused), (declaration, refused)
         else:
@@ -384,11 +385,11 @@ EXPOSITIONS = [
     ('a registry given to a client\'s router makes its _OTHER series at 0: request among its client families, command among its server families',
      [MADE_AHEAD, ROLES, LABELED, ORDERED], None, ['client'], [], []),
     ('a resolver declared makes its 61 series at 0, and one whose procedure notifies 27 more, as the side that notifies',
-     [DECLARED, MADE_AHEAD, CODES_OF, SERIES_COUNTS, GROUPED, ORDERED], None, ['server'],
-     [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
+     [DECLARED, AS_RESOLVER, MADE_AHEAD, CODES_OF, CODES_SERVER, CODES_NOTIFIER, SERIES_COUNTS, GROUPED, ORDERED], None,
+     ['server'], [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
     ('a requester declared makes its 74 series at 0, and a notification registered 26, as the side that hears',
-     [DECLARED, MADE_AHEAD, CODES_OF, SERIES_COUNTS, ORDERED], None, ['client'],
-     [requester(SERVER, 1, 1, 'echo'), notification(SERVER, 1, 10, 'ticks')], []),
+     [DECLARED, AS_REQUESTER, AS_HEARER, MADE_AHEAD, CODES_OF, CODES_CLIENT, CODES_HEARER, SERIES_COUNTS, ORDERED], None,
+     ['client'], [requester(SERVER, 1, 1, 'echo'), notification(SERVER, 1, 10, 'ticks')], []),
     ('a resolver declared on a client\'s router counts its commands, and a requester on a server\'s router the commands it makes',
      [DECLARED, ROLES], None, ['client', 'server'],
      [resolver(0, 1, 9, 'clock'), requester(1, 1, 9, 'clock')],
@@ -417,7 +418,7 @@ EXPOSITIONS = [
       made(SERVER, 'failure', APPLICATION, service=1, procedure=1), made(SERVER, 'result', service=1, procedure=1),
       made(SERVER, 'failure', OTHER)]),
     ('a duration falls in every bucket whose bound is it or more: 0 in every one, and each edge in its own',
-     [DURATION, OBSERVED, BUCKETS], None, ['server'], [resolver(SERVER, 1, 1, 'echo')],
+     [DURATION, OBSERVED, BUCKETS, *BUCKET_ROWS], None, ['server'], [resolver(SERVER, 1, 1, 'echo')],
      [answered(SERVER, 'result', microseconds=microseconds, service=1, procedure=1)
       for microseconds in (0, 1, 10, 11, 999_999, 1_000_000, 1_000_001, 100_000_000, 100_000_001)]),
     ('a _sum is whole seconds and the microseconds under one, their trailing zeros dropped, never an exponent, held exactly past 2^53',
@@ -430,7 +431,7 @@ EXPOSITIONS = [
       made(SERVER, 'result', microseconds=3_000_000, service=1, procedure=3),
       *[answered(SERVER, 'result', microseconds=(1 << 52) + 1, service=1, procedure=4)] * 3]),
     ('notifications count by role: sent and failed at the side that notifies, heard at the side that hears, dropped at each end by its code',
-     [DECLARED, MADE_AHEAD, CODES_OF, ORDERED], None, ['client', 'server'],
+     [DECLARED, MADE_AHEAD, CODES_OF, FAMILY_TABLE, *FAMILY_ROWS, ORDERED], None, ['client', 'server'],
      [resolver(1, 1, 10, 'ticks', notifies=True), notification(0, 1, 10, 'ticks')],
      [notified(1, 'sent', 1, 10), notified(1, 'sent', 1, 10), notified(1, 'failed', 1, 10), notified(0, 'heard', 1, 10),
       dropped(1, 'notifies', 1, 10, 'CAPACITY_EXCEEDED'), dropped(0, 'hears', 1, 10, 'CAPACITY_EXCEEDED'),
@@ -463,22 +464,23 @@ EXPOSITIONS = [
     ('names apart outside ASCII are two names, each at an address of its own',
      [DECLARED_REFUSED, ANOTHER_ADDRESS], None, ['client'],
      [notification(SERVER, 1, 1, 'caf' + chr(0xE9)), notification(SERVER, 1, 2, 'caf' + chr(0xC9))], []),
-    ('a declaration of a service at another revision than the registry holds is refused, and declares nothing; at its service\'s revision it is taken',
-     [DECLARED_REFUSED, ANOTHER_REVISION], None, ['client', 'server'],
-     [resolver(1, 1, 1, 'echo'), resolver(1, 1, 2, 'fail', refused='another revision of its service', revision=2),
-      requester(0, 1, 2, 'fail', refused='another revision of its service', revision=2), resolver(1, 1, 2, 'fail'),
-      resolver(1, 2, 1, 'echo', revision=2)], []),
+    ('a service declared at a second revision counts into its series: an address the registry holds takes the same series, whatever its router, and another address series of its own',
+     [REGISTRY, DECLARED_REFUSED], None, ['client', 'server', 'server'],
+     [resolver(1, 1, 1, 'echo'), resolver(2, 1, 1, 'echo', revision=2), resolver(2, 1, 2, 'fail', revision=2),
+      requester(0, 1, 2, 'fail', revision=3)],
+     [answered(1, 'result', service=1, procedure=1), answered(2, 'result', microseconds=20, service=1, procedure=1),
+      answered(2, 'failure', APPLICATION, service=1, procedure=2), made(0, 'result', service=1, procedure=2)]),
     ('a declaration past its families\' ceiling is refused; one of a procedure they name already, or of other families, is not',
      [DECLARED_REFUSED, PAST_CEILING, CEILING], 2, ['server'],
      [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 2, 'fail'), resolver(SERVER, 1, 3, 'slow', refused='past the ceiling'),
       resolver(SERVER, 1, 1, 'echo'), requester(SERVER, 1, 3, 'slow')],
      [answered(SERVER, 'failure', 'PROCEDURE_UNKNOWN')]),
     ('a declaration that several reasons refuse is refused for the first that applies, in the order of their table',
-     [DECLARED_REFUSED, ANOTHER_NAME, ANOTHER_ADDRESS, ANOTHER_REVISION, PAST_CEILING], 2, ['server'],
+     [DECLARED_REFUSED, ANOTHER_NAME, ANOTHER_ADDRESS, PAST_CEILING], 2, ['server'],
      [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 2, 'fail'),
       resolver(SERVER, 1, 1, 'other', refused='another name at its address', revision=2),
       resolver(SERVER, 1, 3, 'ECHO', refused='its name at another address', revision=2),
-      resolver(SERVER, 1, 3, 'slow', refused='another revision of its service', revision=2)], []),
+      resolver(SERVER, 1, 3, 'slow', refused='past the ceiling', revision=2)], []),
     ('a resolver whose procedure notifies counts against the notification families\' ceiling too',
      [PAST_CEILING, CEILING], 1, ['client', 'server'],
      [notification(0, 1, 10, 'ticks'), resolver(1, 1, 11, 'tick', notifies=True, refused='past the ceiling'),
@@ -510,11 +512,10 @@ def interop_registry():
         address = (SERVICE, procedure['procedureId'])
 
         if procedure['procedureKind'] == 'command':
-            registry.declare('server', 'requester', address, procedure['procedureName'],
-                             revision=talk.API['serviceRevision'])
+            registry.declare('server', 'requester', address, procedure['procedureName'])
         else:
             registry.declare('server', 'resolver', address, procedure['procedureName'],
-                             procedure['procedureKind'] == 'notifies', talk.API['serviceRevision'])
+                             procedure['procedureKind'] == 'notifies')
 
     return registry
 
@@ -749,8 +750,10 @@ EXITS = [
      {4: answered_whole('login', 'result'), 6: answered_whole('register', 'result'),
       10: [opened(), commanded(), settled(None, 'failure', APPLICATION), ended(None, 'failure', APPLICATION)]}),
     ('a relay\'s own failure counts under _OTHER, and no leg B', [RELAYED],
-     'a relay asks for a session by default, and its own failure crosses no relay',
-     {4: answered_whole('register', 'result'), 6: answered_whole(None, 'failure', 'SESSION_REQUIRED')}),
+     'a server\'s relay admits by default a credential it forwards alone: a call presenting none or OPAQUE is refused ACCESS_DENIED, its detail naming the default, in leg A\'s connection\'s session or in none, before its destination is looked up, and its own failure crosses no relay',
+     {4: answered_whole('register', 'result'), 6: answered_whole(None, 'failure', 'ACCESS_DENIED'),
+      8: answered_whole('login', 'result'), 10: answered_whole(None, 'failure', 'ACCESS_DENIED'),
+      12: answered_whole(None, 'failure', 'ACCESS_DENIED'), 14: answered_whole(None, 'failure', 'ACCESS_DENIED')}),
     ('a subscription through a relay counts the relay\'s SUBSCRIPTION_UNSUPPORTED under _OTHER', [RELAYED, LABELED],
      'a request that opens a subscription through a relay is answered SUBSCRIPTION_UNSUPPORTED',
      {4: answered_whole('login', 'result'), 6: answered_whole('register', 'result'),

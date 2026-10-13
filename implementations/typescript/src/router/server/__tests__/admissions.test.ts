@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { CredentialScheme, EnvelopeKind, SERVER_FAILURES } from '../../shared/constants';
-import type { Credential, IRequestHeader } from '../../shared/types';
-import { requireSession, requireSessionOrCredential } from '../admissions';
+import type { Credential, IRequestHeader, SessionToken } from '../../shared/types';
+import { requireCredential, requireSession, shareLegBSession } from '../admissions';
 
 // helpers
 
@@ -22,6 +22,7 @@ const CREDENTIALS: readonly (Credential | undefined)[] = [
   { scheme: CredentialScheme.JWT, token: 'a.b.c' },
   { scheme: CredentialScheme.ELSEWHERE },
 ];
+const OPAQUE = { scheme: CredentialScheme.OPAQUE, token: 'A'.repeat(22) as SessionToken } as const;
 
 // definition
 
@@ -46,13 +47,42 @@ test.describe('requireSession', () => {
   });
 });
 
-test.describe('requireSessionOrCredential', () => {
+test.describe('requireCredential', () => {
+  // spec 14.3.1
+  test('admits a call presenting a JWT or an ELSEWHERE by its scheme alone, and refuses none and OPAQUE, in a session or in none, ACCESS_DENIED with its detail', () => {
+    expect(
+      [...CREDENTIALS, OPAQUE].map((credential) => {
+        const header = headerOf(credential);
+
+        // the call's session read nowhere: in one or in none, the same
+        return [SESSION, undefined].map((session) => {
+          const request = { header, session };
+
+          return requireCredential(request);
+        });
+      })
+    ).toEqual([
+      [false, false],
+      [true, true],
+      [true, true],
+      [false, false],
+    ]);
+    expect(requireCredential.refusal).toEqual({
+      ...SERVER_FAILURES.accessDenied,
+      detail: 'a relay admits by default only a credential it forwards',
+    });
+    expect(Object.isFrozen(requireCredential.refusal)).toBe(true);
+  });
+});
+
+test.describe('shareLegBSession', () => {
+  // spec 14.3.1
   test('admits a call in a session, or presenting a JWT or an ELSEWHERE by its scheme alone, and refuses any other in none, SESSION_REQUIRED', () => {
     expect(
       CREDENTIALS.map((credential) => {
         return [
-          requireSessionOrCredential({ header: headerOf(credential), session: SESSION }),
-          requireSessionOrCredential({ header: headerOf(credential), session: undefined }),
+          shareLegBSession({ header: headerOf(credential), session: SESSION }),
+          shareLegBSession({ header: headerOf(credential), session: undefined }),
         ];
       })
     ).toEqual([
@@ -60,6 +90,6 @@ test.describe('requireSessionOrCredential', () => {
       [true, true],
       [true, true],
     ]);
-    expect(requireSessionOrCredential.refusal).toBe(SERVER_FAILURES.sessionRequired);
+    expect(shareLegBSession.refusal).toBe(SERVER_FAILURES.sessionRequired);
   });
 });

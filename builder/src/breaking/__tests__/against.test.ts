@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 import { InputError } from '../../diagnostics.ts';
-import { Category } from '../../rules.ts';
-import { againstOf, againstOfFolder } from '../against.ts';
+import { Category, Severity } from '../../rules.ts';
+import { againstOf, againstOfFolder, type IEarlier } from '../against.ts';
 import { breaking } from '../breaking.ts';
 
 const INTEROP = fileURLToPath(new URL('../../../../spec/interop-blueprint.json', import.meta.url));
@@ -211,4 +211,58 @@ test('an earlier beadc.yaml is read for its source and blueprint alone', () => {
     againstOfFolder(folder, { current: { proto: [folder] }, name: 'later' }).blueprint.services[0]
       ?.procedures[0]?.procedureName
   ).toBe('getThePrice');
+});
+
+test("a committed blueprint its .proto contradicts, or one named and missing, is AGAINST_BLUEPRINT's warning", () => {
+  const read = (folder: string, name: string): IEarlier => {
+    return againstOfFolder(folder, { current: { proto: [EARLIER] }, name });
+  };
+  const contradicted = read(
+    project('contradicted', { config: WITH_BLUEPRINT, committed: committedBlueprint() }),
+    'contradicted'
+  );
+  const agreeing = read(
+    project('agreeing', {
+      config: WITH_BLUEPRINT,
+      committed: readFileSync(SHOP_BLUEPRINT, 'utf8'),
+    }),
+    'agreeing'
+  );
+  const missing = read(project('missing', { config: WITH_BLUEPRINT }), 'missing');
+
+  // * the release's blueprint and its .proto compared by id, the first finding named
+  expect(contradicted.diagnostics).toEqual([
+    {
+      rule: 'AGAINST_BLUEPRINT',
+      severity: Severity.WARNING,
+      file: 'contradicted',
+      message: expect.stringMatching(
+        /^the earlier's committed blueprint, gen\/shop\.blueprint\.json, and its \.proto disagree, PROCEDURE_SAME_NAME first: procedure 1 getThePrice of service 1 Shop is getPrice now/u
+      ),
+    },
+  ]);
+  expect(agreeing.diagnostics).toBeUndefined();
+  expect(
+    missing.diagnostics?.map((diagnostic) => {
+      return diagnostic.message;
+    })
+  ).toEqual([
+    "the earlier's beadc.yaml names its blueprint, gen/shop.blueprint.json, which is not there: Bead's rules read its .proto",
+  ]);
+
+  // a warning among the run's findings, which --fail-on-warning holds
+  const run = breaking(
+    { proto: [join(EARLIER, 'proto')] },
+    {
+      against: project('run', { config: WITH_BLUEPRINT, committed: committedBlueprint() }),
+      category: Category.API,
+      except: ['PROCEDURE_SAME_NAME', 'NAME_NO_DELETE', 'SERVICE_REVISION'],
+    }
+  );
+
+  expect(
+    run.diagnostics.map((diagnostic) => {
+      return `${diagnostic.rule} ${diagnostic.severity}`;
+    })
+  ).toEqual(['AGAINST_BLUEPRINT warning']);
 });

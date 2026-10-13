@@ -35,6 +35,9 @@ src/
   Bead.Core/                    the codec, the router's core, both sides' routers, the service,
                                 session and notification managers, the relay, the server over
                                 them, and the service layer a service is served and called through
+  Bead.Protobuf/                the check of a proto payload's records against its message's
+                                descriptor, which a generated proto codec calls before
+                                Google.Protobuf reads them: Bead.Core references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
@@ -47,13 +50,18 @@ interop/
     InteropCredentials.cs       its credentials: the key set and the verifier
   BannedSymbols.txt             what the banned-API analyzer refuses there: the service manager,
                                 called through the generated server and client
-  Bead.Interop.Server/          its server, which the TypeScript side's interop calls
+  Bead.Interop.Server/          its server, which the TypeScript side's interop and its page of
+                                another origin call
 tests/
   Bead.*.Tests/                 a project's tests, beside it by name
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
                                 under this side's rules as a consumer compiles them
   Shared/                       what several test projects link: the test clock, the durations'
-                                helper, the JSON payloads
+                                helper, the JSON payloads, the addresses a server listens on
+tools/
+  Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
+                                Generated/ is what tools/protobuf-conformance.mjs generates at run
+                                time; failing.txt, its failure list (decision 0028)
 ```
 
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
@@ -66,15 +74,220 @@ share.
   core.
 - **The relay** is `Relay`, its registrations under a lock, since they are registered from any
   thread and read on the router's scheduler; a destination is a `ConnectionTarget` or an
-  `IRouterTarget`, which a client's router meets.
+  `IRouterTarget`, which a client's router meets. A server's relay admits by default only a
+  credential it forwards, `RequireCredential`: a call presenting a `JWT` or an `ELSEWHERE`, by its
+  scheme alone unless the relay verifies, for its destination to verify; any other, one that
+  presents none or `OPAQUE`, in leg A's connection's session or in none, is refused
+  `ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`, since leg
+  A's session opens nothing at the destination (spec 14.3, 14.7). A relay whose requesters log in at
+  it gives a `BeforeRoute` of its own, which checks the destination against the requester's session:
+
+  ```csharp
+  // a requester reaches a destination its session names, or forwards a credential its
+  // destination verifies
+  var isAdmitted = new BeforeRequest((request) =>
+  {
+      var forwards = request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
+
+      return forwards || (request.Session?.Data is Account account && account.Reaches(request.Header.DestinationId));
+  });
+
+  await using var server = new WebSocketServer<Account>(new WebSocketServerOptions
+  {
+      Server = new ServerOptions { Relay = new RelayOptions { BeforeRoute = isAdmitted } },
+  });
+  ```
+
+  Its refusal is `ACCESS_DENIED`, without the default's detail. `ShareLegBSession`, in its place,
+  lends leg B's session to every requester in a session at the relay, at every destination: it
+  reads none, so a requester in any session acts at every destination with leg B's rights, as a
+  deputy that lends its own authority (CWE-441).
+- **The client's router** presents its `Credential` on every call that gives none of its own. A
+  default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
+  the refusal crossed: `CredentialWithdrawn` tells the application its scheme alone, never its
+  bytes, and from then on, until the application gives it a default again — a credential, or
+  `null`, which says "anonymous" in writing — every call that would present it fails before it
+  goes, `SESSION_REQUIRED`, nothing sent and nothing withdrawn, so no call falls to its connection's
+  session, or to none, in silence; `IsCredentialWithdrawn` says so (spec 13.4). A call that gives
+  its own credential, `Credential.None` among them, goes: a call that needs no identity presents
+  none, and so does the call that renews.
+
+  ```csharp
+  // the call that renews presents none: until a default is given again, a call that would
+  // present it fails
+  client.Router.CredentialWithdrawn += async (_) =>
+  {
+      var renewed = await SignIn(new RequestOptions { Credential = Credential.None });
+
+      client.Router.Credential = Credential.Jwt(renewed);
+  };
+  ```
 - **HTTP's transport** sets the shared behaviour where Kestrel's defaults would differ: no body
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
-  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `x-forwarded-for`
-  is read by one rule of its own. `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
+  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`
+  is read by one rule of its own, `TrustedProxies`, as the section below says. `BeadHttpClient` is
+  its client, as .NET's own is `HttpClient`.
+  The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
+  off the machine, HTTPS.
 - **The transports** hold the same ready states on both sides, and the client reconnects alike, its
   delay, attempts, token and tap, its router rejecting what waited on the connection replaced.
+  Neither client reads a `Retry-After`: a reconnection waits its own schedule, whatever a refusal's
+  `Retry-After` asks (spec 15.7). A server listens on `127.0.0.1` unless `Start` is given an
+  `Address`, an IP address written bare, RFC 3986's grammar and not the platform's parser's: a
+  container, or any server another machine reaches, says `0.0.0.0` or `::`, and names its hosts; a
+  name, `[::1]`, `127.1` or `0` is an `ArgumentException` as it starts. On the loopback it is secure
+  (spec 13.4); behind a proxy on the same machine that serves the network in the clear, it says
+  `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
+  clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
+  connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
+  client given a `Handler` keeps the handler's behaviour.
+- **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
+  `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
+  own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
+  stock library reads on, a field at a wire type its type does not take and a map's entry with a
+  field it does not declare among them (spec 17.9, [decision
+  0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+  A project that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
 - **The clock** is a `TimeProvider`, named `Clock`, which every layer takes and exposes ([decision
   0011](../../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
+
+## Hosts and origins
+
+Both transport servers judge a request's host and origin alike, by spec 15.12, through
+`HttpTransportServerOptions` and `WebSocketTransportServerOptions`: `Hosts` before anything else of
+a request but its form, `Origins` on an exchange, and on a WebSocket's upgrade once its version and
+its form are a handshake's.
+
+A field value that holds a control character other than HTAB, or a character past ASCII, is
+answered 400 unmarked before anything else of the request is judged, at both transports, as HTTP
+answers a malformed field (spec 15.12): Kestrel refuses an octet that is no UTF-8 and takes a
+control character, which the transport refuses; over HTTP/2, its stream reset, `PROTOCOL_ERROR`.
+So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
+over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
+strips it first (RFC 9110 §5.5).
+
+A request names its authority by its target when the target is in absolute-form, `http://` or
+`https://` in lower case, its `Host` judged as one field line alone, which an HTTP/1.0 request may
+leave out (RFC 9112 §3.2.2), for which both servers set Kestrel's `AllowHostHeaderOverride` and read
+the authority from the target as it came, never as Kestrel's `Uri` normalizes it; over HTTP/2, by its `:authority`, a `host` beside it
+ignored (RFC 9113 §8.3.1), which Kestrel puts in the `Host`; otherwise by its `Host`. An authority
+is a host and an optional port of 15.12's grammar, RFC 3986's narrowed: no userinfo, no
+percent-encoded octet, no `*`, `+`, `,`, `;` or `=` in a name, no `IPvFuture` literal, no colon
+without a port. Kestrel
+answers an HTTP/1.1 request without a `Host`, or with two, or with an authority that is none, 400
+before the application runs, unmarked, and resets the stream of such an HTTP/2 request,
+`PROTOCOL_ERROR`, nothing written; the transport answers alike what Kestrel reads past.
+
+Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
+address, by the request's host, its port aside: no name a browser fetches is written as an IP
+literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
+them. `Hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
+case as the field carries it, an IDN host in the punycode a browser sends: `["bead.example"]` takes
+`bead.example` and `bead.example:8443` alike; none and `[]` take no other. Any other host, an empty
+one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its name to
+the server's address among them. So a server reached by a name names it in `Hosts`: a public one,
+one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service reached
+by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy that
+writes its upstream's address, as nginx does by default, none is needed. `["*"]` takes every host
+and makes none of their origins the server's own: a page that rebinds its name to the server's
+address passes the host's test, and is refused by the origin's, 403 `origin-refused`, so a page is
+then taken only when `Origins` names it, and an application under `*` that serves its own page
+names that page's host in `Hosts` or its origin in `Origins`. A client that is no browser and
+writes its target as its `Origin` — Python's `websocket-client` does by default — is refused
+alike under `*` by a name `Hosts` does not list: list that name, or have the client write no
+`Origin`, as a Bead client writes none (spec 15.2, 15.5).
+
+`Origins` names the origins a request may come from besides the server's own, `http://` or
+`https://` followed by the request's authority when its host is one the server takes by name — one
+every server takes, or one `Hosts` lists — never by `*`, none by default, each compared exactly. A
+request with no `Origin` comes from no page, and is taken. `null` is refused as the transport is
+built: a browser sends it for every page with no origin of its own — a sandboxed frame of any
+site, a `file:` or a `data:` page, one whose origin it withholds — so naming it would let any site
+drive the server and read every answer; serve the page from an origin, a local development
+server's or the Bead server's own, and name that one.
+
+Over HTTP, the server answers CORS to the origins `Origins` names and to no other (spec 15.12):
+their preflight is answered, allowing `Authorization`, the fields it asks for and any other
+field — `access-control-allow-headers` naming `authorization`, then its
+`Access-Control-Request-Headers` as they came, its lines joined by `", "`, then `*`, so a browser
+that caches names and no wildcard keeps the answer too — and every answer to them names their
+origin and exposes every field, so a page of a listed origin connects, calls, listens and presents
+`ELSEWHERE` in `Authorization`. Every exchange of a connection goes to its one URL, a listen's
+cursor and wait in `bead-after` and `bead-wait`, which a browser's preflight cache keys, so a page
+preflights its connection's opening and not each listen. No answer carries `Access-Control-Allow-Credentials`:
+no cookie goes across origins, and a `fetch` given to the TypeScript side's client must not use
+`credentials: 'include'`. A gateway in front that answers CORS for the path stops, or replaces the
+fields rather than appends them, once the server lists the origin: two `Access-Control-Allow-Origin`
+fail the browser's check. A page of the public network reaching a server on the loopback or a
+private address needs besides its user's permission, which the browser asks (Local Network Access),
+in a secure context alone; a secure page reaching `http://` on a private address by a hostname
+passes the browser's mixed-content block only with `targetAddressSpace: 'local'`, which a `fetch`
+given to the TypeScript side's client adds. The server writes nothing for either. A WebSocket
+answers no CORS, which no browser asks of an upgrade.
+
+A server is refused as it is built, an `ArgumentException` naming the option and the entry, a
+`Hosts` entry with a port, an empty one, one that is no host, or `*` beside another; and an
+`Origins` entry that is `*`, since no origin wildcard exists, `null`, or anything but an origin as a
+browser serializes it (RFC 6454 §6.2): a scheme in lower case, a host, a port with no leading
+zero, nothing after; for `http`, `https`, `ws` and `wss`, the host in lower case and no default
+port.
+
+Behind a proxy, an HTTP server believes `X-Forwarded-For` from the proxies `TrustedProxies` names
+alone, each an IP address or a network, `10.0.0.0/8` say, or the compose network's: while the
+address reached is one they hold, the field's next entry from the right is the client's, so what a
+client wrote to the left of the first address none of them holds is never read (spec 15.12). An
+entry is read in RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or
+`[2001:db8::1]:443`, its port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC
+5952 writes it, hexadecimal throughout, by the transport's own reading rather than
+`IPAddress.TryParse`'s; any other, `unknown` or a zone among them, ends the walk at the proxy that
+wrote it. None trusts no proxy, the loopback among them; a name, a network whose bits past its
+prefix are set, and a network of prefix 0, which would trust what every client writes, are an
+`ArgumentException` as the transport is built. `Forwarded` is never read, and a WebSocket server
+reads no `X-Forwarded-For`, the same list on it being ahead. A proxy not listed is a client as any
+other: every client behind it is its address, which `MaximumConnectionsPerAddress` counts, so a
+told `busy` whose `Address` is your proxy's, or a `largestAddressConnections` near its ceiling on
+`/health`, is a proxy to list. A deployment whose proxies' addresses it cannot name, a platform's
+router or a cloud load balancer on public addresses, counts one address per proxy, a hop bound for
+such proxies being ahead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+A bound by address counts as one the users behind one NAT, and as many the addresses of one IPv6
+network.
+
+A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which `curl -i` and a
+browser's network panel show. Each refusal the server judges of its own it tells, the event
+`Refusal`, a `TransportServerRefusal` of its status, its reason, the request's authority and origin
+as they came and the client's address and port, never the target, a token or a credential: what to
+add to `Hosts` or `Origins`. The 404 that ends a listen or an exchange as its connection closes is
+told by `Close` alone. A client names the status and the reason it was refused with:
+`BeadHttpClient` and `HttpTransportClient`'s connect, and `WebSocketTransportClient`'s, through
+`CollectHttpResponseDetails`, "the server refused the upgrade: 403 host-refused"; a page's
+WebSocket reads nothing past its close, 1006, and its server's tell is then what says why.
+
+```csharp
+server.Transport.Refusal += (refusal) =>
+{
+    Console.Error.WriteLine($"refused {refusal.Status} {refusal.Reason}: authority {JsonSerializer.Serialize(refusal.Authority)}, origin {JsonSerializer.Serialize(refusal.Origin)}, from {refusal.Address}:{refusal.Port}");
+};
+```
+
+A transport goes on through what its listener throws, a reconnection's listener among them, and
+awaits nothing it returns (spec 15.1): what one throws is reported through the transport's `Error`,
+which no router forwards to its own. A server gives its transport as `IServerTransport`, which
+carries `Error` and `Refusal` alike, so an application hears both through `server.Transport`,
+whichever transport it built, beside its router's; a client's, through the client transport it
+built. An `async` lambda given to one of its events is `async void`, whose exception ends the
+process, so a listener catches its own.
+
+```csharp
+server.Router.Error += (reason, connectionHandle) =>
+{
+    Console.Error.WriteLine($"router, {connectionHandle ?? "no connection"}: {reason.Message}");
+};
+server.Transport.Error += (reason, connectionHandle) =>
+{
+    Console.Error.WriteLine($"transport, {(connectionHandle.Length == 0 ? "no connection" : connectionHandle)}: {reason.Message}");
+};
+```
 
 Where the platform makes the sides differ, or a difference is still open, the [support
 matrix](../../docs/support.md) has the row and its test.

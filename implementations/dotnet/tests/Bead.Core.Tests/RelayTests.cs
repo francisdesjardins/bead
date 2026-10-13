@@ -9,9 +9,9 @@ public sealed class RelayTests
 {
     // constants
 
-    private const string First = "type=WS;ip=127.0.0.1;port=50001";
+    private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
-    private const string Device = "type=WS;ip=127.0.0.1;port=50002";
+    private const string Device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
@@ -638,6 +638,7 @@ public sealed class RelayTests
         Assert.Empty(test.Answers);
     }
 
+    // spec 14.5
     [Fact]
     public async Task Answers_as_failed_once_what_leg_A_cannot_carry_and_lets_why_be_reported()
     {

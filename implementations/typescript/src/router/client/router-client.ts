@@ -421,6 +421,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
 
   // the credential every call presents but one that gives its own, or none, until withdrawn
   let defaultCredential = defaultCredentialOf(options?.credential, core.limits);
+  // ! withdrawn, a call that would present the default fails before it goes, until the application
+  // gives it again, or none: it never falls to its connection's session in silence (spec 13.4)
+  let isWithdrawn = false;
 
   // binds the calls of a subscription as their call ids are drawn: before the request goes out, so
   // a notification right behind its result is heard — paced, when the notification has a window, its
@@ -492,8 +495,8 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
   };
 
   // a call that presented the default, refused SESSION_REQUIRED through relays or not, withdraws it
-  // while it is still that credential by value, set again or not: later calls present none by
-  // default, and the application hears of it by its scheme alone
+  // while it is still that credential by value, set again or not: a later call that would present
+  // it fails before it goes, and the application hears of it by its scheme alone
   const withdraw = (reason: unknown, presented: DefaultCredential | undefined): void => {
     if (
       presented !== undefined &&
@@ -507,6 +510,7 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       reason.isProtocol(CLIENT_FAILURES.sessionRequired.code)
     ) {
       defaultCredential = undefined;
+      isWithdrawn = true;
       emitter.emit('credentialWithdrawn', presented.scheme);
     }
   };
@@ -537,9 +541,13 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
     },
     set credential(credential) {
       defaultCredential = defaultCredentialOf(credential, core.limits);
+      isWithdrawn = false;
     },
     get failures() {
       return CLIENT_FAILURES;
+    },
+    get isCredentialWithdrawn() {
+      return isWithdrawn;
     },
     get limits() {
       return core.limits;
@@ -551,6 +559,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       return transport;
     },
 
+    answeredOf: ({ header }) => {
+      return core.answeredOf({ connectionHandle: SERVER_CONNECTION_HANDLE, header });
+    },
     declareRequester: (procedure) => {
       checkDeclaration(procedure);
       checkProcedureKind(procedure, 'client-requester');
@@ -655,6 +666,18 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
           destinationId,
           procedureAddress: { procedureId, serviceId },
         });
+      }
+
+      // a call that would present a default withdrawn fails before it goes, withdrawing nothing:
+      // one that gives its own credential, or none, goes
+      if (refusal === undefined && isWithdrawn && options.credential === undefined) {
+        const { destinationId } = options;
+        const { procedureId, serviceId } = procedure;
+
+        refusal = new FailureError(
+          { ...CLIENT_FAILURES.sessionRequired, detail: 'the default credential was withdrawn' },
+          { destinationId, procedureAddress: { procedureId, serviceId } }
+        );
       }
 
       const sent = { connectionHandle, credential, onSent, options, procedure, refusal, series };

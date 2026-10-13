@@ -62,7 +62,7 @@
       }
     },
     "options": {
-      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, a proxy it trusts.",
+      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, and over HTTP the proxies it trusts.",
       "type": "object",
       "minProperties": 1,
       "$ref": "#/$defs/bounds",
@@ -70,7 +70,7 @@
       "properties": {
         "hosts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "origins": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "isProxyTrusted": { "type": "boolean" }
+        "trustedProxies": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "response": {
@@ -190,9 +190,9 @@
       "additionalProperties": false,
       "properties": {
         "head": {
-          "description": "The request's line and fields, as text, CRLF after each and one more after the last; {host} and a captured value's {name} put in.",
+          "description": "The request's line and fields, as text, CRLF after each and one more after the last; {host} and a captured value's {name} put in. Each character is one octet, its code point (ISO-8859-1), so one past U+007F is an octet past ASCII.",
           "type": "string",
-          "pattern": "^[A-Z]+ \\S+ HTTP/1\\.[01]\\r\\n(?:[a-z0-9-]+: [^\\r\\n]*\\r\\n)*\\r\\n$"
+          "pattern": "^[A-Z]+ \\S+ HTTP/1\\.[01]\\r\\n(?:[a-z0-9-]+: [^\\r\\n\\u0100-\\uffff]*\\r\\n)*\\r\\n$"
         },
         "body": { "$ref": "common.schema.json#/$defs/bytes" }
       }
@@ -277,7 +277,25 @@
           "type": "array",
           "minItems": 1,
           "items": { "$ref": "conversations.schema.json#/$defs/expect" }
+        },
+        "told": {
+          "description": "On a marked refusal, what the server's transport tells of it (spec 15.1), or null where it tells nothing.",
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/refusal" }]
         }
+      }
+    },
+    "refusal": {
+      "description": "A refusal told: its status, its reason, the request's authority and its Origin as they came, the field's lines joined by \", \", null for none, the client's address, and its port, {port}, the local port of the socket the exchange was sent on.",
+      "type": "object",
+      "required": ["status", "reason", "authority", "origin", "address", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "reason": { "type": "string", "pattern": "^[a-z]+(?:-[a-z]+)*$" },
+        "authority": { "type": ["string", "null"] },
+        "origin": { "type": ["string", "null"] },
+        "address": { "type": "string", "minLength": 1 },
+        "port": { "const": "{port}" }
       }
     },
     "shape": {

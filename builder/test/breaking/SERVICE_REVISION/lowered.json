@@ -16,7 +16,8 @@
   "findings": [
     {
       "rule": "SERVICE_REVISION",
-      "pointer": "/services/0/serviceRevision"
+      "pointer": "/services/0/serviceRevision",
+      "subject": "service:1"
     }
   ]
 }

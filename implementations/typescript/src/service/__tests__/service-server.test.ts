@@ -7,7 +7,13 @@ import { ProgrammerError } from '../../transport/shared/errors';
 import { type IAdmissionHook, requestOf } from '../descriptors';
 import { createServiceClient } from '../service-client';
 import { createServiceServer } from '../service-server';
-import { CONNECTION, connectWorker, GreeterFailures, GreeterProcedures } from './fixtures';
+import {
+  CONNECTION,
+  connectWorker,
+  deprecationsIn,
+  GreeterFailures,
+  GreeterProcedures,
+} from './fixtures';
 
 // helpers
 
@@ -428,5 +434,14 @@ test.describe('createServiceServer', () => {
     expect(await codeOf(client.request.echo('')())).toBe(ProtocolCode.PROCEDURE_FAILED);
     expect(seen).toEqual(['hi']);
     expect(reported).toEqual([expect.any(RangeError)]);
+  });
+
+  test("a mapped member keeps its descriptor's @deprecated", async () => {
+    // * each command's requester, notifier and resolver of a deprecated descriptor is flagged at each use, and none of another
+    expect(await deprecationsIn('deprecated-server-uses.ts')).toEqual({
+      directives: 4,
+      files: 1,
+      reports: [],
+    });
   });
 });

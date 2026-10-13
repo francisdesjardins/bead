@@ -2,12 +2,16 @@ namespace Bead;
 
 /// <summary>
 /// The hosts and origins a server takes a request from, over HTTP as on a WebSocket's upgrade
-/// (spec 15.2, 15.12): a host among those it takes, every host when given none; a request with no
-/// <c>Origin</c>, or one from its own origin, or from one among those it takes. A host is compared
-/// ASCII case-insensitively (RFC 9110 §4.2.3), as the request's field carries it. An origin is read
-/// as the serialized origin the field carries (RFC 6454 §6.2), compared as a string, never parsed
-/// as a URL, as the TypeScript side compares it. Before either, the request's <c>Host</c> is one
-/// HTTP takes (RFC 9112 §3.2).
+/// (spec 15.2, 15.12). A request names its authority by its target in absolute-form, else by its
+/// <c>Host</c>, which Kestrel fills from HTTP/2's <c>:authority</c>; an authority is a host and an
+/// optional port, of 15.12's grammar, a restriction of RFC 3986 §3.2.2. Its host, the port aside,
+/// is taken when every server takes it — <c>localhost</c>, a name under <c>.localhost</c>, an IPv6
+/// address in brackets, an IPv4 address — or when the server's hosts list it, compared ASCII
+/// case-insensitively (RFC 9110 §4.2.3), as the request carries it; <c>*</c> takes every host, and
+/// makes none of their origins its own. A request with no <c>Origin</c>, or one from its own origin,
+/// by a host it takes by name, or from one among those it takes, is taken. An origin is read as the
+/// serialized origin the field carries (RFC 6454 §6.2), compared as a string, never parsed as a
+/// URL, as the TypeScript side compares it.
 /// </summary>
 internal static class HostsAndOrigins
 {
@@ -24,61 +28,50 @@ internal static class HostsAndOrigins
     /// </summary>
     public const string OriginRefusal = "origin-refused";
 
+    /// <summary>
+    /// The one entry of a server's hosts that takes every host, an empty one and none, and makes none
+    /// of their origins its own.
+    /// </summary>
+    public const string AnyHost = "*";
+
     /// <summary>What may stand around a field's value, and is not of it (RFC 9110 §5.5): SP and HTAB.</summary>
     public static readonly char[] FieldWhitespace = [' ', '\t'];
 
+    // the localhost names' own domain (RFC 6761 §6.3)
+    private const string Localhost = "localhost";
+
+    // the characters a name holds besides letters and digits: RFC 3986's unreserved, and the
+    // sub-delims no HTTP server refuses (spec 15.12)
+    private const string NameMarks = "-._~!$&'()";
+
+    // the schemes whose origin a browser serializes with its host in lower case and its default
+    // port left out (RFC 6454 §6.2; the URL Standard's special schemes)
+    private static readonly Dictionary<string, int> DefaultPorts = new(StringComparer.Ordinal)
+    {
+        ["http"] = 80,
+        ["https"] = 443,
+        ["ws"] = 80,
+        ["wss"] = 443,
+    };
+
     // helpers
 
-    // the characters a reg-name holds besides a percent-encoded octet: RFC 3986's unreserved and
-    // sub-delims (§2.2, §2.3)
-    private const string RegNameMarks = "-._~!$&'()*+,;=";
-
-    // whether a character is one of RFC 3986's unreserved or sub-delims
-    private static bool IsRegNameCharacter(char character)
+    // whether a string is 15.12's name: letters, digits and the marks above, empty among them
+    private static bool IsName(string text)
     {
-        return char.IsAsciiLetterOrDigit(character) || RegNameMarks.Contains(character, StringComparison.Ordinal);
+        return text.All((character) =>
+        {
+            return char.IsAsciiLetterOrDigit(character) || NameMarks.Contains(character, StringComparison.Ordinal);
+        });
     }
 
-    // whether a string is RFC 3986's reg-name, an IPv4 address among them (§3.2.2): each character
-    // unreserved, a sub-delim, or a percent-encoded octet; empty among them
-    private static bool IsRegName(string text)
+    /// <summary>
+    /// Whether a string is RFC 3986's <c>IPv6address</c>, what stands between an IP-literal's
+    /// brackets: never a zone nor a prefix length, which the platform's parser takes.
+    /// </summary>
+    public static bool IsIPv6Address(string text)
     {
-        for (var index = 0; index < text.Length; index += 1)
-        {
-            if (text[index] == '%')
-            {
-                if (index + 2 >= text.Length || !char.IsAsciiHexDigit(text[index + 1]) || !char.IsAsciiHexDigit(text[index + 2]))
-                {
-                    return false;
-                }
-
-                index += 2;
-            }
-            else if (!IsRegNameCharacter(text[index]))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    // whether what stands between an IP-literal's brackets is RFC 3986's IPv6address or IPvFuture
-    // (§3.2.2): "v", hexadecimal digits, a dot, then unreserved, sub-delims or colons
-    private static bool IsIpLiteral(string text)
-    {
-        if (text.StartsWith('v') || text.StartsWith('V'))
-        {
-            var dot = text.IndexOf('.', StringComparison.Ordinal);
-
-            return dot > 1
-                && dot < text.Length - 1
-                && text[1..dot].All(char.IsAsciiHexDigit)
-                && text[(dot + 1)..].All((character) =>
-                {
-                    return character == ':' || IsRegNameCharacter(character);
-                });
-        }
+        ArgumentNullException.ThrowIfNull(text);
 
         // ! the platform's parser takes a zone or a prefix length, which RFC 3986 does not: hex
         // digits, colons and dots alone reach it
@@ -91,36 +84,67 @@ internal static class HostsAndOrigins
             && address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
     }
 
-    // whether a string is RFC 9110's Host value, uri-host and an optional port (§7.2): an
-    // IP-literal in brackets or a reg-name, then a colon and digits, or nothing
-    private static bool IsHostValue(string value)
+    // whether a string is RFC 3986's dec-octet: 0 to 255, with no leading zero
+    private static bool IsDecOctet(string text)
     {
-        string port;
+        return text.Length is > 0 and < 4
+            && text.All(char.IsAsciiDigit)
+            && (text.Length == 1 || text[0] != '0')
+            && int.Parse(text, System.Globalization.CultureInfo.InvariantCulture) <= 255;
+    }
 
-        if (value.StartsWith('['))
+    // whether a port is one as a browser serializes it: a number of 0 to 65535, with no leading zero
+    private static bool IsSerializedPort(string port)
+    {
+        return port.Length < 6
+            && (port.Length == 1 || port[0] != '0')
+            && int.Parse(port, System.Globalization.CultureInfo.InvariantCulture) <= 65_535;
+    }
+
+    // an authority read by 15.12's grammar, its host and its port apart: an IPv6 address in
+    // brackets, or a name, then a colon and one digit at least, or nothing; none when it is not of it
+    private static (string Host, string? Port)? PartsOf(string authority)
+    {
+        string host;
+        string rest;
+
+        if (authority.StartsWith('['))
         {
-            var close = value.IndexOf(']', StringComparison.Ordinal);
+            var close = authority.IndexOf(']', StringComparison.Ordinal);
 
-            if (close < 0 || !IsIpLiteral(value[1..close]))
+            if (close < 0 || !IsIPv6Address(authority[1..close]))
             {
-                return false;
+                return null;
             }
 
-            port = value[(close + 1)..];
+            host = authority[..(close + 1)];
+            rest = authority[(close + 1)..];
         }
         else
         {
-            var colon = value.IndexOf(':', StringComparison.Ordinal);
+            var colon = authority.IndexOf(':', StringComparison.Ordinal);
 
-            if (!IsRegName(colon < 0 ? value : value[..colon]))
+            host = colon < 0 ? authority : authority[..colon];
+            rest = colon < 0 ? "" : authority[colon..];
+
+            if (!IsName(host))
             {
-                return false;
+                return null;
             }
-
-            port = colon < 0 ? "" : value[colon..];
         }
 
-        return port.Length == 0 || (port[0] == ':' && port[1..].All(char.IsAsciiDigit));
+        if (rest.Length == 0)
+        {
+            return (host, null);
+        }
+
+        return rest[0] == ':' && rest.Length > 1 && rest[1..].All(char.IsAsciiDigit) ? (host, rest[1..]) : null;
+    }
+
+    // the error naming an entry of a server's option that is refused as it is built
+    private static ArgumentException Refused((string Name, string Entry) option, string why)
+    {
+        return new ArgumentException($"{option.Name} cannot hold \"{option.Entry}\": {why}", option.Name);
     }
 
     /// <summary>Whether two strings are one but for the case of A to Z: every other character as it is.</summary>
@@ -151,11 +175,24 @@ internal static class HostsAndOrigins
     // definition
 
     /// <summary>
+    /// Whether a string is an authority of 15.12's grammar: a host — an IPv6 address in brackets, an
+    /// IPv4 address, or a name of letters, digits and <c>-._~!$&amp;'()</c>, empty among them, with
+    /// no percent-encoded octet — then a colon and one digit at least, or nothing.
+    /// </summary>
+    public static bool IsAuthority(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return PartsOf(text) is not null;
+    }
+
+    /// <summary>
     /// Whether a request's <c>Host</c> is one HTTP takes (RFC 9112 §3.2), from its field lines as
     /// they came: one line at most, none only where <paramref name="isRequired"/> is false, as in an
-    /// HTTP/1.0 request; its value, without the whitespace around it, <c>uri-host</c> and an
-    /// optional port (RFC 9110 §7.2, RFC 3986 §3.2.2–3.2.3). An empty value is one, and so is a name
-    /// of invalid punycode, which <see cref="IsTakenHost"/> judges.
+    /// HTTP/1.0 request; its value, without the whitespace around it, an authority of 15.12's
+    /// grammar, so none of a percent-encoded octet, <c>*+,;=</c> in a name, an <c>IPvFuture</c>
+    /// literal or a colon with no port. An empty value is one, and so is a name of invalid punycode,
+    /// which <see cref="IsTakenHost"/> judges.
     /// </summary>
     public static bool IsWellFormedHost(IReadOnlyList<string?> lines, bool isRequired)
     {
@@ -166,35 +203,236 @@ internal static class HostsAndOrigins
             return !isRequired;
         }
 
-        return lines.Count == 1 && IsHostValue((lines[0] ?? "").Trim(FieldWhitespace));
+        return lines.Count == 1 && IsAuthority((lines[0] ?? "").Trim(FieldWhitespace));
     }
 
     /// <summary>
-    /// Whether a request naming <paramref name="host"/> is taken: every one when
-    /// <paramref name="hosts"/> is none; otherwise one among them, in any ASCII case, and never a
-    /// request that names none.
+    /// Whether an HTTP/1 request's <c>Host</c> and target are what HTTP takes: its <c>Host</c> as
+    /// <see cref="IsWellFormedHost(IReadOnlyList{string?}, bool)"/> judges it; or, its target in
+    /// absolute-form, that target's authority, judged in place of the <c>Host</c>'s value, which
+    /// Kestrel ignores beside one (RFC 9112 §3.2.2), the <c>Host</c>'s lines counted alone.
     /// </summary>
-    public static bool IsTakenHost(string? host, IReadOnlyList<string>? hosts)
+    public static bool IsWellFormedHost(IReadOnlyList<string?> lines, (bool IsRequired, string? TargetAuthority) request)
     {
-        if (hosts is null)
+        ArgumentNullException.ThrowIfNull(lines);
+
+        if (request.TargetAuthority is not { } authority)
+        {
+            return IsWellFormedHost(lines, request.IsRequired);
+        }
+
+        return (lines.Count == 1 || (lines.Count == 0 && !request.IsRequired)) && IsAuthority(authority);
+    }
+
+    /// <summary>
+    /// The authority an HTTP/1 request's target names when it is in absolute-form (RFC 9112 §3.2.2,
+    /// §3.3): what follows its <c>http://</c> or <c>https://</c> up to its path, its query, its
+    /// fragment or its end, as it came; none for a target of another form.
+    /// </summary>
+    public static string? TargetAuthorityOf(string? target)
+    {
+        // ! Kestrel reads a target as absolute-form by its scheme in lower case alone, and refuses
+        // 400 any other it is given
+        var scheme = target is null ? -1 : target.StartsWith("http://", StringComparison.Ordinal) ? 7 : target.StartsWith("https://", StringComparison.Ordinal) ? 8 : -1;
+
+        if (scheme < 0)
+        {
+            return null;
+        }
+
+        var rest = target![scheme..];
+        var end = rest.IndexOfAny(['/', '?', '#']);
+
+        return end < 0 ? rest : rest[..end];
+    }
+
+    /// <summary>
+    /// The authority a request names (spec 15.12): its absolute-form target's, given, the
+    /// <c>Host</c> beside it ignored; otherwise its <c>Host</c>'s, from the field lines given,
+    /// without the whitespace around it; none when it has none.
+    /// </summary>
+    public static string? AuthorityOf(IReadOnlyList<string?> lines, string? targetAuthority)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        return targetAuthority ?? (lines.Count == 0 ? null : (lines[0] ?? "").Trim(FieldWhitespace));
+    }
+
+    /// <summary>
+    /// An authority's host, its port aside: the IPv6 address in its brackets, or what stands
+    /// before its first colon.
+    /// </summary>
+    public static string HostPartOf(string authority)
+    {
+        ArgumentNullException.ThrowIfNull(authority);
+
+        if (authority.StartsWith('['))
+        {
+            var close = authority.IndexOf(']', StringComparison.Ordinal);
+
+            return close < 0 ? authority : authority[..(close + 1)];
+        }
+
+        var colon = authority.IndexOf(':', StringComparison.Ordinal);
+
+        return colon < 0 ? authority : authority[..colon];
+    }
+
+    /// <summary>
+    /// Whether a string is RFC 3986's <c>IPv4address</c>: four <c>dec-octet</c> joined by dots, each
+    /// 0 to 255 with no leading zero — never as the platform's parser reads one, which takes
+    /// <c>127.1</c>, octal, hexadecimal and a single number.
+    /// </summary>
+    public static bool IsIPv4Address(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var octets = text.Split('.');
+
+        return octets.Length == 4 && octets.All(IsDecOctet);
+    }
+
+    /// <summary>
+    /// Whether a string is an IP address a server listens on (spec 15.12): RFC 3986's
+    /// <c>IPv4address</c>, or its <c>IPv6address</c> written bare, with no brackets and no zone, and
+    /// not IPv4-mapped (<c>::ffff:0:0/96</c>, RFC 4291 §2.5.5.2), whose node's address is written as
+    /// the IPv4 one — never as the platform's parser reads one, which takes <c>0</c> for
+    /// <c>0.0.0.0</c>, <c>127.1</c>, octal, hexadecimal and a zone.
+    /// </summary>
+    public static bool IsIpAddress(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return IsIPv4Address(text)
+            || (IsIPv6Address(text) && !System.Net.IPAddress.Parse(text).IsIPv4MappedToIPv6);
+    }
+
+    /// <summary>
+    /// The address a server is to listen on, as it starts: one <see cref="IsIpAddress"/> refuses is
+    /// an <see cref="ArgumentException"/> naming the option, which tells how to write an IPv6
+    /// address given in brackets.
+    /// </summary>
+    public static void AssertAddress(string address, string name)
+    {
+        ArgumentNullException.ThrowIfNull(address, name);
+
+        if (IsIpAddress(address))
+        {
+            return;
+        }
+
+        var bare = address.Length > 2 && address.StartsWith('[') && address.EndsWith(']') ? address[1..^1] : null;
+        var hint = bare is not null && IsIpAddress(bare) ? $": write {bare}, not {address}" : "";
+
+        throw new ArgumentException($"a server listens on an IP address, not \"{address}\"{hint}", name);
+    }
+
+    /// <summary>
+    /// Whether a field's value is one a server reads (spec 15.12): HTAB, SP and visible ASCII alone,
+    /// so never a control character but HTAB, DEL among them, which RFC 9110 §5.5 calls invalid, nor
+    /// a character past ASCII, which it keeps out of every field defined since, and which no origin
+    /// holds (RFC 6454 §6.2); and neither SP nor HTAB at either end, which RFC 9113 §8.2.1 calls
+    /// malformed, and which HTTP/1.1's parser strips before (RFC 9110 §5.5).
+    /// </summary>
+    public static bool IsVisibleField(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        if (value.Length > 0 && (FieldWhitespace.Contains(value[0]) || FieldWhitespace.Contains(value[^1])))
+        {
+            return false;
+        }
+
+        return value.All((character) =>
+        {
+            return character == '\t' || character is >= ' ' and <= '~';
+        });
+    }
+
+    /// <summary>
+    /// A request's <c>Origin</c> as a refusal tells it (spec 15.1): its field lines as they came,
+    /// joined by <c>", "</c> (RFC 9110 §5.3); none when it sends none.
+    /// </summary>
+    public static string? OriginOf(IReadOnlyList<string?> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        return lines.Count == 0 ? null : string.Join(", ", lines.Select((line) =>
+        {
+            return line ?? "";
+        }));
+    }
+
+    /// <summary>
+    /// Whether every server takes a host, whatever its hosts: <c>localhost</c>, a name that ends in
+    /// <c>.localhost</c>, in any ASCII case, which a resolver answers with the loopback itself
+    /// (RFC 6761 §6.3); an IPv6 address in brackets, and an IPv4 address, which no name a browser
+    /// fetches is written as, so no page rebinds its name to one.
+    /// </summary>
+    public static bool IsTakenByEveryServer(string host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        if (host.StartsWith('[') && host.EndsWith(']'))
+        {
+            return IsIPv6Address(host[1..^1]);
+        }
+
+        return IsIPv4Address(host)
+            || IsAsciiEqual(host, Localhost)
+            || (host.Length > Localhost.Length && IsAsciiEqual(host[^(Localhost.Length + 1)..], $".{Localhost}"));
+    }
+
+    /// <summary>
+    /// Whether a request naming <paramref name="authority"/> is taken: every one when
+    /// <paramref name="hosts"/> is <c>*</c> alone, an empty one and none among them; otherwise one
+    /// whose host, its port aside, every server takes, or one among <paramref name="hosts"/>, in any
+    /// ASCII case; never an empty host, nor a request that names none.
+    /// </summary>
+    public static bool IsTakenHost(string? authority, IReadOnlyList<string>? hosts)
+    {
+        if (hosts is [AnyHost])
         {
             return true;
         }
 
-        return !string.IsNullOrEmpty(host) && hosts.Any((taken) =>
+        if (authority is null)
+        {
+            return false;
+        }
+
+        var host = HostPartOf(authority);
+
+        if (host.Length == 0)
+        {
+            return false;
+        }
+
+        return IsTakenByEveryServer(host) || (hosts ?? []).Any((taken) =>
         {
             return IsAsciiEqual(taken, host);
         });
     }
 
     /// <summary>
+    /// The authority a request's origin is the server's own by (spec 15.12): the request's, when its
+    /// host is taken by name — one every server takes, or one <paramref name="hosts"/> lists — and
+    /// none when only <c>*</c> takes it, since a page that rebinds its name to the server's address
+    /// names that name, which <c>*</c> never checked.
+    /// </summary>
+    public static string? OwnAuthorityOf(string? authority, IReadOnlyList<string>? hosts)
+    {
+        return IsTakenHost(authority, hosts is [AnyHost] ? [] : hosts) ? authority : null;
+    }
+
+    /// <summary>
     /// Whether a request from <paramref name="origin"/> is taken: one with no <c>Origin</c> comes
     /// from no page, and is; one among <c>Origins</c>, exactly; or the server's own, <c>http://</c>
-    /// or <c>https://</c> followed by the request's <c>Host</c> as its field carries it, in any ASCII
-    /// case. Any other, <c>null</c> and every other scheme among them, or a request without a host,
-    /// is none of its own.
+    /// or <c>https://</c> followed by its own authority, as <see cref="OwnAuthorityOf"/> gives it, as
+    /// the request carries it, in any ASCII case. Any other, <c>null</c> and every other scheme among
+    /// them, or a request without an authority of its own, is none of its own.
     /// </summary>
-    public static bool IsTakenOrigin(string? origin, (string? Host, IReadOnlyList<string> Origins) taken)
+    public static bool IsTakenOrigin(string? origin, (string? Authority, IReadOnlyList<string> Origins) taken)
     {
         ArgumentNullException.ThrowIfNull(taken.Origins);
 
@@ -205,7 +443,124 @@ internal static class HostsAndOrigins
 
         // the field read as the serialized origin a browser writes from the URL it writes its Host
         // from, so neither is parsed: a default port, a path or another scheme is another origin
-        return !string.IsNullOrEmpty(taken.Host)
-            && (IsAsciiEqual(origin, $"http://{taken.Host}") || IsAsciiEqual(origin, $"https://{taken.Host}"));
+        return !string.IsNullOrEmpty(taken.Authority)
+            && (IsAsciiEqual(origin, $"http://{taken.Authority}") || IsAsciiEqual(origin, $"https://{taken.Authority}"));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="origin"/> is among the pages an HTTP server answers CORS to (spec
+    /// 15.12): an <c>Origin</c> among <paramref name="origins"/>, exactly, as
+    /// <see cref="IsTakenOrigin"/> compares them; none is never listed, and the server's own origin
+    /// only when named.
+    /// </summary>
+    public static bool IsListedOrigin(string? origin, IReadOnlyList<string> origins)
+    {
+        ArgumentNullException.ThrowIfNull(origins);
+
+        return origin is not null && origins.Contains(origin, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A server's hosts, as it is built: none, or entries each a host without its port, or
+    /// <c>*</c> alone. An entry with a port, an empty one, one that is no host by 15.12's grammar — a
+    /// Unicode name among them, which the field never carries — and <c>*</c> beside another are an
+    /// <see cref="ArgumentException"/> naming the option and the entry.
+    /// </summary>
+    public static void AssertHosts(IReadOnlyList<string>? entries, string name)
+    {
+        if (entries is null)
+        {
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            ArgumentNullException.ThrowIfNull(entry, name);
+
+            if (entry == AnyHost)
+            {
+                if (entries.Count > 1)
+                {
+                    throw Refused((name, entry), "* takes every host, and stands alone");
+                }
+
+                continue;
+            }
+
+            if (entry.Length == 0)
+            {
+                throw Refused((name, entry), "an empty host is taken under * alone");
+            }
+
+            if (PartsOf(entry) is not { } parts || parts.Host.Length == 0)
+            {
+                throw Refused((name, entry), "it is no host, as a request's Host carries one, an IDN in its punycode");
+            }
+
+            if (parts.Port is not null)
+            {
+                throw Refused((name, entry), "a host is taken on any port, and is given without one");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A server's origins, as it is built: each an origin as RFC 6454 §6.2 serializes it — a scheme
+    /// in lower case, <c>://</c>, a host of 15.12's grammar and a port with no leading zero, nothing
+    /// after; for <c>http</c>, <c>https</c>, <c>ws</c> and <c>wss</c>, the host in lower case and no
+    /// port where it is the scheme's default. <c>*</c>; <c>null</c>, which a browser sends for every
+    /// page with no origin of its own, a sandboxed frame of any site among them; and any other entry
+    /// are an <see cref="ArgumentException"/> naming the option and the entry.
+    /// </summary>
+    public static void AssertOrigins(IReadOnlyList<string>? entries, string name)
+    {
+        foreach (var entry in entries ?? [])
+        {
+            ArgumentNullException.ThrowIfNull(entry, name);
+
+            if (entry == AnyHost)
+            {
+                throw Refused((name, entry), "no wildcard of origins exists; each entry is one origin, and a page of any other is refused");
+            }
+
+            // ! null serializes every opaque origin alike (RFC 6454 §6.2), so naming it would take a
+            // sandboxed frame of any site, which reads every answer
+            if (entry == "null")
+            {
+                throw Refused((name, entry), "a browser sends it for every page with no origin of its own, a sandboxed frame of any site among them; serve the page from an origin, and name that one");
+            }
+
+            var separator = entry.IndexOf("://", StringComparison.Ordinal);
+            var scheme = separator < 0 ? "" : entry[..separator];
+            var isScheme = scheme.Length > 0
+                && char.IsAsciiLetterLower(scheme[0])
+                && scheme.All((character) =>
+                {
+                    return char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character is '+' or '-' or '.';
+                });
+
+            if (!isScheme || PartsOf(entry[(separator + 3)..]) is not { } parts || parts.Host.Length == 0)
+            {
+                throw Refused((name, entry), "it is no origin as a browser serializes one, a scheme, :// and a host, with an optional port and nothing after");
+            }
+
+            if (parts.Port is { } port && !IsSerializedPort(port))
+            {
+                throw Refused((name, entry), "a browser writes a port as a number of 0 to 65535 with no leading zero");
+            }
+
+            if (DefaultPorts.TryGetValue(scheme, out var defaultPort))
+            {
+                if (parts.Host.Any(char.IsAsciiLetterUpper))
+                {
+                    throw Refused((name, entry), "a browser writes the host of an origin in lower case");
+                }
+
+                if (parts.Port is { } given && int.Parse(given, System.Globalization.CultureInfo.InvariantCulture) == defaultPort)
+                {
+                    throw Refused((name, entry), "a browser leaves the scheme's default port out of an origin");
+                }
+            }
+        }
     }
 }

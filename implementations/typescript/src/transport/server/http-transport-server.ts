@@ -2,8 +2,8 @@
 
 // dependencies
 
-import { isIP } from 'node:net';
 import {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CLOSE_EVENT,
@@ -14,23 +14,37 @@ import {
   LISTEN_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
+  REFUSAL_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
   TRANSPORT_HTTP,
+  WAIT_HEADER,
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
+import { BARE_ITEM_TYPES, type BareItem, parseItem } from '../shared/structured-fields';
 import type { Data } from '../shared/types';
 import {
+  assertHosts,
+  assertListeningAddress,
+  assertOrigins,
+  authorityOf,
+  hasVisibleFields,
   HOST_REFUSAL,
+  isAuthority,
+  isListedOrigin,
   isTakenHost,
   isTakenOrigin,
-  isWellFormedHost,
+  type IAuthority,
   ORIGIN_REFUSAL,
+  originOf,
+  ownAuthorityOf,
+  requestTargetOf,
 } from './hosts-and-origins';
-import { createTransportServer, generateDrawnHandle } from './transport-server';
+import { createTransportServer, generateHandle } from './transport-server';
+import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
   HTTPRequestListener,
   HTTPTransportServer,
@@ -47,6 +61,7 @@ import type {
 } from './types';
 
 export {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
@@ -54,6 +69,7 @@ export {
   LISTEN_HEADER,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
+  WAIT_HEADER,
 } from '../shared/constants';
 export type {
   HTTPRequestListener,
@@ -178,7 +194,7 @@ export const PATHNAME = '/bead';
 
 /** What an omitted start option resolves to. */
 export const START_DEFAULTS = Object.freeze({
-  address: '0.0.0.0',
+  address: '127.0.0.1',
   findOpenPort: false,
   port: 80,
 } satisfies ITransportServerStartOptions);
@@ -237,14 +253,23 @@ const LENGTH_BYTES = 4;
 // what a listen that brings nothing back ends with
 const NOTHING: IEnd = Object.freeze({ status: 204 });
 
-// what every response on the path carries: never stored, never sniffed
+// what every response on the path carries: never stored, never sniffed, and which one a request
+// gets turns on its Origin; HTTP's own 400 carries none of these
 const RESPONSE_HEADERS = Object.freeze({
   'cache-control': 'no-store',
+  vary: 'Origin',
   'x-content-type-options': 'nosniff',
 });
 
-// the addresses of this machine, from which a proxy in front of the transport comes
-const LOOPBACK: ReadonlySet<string> = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+// what a preflight's answer from an origin `origins` names (spec 15.12) carries whatever method it
+// asks for: the browser judges its request against it
+const PREFLIGHT = Object.freeze({
+  'access-control-allow-methods': 'GET, POST, DELETE',
+  'access-control-max-age': '7200',
+});
+
+// HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
+const PROTOCOL_ERROR = 0x1;
 
 // the 404 that tells a client its connection is gone
 const UNKNOWN_CONNECTION: IEnd = Object.freeze({
@@ -260,34 +285,12 @@ const headerOf = (request: IHTTPRequestLike, name: string): string | undefined =
   return Array.isArray(value) ? value[0] : value;
 };
 
-// the host a request names: `Host` over HTTP/1, `:authority` over HTTP/2
-const hostOf = (request: IHTTPRequestLike): string | undefined => {
-  return headerOf(request, 'host') ?? headerOf(request, ':authority');
-};
+// the path a request names, an absolute-form target's among them, its query read by no exchange;
+// none for a target HTTP refuses
+const targetOf = (request: IHTTPRequestLike): { path: string } | undefined => {
+  const target = requestTargetOf(request.url);
 
-// the path a request names, and its query, which a listen reads: read as a string, so no target
-// throws
-const targetOf = (request: IHTTPRequestLike): { path: string; query: URLSearchParams } => {
-  const target = request.url ?? '/';
-  const index = target.indexOf('?');
-
-  return index === -1
-    ? { path: target, query: new URLSearchParams() }
-    : { path: target.slice(0, index), query: new URLSearchParams(target.slice(index + 1)) };
-};
-
-// a count a listen gives: absent is 0, and anything but digits is none
-const countOf = (query: URLSearchParams, name: string): number | undefined => {
-  const value = query.get(name) ?? '0';
-
-  return /^\d{1,15}$/u.test(value) ? Number(value) : undefined;
-};
-
-// whether a connect says its client listens: `?1` or `?0`, absent being `?0`; anything else is none
-const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
-  const value = headerOf(request, LISTEN_HEADER) ?? '?0';
-
-  return value === '?1' || (value === '?0' ? false : undefined);
+  return target === undefined ? undefined : { path: target.path };
 };
 
 // the length an envelope goes after in a batch
@@ -321,6 +324,72 @@ const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   }
 
   return values;
+};
+
+// a field a request carries read as an Item of RFC 9651, its lines joined by `, ` first (§4.2, RFC
+// 9110 §5.3): its bare item, its parameters ignored (§2.3); `null` when the request carries none,
+// `undefined` when it does not parse, two lines of it among them
+const bareItemOf = (request: IHTTPRequestLike, name: string): BareItem | null | undefined => {
+  const lines = linesOf(request, name);
+
+  return lines.length === 0 ? null : parseItem(lines.join(', '))?.bareItem;
+};
+
+// a count a listen gives (spec 15.9): an Integer of 0 or more, anything else none; left out, 0, or
+// none where it `isRequired`
+const countOf = (
+  request: IHTTPRequestLike,
+  name: string,
+  { isRequired = false }: { isRequired?: boolean } = {}
+): number | undefined => {
+  const bareItem = bareItemOf(request, name);
+
+  if (bareItem === null) {
+    return isRequired ? undefined : 0;
+  }
+
+  return bareItem?.type === BARE_ITEM_TYPES.INTEGER && bareItem.value >= 0
+    ? bareItem.value
+    : undefined;
+};
+
+// whether a connect says its client listens: a Boolean, absent being false; anything else is none
+const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
+  const bareItem = bareItemOf(request, LISTEN_HEADER);
+
+  if (bareItem === null) {
+    return false;
+  }
+
+  return bareItem?.type === BARE_ITEM_TYPES.BOOLEAN ? bareItem.value : undefined;
+};
+
+// a preflight's answer (spec 15.12): `authorization`, which no wildcard covers (Fetch §4.8); the
+// names asked, for a browser that caches names and no wildcard; then `*`. No `Vary` names what was
+// asked: no cache stores an answer to `OPTIONS` (RFC 9110 §9.3.7)
+const preflightOf = (request: IHTTPRequestLike): IEnd => {
+  const asked = linesOf(request, 'access-control-request-headers').join(', ');
+  const allowed = ['authorization', ...(asked === '' ? [] : [asked]), '*'];
+
+  return {
+    headers: { ...PREFLIGHT, 'access-control-allow-headers': allowed.join(', ') },
+    status: 204,
+  };
+};
+
+// a request's authority (spec 15.12): over HTTP/2, its `:authority`, else its `host`, judged by
+// its form; over HTTP/1, as `authorityOf` reads it. None for what HTTP refuses of its own
+const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefined => {
+  if (request.httpVersionMajor !== 1) {
+    const authority = headerOf(request, ':authority') ?? headerOf(request, 'host');
+
+    return authority === undefined || isAuthority(authority) ? { authority } : undefined;
+  }
+
+  return authorityOf(linesOf(request, 'host'), {
+    isRequired: request.httpVersion === '1.1',
+    target: requestTargetOf(request.url),
+  });
 };
 
 // the credential a field carries: its value whole, without the spaces and tabs around it (RFC 9110
@@ -395,6 +464,8 @@ const unref = (timer: TimeoutId): void => {
 };
 
 // writes an exchange's end, once: its status and headers, marked when it is a refusal
+// ! never tells: the 404 of a connection that closes is section 15.7's close, told by `close`, and
+// no refusal; a refusal the transport judges goes through `finish`, which tells it
 const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd): void => {
   if (!response.headersSent) {
     response.writeHead(status, {
@@ -405,6 +476,29 @@ const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd)
   }
 
   response.end();
+};
+
+// a malformed HTTP/2 request's end: its stream reset, nothing written (RFC 9113 §8.1.1)
+const reset = (response: IHTTPResponseLike): void => {
+  if (response.stream === undefined) {
+    response.destroy();
+  } else {
+    response.stream.close(PROTOCOL_ERROR);
+  }
+};
+
+// what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
+// unmarked, with none of the path's fields, as Node's parser writes its own; over HTTP/2, a
+// malformed request, its stream reset
+const refuseMalformed = ({ request, response }: IExchangeIn): void => {
+  if (request.httpVersionMajor !== 1) {
+    return (reset(response), undefined);
+  }
+
+  response.writeHead(400, { 'content-length': '0', connection: 'close' });
+  response.end();
+
+  return undefined;
 };
 
 // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
@@ -433,20 +527,23 @@ const sendHead = (response: IHTTPResponseLike): void => {
  * exchange's is read, and a `POST` with two is refused 400. An answer, and what a listen brings
  * back, carry none. A cancel ends the exchange of its call; one that comes before its request
  * buries that call id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked
- * in `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes
+ * in `bead-refusal`. To a page of an origin `origins` names, it answers CORS (spec 15.12): its
+ * preflight 204, and every answer once its origin is judged naming it and exposing every field, no
+ * credential allowed. An exchange lost — its response closed before the transport ended it — closes
  * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
  * a connection idle past `inactivityTimeout`.
  *
  * What the server sends of its own reaches a client that said at connect that it listens —
  * `bead-listen: ?1`, which the 201 says back. It waits in the connection's outbox, numbered, until a
- * listen — a `GET` with `after` and `wait` — brings back all that waits, in a batch of
- * `application/prs.bead-batch`, the number of its first in `bead-sequence`; the next listen
- * acknowledges by `after` what its client heard whole, and what it did not comes again. A listen waits up to `wait`, no longer than `maximumWait`, for something
- * to bring back; a second takes the first's place. Each listen held, once past its refusals, emits
- * `listen` with `true`, and its end, while its connection stands, `listen` with `false`: the layers
- * above count no silence meanwhile (spec 13.7). An outbox past `maximumOutboxBytes` closes its
- * connection. A connection whose client does not listen carries answers alone: anything else
- * rejects its `send`.
+ * listen — a `GET` at the connection's URL, its `bead-after` and `bead-wait` — brings back all that
+ * waits, in a batch of `application/prs.bead-batch`, the number of its first in `bead-sequence`;
+ * the next listen acknowledges by `bead-after` what its client heard whole, and what it did not
+ * comes again, and one without it is refused. A listen waits up to `bead-wait` milliseconds, 0 when
+ * left out, no longer than `maximumWait`, for something to bring back; a second takes the first's
+ * place. Each listen held, once past its refusals, emits `listen` with `true`, and its end, while
+ * its connection stands, `listen` with `false`: the layers above count no silence meanwhile (spec
+ * 13.7). An outbox past `maximumOutboxBytes` closes its connection. A connection whose client does
+ * not listen carries answers alone: anything else rejects its `send`.
  *
  * @example
  * const server = createHTTPTransportServer({ createServer: (listener) => createServer(listener) });
@@ -463,7 +560,6 @@ export const createHTTPTransportServer = (
     exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     hosts,
     inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
-    isProxyTrusted = false,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
     maximumConnections = MAXIMUM_CONNECTIONS,
     maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
@@ -473,6 +569,7 @@ export const createHTTPTransportServer = (
     origins = [],
     pathname = PATHNAME,
     secure,
+    trustedProxies,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
@@ -484,12 +581,15 @@ export const createHTTPTransportServer = (
   assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
   const maximumWait = assertHeldFinite('maximumWait', givenMaximumWait);
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
+  assertHosts(hosts);
+  assertOrigins(origins);
+  const proxies = trustedProxiesOf(trustedProxies);
 
   // what the transport keeps of each connection, by handle
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
 
   const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
-    (server, connections, { tell }) => {
+    (server, connections, { isHeard, tell }) => {
       let httpServer: IHTTPServerLike | undefined;
       let ordinal = 0;
       // the bytes of body the exchanges under way hold, all together, counted as they come
@@ -505,36 +605,47 @@ export const createHTTPTransportServer = (
         return perAddress.get(address) ?? 0;
       };
 
-      // the client's address: the socket's, or, behind a proxy on this machine the transport trusts,
-      // the last one it forwarded — an address, or nothing of it is taken
+      // the client's address: the socket's, in the one form, or, behind proxies the transport
+      // trusts, the rightmost `X-Forwarded-For` entry none of them holds (spec 15.12)
       const addressOf = (request: IHTTPRequestLike): string | undefined => {
         const { remoteAddress } = request.socket;
-        const forwarded = headerOf(request, 'x-forwarded-for')?.split(',').at(-1)?.trim();
+        const lines = linesOf(request, 'x-forwarded-for');
 
-        return isProxyTrusted &&
-          remoteAddress !== undefined &&
-          LOOPBACK.has(remoteAddress) &&
-          forwarded !== undefined &&
-          isIP(forwarded) !== 0
-          ? forwarded
-          : remoteAddress;
+        return remoteAddress === undefined
+          ? undefined
+          : clientAddressOf(remoteAddress, {
+              forwarded: lines.length === 0 ? undefined : lines.join(', '),
+              trustedProxies: proxies,
+            });
       };
 
-      // an exchange from the server's own origin, or one it was told; one with no `Origin` comes from
-      // anywhere, and any client that sends one is judged by it
-      const isAllowedOrigin = (request: IHTTPRequestLike): boolean => {
-        return isTakenOrigin(headerOf(request, 'origin'), { host: hostOf(request), origins });
-      };
-
-      // ends an exchange the transport answers itself; one whose body it will not read is closed
-      // behind a refusal over HTTP/1, since what follows would read as the next request
+      // ends an exchange the transport answers itself, telling a refusal once written (spec 15.1);
+      // over HTTP/1, a refusal of a body it will not read closes its socket, lest the rest read as
+      // the next request
       const finish = ({ request, response }: IExchangeIn, end: IEnd): void => {
         const isClosing = end.status >= 400 && request.httpVersionMajor === 1 && hasBody(request);
+        const { reason, status } = end;
+        // read before the end is written, which may close its socket
+        const refusal =
+          reason === undefined || !isHeard(REFUSAL_EVENT)
+            ? undefined
+            : {
+                address: addressOf(request),
+                authority: authorityNamedBy(request)?.authority,
+                origin: originOf(linesOf(request, 'origin')),
+                port: request.socket.remotePort ?? 0,
+                reason,
+                status,
+              };
 
         endWith(
           response,
           isClosing ? { ...end, headers: { ...end.headers, connection: 'close' } } : end
         );
+
+        if (refusal !== undefined) {
+          tell(REFUSAL_EVENT, [refusal]);
+        }
       };
 
       // a connection idle — no exchange under way — closes past its timeout
@@ -662,9 +773,8 @@ export const createHTTPTransportServer = (
       // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
       const listen = (exchange: IExchangeIn, connection: IDrawn): void => {
         const { request, response } = exchange;
-        const { query } = targetOf(request);
-        const after = countOf(query, 'after');
-        const wait = countOf(query, 'wait');
+        const after = countOf(request, AFTER_HEADER, { isRequired: true });
+        const wait = countOf(request, WAIT_HEADER);
 
         if (!connection.isListening) {
           return (finish(exchange, { reason: REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined);
@@ -772,7 +882,7 @@ export const createHTTPTransportServer = (
         }
 
         const connectionToken = drawToken();
-        const connectionHandle = generateDrawnHandle({
+        const connectionHandle = generateHandle({
           ip: address,
           ordinal: (ordinal += 1),
           type: TRANSPORT_HTTP,
@@ -1081,29 +1191,55 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
-        // what HTTP refuses of its own (RFC 9112 §3.2), as HTTP answers it, unmarked; HTTP/2's
-        // authority is its server's to judge
-        if (
-          request.httpVersionMajor === 1 &&
-          !isWellFormedHost(linesOf(request, 'host'), {
-            isRequired: request.httpVersion === '1.1',
-          })
-        ) {
-          response.writeHead(400, { 'content-length': '0', connection: 'close' });
-
-          return (response.end(), undefined);
+        // * a field of a control character but a tab, of an octet past ASCII, or padded at either
+        // end, before anything else: Node's parser answers the first itself, and drops a padded one
+        // over HTTP/2 unless `strictFieldWhitespaceValidation` is false
+        if (!hasVisibleFields(request.rawHeaders)) {
+          return (refuseMalformed(exchange), undefined);
         }
 
-        if (!isTakenHost(hostOf(request), hosts)) {
+        const named = authorityNamedBy(request);
+
+        if (named === undefined) {
+          return (refuseMalformed(exchange), undefined);
+        }
+
+        const { authority } = named;
+
+        if (!isTakenHost(authority, hosts)) {
           return (finish(exchange, { reason: REFUSALS.HOST, status: 403 }), undefined);
         }
 
-        if (targetOf(request).path !== pathname) {
+        if (targetOf(request)?.path !== pathname) {
           return (finish(exchange, { reason: REFUSALS.PATH, status: 404 }), undefined);
         }
 
-        if (!isAllowedOrigin(request)) {
+        // an exchange from the server's own origin, by a host it takes by name, or one it was told;
+        // one with no `Origin` comes from anywhere, and any client that sends one is judged by it
+        const origin = headerOf(request, 'origin');
+
+        if (!isTakenOrigin(origin, { host: ownAuthorityOf(authority, hosts), origins })) {
           return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
+        }
+
+        // the origin the server answers CORS to, as it came: one `origins` names
+        const listed = isListedOrigin(origin, origins) ? origin : undefined;
+
+        // * every answer a page `origins` names can read carries it, a refusal's too, which its
+        // client reads; a refusal judged before the origin answers a preflight no browser reads. The
+        // writers' `writeHead` merges it
+        if (listed !== undefined) {
+          response.setHeader('access-control-allow-origin', listed);
+          response.setHeader('access-control-expose-headers', '*');
+        }
+
+        // a preflight is no refusal: `endWith`, never `finish`, so nothing tells it
+        if (
+          listed !== undefined &&
+          request.method === 'OPTIONS' &&
+          headerOf(request, 'access-control-request-method') !== undefined
+        ) {
+          return (endWith(response, preflightOf(request)), undefined);
         }
 
         if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
@@ -1169,6 +1305,8 @@ export const createHTTPTransportServer = (
         type: TRANSPORT_HTTP,
 
         start: async ({ address, findOpenPort, port, signal }) => {
+          assertListeningAddress(address);
+
           let opened: IHTTPServerLike | undefined;
           let isListening = false;
 
@@ -1247,6 +1385,7 @@ export const createHTTPTransportServer = (
         gauges: () => {
           const kept = {
             buriedCallIds: 0,
+            largestAddressConnections: 0,
             largestOutboxBytes: 0,
             listens: 0,
             outboxBytes: 0,
@@ -1263,10 +1402,17 @@ export const createHTTPTransportServer = (
             kept.waitingExchanges += connection.waiting.size;
           }
 
+          // * the busiest address, under its ceiling: a proxy left off `trustedProxies` holds every
+          // connection, and the health warns before its first 503
+          for (const held of perAddress.values()) {
+            kept.largestAddressConnections = Math.max(kept.largestAddressConnections, held);
+          }
+
           return gaugesOf({
             ceilings: {
               bodyBytes: bodyBytesBudget,
               connections: maximumConnections,
+              largestAddressConnections: maximumConnectionsPerAddress,
               largestOutboxBytes: maximumOutboxBytes,
             },
             connectionHandles: drawn.keys(),

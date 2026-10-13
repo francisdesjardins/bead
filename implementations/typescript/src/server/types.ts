@@ -15,7 +15,10 @@ import type {
   IServiceManagerOptions,
   RouterLimitsOptions,
 } from '../router/shared/types';
-import type { TransportServerConnectionHandle } from '../transport/server/types';
+import type {
+  ITransportServerRefusal,
+  TransportServerConnectionHandle,
+} from '../transport/server/types';
 import type { IClock } from '../transport/shared/clock';
 import type { EmitterListener, IGauges, ITransportMessage } from '../transport/shared/types';
 import type { IMetricsRegistry } from '../router/shared/metrics-registry';
@@ -68,12 +71,23 @@ export interface IServer<
     request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
-   * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call in leg A's
-   * connection's session, or one whose header presents a `JWT`, or an `ELSEWHERE` its transport
-   * carried, which the relay forwards for its destination to verify. It refuses any other, a call in
-   * none that presented none, with its `refusal`, SESSION_REQUIRED.
+   * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call whose header
+   * presents a `JWT`, or an `ELSEWHERE` its transport carried, which the relay forwards for its
+   * destination to verify, read from its credential scheme alone unless the relay verifies. It
+   * refuses any other, one that presents none or `OPAQUE`, in a session or in none, with its
+   * `refusal`, ACCESS_DENIED, its detail naming the default.
    */
-  requireSessionOrCredential: ((
+  requireCredential: ((
+    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header'>
+  ) => boolean) & { readonly refusal: AdmissionFailure };
+  /**
+   * A relay's `beforeRoute` that lends leg B's session to every requester in a session at the
+   * relay, at every destination (spec 14.3, step 1, 14.7): a call in leg A's connection's session,
+   * or one presenting a credential `requireCredential` admits. It reads no destination; a
+   * `beforeRoute` that checks the destination against the session is the one to write. It refuses a
+   * call in none that presented none with its `refusal`, SESSION_REQUIRED.
+   */
+  shareLegBSession: ((
     request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header' | 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
@@ -156,8 +170,11 @@ export interface IServerOptions {
   pacing?: PacingLimitsOptions | undefined;
   /**
    * How the router relays a request that names a destination registered in it. Its `beforeRoute`
-   * is `requireSessionOrCredential` when not given: a relay is a door to what is behind it, which a
-   * credential it forwards opens for its destination to verify.
+   * is `requireCredential` when not given: a relay is a door to what is behind it, which a
+   * credential it forwards opens for its destination to verify, and leg A's session does not.
+   * `shareLegBSession` lends leg B's session to every requester in a session of leg A's, at every
+   * destination: a choice to write, as a `beforeRoute` that checks the destination against the
+   * requester's session is.
    */
   relay?: IRelayOptions | undefined;
 }
@@ -166,7 +183,9 @@ export interface IServerOptions {
  * The part of a transport server a server uses, besides what its router does — met by this
  * package's. It asks only for connections named by a handle, and to be told when one opens, speaks or
  * closes, and, over HTTP, when a listen is held and when it ends; a transport over a broker meets it
- * once its handles have a shape of their own.
+ * once its handles have a shape of their own. It carries its `error` and its `refusal` as each of
+ * this package's does, which the server hears nothing of: an application hears them through
+ * `server.transport`, whichever transport it built (decision 0023).
  */
 export interface IServerTransportLike extends IRouterServerTransportLike {
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
@@ -188,6 +207,12 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
     >
   ): unknown;
   off(
+    event: 'error',
+    listener: EmitterListener<
+      [error: Error, connectionHandle: TransportServerConnectionHandle | '']
+    >
+  ): unknown;
+  off(
     event: 'listen',
     listener: EmitterListener<[isHeld: boolean, connectionHandle: TransportServerConnectionHandle]>
   ): unknown;
@@ -197,6 +222,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
       [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
+  off(event: 'refusal', listener: EmitterListener<[refusal: ITransportServerRefusal]>): unknown;
   on(
     event: 'close',
     listener: EmitterListener<
@@ -207,6 +233,16 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
     event: 'connection',
     listener: EmitterListener<
       [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+    >
+  ): unknown;
+  /**
+   * What went wrong on a connection, or what a listener of its events threw; an empty handle is the
+   * transport's own, or a `refusal` listener's.
+   */
+  on(
+    event: 'error',
+    listener: EmitterListener<
+      [error: Error, connectionHandle: TransportServerConnectionHandle | '']
     >
   ): unknown;
   /** A listen held on a connection, `isHeld`, and its end; one that has no listen never says it. */
@@ -220,5 +256,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
       [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
+  /** Each refusal it judges of its own, once written (spec 15.1); a worker's never refuses. */
+  on(event: 'refusal', listener: EmitterListener<[refusal: ITransportServerRefusal]>): unknown;
   stop(): Promise<void>;
 }

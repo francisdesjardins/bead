@@ -27,8 +27,8 @@ import { join } from 'node:path';
 
 // ── Rules ─────────────────────────────────────────────────────────────────────
 
-// the name `beadc init` takes: a proto package's part
-const NAME = /^[a-z][a-z0-9_]*$/;
+// the name `beadc init` takes: a proto package's part, buf's lower snake case
+const NAME = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/;
 
 export const WRAPPERS = ['beadc.sh', 'beadc.ps1'];
 

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A consumer of the C# target's goldens: builder/test/consumer/UseDeprecated.cs, compiled with
+       them by Roslyn, as a consumer's build compiles them, every use of what they mark read off the
+       diagnostics. The twin of the TypeScript target's consumer, which typescript.test.ts lints. -->
+  <PropertyGroup>
+    <!-- xUnit v3 runs its tests as a program of their own -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Bead.Goldens.Tests</RootNamespace>
+    <!-- a test says what it shows by its name -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+    <!-- the compiler, which reads the consumer's diagnostics as its build would print them -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+    <!-- what the goldens compile against, beside Bead.Core -->
+    <PackageReference Include="Google.Protobuf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
+    <!-- the check a proto codec of the goldens calls first, as a consumer that binds proto references it -->
+    <ProjectReference Include="../../src/Bead.Protobuf/Bead.Protobuf.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the goldens and their consumer, read as text and compiled by the test, never by this project -->
+    <Content Include="../../../../builder/test/golden/csharp/**/*.cs" Link="Golden/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../builder/test/consumer/UseDeprecated.cs" Link="Consumer/UseDeprecated.cs" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

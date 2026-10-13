@@ -177,11 +177,19 @@ internal sealed class InterceptedServer(Server<string> server) : IBeadServer<str
         }
     }
 
-    public BeforeRequest RequireSessionOrCredential
+    public BeforeRequest RequireCredential
     {
         get
         {
-            return server.RequireSessionOrCredential;
+            return server.RequireCredential;
+        }
+    }
+
+    public BeforeRequest ShareLegBSession
+    {
+        get
+        {
+            return server.ShareLegBSession;
         }
     }
 
@@ -314,6 +322,11 @@ internal sealed class InterceptingRouter(IRouterLike router) : IRouterLike
     public Task<uint> Subscribe(AnswerTarget target)
     {
         return router.Subscribe(target);
+    }
+
+    public Failure? AnsweredOf(AnswerTarget target)
+    {
+        return router.AnsweredOf(target);
     }
 
     public bool HasNotification(INotificationLike notification)

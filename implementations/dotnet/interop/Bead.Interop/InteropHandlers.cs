@@ -87,7 +87,8 @@ public static class InteropHandlers
             || !request.TryGetProperty("issuer", out var issuer)
             || issuer.ValueKind != JsonValueKind.String)
         {
-            throw new ArgumentException("endSessionsOf names an issuer by {issuer}, a string, alone", nameof(request));
+            // * the words of verifiers.endSessionsOf's refusal, as the TypeScript side throws them
+            throw new ArgumentException("endSessionsOf names an issuer by {\"issuer\"} alone, a string");
         }
 
         return issuer.GetString()!;

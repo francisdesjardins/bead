@@ -240,10 +240,20 @@ internal sealed class CallTable
 }
 
 /// <summary>
+/// What one series of calls held at one reading: its started count, its handled counts by column,
+/// each bucket's own count, and its sum in whole microseconds.
+/// </summary>
+/// <param name="Started">Its started count, never below the sum of its handled counts.</param>
+/// <param name="Handled">Its handled counts, by column; their sum is its <c>_count</c>.</param>
+/// <param name="Buckets">Each bucket's own count, their sum never above its handled counts'.</param>
+/// <param name="Sum">Its sum, in whole microseconds.</param>
+internal sealed record CallReading(long Started, long[] Handled, long[] Buckets, long Sum);
+
+/// <summary>
 /// One series of calls, made at 0 as its procedure is declared, or as its registry is given to a
 /// router for <c>_OTHER</c>: its started count, its handled counts by column, and its duration's
 /// buckets and sum, each in whole microseconds. Counted with no lock and no allocation, from any
-/// thread; read by the exposition.
+/// thread; read by the exposition, once a series.
 /// </summary>
 internal sealed class CallSeries(CallTable table, string labels)
 {
@@ -269,33 +279,35 @@ internal sealed class CallSeries(CallTable table, string labels)
     /// <summary>A call ended, so long after it started: every end is observed (11.2).</summary>
     public void End((CallOutcome Outcome, Failure? Failure) ending, long microseconds)
     {
+        // ! counted in this order, which Read reads backwards: its handled count first
         Interlocked.Increment(ref _handled[Table.ColumnOf(ending)]);
         Interlocked.Increment(ref _buckets[MetricsBuckets.Of(microseconds)]);
         Interlocked.Add(ref _sum, microseconds);
     }
 
-    /// <summary>Its started count.</summary>
-    public long Started()
+    /// <summary>
+    /// Its counts at one reading (spec/debugging.md 8.5), read in the reverse of the order a call
+    /// counts them — its sum, its buckets, its handled counts, then its started count — while other
+    /// threads go on counting: an end it reads in a bucket it reads among its handled counts too, and
+    /// a call it reads ended it reads started.
+    /// </summary>
+    public CallReading Read()
     {
-        return Volatile.Read(ref _started);
-    }
+        var sum = Volatile.Read(ref _sum);
+        var buckets = new long[_buckets.Length];
+        var handled = new long[_handled.Length];
 
-    /// <summary>Its handled count in a column.</summary>
-    public long Handled(int column)
-    {
-        return Volatile.Read(ref _handled[column]);
-    }
+        for (var index = 0; index < buckets.Length; index += 1)
+        {
+            buckets[index] = Volatile.Read(ref _buckets[index]);
+        }
 
-    /// <summary>A bucket's own count, not yet added to those under it.</summary>
-    public long Bucket(int index)
-    {
-        return Volatile.Read(ref _buckets[index]);
-    }
+        for (var index = 0; index < handled.Length; index += 1)
+        {
+            handled[index] = Volatile.Read(ref _handled[index]);
+        }
 
-    /// <summary>Its sum, in whole microseconds.</summary>
-    public long Sum()
-    {
-        return Volatile.Read(ref _sum);
+        return new CallReading(Volatile.Read(ref _started), handled, buckets, sum);
     }
 }
 

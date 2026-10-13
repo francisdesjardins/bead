@@ -11,7 +11,7 @@ public sealed partial class RouterServerTests
     // constants
 
     // the device behind the relay
-    private const string DeviceHandle = "type=WS;ip=127.0.0.1;port=50100";
+    private const string DeviceHandle = "type=WS;ip=127.0.0.1;port=50100;ordinal=1";
 
     private static readonly Procedure Failing = new() { ServiceId = 2, ProcedureId = 2, ProcedureName = "failing", ServiceRevision = 3 };
 

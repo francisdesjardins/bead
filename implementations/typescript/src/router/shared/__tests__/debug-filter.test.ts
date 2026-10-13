@@ -162,6 +162,7 @@ test.describe('filterDebug', () => {
     expect(heardOf('get*, -getstatus', events)).toEqual(['GetTime rx request']);
   });
 
+  // debugging 6.10
   test('matches a whole name, and takes every other character literally', () => {
     const names = [eventOf('get+status'), eventOf('a.b'), eventOf('axb'), eventOf('getStatusNow')];
 
@@ -172,6 +173,7 @@ test.describe('filterDebug', () => {
     expect(heardOf('status, getStatu', [eventOf('getStatus')])).toEqual([]);
   });
 
+  // debugging 6.8
   test('refuses a filter given whole in the grammar’s names, as it is made', () => {
     const none = () => {
       return undefined;

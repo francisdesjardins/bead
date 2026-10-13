@@ -68,53 +68,64 @@ its close as a server goes down is 1001, going away
 ## Decision
 
 **A transport goes on through its listener's throw** (spec 15.1). Each listener of a transport's
-event, a connection opened, an envelope, a listen or a close, is called within its own guard, on
-every transport, server and client, on both sides: what one throws is reported, as spec 9.0 reports
-an error, through its transport's `error` event with the connection it was told of; the listeners
-after it are called all the same; and the transport goes on as if it returned. Its connection is
-drawn and its 201 written, or its socket kept; its envelope is handed on, and the router's answer
-written; its close is done. A listener's throw refuses no connection, fails no exchange and closes
-nothing. It is [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s rule for a debug
-listener, carried to the transports, and the DOM's inner invoke is its standard. A listener of the
-transport's `error` that throws is its platform's, as a listener of a router's `error` is.
+event, a connection opened, an envelope, a listen, a close or a reconnection, is called within its
+own guard, on every transport, server and client, on both sides: what one throws is reported, as
+spec 9.0 reports an error, through its transport's `error` event with the connection it was told of;
+the listeners after it are called all the same; and the transport goes on as if it returned. Its
+connection is drawn and its 201 written, or its socket kept; its envelope is handed on, and the
+router's answer written; its close is done; its reconnection goes on to its attempts. A listener's
+throw refuses no connection, fails no exchange and closes nothing. It is
+[0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s rule for a debug listener, carried
+to the transports, and the DOM's inner invoke is its standard. A listener of the transport's `error`
+that throws is its platform's, as a listener of a router's `error` is, and so is what a listener
+returns: a side awaits nothing of it.
 
 **The transport's `error` is where it is told.** Every TypeScript transport carries one, and its
 emitter returns `false` for an `error` nobody listens to, so a report ends nothing. On the C# side,
 `HttpTransportServer` and `HttpTransportClient` carry `Error` in their WebSocket siblings' shapes,
 `Action<Exception, string>` on a server, the connection's handle last, and `Action<Exception>` on a
-client. The routers listen to a transport's `connection`, `message` and `close` alone, and forward
-none of its errors to their own: an application hears its transport's on the transport it built,
-`server.transport.on('error', …)`, the concrete transport's `Error` on the C# side, where a socket's
-error already goes.
+client. The routers listen to a transport's `connection`, `message` and `close`, and a client's
+router to its `reconnect`, `Reconnect` on the C# side, and forward none of its errors to their own.
+A server's transport, as the server gives it, carries `error` and `refusal` as each transport does:
+`IServerTransportLike` on the TypeScript side, `IServerTransport` on the C# side. So an application
+hears its transport's through its server, whichever transport it built,
+`server.transport.on('error', …)` and `server.Transport.Error`, where a socket's error already goes,
+and a client's on the client transport it built.
 
-**Once its stop began, a server takes nothing new** (spec 15.2, 15.6, 15.7). Over HTTP it draws no
-connection, a connect it would take refused 503 `busy`, its `Retry-After` 1, judged where
-`maximumConnections` is judged, after the connect's 415 and its own 400; and it holds none, an
-exchange that presents a well-formed token answered the 404 marked `connection-unknown`, unlooked-up
-and nothing of it handed on, as the stop answers each listen it holds, and as the exchange is
-answered once the stop closed its connection. At a WebSocket's address, an upgrade it would take is
-refused 503 `busy`, its `Retry-After` 1, marked and stamped as 15.6 says, after 15.2's refusals. A
-request refused for what it is — its host, its path, its origin, its method, its token's form, and a
-connect's type and its own 400 — is refused so whether or not a stop began: what a request is comes
-before when it came. An exchange's type, its `Authorization` and its length are judged once its
-connection is found, and a stopping server finds none: the 404 comes first. Spec 15.6 gives the
-whole order. On the TypeScript side, Node's `shouldUpgradeCallback` says false once the HTTP server
-that received the request no longer serves, and the transport's `request` listener answers the
-refusal.
+**Once its stop began, a server takes nothing new** (spec 15.2, 15.6, 15.7). A server's transport
+stops when its application stops it (spec 15.1). Over HTTP it draws no connection, a connect it
+would take refused 503 `busy`, its `Retry-After` 1, judged where `maximumConnections` is judged,
+after the connect's 415 and its own 400; and it holds none, an exchange that presents a well-formed
+token answered the 404 marked `connection-unknown`, unlooked-up and nothing of it handed on, as the
+stop answers each listen it holds, and as the exchange is answered once the stop closed its
+connection. At a WebSocket's address, an upgrade it would take is refused 503 `busy`, its
+`Retry-After` 1, marked and stamped as 15.6 says, the last of 15.2's steps. A client may wait longer
+than its reconnection's delay, as a `Retry-After` asks (spec 15.7,
+[RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)): the field binds no
+recipient, so the spec leaves the choice to each client. Bead's own clients read none, and a
+reconnection waits its schedule, a Features row of the support matrix. A request refused for what it
+is — its host, its path, its origin, its method, its token's form, and a connect's type and its own
+400 — is refused so whether or not a stop began: what a request is comes before when it came. An
+exchange's type, its `Authorization` and its length are judged once its connection is found, and a
+stopping server finds none: the 404 comes first. Spec 15.6 gives the whole order. On the TypeScript
+side, Node's `shouldUpgradeCallback` says false once the HTTP server that received the request no
+longer serves, and the transport's `request` listener answers the refusal.
 
-**A connection that registers as the stop begins is closed going away, 1001** (spec 15.3), by a
-guard at registration. No pass of the stop looks again for one: on the C# side, the host's
-`StopAsync` waits on the request the guard closes, bounded by the close timeout; on the TypeScript
-side, `ws` takes no upgrade once closed, and the guard is reached by an injected `WebSocketServer`
-that delivers a connection after its `close()`.
+**A connection whose opening handshake completes as the stop begins is closed going away, 1001**
+(spec 15.3), by a guard at registration. No pass of the stop looks again for one: on the C# side,
+the host's `StopAsync` waits on the request the guard closes, bounded by the close timeout; on the
+TypeScript side, `ws` takes no upgrade once closed, and the guard is reached by an injected
+`WebSocketServer` that delivers a connection after its `close()`.
 
 ## Consequences
 
 **A throw nobody listens for is unseen, on both sides alike**: the cost
-[0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) takes for a debug listener. Neither
-process ends for it. A listener of Bead's own that throws, its router's or its server's, is reported
-the same way, and a connection it leaves untracked lives until its transport closes it, over HTTP at
-its `inactivityTimeout`.
+[0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) takes for a debug listener. A throw
+ends neither process. A listener's rejection is its platform's: Node's unhandled rejection ends its
+process, and an async listener of a C# event is `async void`, whose exception ends its process. So a
+listener catches its own. A listener of Bead's own that throws, its router's or its server's, is
+reported the same way, and a connection it leaves untracked lives until its transport closes it,
+over HTTP at its `inactivityTimeout`.
 
 **An application listens for errors in two places**: on its router, for what spec 9.0 reports, and
 on its transport, for a socket's error and a listener's throw. A router that re-emits its
@@ -144,14 +155,16 @@ listener the stop calls, a head written in two halves or a scripted `WebSocketSe
 `refuses a connect that comes as it stops, busy, told when to come back, drawing nothing`;
 `answers the 404 marked connection-unknown an exchange that comes as it stops, its connection not yet closed, nothing handed on`;
 `refuses an upgrade that comes as it stops, 503 busy, told when to come back`;
-`closes going away a connection whose accept a stop crossed`; and the clients'
-`hears the next message after a message listener throws, the throw reported`
+`closes going away a connection whose accept a stop crossed`; the clients'
+`hears the next message after a message listener throws, the throw reported` and
+`reconnects though a reconnect listener throws, the throw reported, the next listener told`; and
+the servers' `hears its transport's error and refusal through the server's transport`
 ([0004](0004-one-behaviour-in-every-language.md)).
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-one round. Its objections, each with the answer that holds:
+two rounds. Their objections, each with the answer that holds:
 
 ### On a transport's listener that throws, and a stop crossed by an arrival
 
@@ -163,3 +176,10 @@ one round. Its objections, each with the answer that holds:
 | A stop that looks again for connections until none are left never looks twice on the TypeScript side and adds nothing on the C# side                                                                                                                  | Accepted: on the TypeScript side no upgrade crosses a stop once `ws` closed; on the C# side the host's `StopAsync` waits on the request the registration guard closes, bounded by the close timeout. No second look; the guard stays, commented so                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | A conformance case holding a listen across a stop and asserting its 404 contradicts the matrix's row for a stop over HTTP, whose C# grace may cut that 404 before the wire                                                                            | Accepted: no case. With `orLost` it would prove only that the stop ends the listen; that row's twin tests stay the proof                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Citing RFC 9113 §6.8, GOAWAY, a drain, for a stop that closes every connection as lost                                                                                                                                                                | Accepted: 15.7 and 15.2 cite RFC 9110 §15.6.4 and §10.2.3 for the 503 and its `Retry-After`, and nothing for "holds none", which is Bead's own                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+
+### On a listener's rejection, and a stop's Retry-After
+
+| Objection                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "As .NET's unobserved exception may" names the wrong mechanism: a C# listener is an `Action<…>` event, so an async lambda is `async void`, whose exception always ends the process                                      | Accepted: the transports' events are `Action<…>`. This record and the C# README say that an async listener of a C# event is `async void`: its exception ends the process, as Node's unhandled rejection does, so a listener catches its own |
+| "A client of Bead reads no Retry-After", as spec text, binds every client, since a unit no entry cites binds a side all the same. So a third-party client that honours the field, as RFC 9110 allows, would not conform | Accepted: spec 15.7 says instead that a client MAY wait longer than its reconnection's delay, as a `Retry-After` asks (RFC 9110 §10.2.3). That Bead's own clients read none is in both READMEs and in the matrix's Features                 |

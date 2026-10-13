@@ -119,8 +119,9 @@ jobs:
   # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
   # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests — and
   # the interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts
-  # with Node, then the TypeScript client against the C# server. Only the TypeScript side is
-  # installed, for its interop server.
+  # with Node, then the TypeScript client against the C# server; then a page of another origin in
+  # Chromium against both sides' HTTP servers, what proves a browser reads their CORS answer. Only
+  # the TypeScript side is installed, for its interop server and its page, and Chromium.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -154,6 +155,10 @@ jobs:
       - run: dotnet build Bead.slnx
       - run: dotnet test --solution Bead.slnx
       - run: $YARN test:interop
+        working-directory: implementations/typescript
+      - run: $YARN playwright install --with-deps chromium
+        working-directory: implementations/typescript
+      - run: $YARN test:browser
         working-directory: implementations/typescript
 
   # ── Builder ──────────────────────────────────────────────────────────────────
@@ -269,14 +274,25 @@ jobs:
         run: node builder/src/cli.ts generate --check
       # ! beadc breaking, against the last release that carries a blueprint, the interop's and
       # examples/hello's: 0.3.0 is the first, and a later tag without one fails, so the step never
-      # passes by comparing nothing once a release carries it
+      # passes by comparing nothing once a release carries it. The last release is the newest
+      # vX.Y.Z, as tools/release.mjs reads one, whose commit is not HEAD's: on a release's own
+      # commit, the one before it, so a waiver the release carried still waives its change. Read by
+      # the tag's commit, never by ancestry, which the shallow fetch does not hold. Every warning
+      # fails, WAIVER_UNUSED's among them: a waiver that waived nothing is taken out
       - if: runner.os == 'Linux'
         name: The interop's blueprint and examples/hello, against the last release
         working-directory: .
         shell: bash
         run: |
           git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
-          tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          head="$(git rev-parse HEAD)"
+          tag=""
+          for each in $(git tag --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V -r); do
+            if [ "$(git rev-parse "$each^{commit}")" != "$head" ]; then
+              tag="$each"
+              break
+            fi
+          done
           if [ -z "$tag" ] || ! git cat-file -e "$tag:spec/interop-blueprint.json" 2> /dev/null; then
             if [ "$(printf '%s\n' v0.3.0 "$tag" | sort -V | head -n 1)" = v0.3.0 ]; then
               echo "::error title=beadc breaking::$tag carries no spec/interop-blueprint.json"
@@ -285,9 +301,9 @@ jobs:
             echo "::notice title=beadc breaking::${tag:-no v* tag} carries no blueprint: nothing to hold against before 0.3.0"
             exit 0
           fi
-          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github
+          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
           cd examples/hello
-          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github
+          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a
@@ -371,6 +387,70 @@ jobs:
       - name: Each client against each server
         run: node examples/hello/pairs.mjs
 
+  # ── Protobuf conformance ─────────────────────────────────────────────────────
+  # Protobuf's conformance suite through each side's generated `proto` codec, the check of a
+  # payload's records in front of its library, binary, recommended enforced, every edition, at the
+  # release both libraries pin (decision 0028): the runner `tools/protobuf-conformance/runner.json`
+  # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
+  # and its failure list, which the runner holds both ways, then the floor of tests run; then one
+  # corpus of Probe through both testees, read alike. A job of its own: it needs both runtimes,
+  # beadc and protoc, which no other job has together. The C# testee lies outside Bead.slnx, so its
+  # format is held here, by name, the code generated into it at run time aside; `CI=true`, the
+  # runner's own, restores it locked.
+  protobuf-conformance:
+    name: Protobuf conformance
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: implementations/dotnet/global.json
+          cache: true
+          cache-dependency-path: implementations/dotnet/**/packages.lock.json
+      - name: Locate the Yarn cache
+        id: yarn-cache
+        working-directory: builder
+        run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      # The download cache, not `node_modules`: cache what was downloaded, always install.
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: protobuf-conformance-yarn-cache-${{ runner.os }}-${{ hashFiles('builder/yarn.lock', 'implementations/typescript/yarn.lock') }}
+          restore-keys: protobuf-conformance-yarn-cache-${{ runner.os }}-
+      # `--immutable` fails if `yarn.lock` would change.
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - run: $YARN install --immutable
+        working-directory: builder
+      - uses: actions/cache@v6
+        with:
+          path: builder/.protoc
+          key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
+      # assigned first: a failed fetch fails the step
+      - name: protoc, by its pin's sha256
+        working-directory: builder
+        run: |
+          protoc="$(node tools/fetch-protoc.mjs)"
+          echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
+      # the runner's package, unpacked, by the pin it was checked against
+      - uses: actions/cache@v6
+        with:
+          path: tools/protobuf-conformance/.runner
+          key: protobuf-conformance-${{ runner.os }}-${{ hashFiles('tools/protobuf-conformance/runner.json') }}
+      - name: The suite through the TypeScript side's codec
+        run: node tools/protobuf-conformance.mjs typescript
+      - name: The suite through the C# side's codec
+        run: node tools/protobuf-conformance.mjs csharp
+      - name: The C# testee's format
+        working-directory: implementations/dotnet/tools/Bead.ProtobufConformance
+        run: dotnet format Bead.ProtobufConformance.csproj --verify-no-changes --exclude Generated
+      - name: One corpus through both sides
+        run: node tools/protobuf-conformance.mjs differential
+
   # ── Commits ──────────────────────────────────────────────────────────────────
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
@@ -431,7 +511,7 @@ jobs:
   ci-ok:
     name: CI ok
     if: always()
-    needs: [spec, typescript, dotnet, builder, examples, commits]
+    needs: [spec, typescript, dotnet, builder, examples, protobuf-conformance, commits]
     runs-on: ubuntu-26.04
     timeout-minutes: 2
     steps:

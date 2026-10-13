@@ -475,8 +475,8 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <summary>
     /// Registers a connection of the router's own as a destination, which the relay asks by a request
     /// of the router's: the destination given, or drawn. Once that connection closes, the destination
-    /// is unreachable, whoever connects under the same handle next, until it is registered anew. A
-    /// timeout under a millisecond, or past 2³¹ − 1 ms, is an
+    /// is unreachable until it is registered anew, on another connection: no connection takes a
+    /// handle its transport gave before. A timeout under a millisecond, or past 2³¹ − 1 ms, is an
     /// <see cref="ArgumentOutOfRangeException"/>; a destination of 0, or registered already, an
     /// <see cref="ArgumentException"/>.
     /// </summary>
@@ -523,6 +523,12 @@ public sealed class RouterServer : IRouterLike, IDisposable
         return _relay.Destinations();
     }
 
+    /// <inheritdoc/>
+    public Failure? AnsweredOf(AnswerTarget target)
+    {
+        return _core.AnsweredOf(target);
+    }
+
     /// <summary>A server holds no notification: it sends them.</summary>
     public bool HasNotification(INotificationLike notification)
     {
@@ -562,7 +568,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// Ends a credential's session by its identifier on every connection that keeps it, and nothing
-    /// else: each subscription it bounds fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// else: each subscription it bounds fails SESSION_REQUIRED on its call id (spec 13.10). An
     /// identifier no connection keeps ends nothing. Ending a session refuses no credential: one that
     /// still holds opens it anew, a call that resolved to it before it ended and subscribes as it is
     /// answered after among them. Settles once each failure was tried; one that cannot go out is
@@ -586,7 +592,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// each <see cref="CredentialScheme.Jwt"/>'s session whose identifier's issuer it is, compared
     /// octet for octet, whatever its <c>sid</c> or <c>sub</c>, on every connection that keeps one,
     /// and nothing else — an <see cref="CredentialScheme.Elsewhere"/>'s identifier names no
-    /// issuer. Each subscription they bound fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// issuer. Each subscription they bound fails SESSION_REQUIRED on its call id (spec 13.10). An
     /// issuer no kept session names ends nothing. Ending a session refuses no credential: one that
     /// still holds opens its session anew, a token a leaked key signed among them while that key
     /// serves. Settles once each failure was tried; one that cannot go out is reported. An issuer

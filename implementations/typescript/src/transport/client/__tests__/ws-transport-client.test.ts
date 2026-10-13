@@ -1,5 +1,8 @@
+import { once } from 'node:events';
+import { createServer as createNodeServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
-import type { WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
   CancelError,
   ConnectError,
@@ -22,6 +25,7 @@ import {
   host,
   IMPLEMENTATIONS,
   portOf,
+  reachedByLocalhost,
   sockets,
   spyIntervals,
   startServer,
@@ -35,6 +39,7 @@ import {
   type IWebSocketConstructor,
   type WSTransportClient,
 } from '../ws-transport-client';
+import { createWSTransportServer } from '../../server/ws-transport-server';
 import { createFakeWebSocket } from './fake-websocket';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
@@ -116,6 +121,20 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });
         expect(client.isOpen()).toBe(true);
+      });
+
+      // spec 15.2
+      test('writes no Origin on its upgrade', async () => {
+        const upgraded = new Promise<string | undefined>((resolve) => {
+          server.once('connection', (_socket, request) => {
+            resolve(request.headers.origin);
+          });
+        });
+
+        await client.connect({ host, port });
+
+        // a page's browser writes its own, which the server judges; the client, none
+        expect(await upgraded).toBeUndefined();
       });
 
       test('rejects with a ConnectError on a port no URL can hold', async () => {
@@ -568,6 +587,33 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.disconnect();
         await client.reconnect({ delay: 10, maxAttempts: 1 });
         expect(client.isOpen()).toBe(true);
+      });
+
+      test('reconnects though a reconnect listener throws, the throw reported, the next listener told', async () => {
+        const reported: Error[] = [];
+        let told = 0;
+
+        client.on('reconnect', () => {
+          throw new Error('a reconnect listener that throws');
+        });
+        client.on('reconnect', () => {
+          told += 1;
+        });
+        client.on('error', (error) => {
+          reported.push(error);
+        });
+
+        await client.connect({ host, port });
+        await client.disconnect();
+        await client.reconnect({ delay: 10, maxAttempts: 1 });
+
+        expect(client.isOpen()).toBe(true);
+        expect(told).toBe(1);
+        expect(
+          reported.map((error) => {
+            return error.message;
+          })
+        ).toEqual(['a reconnect listener that throws']);
       });
 
       test('reconnects an open transport without emitting "close"', async () => {
@@ -1047,6 +1093,158 @@ test.describe('WSTransportClient, heartbeat', () => {
     } finally {
       await stopServer(server);
       await allClosed();
+    }
+  });
+});
+
+// an upgrade refused by the server's transport, marked, and one by a gateway, unmarked
+const FORBIDDEN =
+  'HTTP/1.1 403 Forbidden\r\nbead-refusal: host-refused\r\ncontent-length: 0\r\nconnection: close\r\n\r\n';
+const BAD_GATEWAY = 'HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\nconnection: close\r\n\r\n';
+
+/**
+ * An HTTP server that upgrades as `ws` does until `refusal` is set, then answers each upgrade with
+ * it, raw.
+ */
+const startRefusing = async (refusal?: string) => {
+  const http = createNodeServer();
+  const upgrading = new WebSocketServer({ noServer: true });
+  const state = { refusal };
+
+  // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+  http.on('upgrade', (request, socket, head) => {
+    if (state.refusal !== undefined) {
+      return (socket.end(state.refusal), undefined);
+    }
+
+    return (
+      upgrading.handleUpgrade(request, socket, head, (upgraded) => {
+        upgrading.emit('connection', upgraded, request);
+      }),
+      undefined
+    );
+  });
+  http.listen(0, host);
+  await once(http, 'listening');
+
+  return {
+    port: (http.address() as AddressInfo).port,
+    state,
+    upgrading,
+    [Symbol.asyncDispose]: async () => {
+      for (const socket of upgrading.clients) {
+        socket.terminate();
+      }
+
+      http.closeAllConnections();
+      await new Promise((resolve) => {
+        http.close(resolve);
+      });
+      await allClosed();
+    },
+  };
+};
+
+test.describe('WSTransportClient, an upgrade refused', () => {
+  const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
+
+  test('names the status and the reason of an upgrade refused', async () => {
+    for (const [refusal, message] of [
+      [FORBIDDEN, 'the server refused the upgrade: 403 host-refused'],
+      [BAD_GATEWAY, 'the server refused the upgrade: 502'],
+    ] as const) {
+      await using refusing = await startRefusing(refusal);
+      const client = createWSTransportClient({
+        WebSocket: TrackedWs as unknown as IWebSocketConstructor,
+      });
+      const reason: unknown = await client
+        .connect({ host, port: refusing.port })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      expect(reason).toBeInstanceOf(ConnectError);
+      expect((reason as ConnectError).message).toBe(message);
+      // `ws`'s own, which ended the socket
+      expect((reason as ConnectError).cause).toBeInstanceOf(Error);
+      expect(client.isClosed()).toBe(true);
+    }
+  });
+
+  test('names nothing of an upgrade refused but its close, over the global WebSocket', async () => {
+    await using refusing = await startRefusing(FORBIDDEN);
+    const client = createWSTransportClient({ WebSocket: TrackedGlobal });
+
+    const reason: unknown = await client
+      .connect({ host, port: refusing.port })
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    // its close's code alone, its error's message empty, as the WHATWG WebSockets Standard has it
+    expect([reason instanceof ConnectError, (reason as ConnectError).message]).toEqual([
+      true,
+      '1006',
+    ]);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('carries the last failure of a reconnect, an upgrade refused unmarked named by its status, over ws', async () => {
+    await using refusing = await startRefusing();
+    const client = createWSTransportClient({
+      WebSocket: TrackedWs as unknown as IWebSocketConstructor,
+    });
+    const reconnectOutcome = new Promise<unknown>((resolve) => {
+      client.once('close', () => {
+        client.reconnect({ delay: 10, maxAttempts: 2 }).then(resolve, resolve);
+      });
+    });
+
+    await client.connect({ host, port: refusing.port });
+    refusing.state.refusal = BAD_GATEWAY;
+
+    for (const socket of refusing.upgrading.clients) {
+      socket.terminate();
+    }
+
+    const reason = await reconnectOutcome;
+
+    expect(reason).toBeInstanceOf(ReconnectError);
+    expect((reason as ReconnectError).cause).toEqual(
+      new ConnectError('the server refused the upgrade: 502')
+    );
+    expect(client.isClosed()).toBe(true);
+  });
+});
+
+test.describe('WSTransportClient, by a name', () => {
+  test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
+    for (const address of await reachedByLocalhost()) {
+      const server = createWSTransportServer({ WebSocketServer });
+      const { port } = await server.start({ address, findOpenPort: true });
+
+      try {
+        for (const [label, Tracked] of IMPLEMENTATIONS) {
+          const client = createWSTransportClient({
+            WebSocket: Tracked as unknown as IWebSocketConstructor,
+          });
+          const began = performance.now();
+
+          await client.connect({ host: 'localhost', port });
+
+          // the families raced, as RFC 8305 asks: no wait on the one that is refused
+          expect([address, label, client.isOpen(), performance.now() - began < 1_500]).toEqual([
+            address,
+            label,
+            true,
+            true,
+          ]);
+          await client.disconnect();
+        }
+      } finally {
+        await server.stop();
+        await allClosed();
+      }
     }
   });
 });

@@ -21,9 +21,6 @@ const HTTP_PORT = Number(process.env['DEMO_PORT'] ?? 8_080);
 /** The address it listens on: this machine alone, which the demo serves. */
 const HTTP_ADDRESS = '127.0.0.1';
 
-/** The hosts a page names the public port by, which both Bead servers take, and no other. */
-const HOSTS = [`localhost:${String(HTTP_PORT)}`, `${HTTP_ADDRESS}:${String(HTTP_PORT)}`];
-
 /** Where the page reaches Bead: its WebSocket upgrades, and its HTTP exchanges. */
 const BEAD_PATHNAME = '/bead';
 
@@ -89,12 +86,13 @@ const serve = async (request: IncomingMessage, reply: ServerResponse): Promise<v
 // definition
 
 // a connection gone silent is closed, as no session of its own times it; behind the relay, an
-// upgrade names the host a page named, as an HTTP exchange does
+// upgrade names the host a page named, `localhost` or this machine's address, which every server
+// takes, as an HTTP exchange does
 const overWebSocket = createWSServer({
   connectionInactivityTimeout: SILENCE_MILLISECONDS,
   credentials: CREDENTIALS,
   metricsRegistry: METRICS_REGISTRY,
-  transport: { hosts: HOSTS, WebSocketServer },
+  transport: { WebSocketServer },
 });
 // behind the relay: the host a page named, and the address the relay says it came from
 const overHTTP = createHTTPServer({
@@ -105,8 +103,8 @@ const overHTTP = createHTTPServer({
     createServer: (listener) => {
       return createServer(listener);
     },
-    hosts: HOSTS,
-    isProxyTrusted: true,
+    // the public port's relay, in this process, on the loopback
+    trustedProxies: ['127.0.0.1'],
   },
 });
 

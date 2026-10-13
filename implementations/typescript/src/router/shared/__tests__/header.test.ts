@@ -111,6 +111,7 @@ test.describe('writeHeader and readHeader', () => {
 });
 
 test.describe('writeHeader', () => {
+  // spec 4.10
   test('refuses a field out of its range, naming it, before writing anything', () => {
     const bytes = new Uint8Array(16);
 
@@ -197,6 +198,7 @@ test.describe('writeHeader', () => {
     );
   });
 
+  // spec 4.10
   test('refuses a destination on an answer, which names its call alone', () => {
     const bytes = new Uint8Array(16);
 
@@ -209,6 +211,7 @@ test.describe('writeHeader', () => {
     expect(bytes).toEqual(new Uint8Array(16));
   });
 
+  // spec 4.10
   test('refuses a credential its kind does not take, or its scheme does not hold', () => {
     // room for any header, so what is refused is the header, never the room
     const bytes = new Uint8Array(1_024);
@@ -376,6 +379,7 @@ test.describe('writeHeader', () => {
     }
   });
 
+  // spec 4.10
   test('refuses a kind it does not write, a block its kind lacks, and bytes too few', () => {
     expect(() => {
       return writeHeader({ callId: 1, kind: 0x17 } as unknown as EnvelopeHeader, new Uint8Array(8));

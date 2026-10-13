@@ -9,8 +9,9 @@ namespace Bead.Transport.Http;
 public sealed record HttpTransportClientOptions
 {
     /// <summary>
-    /// What its exchanges go through; a handler of its own when none, which follows no redirect. The
-    /// tests' way, as the TypeScript side's give it a <c>fetch</c>.
+    /// What its exchanges go through; a handler of its own when none, which follows no redirect and
+    /// races the address families of a name (RFC 8305), as Node's and a browser's do; one given
+    /// keeps its own behaviour. The tests' way, as the TypeScript side's give it a <c>fetch</c>.
     /// </summary>
     public HttpMessageHandler? Handler { get; init; }
 
@@ -168,14 +169,17 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     public event Action<bool, bool>? Close;
 
     /// <summary>
-    /// What a listener of its messages or its close threw: the client went on as if it returned
-    /// (spec 15.1), as the WebSocket transport client's own <c>Error</c> tells what broke its socket.
+    /// What a listener of its messages, its close or its reconnection threw: the client went on as
+    /// if it returned (spec 15.1), as the WebSocket transport client's own <c>Error</c> tells what
+    /// broke its socket.
     /// </summary>
     public event Action<Exception>? Error;
 
     /// <summary>
     /// A reconnection starts: what was sent on the connection it replaces will not be answered there.
-    /// Reached through <see cref="IRouterClientTransport"/>: <see cref="Reconnect"/> names the method here.
+    /// Each listener is told within its guard, its throw reported through <see cref="Error"/>, and the
+    /// reconnection goes on. Reached through <see cref="IRouterClientTransport"/>:
+    /// <see cref="Reconnect"/> names the method here.
     /// </summary>
     event Action? IRouterClientTransport.Reconnect
     {
@@ -396,10 +400,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         try
         {
-            // the connection replaced goes whatever a listener does
+            // each listener within its guard, its throw reported through Error; the connection
+            // replaced goes whatever a listener of Error does
             try
             {
-                starting?.Invoke();
+                _listeners.Tell(starting);
             }
             finally
             {
@@ -533,6 +538,13 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
     }
 
+    // a field of Bead's the server writes, read as an Item of RFC 9651, its lines joined by ", "
+    // (RFC 9110 §5.3) and its parameters ignored (§2.3); none when absent or when it does not parse
+    private static StructuredFields.Item? ItemOf(HttpResponseMessage response, string name)
+    {
+        return response.Headers.TryGetValues(name, out var values) ? StructuredFields.ParseItem(string.Join(", ", values)) : null;
+    }
+
     // how long to wait before listening again after `losses` listens lost in a row, drawn apart so
     // the clients one restart dropped together come back apart, as EventSource's do; in whole
     // milliseconds, as every wait of Bead's
@@ -558,11 +570,13 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
+    // its own handler races the address families of a name, as RFC 8305 asks, where the
+    // platform's tries each address in turn
     private HttpClient NewHttp()
     {
         return _options.Handler is { } handler
             ? new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan }
-            : new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+            : new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback }) { Timeout = Timeout.InfiniteTimeSpan };
     }
 
     // a request carrying the connection's token, as each exchange after the connect does
@@ -719,11 +733,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                 if (response.StatusCode != HttpStatusCode.Created || connectionToken is null)
                 {
-                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}");
+                    // named by its status, and by its mark where it is a refusal of the transport's
+                    // own (spec 15.6)
+                    var mark = HeaderOf(response, HttpTransport.RefusalHeader) is { } refusal ? $" {refusal}" : "";
+
+                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}{mark}");
                 }
 
                 // taken where the server said it back, and nowhere else
-                connection = new Drawn((connectionToken, uri), _options.IsListening && HeaderOf(response, HttpTransport.ListenHeader) == "?1");
+                connection = new Drawn((connectionToken, uri), _options.IsListening && ItemOf(response, HttpTransport.ListenHeader)?.BareItem is true);
             }
 
             lock (_gate)
@@ -998,13 +1016,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private async Task<Listened> ListenOnce((Drawn Connection, Cursor Cursor) listen)
     {
         var (connection, cursor) = listen;
-        var query = string.Create(CultureInfo.InvariantCulture, $"?after={cursor.After}&wait={(long)_options.Wait.TotalMilliseconds}");
         HttpResponseMessage response;
 
         try
         {
-            using var request = RequestOf(connection, (HttpMethod.Get, new Uri(connection.Uri + query)));
+            // at the connection's one URL, its cursor and its wait in fields of their own (spec 15.9)
+            using var request = RequestOf(connection, (HttpMethod.Get, connection.Uri));
 
+            request.Headers.Add(HttpTransport.AfterHeader, cursor.After.ToString(CultureInfo.InvariantCulture));
+            request.Headers.Add(HttpTransport.WaitHeader, ((long)_options.Wait.TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
             response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
         }
         catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
@@ -1027,7 +1047,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             }
 
             // numbered from the one after the last it heard, or it is no batch of this listen's
-            if (HeaderOf(response, HttpTransport.SequenceHeader) != (cursor.After + 1).ToString(CultureInfo.InvariantCulture))
+            if (ItemOf(response, HttpTransport.SequenceHeader)?.BareItem as long? != cursor.After + 1)
             {
                 return Listened.Broken;
             }

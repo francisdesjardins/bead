@@ -306,10 +306,14 @@ export const blueprintOf = (input: IProtoInput): IProtoBlueprint => {
       })
       .map((value) => {
         const description = leadingOf(value.parent.file, pathOf(value));
+        // protobuf's own deprecated on the enum value, which carries no message: options.proto
+        // extends no EnumValueOptions
+        const deprecation = deprecationOf(value.proto.options?.deprecated === true, '');
         const failure: IFailureEntry = {
           code: value.number,
           failureName: failureNameOf(value.parent, value.name),
           ...(description === undefined ? {} : { description }),
+          ...(deprecation === undefined ? {} : { deprecation }),
         };
         const owner = input.files.find((each) => {
           return each.desc === value.parent.file;

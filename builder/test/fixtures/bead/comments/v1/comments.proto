@@ -29,12 +29,17 @@ service CommentsService {
   }
 
   rpc Trailing(bead.Raw) returns (bead.Raw) {
-    option (bead.procedure) = {id: 2};
+    option deprecated = true;
+    option (bead.procedure) = {
+      id: 2
+      deprecation_message: "Use escapes."
+    };
   } // A trailing comment: no description.
 
   // A detached comment: no description.
 
   rpc Detached(bead.Json) returns (bead.Json) {
+    option deprecated = true;
     option (bead.procedure) = {id: 3};
   }
 
@@ -43,7 +48,10 @@ service CommentsService {
   rpc Block(bead.Json) returns (bead.Json) {
     option (bead.procedure) = {
       id: 4
-      failures: ["COMMENTS_FAILURE_LATE"]
+      failures: [
+        "COMMENTS_FAILURE_LATE",
+        "COMMENTS_FAILURE_EARLY"
+      ]
     };
   }
 
@@ -58,11 +66,25 @@ service CommentsService {
   }
 }
 
+// The comments service as it was, deprecated: every type its file declares for it is marked.
+service OldCommentsService {
+  option deprecated = true;
+  option (bead.service) = {
+    id: 4
+    revision: 1
+    deprecation_message: "Use CommentsService."
+  };
+
+  rpc Escapes(bead.Text) returns (bead.Text) {
+    option (bead.procedure) = {id: 1};
+  }
+}
+
 // The comments fixture's failures.
 enum CommentsFailure {
   COMMENTS_FAILURE_UNSPECIFIED = 0;
   // Too late, on its first line;
   // and on its second.
-  COMMENTS_FAILURE_LATE = 1;
+  COMMENTS_FAILURE_LATE = 1 [deprecated = true];
   COMMENTS_FAILURE_EARLY = 2; // A trailing comment: no description.
 }

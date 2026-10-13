@@ -2,7 +2,12 @@
 
 // dependencies
 
-import { CLOSE_EVENT, MESSAGE_EVENT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
+import {
+  CLOSE_EVENT,
+  MESSAGE_EVENT,
+  REFUSAL_HEADER,
+  TRANSPORT_WEBSOCKET_BINARYTYPE,
+} from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { ConnectError, ProgrammerError, ReadyStateError, wrapReason } from '../shared/errors';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '../shared/heartbeat';
@@ -20,6 +25,7 @@ import type { Data } from '../shared/types';
 import { dispose } from './symbols';
 import { createTransportClient, DEFAULTS, DISCONNECT_DEFAULTS } from './transport-client';
 import type {
+  IUpgradeResponseLike,
   IWebSocketLike,
   IWSTransportClientConnectOptions,
   IWSTransportClientOptions,
@@ -31,6 +37,7 @@ export { HEARTBEAT } from '../shared/heartbeat';
 export type {
   ICloseEventLike,
   IMessageEventLike,
+  IUpgradeResponseLike,
   IWebSocketConstructor,
   IWebSocketLike,
   IWSTransportClientConnectOptions,
@@ -59,6 +66,14 @@ const errorOf = (event: unknown): unknown => {
   return typeof event === 'object' && event !== null && 'error' in event ? event.error : undefined;
 };
 
+/** A refused upgrade's status, and the reason it was marked with when it was (spec 15.6). */
+const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
+  const mark = headers[REFUSAL_HEADER];
+  const reason = Array.isArray(mark) ? mark[0] : mark;
+
+  return reason === undefined ? String(statusCode) : `${String(statusCode)} ${reason}`;
+};
+
 // definition
 
 /**
@@ -69,7 +84,10 @@ const errorOf = (event: unknown): unknown => {
  * router fails a call that presents an `ELSEWHERE` before it goes. It is secure under `wss`, or to a
  * loopback host. Over `ws`, a message is an envelope at most by default,
  * {@link MAXIMUM_MESSAGE_BYTES}, and a larger one closes the connection with 1009; over the global
- * `WebSocket`, its platform's bound applies.
+ * `WebSocket`, its platform's bound applies. Over `ws`, an upgrade refused fails the connect with
+ * its status and its reason, "the server refused the upgrade: 403 host-refused"; the global
+ * `WebSocket` reads nothing of it, as the WHATWG WebSockets Standard has a page's, and names its
+ * close alone, 1006.
  *
  * @example
  * const client = createWSTransportClient();
@@ -177,8 +195,17 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                 }
 
                 let lastError: unknown;
+                // the status and the mark of an upgrade the server refused, where it can be read
+                let refused: string | undefined;
 
                 rejectConnect = reject;
+
+                // ! ended by `terminate`: a request destroyed leaves the socket connecting for ever
+                socket.on?.('unexpected-response', (_request, response) => {
+                  refused = refusalOf(response);
+                  response.resume?.();
+                  socket.terminate?.();
+                });
 
                 socket.binaryType = binaryType;
 
@@ -186,9 +213,11 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   lastError = errorOf(event);
                 };
                 socket.onclose = (closeEvent) => {
-                  const message = closeEvent.reason
+                  const closed = closeEvent.reason
                     ? `${closeEvent.reason} (${String(closeEvent.code)})`
                     : String(closeEvent.code);
+                  const message =
+                    refused === undefined ? closed : `the server refused the upgrade: ${refused}`;
 
                   reject(
                     new ConnectError(

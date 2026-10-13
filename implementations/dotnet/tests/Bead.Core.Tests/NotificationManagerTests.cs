@@ -8,9 +8,9 @@ public sealed class NotificationManagerTests
 {
     // constants
 
-    private const string First = "type=WS;ip=127.0.0.1;port=50001";
-    private const string Second = "type=WS;ip=127.0.0.1;port=50002";
-    private const string Unknown = "type=WS;ip=127.0.0.1;port=1";
+    private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
+    private const string Second = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
+    private const string Unknown = "type=WS;ip=127.0.0.1;port=1;ordinal=1";
 
     // helpers
 
@@ -96,7 +96,7 @@ public sealed class NotificationManagerTests
         // C# only: a JavaScript map keeps the order its entries were made in, which the wire sees — the
         // failures a session's end sends, the connections a notification goes to — where a .NET
         // dictionary reuses the place of an entry gone
-        const string third = "type=WS;ip=127.0.0.1;port=50003";
+        const string third = "type=WS;ip=127.0.0.1;port=50003;ordinal=1";
 
         var notifications = new NotificationManager(PacingLimits.Default);
 

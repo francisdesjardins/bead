@@ -2,7 +2,7 @@
 
 - **Status**: accepted
 - **Scope**: spec section 17, and the lines that point to it; debugging 4.3 and 10.1;
-  `spec/codecs.json`, its gate, and eight conversations of `spec/conversations.json`; both runtimes'
+  `spec/codecs.json`, its gate, and nine conversations of `spec/conversations.json`; both runtimes'
   payload codecs, public
   ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)),
   and the interop's serializers, which use them; both service managers, where a value does not
@@ -10,8 +10,9 @@
 
 ## Context
 
-The builder gives a procedure's payloads one of the encodings `raw`, `text` and `json`, and the code
-it generates in every language reads and writes them through its runtime's codecs
+The builder gives a procedure's payloads one of the encodings `raw`, `text` and `json`, or `proto`,
+which is [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s, and the
+code it generates in every language reads and writes them through its runtime's codecs
 ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
 Spec section 17 states those payloads, with `spec/codecs.json` beside it.
 
@@ -46,8 +47,8 @@ Four inputs reach another outcome, not only other bytes: a byte order mark, a su
 arrays nested, and `1E400`.
 
 Bead asks one behaviour of every language ([0004](0004-one-behaviour-in-every-language.md)): the
-codecs agree before the builder generates clients that send their bytes, or a third language copies
-one of two forms.
+codecs agree, so that the clients the builder generates send one form, and a third language copies
+one form, not one of two.
 
 What had to be settled, and the ways weighed for each:
 
@@ -305,8 +306,10 @@ row: "A value a side's type cannot hold". The C# side cannot be given `NaN` or a
 `JsonElement` holds as a number; the TypeScript side cannot be given an object naming a member
 twice, which no JavaScript object holds.
 
-**Eight conversations play it over the wire**, each a request to `echo`: what `codecs.json` cannot
-hold, which code a server answers and that the refusal comes at the read and not at the write.
+**Nine conversations play it over the wire**, each a request to `echo`: what `codecs.json` cannot
+hold, which code a server answers and that the refusal comes at the read and not at the write, and
+that a name holding an escape is read as its escapes say, whatever a payload of its shape read on
+another connection held.
 
 **Each runtime holds the codecs**, public under the names
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)
@@ -382,8 +385,7 @@ U+E000 to U+FFFF (RFC 8785 §3.2.3's note).
 
 **A value a side's type cannot hold** is a platform row of the matrix.
 
-**Versions move as [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) says**, in
-the release that carries them; the layout, `0xA1`, does not: no envelope changes.
+**The layout, `0xA1`, does not move**: no envelope changes.
 
 ## The Tenth Man
 

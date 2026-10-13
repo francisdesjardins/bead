@@ -8,8 +8,8 @@ public sealed class SubscriptionPlacesTests
 {
     // constants
 
-    private const string First = "type=WS;ip=127.0.0.1;port=50001";
-    private const string Second = "type=WS;ip=127.0.0.1;port=50002";
+    private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
+    private const string Second = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
     private static readonly ProcedureAddress News = new(2, 5);
     private static readonly ProcedureAddress Other = new(2, 7);

@@ -1,5 +1,8 @@
+import { once } from 'node:events';
+import { type IncomingMessage, request } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
+import { WebSocketServer } from 'ws';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
 import { CredentialScheme, EnvelopeKind } from '../../router/shared/constants';
@@ -15,7 +18,11 @@ import type {
 } from '../../router/shared/types';
 import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type {
+  ITransportServerRefusal,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
+import { createWSTransportServer } from '../../transport/server/ws-transport-server';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
 import type { ITransportMessage } from '../../transport/shared/types';
@@ -24,7 +31,10 @@ import {
   createServer,
   DisconnectError,
   ProtocolCode,
+  requireCredential,
+  shareLegBSession,
   TimeoutError,
+  type IServer,
   type IServerOptions,
   type IServerTransportLike,
 } from '../server';
@@ -33,7 +43,7 @@ import {
 
 type Handle = TransportServerConnectionHandle;
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -233,9 +243,14 @@ test.describe('createServer', () => {
     );
 
     expect(built).toEqual([['sessions'], ['router', true], ['services', true]]);
-    // the router is built with the server's limits, and relays to a session alone unless told
+    // the router is built with the server's limits, and relays a credential it forwards alone
+    // unless told; the admissions a relay is given are the server's members
     expect(routerOptions?.limits).toEqual({ maximumPayloadBytes: 8 });
-    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSessionOrCredential });
+    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireCredential });
+    expect([server.requireCredential, server.shareLegBSession]).toEqual([
+      requireCredential,
+      shareLegBSession,
+    ]);
     expect(server.router).toBe(builtRouter);
     expect(server.sessions).toBe(sessions);
     expect(server.transport).toBe(transport);
@@ -1037,7 +1052,8 @@ test.describe('createServer', () => {
     expect(inner.getAll()).toEqual([]);
   });
 
-  test('relays as its options say, its own admission and timeout kept, requireSessionOrCredential where it gives none', async () => {
+  // spec 14.3.1
+  test('relays as its options say, its own admission and timeout kept, requireCredential where it gives none', async () => {
     const beforeRoute = () => {
       return true;
     };
@@ -1061,7 +1077,7 @@ test.describe('createServer', () => {
 
     expect(relays).toEqual([
       { beforeRoute, timeout: 250 },
-      { beforeRoute: timed.requireSessionOrCredential, timeout: 250 },
+      { beforeRoute: timed.requireCredential, timeout: 250 },
     ]);
     expect(server.router.destinations()).toEqual([]);
   });
@@ -1192,6 +1208,49 @@ test.describe('createServer', () => {
     ).toEqual([0, 0, 0, 0]);
   });
 
+  test("hears its transport's error and refusal through the server's transport", async () => {
+    const transport = createWSTransportServer({ WebSocketServer });
+    // typed by what a server asks of its transport alone, as code over any transport sees it
+    await using server: IServer = createServer({ transport });
+    const refusals: [status: number, reason: string][] = [];
+    const errors: [message: string, connectionHandle: string][] = [];
+    const onRefusal = ({ reason, status }: ITransportServerRefusal) => {
+      refusals.push([status, reason]);
+
+      throw new Error('a refusal listener that throws');
+    };
+
+    server.transport.on('refusal', onRefusal);
+    server.transport.on('error', (error, connectionHandle) => {
+      errors.push([error.message, connectionHandle]);
+    });
+
+    const { port } = await transport.start({ address: '127.0.0.1', findOpenPort: true });
+    const post = async () => {
+      const posted = request({ agent: false, host: '127.0.0.1', method: 'POST', port });
+
+      posted.end();
+
+      const [answer] = (await once(posted, 'response')) as [IncomingMessage];
+
+      answer.resume();
+      await once(answer, 'end');
+
+      return [answer.statusCode, answer.headers['bead-refusal']];
+    };
+
+    expect(await post()).toEqual([405, 'method-refused']);
+    expect(refusals).toEqual([[405, 'method-refused']]);
+    expect(errors).toEqual([['a refusal listener that throws', '']]);
+
+    // let go of, it hears nothing more
+    server.transport.off('refusal', onRefusal);
+
+    expect(await post()).toEqual([405, 'method-refused']);
+    expect(refusals).toHaveLength(1);
+    expect(errors).toHaveLength(1);
+  });
+
   test.describe('gauges and health', () => {
     test('count each layer, set against the connections it holds when its transport counts none, back to nothing as each closes', async () => {
       const { ask, emitter, open, server } = createSessionServer(forever);
@@ -1243,7 +1302,7 @@ test.describe('createServer', () => {
 
     test('fail what a layer keeps for a connection the transport does not hold, and say why', async () => {
       const { server } = createSessionServer(forever);
-      const gone: Handle = 'type=WS;ip=127.0.0.1;port=50009';
+      const gone: Handle = 'type=WS;ip=127.0.0.1;port=50009;ordinal=1';
 
       // a timer set by hand for a connection that is not there
       server.sessions.timers.setConnectionInactivityTimeout(

@@ -73,12 +73,7 @@
         "serviceRevision": { "$ref": "common.schema.json#/$defs/serviceRevision" },
         "notifies": { "const": true },
         "refused": {
-          "enum": [
-            "another name at its address",
-            "its name at another address",
-            "another revision of its service",
-            "past the ceiling"
-          ]
+          "enum": ["another name at its address", "its name at another address", "past the ceiling"]
         }
       },
       "dependentSchemas": {

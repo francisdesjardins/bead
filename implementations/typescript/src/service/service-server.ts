@@ -45,7 +45,9 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
    * {@link ProgrammerError}.
    */
   readonly command: {
-    readonly [Name in CommandName<S>]: IRequest<
+    // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
+    // @deprecated with it
+    readonly [Name in keyof S as Name extends CommandName<S> ? Name : never]: IRequest<
       GivenOf<S[Name]['request']>,
       ValueOf<S[Name]['result']>,
       TransportServerConnectionHandle
@@ -56,7 +58,9 @@ export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
    * offered, or with no resolver registered, it sends nothing and resolves.
    */
   readonly notify: {
-    readonly [Name in NotifyingName<S>]: (
+    // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
+    // @deprecated with it
+    readonly [Name in keyof S as Name extends NotifyingName<S> ? Name : never]: (
       notification: GivenOf<NonNullable<S[Name]['notification']>>,
       options?: INotifyOptions<TransportServerConnectionHandle>
     ) => Promise<void>;
@@ -102,7 +106,11 @@ export type ServiceResolverCallback<
 
 /** Each procedure's resolver a server answers, by name, for resolvers written in a module apart. */
 export type ServiceResolvers<S extends ServiceProcedures> = {
-  readonly [Name in AnsweredName<S>]: ServiceResolverCallback<S[Name]>;
+  // ! keyof S, filtered: a computed key drops the link to the descriptor, and its
+  // @deprecated with it
+  readonly [
+    Name in keyof S as Name extends AnsweredName<S> ? Name : never
+  ]: ServiceResolverCallback<S[Name]>;
 };
 
 /**

@@ -16,11 +16,18 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_HOOKS",
-      "pointer": "/services/0"
+      "pointer": "/services/0",
+      "subject": "service:1/hook:nobody"
+    },
+    {
+      "rule": "SERVICE_SAME_HOOKS",
+      "pointer": "/services/0",
+      "subject": "service:1/hook:anybody"
     },
     {
       "rule": "PROCEDURE_SAME_HOOK",
-      "pointer": "/services/0/procedures/4/admission/hook"
+      "pointer": "/services/0/procedures/4/admission/hook",
+      "subject": "service:1/procedure:5"
     }
   ]
 }

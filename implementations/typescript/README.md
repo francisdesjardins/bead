@@ -24,8 +24,8 @@ first layer of a transport → router → service stack, which is why they sit t
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
 and the connection registry for a server. The transport supplies what only it knows: how to open,
-close and send on the wire. WebSocket is the first, HTTP the second — see [HTTP](#http); another
-transport supplies its own.
+close and send on the wire. WebSocket, HTTP — see [HTTP](#http) — and a Web Worker each supply
+theirs; another transport supplies its own.
 
 The client runs on the global `WebSocket` — every browser, and Node 24.9, the package's floor — or
 on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
@@ -44,12 +44,41 @@ a connection is alive is its transport's to know.
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
 its `maxPayload` says otherwise, and closes a larger one with 1009; over the global `WebSocket`, its
 platform's bound applies. A WebSocket server judges a request at its address in the order of spec
-15.2: 400 as HTTP answers it to a `Host` missing, repeated or no host; 403 to a host not among
-`hosts`, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a request that asks no
-WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but 13, the one it
-speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`. Each
-refusal but HTTP's own is marked, its body empty, and closes its connection; an `Upgrade` listing
-`websocket` among other protocols is taken — see [HTTP](#http).
+15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
+ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
+403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
+request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
+13, the one it speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among
+`origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it would take once its stop began. Each
+refusal but HTTP's own is marked, its body empty, closes its connection, and is
+told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
+[HTTP](#http).
+
+A server listens on `127.0.0.1` unless `start` is given an `address`, an IP address written bare, as
+RFC 3986 writes one: a container, or any server another machine reaches, says `0.0.0.0` or `::`, and
+names its hosts. A name, `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
+loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
+clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
+tries first, Node's and the browsers' racing them (RFC 8305); another process that listens on `::1`,
+on the same port, answers a client that tries that family first. A server meant for other machines
+and given no address is refused there by the network, its connection reset or refused, never by a
+Bead refusal: no socket opens, so nothing is told.
+
+Each refusal a server judges of its own it tells, `refusal`, once written: its status, its reason,
+the request's authority and its `Origin` as they came, and the client's address and port — never
+the target, a token or a credential: what to add to `hosts` or `origins`, or who is refused. The 404
+that ends a listen or an exchange as its connection closes is told by `close`; what HTTP refuses of
+its own, unmarked, by nothing. A client names the status and the reason it was refused with, but
+over the global `WebSocket`, a page's, which reads nothing past its close, 1006. Each string a
+refusal carries is the client's, visible ASCII, spaces and tabs: a log quotes it.
+
+```ts
+server.on('refusal', ({ address, authority, origin, port, reason, status }) => {
+  console.warn(
+    `refused ${String(status)} ${reason}: authority ${JSON.stringify(authority)}, origin ${JSON.stringify(origin)}, from ${String(address)}:${String(port)}`
+  );
+});
+```
 
 ```ts
 import { WebSocketServer } from 'ws';
@@ -72,6 +101,14 @@ await client.connect({ host: 'localhost', port });
 await client.send({ data: 'hello' });
 ```
 
+Each listener of a transport's events is called within a guard: what one throws goes to the
+transport's `error`, the next listener is called all the same, and the transport goes on as if it
+returned (spec 15.1). It awaits nothing a listener returns, so a listener's rejection is Node's, as
+what a listener of `error` throws is: an unhandled rejection ends the process, and a listener
+catches its own, as the `reconnect` above does. Neither client reads a `Retry-After`, which a
+server's 503 `busy` carries and spec 15.7 lets a client wait for: a reconnection waits its own
+schedule, whatever the field asks.
+
 What a transport carries, both ways, is a message, `{ data, credential }`: an envelope, and the
 credential the transport carries beside it, which a request presenting `ELSEWHERE` stands for. Over
 HTTP it is the `Authorization` of the `POST` that carries a request — see [HTTP](#http); a WebSocket
@@ -80,8 +117,8 @@ it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, 
 end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
 (`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`, the
 host as the WHATWG URL Standard's host parser reads it: `127.0.0.1.` is on the loopback, a host
-followed by a space is not); a server, per connection, by what it listens on — a loopback host, or,
-over HTTP, a server under TLS — unless its application tells it what stands in front of it,
+followed by a space is not); a server, per connection, by what it listens on — an address in
+127.0.0.0/8 or `::1`, or, over HTTP, a server under TLS — unless its application tells it what stands in front of it,
 `secure`: `true` for TLS terminated before it, which makes each connection secure, `false` for a
 proxy that serves the network in the clear, which leaves each in the clear; a worker always, since
 it never leaves the machine.
@@ -167,7 +204,7 @@ far a request went:
 | 19   | `PROCEDURE_UNKNOWN`        | the service is known, the procedure is not                                                                                                                                                |
 | 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                    |
 | 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                        |
-| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP                                                                             |
+| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP whose client does not listen                                                |
 | 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                      |
 | 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                 |
 | 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                           |
@@ -200,9 +237,13 @@ anew, rather than run in another; one that asks before any session fails before 
 presenting none runs in whatever session its connection holds.
 
 A default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
-the refusal crossed: the router presents none by default from then on, and emits
-`credentialWithdrawn` with the credential's scheme alone, never its bytes, so the application renews
-it, and the call that renews it goes out without it. A refusal withdraws only the credential its
+the refusal crossed: the router emits `credentialWithdrawn` with the credential's scheme alone,
+never its bytes, so the application renews it, and from then on, until the application gives it a
+default again — a credential, or `undefined`, which says "anonymous" in writing — every call that
+would present it fails before it goes, `SESSION_REQUIRED`, nothing sent and nothing withdrawn, so
+no call falls to its connection's session, or to none, in silence; `isCredentialWithdrawn` says
+so. A call that gives its own credential, `{ scheme: CredentialScheme.NONE }` among them, goes: a
+call that needs no identity presents none, and so does the call that renews. A refusal withdraws only the credential its
 call presented, never a default given anew since, and a failure that ends a subscription its server
 had answered withdraws nothing, over HTTP even when it overtakes that answer in a listen's batch,
 which the failure says, `mayOvertake`. A call whose credential its transport cannot carry fails
@@ -213,8 +254,9 @@ bearer credential crosses only TLS off the machine (RFC 6750 §5.3).
 ```ts
 const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
 
+// the call that renews presents none: until a default is given again, a call that would present it fails
 client.router.on('credentialWithdrawn', () => {
-  void signIn().then((renewed) => {
+  void signIn({ credential: { scheme: CredentialScheme.NONE } }).then((renewed) => {
     client.router.credential = { scheme: CredentialScheme.JWT, token: renewed };
   });
 });
@@ -383,7 +425,11 @@ this package's server transports carries a credential beside an envelope it send
 presenting `ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does
 over a connection that is not secure. A command left unanswered past its timeout closes its
 connection when the server's `closeOnCommandTimeout` says so, or the command's own
-`closeOnTimeout`. `ws-server` is the server over WebSocket:
+`closeOnTimeout`. `ws-server` is the server over WebSocket. A server hears what goes wrong where
+each layer tells it: a call's on its router's `error`, and its transport's — a socket's, or what a
+listener of its events threw — on the transport's `error`, beside each refusal it tells, both on
+`server.transport` whichever transport it was built on
+([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
 
 ```ts
 const server = createWSServer({
@@ -394,6 +440,15 @@ const server = createWSServer({
   transport: { WebSocketServer },
 });
 
+server.router.on('error', (error, connectionHandle) => {
+  console.error(connectionHandle ?? 'no connection', error);
+});
+server.transport.on('error', (error, connectionHandle) => {
+  console.error(connectionHandle === '' ? 'the transport' : connectionHandle, error);
+});
+server.transport.on('refusal', ({ reason, status }) => {
+  console.warn(`refused ${String(status)} ${reason}`);
+});
 await server.transport.start({ port });
 ```
 
@@ -401,8 +456,8 @@ await server.transport.start({ port });
 
 ### The service layer
 
-`@francisdesjardins/bead/service` is the layer a service is served and called through, and the one
-entry generated code imports
+`@francisdesjardins/bead/service` is the layer a service is served and called through, and the
+entry generated code imports, beside `./proto` where a file binds `proto`
 ([0018](../../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
 A service is its procedures, each a typed descriptor — `requestOf` for a request, `notification`
 given for one that notifies, `commandOf` for a command — holding its procedure, who may call it, the
@@ -452,7 +507,19 @@ The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last re
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
 functions, a protobuf message's from protobuf-es's `fromBinary(schema, bytes, { recursionLimit:
 101 })` and `toBinary` — 101, since protobuf-es counts the top message, and section 17.9 bounds a
-message 100 deep below it.
+message 100 deep below it
+([0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
+Before it reads, generated code calls `checkProtoRecords(bytes, schema)`
+from `@francisdesjardins/bead/proto`, which reads the payload's records against the message's own
+descriptor and throws a `SyntaxError` where they are no encoding of it and protobuf-es would read on,
+or where sections 17.9.5 and 17.9.6 refuse them: a field at a wire type its type does not take, and
+a map's entry with a field other than its key and its value
+([0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+Each message's shape is built once, from its descriptor; `./proto` takes `@bufbuild/protobuf` as an
+optional peer, by its types alone, so no protobuf code loads with it. Protobuf's conformance suite
+plays the generated codec, the check in front, through the testee in `tools/protobuf-conformance/`,
+which the root's `tools/protobuf-conformance.mjs` generates its code into and runs, with its failure
+list, `failing.txt`.
 
 ```ts
 const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
@@ -585,7 +652,7 @@ The limits are options of each router and each facade — `createClient(layers, 
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
 from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a timeout a timer
 holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
-least, since its header holds 1,020. Nothing announces them yet: both ends of a connection are set
+least, since its header holds 1,020. Nothing announces them: both ends of a connection are set
 alike. A transport that carries transfers delimits its messages, knows the envelope's size at both
 ends, delivers every chunk and credit — in any order, a copy tolerated — and carries both ways.
 WebSocket does all four. The router copies every payload it reads, so a transport may use its
@@ -612,9 +679,9 @@ the relay calls through, or `{ connectionHandle }`, a connection of its own it a
 and gives the destination: given, or drawn, never 0. Its `audience` is the one the destination
 verifies, as a resource is named for a token (RFC 8707); a destination registered with none takes
 no credential the relay forwards. `destinations()` lists them, for the application to publish. A
-destination on a connection dies with it: once that connection closes, it is unreachable, whoever
-connects under the same handle next, until the application unregisters it and registers the
-newcomer anew.
+destination on a connection dies with it: once that connection closes, it is unreachable until the
+application unregisters it and registers it anew, on another connection: no connection takes a
+handle its transport gave before.
 
 The relay terminates each leg. Leg A, from the requester, and leg B, to the target, each have their
 own call ids, limits and session; what crosses is the payload's bytes, undecoded, the answer, and a
@@ -622,7 +689,7 @@ bearer credential, which the relay forwards and its destination verifies:
 
 | Leg A presents | The relay                                                                                                        | Leg B presents                                                                                      |
 | -------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| none, `OPAQUE` | resolves it to leg A's connection's session, which its admission checks                                          | none: it runs in leg B's session at the target                                                      |
+| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session       | none: it runs in leg B's session at the target                                                      |
 | `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless the relay verifies | the same bytes                                                                                      |
 | `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries a credential      | `ELSEWHERE`, what leg A's transport carried moved to leg B's as it came: over HTTP, `Authorization` |
 
@@ -632,10 +699,13 @@ resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `OPAQUE` that 
 carried, go on unresolved, unless the relay's `verifies` has it verify them besides, with its
 router's `credentials` — a `JWT` against the audiences its destinations were registered with — so
 that one that does not hold is refused `SESSION_REQUIRED` there. Then `beforeRoute`, on its header
-and the call's session: a server's `requireSessionOrCredential` by default, which admits a call in
-leg A's connection's session, or one presenting a `JWT` or an `ELSEWHERE`, by its scheme alone;
-`requireSession` in its place refuses, `ACCESS_DENIED`, every credential the relay forwards without
-verifying, and a router's relay admits nobody without one. Then its destination is looked up. Then
+and the call's session: a server's `requireCredential` by default, which admits a call presenting a
+`JWT` or an `ELSEWHERE`, by its scheme alone unless the relay verifies, and refuses any other — one
+that presents none or `OPAQUE`, in leg A's connection's session or in none — `ACCESS_DENIED`, its
+detail `a relay admits by default only a credential it forwards`, since leg A's session opens
+nothing at the destination; `requireSession` in its place refuses, `ACCESS_DENIED`, every
+credential the relay forwards without verifying, and a router's relay admits nobody without one.
+Then its destination is looked up. Then
 its credential is held to what leg B carries: a `JWT` whose `aud` does not name its destination's
 audience, a destination registered with none, an `ELSEWHERE` over a leg B that carries no
 credential, a `JWT` or an `ELSEWHERE` over a leg B that leaves the machine in the clear, each
@@ -659,15 +729,39 @@ requester's own timeout governs, end to end, by its cancel.
 The relay's own failures name no address behind it: why leg B failed goes to the router's `error`
 event, with leg A's connection.
 
-A failure through a relay counts the relays it crossed, and its side is not known. Every requester
-behind a relay that presents none or `OPAQUE` shares its leg B: one session at the target, one space
-of call ids, and the target's transfer places — so `beforeRoute`, which sees the procedure and the
-destination, is where each such requester's rights are checked. One that presents a `JWT` or an
+A failure through a relay counts the relays it crossed, and its side is not known. A requester
+behind a relay that presents none or `OPAQUE`, and that its `beforeRoute` admits, shares its leg B:
+one session at the target, one space of call ids, and the target's transfer places. A server's
+relay admits none by default: sharing leg B's session is the application's choice, written as a
+`beforeRoute` of its own, which sees the procedure and the destination and is where each such
+requester's rights are checked — its session names the destinations it may reach:
+
+```ts
+// a requester reaches a destination its session names, or forwards a credential its destination verifies
+const isAdmitted = (request: IAdmissionRequest<TransportServerConnectionHandle>): boolean => {
+  const { header, session } = request;
+
+  return (
+    requireCredential(request) ||
+    (session !== undefined &&
+      header.destinationId !== undefined &&
+      devicesOf(session).includes(header.destinationId))
+  );
+};
+
+const server = createWSServer({ relay: { beforeRoute: isAdmitted } });
+```
+
+A composition by `||` answers `ACCESS_DENIED` without the default's detail. `shareLegBSession`, in
+its place, lends leg B's session to every requester in a session at the relay, at every
+destination: it reads none, so a requester in any session acts at every destination with leg B's
+rights, as a deputy that lends its own authority (CWE-441). One that presents a `JWT` or an
 `ELSEWHERE` shares leg B's call ids and transfer places alike, and runs at the target in the session
 its own credential resolves to there, never in leg B's. An answer names its call alone: a
 destination, which means something to its relay only, is malformed on a RESULT or a FAILURE. A relay
-carries no subscription yet — a request that opens one is refused, `SUBSCRIPTION_UNSUPPORTED` — and
-forms no chain: leg B names no destination, so no loop can form.
+carries no subscription — a request that opens one is refused, `SUBSCRIPTION_UNSUPPORTED`, a relay
+that carries one being a decision of its own — and forms no chain: leg B names no destination, so no
+loop can form.
 
 ### HTTP
 
@@ -677,7 +771,9 @@ bytes from `crypto` and answers 201 with them, in base64url, in `bead-connection
 exchange after presents that token, and a `DELETE` ends the connection. The router, the sessions and
 the relays see a connection, as over a socket. The connection's token names the connection and
 nothing else — no session, no credential — and is a secret that enters no handle —
-`type=HTTP;ip=…;ordinal=…` names the connection — no event and no report.
+`type=HTTP;ip=…;ordinal=…` names the connection by the rank it was drawn at, as
+`type=WS;ip=…;port=…;ordinal=…` names a WebSocket's by its peer's port and the rank it was taken
+at, so no two connections share a handle — no event and no report.
 `createHTTPTransportServer({ createServer })` takes the server's factory — `node:http`'s,
 `node:https`'s, or `node:http2`'s with `allowHTTP1` — as the WebSocket one takes `WebSocketServer`,
 and the application sets its timeouts.
@@ -705,7 +801,7 @@ before it goes. A relay that calls a destination through an HTTP client writes i
 request presenting `ELSEWHERE`, the `Authorization` leg A carried, as it came; what came beside any
 other request stays at the relay. The client is secure under `https` or to a loopback host, by the
 URL of its connect; the server under TLS — built on `node:https`'s server, or `node:http2`'s
-`createSecureServer` — or on a loopback host it listens on.
+`createSecureServer` — or on a loopback address it listens on.
 
 A client's `send` settles on the head of its answer, so a caller — a relay, say — knows whether the
 server had the envelope: a 2xx resolves, the server sending its head as it hands the request on.
@@ -719,62 +815,139 @@ from one alive, as a WebSocket's heartbeat does: a connection with no exchange u
 minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
 a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
-| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                              |
-| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                 |
-| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                          |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                             |
-| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed |
-| 403    | `host-refused`, `origin-refused`      | a host not among `hosts`, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                    |
-| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                              |
-| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                  |
-| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                   |
-| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                  |
-| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                            |
-| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                               |
-| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                               |
-| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                         |
+| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
+| ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                           |
+| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                                                    |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin `origins` names                                                                                           |
+| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed |
+| 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                       |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                                                        |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                            |
+| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                             |
+| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
+| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
+| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                         |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                         |
+| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                  |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
-read at once across them all. An HTTP/1.1 request without a `Host`, and one with two `Host` fields
-or a `Host` that is no host, `uri-host` and an optional port, is answered 400 as HTTP answers it,
-unmarked, before anything else of it is read (RFC 9112 §3.2): an empty `Host` is one, and so is a
-name of invalid punycode. `hosts` names the hosts a request may name, every host when not given,
-compared in any ASCII case (RFC 9110 §4.2.3) with its `Host` as the field carries it: an IDN host is
-named in the punycode a browser sends. `origins` names the origins a request may come from besides
-the server's own, none when not given, compared exactly; a WebSocket server takes both alike,
+read at once across them all.
+
+A request names its authority by its target when the target is in absolute-form, `http://` or
+`https://` in lower case, read as it came, its `Host` judged as one field line alone, which an
+HTTP/1.0 request may leave out (RFC 9112 §3.2.2); over HTTP/2, by its `:authority`, a `host` beside
+it ignored (RFC 9113 §8.3.1); otherwise by its `Host`. An authority is a host and an optional port
+of spec 15.12's grammar, RFC 3986's narrowed: no userinfo, no percent-encoded octet, no `*`, `+`,
+`,`, `;` or `=` in a name, no `IPvFuture` literal, no colon without a port. An HTTP/1.1 request without a `Host`,
+and one with two `Host` fields or an authority that is none, is answered 400 as HTTP answers it,
+unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its stream is reset,
+`PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and so is a name of
+invalid punycode. So is a request answered whose field holds a control character but a tab, or an
+octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of every field
+defined since, and Node's parser answers the first itself. So is one whose field value starts or
+ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed over HTTP/2; over HTTP/1.1 the
+parser strips it first (RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value starts or
+ends with a space or a tab, and a control character's, so the request is judged without it; a
+server created with `strictFieldWhitespaceValidation: false` hands the padded value to the
+transport, which resets the stream `PROTOCOL_ERROR`, as the C# side does.
+
+Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
+address, by the request's host, its port aside: no name a browser fetches is written as an IP
+literal, and a localhost name resolves to the loopback, so a page cannot rebind its name to any of
+them. `hosts` names the hosts it takes besides, each a host without its port, compared in any ASCII
+case (RFC 9110 §4.2.3) as the field carries it, an IDN host in the punycode a browser sends:
+`hosts: ['bead.example']` takes `bead.example` and `bead.example:8443` alike. Any other host, an
+empty one and none are refused 403 `host-refused`, whatever the request, a page that rebinds its
+name to the server's address among them. So a server reached by a name names it in `hosts`: a public
+one, one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service
+reached by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy
+that writes its upstream's address, as nginx does by default, none is needed. `hosts: ['*']` takes
+every host and makes none of their origins the server's own: a page that rebinds its name to the
+server's address passes the host's test, and is refused by the origin's, 403 `origin-refused`, so a
+page is then taken only when `origins` names it, and an application under `*` that serves its own
+page names that page's host in `hosts` or its origin in `origins`. A client that is no browser and
+writes its target as its `Origin` — Python's `websocket-client` does by default — is refused alike
+under `*` by a name `hosts` does not list: list that name, or have the client write no `Origin`, as
+a Bead client writes none. An entry with a port, an empty one, one that is no host, or `*` beside
+another throws a `ProgrammerError` as the transport is built; so does an `origins` entry that is
+`*`, since no origin wildcard exists, `null`, or anything but an origin as a browser serializes it. A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which
+`curl -i` and a browser's network panel show; by the HTTP client, "the server drew no connection:
+403 host-refused", and the WebSocket client over `ws`, "the server refused the upgrade: 403
+host-refused", each in its `ConnectError`; and by the
+server's `refusal`, which names the authority to add to `hosts`. A page's WebSocket sees its close
+alone, 1006.
+
+`origins` names the origins a request may come from besides the server's own, none when not given,
+compared exactly; a WebSocket server takes both alike,
 `hosts` on any request at its address, `origins` on an upgrade, after its version and its form. Any
 client that sends an `Origin` is judged by it, a browser's page or not: it gets in by sending none,
 by sending the server's own, or by being named in `origins`. The server's own is `http://` or
-`https://` followed by the request's `Host`, compared in any ASCII case, the field read as the
+`https://` followed by the request's authority, when its host is one the server takes by name —
+one every server takes, or one `hosts` lists — never by `*`, compared in any ASCII case, the field read as the
 serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a browser writes both from one
 URL alike, and a client that writes a default port, a path or another form on one side alone is
 refused. Any other `Origin` is none of its own, whatever host it names: `null`, an extension's, a
 `blob:` URL's, any scheme but `http` and `https`. So `hosts` is what refuses a page that rebinds its
-name to the server's address, never the origin's test. Over HTTP, `origins` serves a proxy that
-rewrites the host: the server answers no CORS, so a page of another origin is not served yet, and a
-page presents `ELSEWHERE` to its own origin alone: `Authorization` is no field a browser sends
-across origins without a preflight. Over WebSocket no CORS stands in the way, so a listed origin's
-page is served outright, a page of another port of the same machine — a development server — among
-them. Naming `null` takes every request that sends it, from any site: a sandboxed frame's, a `file:`
-or a `data:` page's, and one whose origin a browser withholds, after a cross-origin redirect or
-under a referrer policy. `isProxyTrusted` takes the address a proxy on the same machine forwards in
-`x-forwarded-for` for the client's, which the bound per address counts.
+name to the server's address, and under `*` the origin's test. Over HTTP, the server answers CORS to the
+origins `origins` names and to no other (spec 15.12): their preflight is answered, allowing
+`Authorization`, the fields it asks for and any other field — `access-control-allow-headers`
+naming `authorization`, then its `Access-Control-Request-Headers` as they came, then `*`, so a
+browser that caches names and no wildcard keeps the answer too — and every answer to them names
+their origin and exposes every field, so a page of a listed origin connects, calls, listens and
+presents `ELSEWHERE` in `Authorization`. Every exchange of a connection goes to its one URL, which a
+browser's preflight cache keys, so a page preflights its connection's opening and not each listen. No answer carries `Access-Control-Allow-Credentials`: no cookie goes across
+origins, and a `fetch` given to the client must not use `credentials: 'include'`. A gateway in
+front that answers CORS for the path stops, or replaces the fields rather than appends them, once
+the server lists the origin: two `Access-Control-Allow-Origin` fail the browser's check. A page of
+the public network reaching a server on the loopback or a private address needs besides its user's
+permission, which the browser asks (Local Network Access), in a secure context alone; a secure page
+reaching `http://` on a private address by a hostname passes the browser's mixed-content block only
+with `targetAddressSpace: 'local'`, which a `fetch` given to the client adds. The server writes
+nothing for either. Over WebSocket no CORS stands in the way, so a listed origin's page is served
+outright, a page of another port of the same machine — a development server — among them. `null` is
+refused as the transport is built: a browser sends it for every page with no origin of its own — a
+sandboxed frame of any site, a `file:` or a `data:` page, one whose origin it withholds — so naming
+it would let any site drive the server and read every answer; serve the page from an origin, a local
+development server's or the Bead server's own, and name that one.
+
+Behind a proxy, an HTTP server believes `X-Forwarded-For` from the proxies `trustedProxies` names
+alone, each an IP address or a network, `10.0.0.0/8` say, or the compose network's: while the
+address reached is one they hold, the field's next entry from the right is the client's, so what a
+client wrote to the left of the first address none of them holds is never read. An entry is read in
+RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or `[2001:db8::1]:443`, its
+port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; any other,
+`unknown` or a zone among them, ends the walk at the proxy that wrote it. None trusts no proxy, the
+loopback among them; a name, a network whose bits past its prefix are set, and a network of prefix
+0, which would trust what every client writes, throw a `ProgrammerError` as the transport is built.
+`Forwarded` is never read, and a WebSocket server reads no `X-Forwarded-For`, the same list on it
+being ahead. A proxy not listed is a client as any other: every client behind it is its address,
+which `maximumConnectionsPerAddress` counts, so a told `busy` whose `address` is your proxy's, or a
+`largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A deployment whose
+proxies' addresses it cannot name, a platform's router or a cloud load balancer on public addresses,
+counts one address per proxy, a hop bound for such proxies being ahead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+A bound by address counts as one the users behind one NAT, and as many the addresses of one
+IPv6 network.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,
-`bead-listen: ?1` (a boolean of RFC 9651), and the server's 201 says it back when it takes the
+`bead-listen: ?1` (an Item of RFC 9651 whose bare item is a Boolean, its parameters ignored), and
+the server's 201 says it back when it takes the
 listen, as a WebSocket server names the subprotocol it chose: a client whose header something on the
 way dropped never listens where it would be refused. It holds for the connection's life, and
 `isTwoWay` says it of the connection; to a client that does not listen, a request that opens a
 subscription is refused, `SUBSCRIPTION_UNSUPPORTED`, a command rejects, and a relay passes no
-request. The server numbers each such envelope into the connection's outbox. A listen,
-`GET /bead?after=&wait=`, acknowledges what `after` names, which goes, and brings back all that is
-left in a batch of type `application/prs.bead-batch`: each envelope after its length in 4 bytes, the
-number of the first in `bead-sequence`, the others following one by one. Nothing left, the server
-holds the listen up to `wait`, no longer than `maximumWait` — 30 seconds — and ends it 204; a second
-listen takes the first's place. The client reads a batch as it comes and hears each envelope as it
+request. The server numbers each such envelope into the connection's outbox. A listen, a
+`GET /bead` carrying `bead-after` and `bead-wait`, acknowledges what `bead-after` names, which goes,
+and brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope
+after its length in 4 bytes, the number of the first in `bead-sequence`, the others following one
+by one. Nothing left, the server holds the listen up to its `bead-wait` milliseconds, 0 when left
+out, no longer than `maximumWait` — 30 seconds — and ends it 204; a second listen takes the first's
+place. Each count is an Item of RFC 9651 whose bare item is an Integer of 0 or more, its parameters
+ignored; a listen without `bead-after`, or with a count that does not read so, is refused 400
+`malformed`, and no exchange's query is read. The client reads a batch as it comes and hears each envelope as it
 comes whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard
@@ -826,7 +999,8 @@ no counterpart to mirror.
 ### What a server holds
 
 `server.gauges()` counts what each layer holds right now: the server's connections, the transport's
-— and over HTTP its exchanges waiting, its listens held, its outboxes and the bodies being read —
+— and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read and
+the connections its busiest address holds, `largestAddressConnections` —
 the router's calls waited on and answered, the call ids it reserved, its transfers and the bytes
 they hold, its subscriptions in flight, waiting or notified, those paced whose credit is spent and
 what they queue — all together, and the fullest queue, at its bounds — its destinations, and the
@@ -861,10 +1035,12 @@ and came in, decoded and copied; and what it failed with, a failure by its code,
 detail. A call made and its answer, a request received once admitted and decoded and the answer it
 sends, a notification sent or heard: each is a step. An error on a `tx` step says its `tx` did not
 go out, and why: a notification that could not go; an answer its router could not send, told again
-at its start with what its router refused it with; or none, from a resolver that failed before it
-answered, with what it failed with. The `PROCEDURE_FAILED` that goes in their place is the
-envelopes' to tell, and a call answered nothing — cancelled, gone with its connection, its router
-disposed — tells no failure. Each router's own `debug` tells each envelope
+at its start with what its router refused it with; an answer to a request its router already
+answered in its resolver's place, as its subscription's queue went past its bounds, told once with
+the failure its router answered, which its router's `answeredOf` gives the manager; or none, from a
+resolver that failed before it answered, with what it failed with. The `PROCEDURE_FAILED` that goes
+in their place is the envelopes' to tell, and a call answered nothing — cancelled, gone with its
+connection, its router disposed — tells no failure. Each router's own `debug` tells each envelope
 (section 5), out once it is written within its bound, in once it reads: its direction, its
 connection — `server` on a client — and a copy of its header, which carries its credential's scheme
 in place of its credential.
@@ -941,10 +1117,10 @@ given to two routers sums them. It counts what its side declares: each resolver 
 notification registered, and each requester made — `getRequest`'s, `getCommand`'s, a
 notification's — which the service manager declares to its router through `declareRequester` as it
 makes it, each of its calls carrying the series the declaration gave back. The registry keys a
-procedure by its address and holds one name for it, and one revision for each service: a
-declaration of an address it holds under another name, of a name its service holds at another
-address — two names one when they are equal once their ASCII letters are read in one case (spec
-16.6) — or of a service at another revision than it holds, is a `ProgrammerError` as it is made,
+procedure by its address and holds one name for it; a service declared at another revision counts
+into the same series, which no label tells apart. A declaration of an address it holds under
+another name, or of a name its service holds at another address — two names one when they are equal
+once their ASCII letters are read in one case (spec 16.6) — is a `ProgrammerError` as it is made,
 never on a call, and so is one past `maximumProcedures`, the procedures each group of families names
 at most, 1,000 by default. Its router refuses first, whatever its registry, a declaration off
 section 16: an id or a revision out of its range, a procedure's name off its form, or a procedure
@@ -971,11 +1147,12 @@ commands among them, and `bead_server_*` those it answers. A series is labelled 
 service's id in decimal, and `procedure`, its name; a call's, by its `type`, `request` or
 `command`; a call ended, by its `outcome` — `result`, `failure`, `timeout`, `cancelled`, `closed` or
 `error` — and a failure by its `code`: the protocol's name for it, `application` for a procedure's
-own, `_OTHER` for one the protocol names none of. What is under way is a family's started count less
-its handled counts, exact at each exposition, and no gauge is kept besides. A duration is whole
-microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written as Prometheus 3
-stores it. Node reads its monotonic clock finer than a microsecond; a browser coarsens it to 100 µs,
-or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
+own, `_OTHER` for one the protocol names none of. What is under way is a series' started count less
+its handled counts, each series written from one reading of its counts, so the difference never
+reads below 0 and its `_count` is the sum of its handled counts; no gauge is kept besides. A
+duration is whole microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written
+as Prometheus 3 stores it. Node reads its monotonic clock finer than a microsecond; a browser
+coarsens it to 100 µs, or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
 
 `exposition()` writes every series the registry holds in the Prometheus text format 0.0.4, and gives
 its media type with it: `{ contentType, text }`, `contentType` being `METRICS_CONTENT_TYPE`,
@@ -1243,7 +1420,8 @@ credential's session. What a procedure admits reads that session, never the payl
 session, by `requireSession`; a write needs a token whose `scope` holds `write`, by a
 `beforeRequest` that reads `session.data`. A token that does not hold — its signature no longer
 matching, its time past — is refused `SESSION_REQUIRED`, which withdraws it: `credentialWithdrawn`
-tells the page, which asks to log in again. Each log-in is a session of its own, its token's `sid`:
+tells the page, which asks to log in again, and until then a call that would present it fails
+before it goes; the page's public reads, its stats and its metrics, present none. Each log-in is a session of its own, its token's `sid`:
 `whoami` answers the call's session, its claims and its end, and `logout` ends that session alone,
 by `endSession`, whoever else logged in under the same name. The key is drawn at each start, or
 given by `DEMO_KEY`, in base64url, 32 bytes at least; a key published with its RFC is refused before
@@ -1259,29 +1437,64 @@ first.
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
 `chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools:
 
-- **Calls** and **Envelopes**: each step of each call the page's clients make or answer, and each
-  envelope, newest first, as their `debug` events tell them — a credential by its scheme alone, a
-  payload by a preview of 2,000 characters at most — filtered by client and by the package's own
-  filter, as `bead:debug` reads one (`d(rx), -token, e(request)`); a call selected shows what went
-  across.
-- **Metrics**: what each client's registry counts, a line a procedure, read by
-  `devtools/exposition.ts`, the demo's reader too, and its exposition as a scrape reads it; a client
-  given no registry says so.
+- **Calls**: a row a call the page's clients make or answer, newest first, as their `debug` events
+  tell them, its steps and its envelopes met by its call id on its connection — its status by an
+  icon and a colour, its procedure, its type, when it started, how long it took, how it ended in
+  words (`ACCESS_DENIED, beyond 1 relay`, `procedure code 7`, `cancelled`), a command the server
+  made read the right way round, and its bar on a waterfall. A row unfolds into its envelopes, in
+  words (`CREDIT · up to 2.5 MiB`, `CHUNK · at 1 MiB · more`); a subscription keeps its last 50
+  notifications and counts the others. Its **Envelopes** mode lists every envelope on its own. A
+  call selected shows its **Overview**, its failure whole — where it was raised, the relays it
+  crossed, its destination; its **Payload**, as a tree where it reads as one; its **Exchange**, its
+  envelopes as beads on its thread, a third lane for a destination behind a relay, a transfer's bytes
+  against its credit; its **Diff**, a notification against the one before it, an answer against its
+  procedure's last; and its **Trace**, the stack that made it, each frame opened in Sources.
+- **State**: what a client's connection held at the moment a cursor stands on, rebuilt from the
+  panel's records — its session, the calls in flight, the subscriptions and their credit, the
+  transfers and how far they went. It replays nothing, and sends nothing to the page.
+- **Timeline**: every call shown on one axis of time, a notification a ring, a chunk, a credit or a
+  cancel a tick; dragging across it bounds the Calls list to that span.
+- **Metrics**: what each client's registry counts, a row a procedure, read by
+  `devtools/exposition.ts`, the demo's reader too: its calls, those that failed or are in flight, a
+  median and a p95, its calls a second over the last minute, and its exposition as a scrape reads
+  it; a procedure's name shows its calls alone, and a client given no registry says so.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
-  panel saw, read with the package's codec: each `POST`'s envelope, and the batch its answer or a
-  listen brings back.
+  panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
+  procedure named where a client of the page told its name; an exchange copies as the skeleton of
+  an entry of `spec/conversations.json`.
+
+The bar filters by client and by the package's own filter, as `bead:debug` reads one
+(`d(rx), -token, e(request)`), the last filter that held kept while one is refused, with its
+reason; Requests, Commands and Notifications write their selector into it, and Failed shows the
+calls that failed. It pauses the panel's recording (`Ctrl+E`), clears it (`Ctrl+L`), keeps it
+across a reload with Preserve log, and exports its records as JSON, `bead-devtools-log` at version
+1, which Import reads back, pausing the recording so the page's records do not mix with the file's.
+The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
+`←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
+snippet that makes it again by the page's own service manager, and hides or shows its procedure
+alone.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
-nothing until it reloads; and the hook watches only while a panel is open, so the panel shows what
-came after it opened. A server in a Web Worker of the page shows through its client, whose messages
-the Network panel does not show. The parts: `hook.ts`, in the page's world at `document_start`;
-`bridge.ts`, beside it in the extension's world, which alone may open a runtime port;
-`background.ts`, which pairs each tab's page with the panel open on it; `devtools.ts` and
-`panel.ts`; and what they say to each other, in `messages.ts`, JSON alone.
+nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —
+from the first time the Bead tab is shown until DevTools closes — so the panel shows what came after
+it opened, and a page nobody inspects pays nothing. While it watches, the hook takes, for each call
+made, the stack that made it, and keeps an envelope's time to a fraction of a millisecond. A server
+in a Web Worker of the page shows through its client, whose messages the Network panel does not show.
+
+The panel, the hook and what they read are every browser's alike; each browser has its own glue.
+Shared: `hook.ts`, in the page's world at `document_start`; `panel.ts` and `panel.html`, with the
+model they draw from in `model/` and their views in `views/`, which ask of the browser only what
+`host.ts` names; `records.ts`, `preview.ts` and `stack.ts`, which make each event plain before it
+leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each other, in
+`messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
+extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
+page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
+panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
-unit project: its pure modules in Node; the extension loaded in Chromium against the demo's static
+unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's
+procedures, `__tests__/traffic.ts`; the extension loaded in Chromium against the demo's static
 build, the page's calls followed to the panel and the watch stopped as the panel closes —
-`hook.test.ts`, which holds the hook, the bridge and the background, since they run only together; and the
-panel as a page on a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
-`yarn playground:build:file` make what they load.
+`hook.test.ts`, which holds the hook, the bridge and the background, since they run only together;
+and the panel as a page on a fake DevTools API, for what only DevTools gives it.
+`yarn devtools:build` and `yarn playground:build:file` make what they load.

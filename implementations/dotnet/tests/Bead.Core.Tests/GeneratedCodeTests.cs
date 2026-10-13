@@ -4,7 +4,7 @@ namespace Bead.Tests;
 public sealed class GeneratedCodeTests
 {
     // * as a generated file names it: a private constant of the runtime's, which an older runtime lacks
-    private const bool Supports = GeneratedCode.SupportsVersion2;
+    private const bool Supports = GeneratedCode.SupportsVersion3;
 
     [Fact]
     public void Holds_the_constant_of_the_contract_this_runtime_supports()

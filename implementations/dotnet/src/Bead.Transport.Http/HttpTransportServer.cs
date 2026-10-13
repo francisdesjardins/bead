@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -30,9 +31,21 @@ public sealed record HttpTransportServerOptions
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// The hosts a request may name, in any ASCII case, in the form the field carries, an IDN host in
-    /// punycode; any when none. The server judges its own origin by the request's <c>Host</c>, so
-    /// this is what refuses a page that rebinds its name to the server's address.
+    /// The hosts a request may name besides those every server takes — <c>localhost</c>, a name
+    /// under <c>.localhost</c>, an IPv6 address in brackets and an IPv4 address — each a host
+    /// without its port, taken on any port, in any ASCII case, in the form the field carries, an IDN
+    /// host in punycode: none besides when none or empty. A request names its host by its
+    /// authority: an absolute-form target's, else its <c>Host</c>, which carries HTTP/2's
+    /// <c>:authority</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one and none,
+    /// and makes none of their origins its own: the server's own origin is its request's authority
+    /// only when its host is taken by name, one every server takes or one listed here, so under
+    /// <c>*</c> a page that rebinds its name to the server's address is refused 403,
+    /// <c>origin-refused</c>, and a page of the application's own is taken only when
+    /// <see cref="Origins"/> names it. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another are an
+    /// <see cref="ArgumentException"/> as the transport is built. A server reached by a name, a
+    /// public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in a
+    /// cluster, names it here, or refuses it 403, <c>host-refused</c>, which the transport tells
+    /// through <see cref="HttpTransportServer.Refusal"/>.
     /// </summary>
     public IReadOnlyList<string>? Hosts { get; init; }
 
@@ -42,12 +55,6 @@ public sealed record HttpTransportServerOptions
     /// for none; zero is refused.
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// Whether a proxy on this machine is trusted: the last address it forwards in
-    /// <c>x-forwarded-for</c> is then the client's, which the bound per address counts.
-    /// </summary>
-    public bool IsProxyTrusted { get; init; }
 
     /// <summary>The largest body: a router's largest envelope by default; past it, 413.</summary>
     public int MaximumBodyBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
@@ -73,13 +80,39 @@ public sealed record HttpTransportServerOptions
 
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its <c>Host</c>, each compared exactly: none by
-    /// default. <c>null</c> among them takes every exchange that sends it. No CORS is answered.
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
+    /// by name, never by <c>*</c>, each compared exactly:
+    /// none by default. It serves a proxy that rewrites the host, and a page of another origin, to
+    /// which the server answers CORS (spec 15.12): its preflight 204, and on every answer once its
+    /// origin is judged <c>Access-Control-Allow-Origin</c> and every field exposed, never
+    /// <c>Access-Control-Allow-Credentials</c>. Each is an origin as RFC 6454 §6.2 serializes it;
+    /// <c>*</c>, which no origin is, <c>null</c>, which a browser sends for every page with no origin
+    /// of its own, a sandboxed frame of any site among them, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built: a page that sends <c>null</c> is
+    /// served from an origin, which is named here.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 
     /// <summary>The path the transport answers on.</summary>
     public string Pathname { get; init; } = HttpTransport.Pathname;
+
+    /// <summary>
+    /// The proxies it believes <c>X-Forwarded-For</c> from (spec 15.12): none by default, the
+    /// loopback among them. Each is an IP address written bare, as a server listens on one, or a
+    /// network, that address, <c>/</c> and its prefix's length (RFC 4632 §3.1, RFC 4291 §2.3), from
+    /// 1, its bits past the prefix zero: <c>10.0.0.0/8</c>, or a compose network's, for a proxy in a
+    /// container or an ingress; <c>127.0.0.1</c> for one on this machine. A name, a network of prefix
+    /// 0, which would trust what every client writes, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built. While the address reached is one
+    /// they hold, the next entry of the field from the right is the client's, when it is an address,
+    /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
+    /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. A proxy
+    /// left out is a client as any other: every client behind it is its address, which the bound per
+    /// address counts, a told <c>busy</c> names, and the gauge <c>largestAddressConnections</c> shows
+    /// near its ceiling. A bound by address counts as one the users behind one NAT, and as many the
+    /// addresses of one IPv6 network.
+    /// </summary>
+    public IReadOnlyList<string>? TrustedProxies { get; init; }
 
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
@@ -102,8 +135,14 @@ public sealed record HttpTransportServerOptions
 /// <summary>Where an HTTP transport server listens.</summary>
 public sealed record HttpTransportStartOptions
 {
-    /// <summary>The address it listens on.</summary>
-    public string Address { get; init; } = "0.0.0.0";
+    /// <summary>
+    /// The address it listens on (spec 15.12), an IP address written bare: <c>127.0.0.1</c>, the
+    /// loopback, by default; <c>0.0.0.0</c> or <c>::</c> for every interface, which a container, or any
+    /// server another machine reaches, needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or
+    /// <c>IPv6address</c>, with no brackets, no zone, and not IPv4-mapped; a name or any other form is
+    /// an <see cref="ArgumentException"/> as it starts, which ends Closed.
+    /// </summary>
+    public string Address { get; init; } = "127.0.0.1";
 
     /// <summary>The port it listens on.</summary>
     public int Port { get; init; } = 80;
@@ -128,9 +167,12 @@ public sealed record HttpTransportStartOptions
 /// absent; no other exchange's is read, and a <c>POST</c> with two is refused 400. An answer, and
 /// what a listen brings back, carry none. A cancel ends the exchange of its call; one before its
 /// request buries that call id for 5 seconds. Each refusal of its own is marked in
-/// <see cref="HttpTransport.RefusalHeader"/>. An exchange lost — its client gone before the transport
-/// ended it — closes the connection, as a socket that drops does; so do a request unanswered past its
-/// exchange timeout and a connection idle past its inactivity timeout. What the server sends of its
+/// <see cref="HttpTransport.RefusalHeader"/>. To a page of an origin
+/// <see cref="HttpTransportServerOptions.Origins"/> names, it answers CORS (spec 15.12): its
+/// preflight 204, and every answer once its origin is judged naming it and exposing every field, no
+/// credential allowed. An exchange lost — its client gone before the transport ended it — closes the
+/// connection, as a socket that drops does; so do a request unanswered past its exchange timeout and
+/// a connection idle past its inactivity timeout. What the server sends of its
 /// own waits, numbered, in the outbox of a connection whose client said at connect that it listens,
 /// until a <c>GET</c> listen brings it back in a batch; each listen held, once past its refusals,
 /// raises <see cref="Listen"/> with true, and its end, while its connection stands, with false. Each
@@ -144,6 +186,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private const int LengthBytes = 4;
     private const int ReadBytes = 65_536;
 
+    // the error a stream of a malformed request is reset with over HTTP/2 (RFC 9113 §7)
+    private const int ProtocolError = 0x1;
+
     // what a cancel that came before its request buries that call id for: the least a requester
     // reserves one for
     private static readonly TimeSpan Burial = TimeSpan.FromSeconds(5);
@@ -153,9 +198,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // and a client that does not read holds the stop back no longer than this
     private static readonly TimeSpan EndsGrace = TimeSpan.FromSeconds(1);
 
-    // the addresses of this machine, from which a proxy in front of the transport comes
-    private static readonly HashSet<string> Loopback = ["127.0.0.1", "::1"];
-
     private static readonly End Nothing = new(StatusCodes.Status204NoContent);
     private static readonly End Malformed = new(StatusCodes.Status400BadRequest, HttpRefusals.Malformed);
     private static readonly End Unknown = new(StatusCodes.Status404NotFound, HttpRefusals.ConnectionUnknown);
@@ -163,6 +205,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     private readonly HttpTransportServerOptions _options;
     private readonly TimeProvider _clock;
+
+    // the networks of the proxies it believes X-Forwarded-For from
+    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
 
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
@@ -188,12 +233,16 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// <summary>
     /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
     /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
-    /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it.
+    /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it; an entry of its
+    /// hosts, origins or trusted proxies none takes, an <see cref="ArgumentException"/> naming it.
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
         var given = options ?? new HttpTransportServerOptions();
 
+        HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
+        HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
+        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(HttpTransportServerOptions.TrustedProxies));
         AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
 
         var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
@@ -229,9 +278,19 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     public event Action<bool, string>? Listen;
 
     /// <summary>
+    /// Each refusal it judges of its own (spec 15.1): a request it refuses as it arrives, in the order
+    /// spec 15.6 states, a stop's 503 and a token no connection holds among them, or whose body it
+    /// refuses as it comes, each marked; never the 404 that ends an exchange or a listen it had taken
+    /// as their connection closes (spec 15.7), which <see cref="Close"/> tells, nor what HTTP refuses
+    /// of its own, unmarked. Told once the refusal is written, and built only when a listener listens.
+    /// </summary>
+    public event Action<TransportServerRefusal>? Refusal;
+
+    /// <summary>
     /// What a listener of its events threw, with the handle of the connection it was told of: the
-    /// transport went on as if it returned (spec 15.1). Never the server's own, as the TypeScript
-    /// side's can be: Kestrel tells a failure of its own only to its logs.
+    /// transport went on as if it returned (spec 15.1). With an empty handle for a throw of a
+    /// <see cref="Refusal"/> listener alone, which names no connection; never the server's own
+    /// failure, as the TypeScript side's can be: Kestrel tells a failure of its own only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
 
@@ -240,6 +299,13 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// its connection in between.
     /// </summary>
     internal event Action<string>? Holding;
+
+    /// <summary>
+    /// Each answer, before it is written, with its exchange's abort: the tests' way to drop its
+    /// socket in between and to wait until the server is told, where a socket that takes the
+    /// answer whole at once would win the race.
+    /// </summary>
+    internal Func<CancellationToken, Task>? Answering { get; set; }
 
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
@@ -294,8 +360,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     /// <summary>
-    /// What it keeps of its connections, at the ceilings it has: the connections, the addresses, the
-    /// bytes of body being read, the call ids buried, the listens held, what the outboxes hold and the
+    /// What it keeps of its connections, at the ceilings it has: the connections, the addresses and
+    /// the connections the busiest one holds, which its health warns on before a proxy it was not
+    /// told of is refused <c>busy</c>, the bytes of body being read, the call ids buried, the listens held, what the outboxes hold and the
     /// fullest one, and the requests waiting. Kestrel shows no HTTP/2 session, which the TypeScript
     /// side counts.
     /// </summary>
@@ -315,6 +382,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                         return (long)connection.Buried.Count;
                     }),
                     ["connections"] = _drawn.Count,
+                    ["largestAddressConnections"] = _perAddress.Values.DefaultIfEmpty().Max(),
                     ["largestOutboxBytes"] = connections.Select((connection) =>
                     {
                         return connection.OutboxBytes;
@@ -342,6 +410,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 {
                     ["bodyBytes"] = _options.BodyBytesBudget,
                     ["connections"] = _options.MaximumConnections,
+                    ["largestAddressConnections"] = _options.MaximumConnectionsPerAddress,
                     ["largestOutboxBytes"] = _options.MaximumOutboxBytes,
                 },
             };
@@ -381,6 +450,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         WebApplication? application = null;
         TransportServerAddress bound;
 
+        // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
+        // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
+        HostsAndOrigins.AssertAddress(start.Address, nameof(HttpTransportStartOptions.Address));
+
         try
         {
             var builder = WebApplication.CreateSlimBuilder();
@@ -389,6 +462,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             builder.WebHost.ConfigureKestrel((kestrel) =>
             {
                 kestrel.AddServerHeader = false;
+
+                // * an origin server MUST take an absolute-form target's authority over its Host (RFC
+                // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
+                kestrel.AllowHostHeaderOverride = true;
 
                 // the transport counts each body against its own limit and budget
                 kestrel.Limits.MaxRequestBodySize = null;
@@ -583,15 +660,31 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return type == HttpTransport.MediaType && encoding is null or "identity";
     }
 
-    // whether a connect says its client listens: ?1 or ?0, absent being ?0; anything else is none
+    // whether a connect says its client listens: an Item whose bare item is a Boolean, its
+    // parameters ignored (RFC 9651 §2.3), absent being ?0; anything else is none
     private static bool? ListeningOf(HttpRequest request)
     {
-        return (HeaderOf(request, HttpTransport.ListenHeader) ?? "?0") switch
+        return StructuredFields.ParseItem(HeaderOf(request, HttpTransport.ListenHeader) ?? "?0")?.BareItem as bool?;
+    }
+
+    // a CORS preflight's answer from an origin the server lists, whatever method it asks for: the
+    // browser judges its request against it (Fetch §4.8). Authorization is named, since no wildcard
+    // covers it; then the names the preflight asks, its lines joined by ", " (RFC 9110 §5.3), since
+    // a browser may cache a name where it caches no wildcard; then `*`, a wildcard for a request
+    // without credentials (Fetch §3.3.4), which every request to the server is. No Vary names what
+    // it asked: no cache stores an answer to OPTIONS (RFC 9110 §9.3.7)
+    private static End PreflightOf(HttpRequest request)
+    {
+        // ! joined by ", " here, as Node joins them: StringValues.ToString() joins by ","
+        var asked = string.Join(", ", request.Headers.AccessControlRequestHeaders.AsEnumerable());
+        string[] allowed = asked.Length == 0 ? ["authorization", "*"] : ["authorization", asked, "*"];
+
+        return new End(StatusCodes.Status204NoContent, null, new Dictionary<string, string>
         {
-            "?0" => false,
-            "?1" => true,
-            _ => null,
-        };
+            ["access-control-allow-methods"] = "GET, POST, DELETE",
+            ["access-control-allow-headers"] = string.Join(", ", allowed),
+            ["access-control-max-age"] = "7200",
+        });
     }
 
     // a header as the request gives it, given twice as one; none when absent, which is not empty
@@ -612,13 +705,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return value.Length == 0 ? null : value;
     }
 
-    // a count a listen gives: absent is 0, and anything but 1 to 15 digits is none
-    private static long? CountOf(HttpRequest request, string name)
+    // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or
+    // more, its parameters ignored (RFC 9651 §2.3), its lines joined, so two lines never parse.
+    // Absent, it is 0, or none where it is required; anything else is none
+    private static long? CountOf(HttpRequest request, string name, CountOptions? options = null)
     {
-        var values = request.Query[name];
-        var value = values.Count == 0 ? "0" : values[0] ?? "";
+        if (HeaderOf(request, name) is not { } value)
+        {
+            return options is { IsRequired: true } ? null : 0;
+        }
 
-        return value.Length is >= 1 and <= 15 && value.All(char.IsAsciiDigit) ? long.Parse(value, System.Globalization.CultureInfo.InvariantCulture) : null;
+        return StructuredFields.ParseItem(value)?.BareItem is long count and >= 0 ? count : null;
     }
 
     // a token as the server draws it: 22 characters of base64url
@@ -631,8 +728,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     // ends an exchange the transport answers itself; one whose body it will not read is closed
-    // behind a refusal
-    private static async Task Finish(HttpContext context, End end)
+    // behind a refusal, and a refusal marked is told once written: the one writer of every refusal
+    // the transport judges (spec 15.1)
+    private async Task Finish(HttpContext context, End end)
     {
         if (!context.Response.HasStarted && end.Status >= 400 && HasBody(context))
         {
@@ -640,6 +738,50 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
 
         await EndWith(context, end);
+
+        // * built only when a listener listens
+        if (end.Reason is { } reason && Refusal is { } listeners)
+        {
+            var refusal = new TransportServerRefusal(
+                AddressOf(context),
+                AuthorityOf(context),
+                HostsAndOrigins.OriginOf(context.Request.Headers.Origin),
+                context.Connection.RemotePort,
+                reason,
+                end.Status);
+
+            _listeners.Tell(listeners, refusal);
+        }
+    }
+
+    // the authority a request names, as it came (spec 15.12): an HTTP/1 request's absolute-form
+    // target's, else its Host's; none when it names none
+    private static string? AuthorityOf(HttpContext context)
+    {
+        return HostsAndOrigins.AuthorityOf(context.Request.Headers.Host, TargetAuthorityOf(context));
+    }
+
+    // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
+    // over HTTP/2, whose :authority Kestrel has put in the Host
+    private static string? TargetAuthorityOf(HttpContext context)
+    {
+        var request = context.Request;
+        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+
+        return isHttp1 ? HostsAndOrigins.TargetAuthorityOf(context.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
+    }
+
+    // whether every field value of a request is one a server reads (spec 15.12): visible ASCII, SP
+    // and HTAB alone, neither SP nor HTAB at either end
+    private static bool HasVisibleFields(HttpRequest request)
+    {
+        return request.Headers.All((field) =>
+        {
+            return field.Value.All((value) =>
+            {
+                return HostsAndOrigins.IsVisibleField(value ?? "");
+            });
+        });
     }
 
     // closes an HTTP/1 socket behind its exchange, whose body is not read: what follows would read as
@@ -653,6 +795,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     // writes an exchange's end, once: its status and headers, marked when it is a refusal
+    // ! never told: the 404 of a connection that closes is 15.7's close, told by Close, never a
+    // refusal; Finish tells what the transport judges
     private static async Task EndWith(HttpContext context, End end)
     {
         var response = context.Response;
@@ -676,11 +820,28 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         await response.CompleteAsync();
     }
 
-    // what every response on the path carries: never stored, never sniffed
+    // what every response on the path carries: never stored, never sniffed, and which one a request
+    // gets turns on its Origin (RFC 9110 §12.5.5)
     private static void StampOf(HttpResponse response)
     {
         response.Headers.CacheControl = "no-store";
         response.Headers.XContentTypeOptions = "nosniff";
+        response.Headers.Vary = "Origin";
+    }
+
+    // what HTTP refuses of its own, as Kestrel answers it: 400, unmarked, none of the path's fields,
+    // its socket closed behind it, nothing told (spec 15.12)
+    private static async Task RefuseMalformed(HttpContext context)
+    {
+        var response = context.Response;
+
+        if (!response.HasStarted)
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            response.Headers.Connection = "close";
+        }
+
+        await response.CompleteAsync();
     }
 
     // a stop: every connection closed, as lost, then the port freed
@@ -736,8 +897,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
     }
 
-    // the client's address: the socket's, or, behind a proxy on this machine the transport trusts,
-    // the last one it forwarded — an address, or nothing of it is taken
+    // the client's address, in its one form: the socket's, walked past each proxy it trusts through
+    // X-Forwarded-For, its lines joined by commas, from the right
     private string? AddressOf(HttpContext context)
     {
         if (context.Connection.RemoteIpAddress is not { } remote)
@@ -745,21 +906,21 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return null;
         }
 
-        var address = (remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote).ToString();
-        var forwarded = context.Request.Headers["x-forwarded-for"].ToString().Split(',')[^1].Trim();
+        var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        // an address written as one, as isIP reads it: an IPv4 one in its four numbers alone
-        var isAddress = IPAddress.TryParse(forwarded, out var parsed)
-            && (parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 || parsed.ToString() == forwarded);
-
-        return _options.IsProxyTrusted && Loopback.Contains(address) && isAddress ? forwarded : address;
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
     }
 
-    // an exchange from the server's own origin, or one it was told; one with no Origin comes from
-    // anywhere, and any client that sends one is judged by it
-    private bool IsAllowedOrigin(HttpRequest request)
+    // an exchange from the server's own origin, its request's authority under http or https when its
+    // host is taken by name, or one it was told; one with no Origin comes from anywhere, and any
+    // client that sends one is judged by it
+    private bool IsAllowedOrigin((HttpRequest Request, string? Authority) exchange)
     {
-        return HostsAndOrigins.IsTakenOrigin(HeaderOf(request, HeaderNames.Origin), (request.Headers.Host.ToString(), _options.Origins));
+        // ! the own origin by a host taken by name alone: under *, a page that rebinds its name is
+        // its own origin by the very Host * did not check
+        var own = HostsAndOrigins.OwnAuthorityOf(exchange.Authority, _options.Hosts);
+
+        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (own, _options.Origins));
     }
 
     // an exchange: what it is, as its method, its path, its host, its origin and its token say
@@ -790,11 +951,42 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     {
         var request = context.Request;
 
-        // ! the Host field as it came, which a browser writes as it writes its Origin, an IDN in
-        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none
-        var host = request.Headers.Host.ToString();
+        // * a field HTTP would call malformed before anything else is judged (spec 15.12): Kestrel
+        // refuses 400 an octet that is no UTF-8, and decodes the rest, a character past ASCII among
+        // them, and takes a control character, or a value with a space or a tab at either end over
+        // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
+        // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own
+        if (!HasVisibleFields(request))
+        {
+            if (HttpProtocol.IsHttp2(request.Protocol) && context.Features.Get<IHttpResetFeature>() is { } reset)
+            {
+                reset.Reset(ProtocolError);
 
-        if (!HostsAndOrigins.IsTakenHost(host, _options.Hosts))
+                return;
+            }
+
+            await RefuseMalformed(context);
+
+            return;
+        }
+
+        // ! the authority as it came, which a browser writes as it writes its Origin, an IDN in
+        // punycode: Request.Host turns punycode into Unicode, and throws on what decodes to none.
+        // Kestrel has put HTTP/2's :authority in the Host; an absolute-form target's it reads
+        // through a Uri, which lowers its case and drops a default or an empty port and a userinfo,
+        // so it is read from the target as it came, and judged as HTTP judges a Host
+        var targetAuthority = TargetAuthorityOf(context);
+
+        if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
+        {
+            await RefuseMalformed(context);
+
+            return;
+        }
+
+        var authority = HostsAndOrigins.AuthorityOf(request.Headers.Host, targetAuthority);
+
+        if (!HostsAndOrigins.IsTakenHost(authority, _options.Hosts))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Host));
 
@@ -808,9 +1000,29 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        if (!IsAllowedOrigin(request))
+        if (!IsAllowedOrigin((request, authority)))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Origin));
+
+            return;
+        }
+
+        var origin = HeaderOf(request, HeaderNames.Origin);
+        var isListed = HostsAndOrigins.IsListedOrigin(origin, _options.Origins);
+
+        // * every answer a page Origins names can read carries it, a refusal's too, which its client
+        // reads; a refusal judged before the origin answers a preflight no browser reads (Fetch
+        // §4.8). EndWith and the head writers keep what is set here
+        if (isListed)
+        {
+            context.Response.Headers.AccessControlAllowOrigin = origin;
+            context.Response.Headers.AccessControlExposeHeaders = "*";
+        }
+
+        // a preflight is no refusal, so EndWith, never Finish: nothing told, no connection drawn
+        if (isListed && HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
+        {
+            await EndWith(context, PreflightOf(request));
 
             return;
         }
@@ -1283,7 +1495,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // a request's answer, once it comes: written, or how its exchange ends instead — its connection
     // gone once its request was handed on, its head goes before its exchange is cut: a request
     // handed on ran, which no refusal may deny
-    private static async Task<End?> Reply(HttpContext context, Waiting waiting)
+    private async Task<End?> Reply(HttpContext context, Waiting waiting)
     {
         var ending = await waiting.Ended.Task.WaitAsync(context.RequestAborted);
 
@@ -1307,6 +1519,11 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         if (ending.End is { } end)
         {
             return end;
+        }
+
+        if (Answering is { } answering)
+        {
+            await answering(context.RequestAborted);
         }
 
         try
@@ -1438,8 +1655,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     {
         Holding?.Invoke(connection.ConnectionHandle);
 
-        var after = CountOf(context.Request, "after");
-        var wait = CountOf(context.Request, "wait");
+        var after = CountOf(context.Request, HttpTransport.AfterHeader, new CountOptions { IsRequired = true });
+        var wait = CountOf(context.Request, HttpTransport.WaitHeader);
         var listening = new Listening(connection);
         End? refused = null;
 
@@ -1526,7 +1743,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             }
             else
             {
-                await Finish(context, ending.IsGone ? Unknown : ending.End ?? Nothing);
+                // ! a listen ended as its connection closes is 15.7's close, never told
+                await (ending.IsGone ? EndWith(context, Unknown) : Finish(context, ending.End ?? Nothing));
             }
         }
         catch (Exception reason) when (reason is IOException or OperationCanceledException)
@@ -1719,6 +1937,12 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // how the transport ends an exchange of its own: its status, the refusal it is marked with, and
     // its headers
     private sealed record End(int Status, string? Reason = null, IReadOnlyDictionary<string, string>? Headers = null);
+
+    // how a listen's count is read: whether its field is required, or 0 when left out
+    private sealed record CountOptions
+    {
+        public bool IsRequired { get; init; }
+    }
 
     // what an exchange waiting on the transport ends with: an answer's envelope or a listen's batch,
     // the number of a batch's first, an end of the transport's own, or its connection gone — after

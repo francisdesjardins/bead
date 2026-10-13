@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Bead;
 
 /// <summary>
@@ -12,6 +14,45 @@ public interface IServerTransport : IRouterServerTransport
     /// has no listen never raises it, as this default.
     /// </summary>
     event Action<bool, string>? Listen
+    {
+        add
+        {
+        }
+
+        remove
+        {
+        }
+    }
+
+    /// <summary>
+    /// Each refusal the transport judges of its own (spec 15.1), within the guard its other events
+    /// are told in, a listener's throw reported with no connection: what to add to its hosts or
+    /// origins. A transport that refuses nothing of its own never raises it, as this default.
+    /// </summary>
+    event Action<TransportServerRefusal>? Refusal
+    {
+        add
+        {
+        }
+
+        remove
+        {
+        }
+    }
+
+    /// <summary>
+    /// What went wrong on a connection, with its handle, as spec 9.0 reports an error: what a
+    /// listener of its events threw, the transport going on as if it returned (spec 15.1), or what
+    /// broke a connection's socket; with the empty handle for a throw of a <see cref="Refusal"/>
+    /// listener, which names no connection. The routers forward none of it to their own error, so
+    /// an application hears it here, whichever transport it built. A transport that reports nothing
+    /// never raises it, as this default.
+    /// </summary>
+    [SuppressMessage(
+        "Naming",
+        "CA1716:Identifiers should not match keywords",
+        Justification = "each transport's event is Error, as every router's and the TypeScript side's error: one word, one meaning (0003)")]
+    event Action<Exception, string>? Error
     {
         add
         {
@@ -69,8 +110,12 @@ public sealed record ServerOptions
 
     /// <summary>
     /// How the router relays a request that names a destination registered in it. Its
-    /// <see cref="RelayOptions.BeforeRoute"/> is <see cref="Server{TData}.RequireSessionOrCredential"/>
-    /// when none: a relay is a door to what is behind it.
+    /// <see cref="RelayOptions.BeforeRoute"/> is <see cref="Server{TData}.RequireCredential"/> when
+    /// none: a relay is a door to what is behind it, and admits by default only a credential it
+    /// forwards, for its destination to verify. A relay whose requesters log in at it gives one that
+    /// checks the destination against the requester's session;
+    /// <see cref="Server{TData}.ShareLegBSession"/> lends leg B's session to every requester in a
+    /// session of leg A's, at every destination: a choice to write.
     /// </summary>
     public RelayOptions? Relay { get; init; }
 
@@ -118,6 +163,10 @@ public sealed record ServerOptions
 /// <typeparam name="TData">What a session keeps.</typeparam>
 public sealed class Server<TData> : IBeadServer<TData>
 {
+    // what a relay's default admission tells a call it refuses, the same bytes on every side, so a
+    // hub whose requesters present none finds the default by its own words
+    private const string RelayAdmitsCredentialsAlone = "a relay admits by default only a credential it forwards";
+
     private readonly Lock _gate = new();
     private readonly TimeSpan _connectionInactivityTimeout;
     private readonly TimeProvider _clock;
@@ -165,7 +214,13 @@ public sealed class Server<TData> : IBeadServer<TData>
                 return request.Session is not null;
             },
             Failure.OfProtocol(ProtocolCode.SessionRequired));
-        RequireSessionOrCredential = new BeforeRequest(
+        RequireCredential = new BeforeRequest(
+            (request) =>
+            {
+                return request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
+            },
+            Failure.OfProtocol(ProtocolCode.AccessDenied, RelayAdmitsCredentialsAlone));
+        ShareLegBSession = new BeforeRequest(
             (request) =>
             {
                 return request.Session is not null || request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
@@ -190,7 +245,7 @@ public sealed class Server<TData> : IBeadServer<TData>
                     Limits = options?.Limits,
                     MetricsRegistry = options?.MetricsRegistry,
                     Pacing = options?.Pacing,
-                    Relay = (options?.Relay ?? new RelayOptions()) with { BeforeRoute = options?.Relay?.BeforeRoute ?? RequireSessionOrCredential },
+                    Relay = (options?.Relay ?? new RelayOptions()) with { BeforeRoute = options?.Relay?.BeforeRoute ?? RequireCredential },
                     ResolverScheduler = options?.ResolverScheduler,
                     Scheduler = options?.Scheduler,
                     SessionTokenOf = Sessions.SessionTokenOf,
@@ -299,13 +354,27 @@ public sealed class Server<TData> : IBeadServer<TData>
     public BeforeRequest RequireSession { get; }
 
     /// <summary>
-    /// A relay's admission by default (spec 14.3, step 1): a call in leg A's connection's session, or
-    /// one whose header presents a <see cref="CredentialScheme.Jwt"/>, or an
-    /// <see cref="CredentialScheme.Elsewhere"/> its transport carried, read from its credential
-    /// scheme alone — a credential the relay may forward, which its destination verifies; any other,
-    /// a call in none that presented none, is refused with SESSION_REQUIRED.
+    /// A relay's admission by default (spec 14.3, step 1): a call whose header presents a
+    /// <see cref="CredentialScheme.Jwt"/>, or an <see cref="CredentialScheme.Elsewhere"/> its
+    /// transport carried, read from its credential scheme alone unless the relay
+    /// <see cref="RelayOptions.Verifies"/> — a credential it forwards, which its destination
+    /// verifies. Any other, one that presents none or OPAQUE, in leg A's connection's session or in
+    /// none, is refused with ACCESS_DENIED, its detail "a relay admits by default only a credential
+    /// it forwards": leg A's session opens nothing at the destination, and a relay that lent leg B's
+    /// session to it would lend its own authority (CWE-441).
     /// </summary>
-    public BeforeRequest RequireSessionOrCredential { get; }
+    public BeforeRequest RequireCredential { get; }
+
+    /// <summary>
+    /// A relay's admission that lends leg B's session (spec 14.3, step 1, 14.7): a call in any
+    /// session of leg A's connection's, whatever its destination, which then runs in leg B's session
+    /// there, or one whose header presents a <see cref="CredentialScheme.Jwt"/> or an
+    /// <see cref="CredentialScheme.Elsewhere"/>, read from its scheme alone; a call in none that
+    /// presented none is refused with SESSION_REQUIRED. It reads no destination: a
+    /// <see cref="RelayOptions.BeforeRoute"/> that checks the destination against the session is
+    /// the one to write.
+    /// </summary>
+    public BeforeRequest ShareLegBSession { get; }
 
     /// <summary>Follows its transport no more, disposes its router and its sessions, then stops its transport.</summary>
     public async ValueTask DisposeAsync()

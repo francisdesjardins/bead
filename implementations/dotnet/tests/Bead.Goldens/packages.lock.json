@@ -10,6 +10,12 @@
       },
       "bead.core": {
         "type": "Project"
+      },
+      "bead.protobuf": {
+        "type": "Project",
+        "dependencies": {
+          "Google.Protobuf": "[3.36.2, )"
+        }
       }
     }
   }

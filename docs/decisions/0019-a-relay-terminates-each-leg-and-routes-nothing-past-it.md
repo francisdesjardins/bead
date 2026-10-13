@@ -44,11 +44,17 @@ the relay.
 
 ## Consequences
 
-**Every requester behind a relay shares its leg B**: one space of call ids, and the target's
-transfer places. One that presents none or `OPAQUE` shares its session at the target too: the
-relay's admission, which sees the procedure and the destination, is where its rights are checked,
-and the target sees the relay alone. One that presents a `JWT` or an `ELSEWHERE` runs at the target
-in the session its own credential resolves to, which the target verifies
+**A requester behind a relay shares its leg B's session only where its admission says so.** Every
+requester shares leg B's call ids and transfer places. A server's relay admits by default only a
+credential it forwards, `requireCredential`: one that presents none or `OPAQUE` is refused
+`ACCESS_DENIED`, its detail naming the default, since leg A's session opens nothing at the target,
+and a relay that lent leg B's session to any session of leg A's would be the deputy that lends its
+own authority (Hardy, 1988; [CWE-441](https://cwe.mitre.org/data/definitions/441.html)). Sharing it
+is written: a `beforeRoute` of the application's, which sees the procedure and the destination and
+checks the one against the requester's session; or `shareLegBSession`, which lends it to every
+session at every destination, and is named for it. A requester so admitted shares leg B's session at
+the target, which sees the relay alone. One that presents a `JWT` or an `ELSEWHERE` runs at the
+target in the session its own credential resolves to, which the target verifies
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 **A client behind a relay subscribes to nothing**: what it would be notified of stops at the relay,

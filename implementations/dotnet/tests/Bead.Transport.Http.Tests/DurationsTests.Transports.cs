@@ -75,9 +75,11 @@ public sealed partial class DurationsTests
                 }
             };
 
-            var listening = new HttpRequestMessage(HttpMethod.Get, new Uri($"{drive.Url}?after=0&wait={LongestWait}"));
+            var listening = new HttpRequestMessage(HttpMethod.Get, drive.Url);
 
             listening.Headers.TryAddWithoutValidation(HttpTransport.ConnectionTokenHeader, connectionToken);
+            listening.Headers.TryAddWithoutValidation(HttpTransport.AfterHeader, "0");
+            listening.Headers.TryAddWithoutValidation(HttpTransport.WaitHeader, LongestWait.ToString(CultureInfo.InvariantCulture));
             _ = drive.Http.SendAsync(listening, HttpCompletionOption.ResponseHeadersRead, Cancelled);
             await held.Task.WaitAsync(Patience, Cancelled);
 
@@ -162,9 +164,7 @@ public sealed partial class DurationsTests
         return HttpClientOf(new HttpTransportClientOptions { Wait = Assert.NotNull(given) }, async (drive) =>
         {
             var listen = await drive.Fetch.Next();
-            var wait = listen.Uri[(listen.Uri.LastIndexOf("&wait=", StringComparison.Ordinal) + "&wait=".Length)..];
-
-            return HeldAt(TimeSpan.FromMilliseconds(long.Parse(wait, CultureInfo.InvariantCulture)));
+            return HeldAt(TimeSpan.FromMilliseconds(long.Parse(listen.Wait ?? "", CultureInfo.InvariantCulture)));
         });
     }
 
@@ -446,7 +446,7 @@ public sealed partial class DurationsTests
         var taps = Channel.CreateUnbounded<TimeSpan>();
         var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
 
-        await Listener.Refuse((await listener.Next()).Peer);
+        await Listener.Refuse((await Reached(listener, connecting)).Peer);
         await Assert.ThrowsAsync<WebSocketException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
@@ -464,7 +464,7 @@ public sealed partial class DurationsTests
             },
         });
 
-        await Listener.Refuse((await listener.Next()).Peer);
+        await Listener.Refuse((await Reached(listener, Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).Unwrap())).Peer);
         await Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).WaitAsync(Patience, Cancelled);
 
         if (!taps.Reader.TryRead(out var held))
@@ -488,7 +488,7 @@ public sealed partial class DurationsTests
             await clock.Advance(Millisecond);
         }
 
-        var (peer, head) = await listener.Next();
+        var (peer, head) = await Reached(listener, Task.WhenAny(reconnecting, taps.Reader.WaitToReadAsync(Cancelled).AsTask()).Unwrap());
 
         using (peer)
         using (await Listener.Answer((peer, head)))
@@ -499,6 +499,22 @@ public sealed partial class DurationsTests
         }
 
         return HeldAt(held);
+    }
+
+    // the listener's next connection, unless what was to reach it ended first: an attempt that failed
+    // before the listener saw it says so at once, by its own exception where it has one, never by a
+    // wait on the accept that runs out
+    private static async Task<(TcpClient Peer, string Head)> Reached(Listener listener, Task ending)
+    {
+        var next = listener.Next();
+
+        if (await Task.WhenAny(next, ending).WaitAsync(Patience, Cancelled) != next)
+        {
+            await ending;
+            Assert.Fail("what was to reach the listener ended before it did");
+        }
+
+        return await next;
     }
 
     // waits, on the real clock, for what the side does on its own threads
@@ -588,7 +604,7 @@ public sealed partial class DurationsTests
         public Call(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Method = request.Method;
-            Uri = request.RequestUri?.ToString() ?? "";
+            Wait = request.Headers.TryGetValues(HttpTransport.WaitHeader, out var waits) ? waits.FirstOrDefault() : null;
 
             // an exchange aborted is answered by its abort
             cancellationToken.Register(() =>
@@ -599,7 +615,8 @@ public sealed partial class DurationsTests
 
         public HttpMethod Method { get; }
 
-        public string Uri { get; }
+        // the wait a listen asks, in its field
+        public string? Wait { get; }
 
         public Task<HttpResponseMessage> Answered
         {

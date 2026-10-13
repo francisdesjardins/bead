@@ -34,7 +34,7 @@ const LENSES = args.lenses || [
   {
     key: 'text',
     focus:
-      'the spec and its companion read as a standard: every unit normative and testable, its requirement words as RFC 2119 and RFC 8174 use them, its grammar as RFC 5234 writes it, every "section n.n" resolving, every sum and bound computing, every unit a conformance file cites or `spec/uncited.txt` excuses, and what the README, the CHANGELOG and the records count against what holds',
+      'the spec and its companion read as a standard: every unit normative and testable, its requirement words as RFC 2119 and RFC 8174 use them, its grammar as RFC 5234 writes it, every "section n.n" resolving, every sum and bound computing, every unit a conformance file cites or `spec/units.txt` gives its reason for, held as `spec/check.py` holds it, and what the README, the CHANGELOG and the records count against what holds',
   },
   {
     key: 'wire-and-calls',

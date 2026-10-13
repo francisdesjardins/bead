@@ -3,6 +3,7 @@
 // dependencies
 
 import {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CLOSE_EVENT,
@@ -12,6 +13,7 @@ import {
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
+  WAIT_HEADER,
 } from '../shared/constants';
 import { assertHeld, assertHeldDelay, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
@@ -24,6 +26,7 @@ import {
 } from '../shared/errors';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
+import { BARE_ITEM_TYPES, parseItem } from '../shared/structured-fields';
 import {
   getReadyState,
   ReadyState,
@@ -44,6 +47,7 @@ import type {
 } from './types';
 
 export {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
@@ -51,6 +55,7 @@ export {
   LISTEN_HEADER,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
+  WAIT_HEADER,
 } from '../shared/constants';
 export type {
   FetchLike,
@@ -128,6 +133,20 @@ const FIELD_VALUE = /^[\t\x20-\x7e]*$/u;
 // the media type of a response, parameters aside
 const typeOf = (response: IFetchResponseLike): string | undefined => {
   return response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+};
+
+// a field's value read as an Item of RFC 9651, its parameters aside: its Integer, or none
+const integerOf = (value: string | null): number | undefined => {
+  const bareItem = value === null ? undefined : parseItem(value)?.bareItem;
+
+  return bareItem?.type === BARE_ITEM_TYPES.INTEGER ? bareItem.value : undefined;
+};
+
+// a field's value read as an Item of RFC 9651, its parameters aside: whether it is the Boolean true
+const isTrue = (value: string | null): boolean => {
+  const bareItem = value === null ? undefined : parseItem(value)?.bareItem;
+
+  return bareItem?.type === BARE_ITEM_TYPES.BOOLEAN && bareItem.value;
 };
 
 // a body read only to let its socket go
@@ -212,13 +231,14 @@ const retryDelayOf = (losses: number): number => {
  * resolves, and closes the connection, as a socket that drops does.
  *
  * What the server sends of its own, a client that listens — the default, once the server says it
- * back at connect — hears by a listen: a `GET` the server holds up to `wait`, which brings back a
- * batch of envelopes, numbered from its first, each heard as a `message` as it comes whole and
- * bounded alone by `maximumBodyBytes`. The next listen acknowledges what was heard; one that brings
- * nothing is followed by another after `pause`. A listen lost is listened again from where it was, at
- * once, then later and later, drawn apart, until one reaches the server, as EventSource reconnects —
- * or until `inactivityTimeout` has passed, which loses the connection, as a refusal of the server's
- * or a batch that does not read does.
+ * back at connect — hears by a listen: a `GET` at the connection's one URL, which the server holds
+ * up to `wait`, asked in `bead-wait`, and which brings back a batch of envelopes, numbered from its
+ * first, each heard as a `message` as it comes whole and bounded alone by `maximumBodyBytes`. The
+ * next listen acknowledges in `bead-after` what was heard; one that brings nothing is followed by
+ * another after `pause`. A listen lost is listened again from where it was, at once, then later and
+ * later, drawn apart, until one reaches the server, as EventSource reconnects — or until
+ * `inactivityTimeout` has passed, which loses the connection, as a refusal of the server's or a
+ * batch that does not read does.
  *
  * @example
  * const client = createHTTPTransportClient();
@@ -340,12 +360,17 @@ export const createHTTPTransportClient = (
         connection: IDrawn,
         cursor: { after: number }
       ): Promise<'broken' | 'gone' | 'heard' | 'lost' | 'nothing' | 'refused'> => {
-        const query = `after=${String(cursor.after)}&wait=${String(wait)}`;
         let response: IFetchResponseLike;
 
+        // * at the connection's one URL, its counts in fields: a moving URL is a preflight each time
+        // for a page of another origin, whose browser caches the answer by URL (Fetch §4.9)
         try {
-          response = await fetchImpl(`${connection.url}?${query}`, {
-            headers: { [CONNECTION_TOKEN_HEADER]: connection.connectionToken },
+          response = await fetchImpl(connection.url, {
+            headers: {
+              [AFTER_HEADER]: String(cursor.after),
+              [CONNECTION_TOKEN_HEADER]: connection.connectionToken,
+              [WAIT_HEADER]: String(wait),
+            },
             method: 'GET',
             redirect: 'error',
             signal: connection.controller.signal,
@@ -372,7 +397,7 @@ export const createHTTPTransportClient = (
 
         // numbered from the one after the last it heard, or it is no batch of this listen's
         if (
-          response.headers.get(SEQUENCE_HEADER) !== String(cursor.after + 1) ||
+          integerOf(response.headers.get(SEQUENCE_HEADER)) !== cursor.after + 1 ||
           response.body === null
         ) {
           return (drain(response), 'broken');
@@ -549,8 +574,11 @@ export const createHTTPTransportClient = (
                     drain(response);
 
                     if (response.status !== 201 || connectionToken === null) {
+                      // its status, and its reason where the server marked it (spec 15.6)
+                      const reason = response.headers.get(REFUSAL_HEADER);
+                      const status = String(response.status);
                       const refused = new ConnectError(
-                        `the server drew no connection: ${String(response.status)}`
+                        `the server drew no connection: ${reason === null ? status : `${status} ${reason}`}`
                       );
 
                       return (reject(refused), undefined);
@@ -560,7 +588,7 @@ export const createHTTPTransportClient = (
                       connectionToken,
                       controller: new AbortController(),
                       // taken where the server said it back, and nowhere else
-                      isListening: isListening && response.headers.get(LISTEN_HEADER) === '?1',
+                      isListening: isListening && isTrue(response.headers.get(LISTEN_HEADER)),
                       url,
                     };
 

@@ -2,12 +2,13 @@ namespace Bead;
 
 /// <summary>
 /// Whether a transport is secure (spec 13.4), judged by what it is given, never by what a name
-/// resolves to: under TLS, its scheme <c>wss</c> or <c>https</c>; or on the loopback, its host — the
-/// one a client names, or the one a server listens on — as the WHATWG URL Standard's host parser
-/// reads it, <see cref="UrlHost"/>: <c>localhost</c> or a name that ends in <c>.localhost</c>,
-/// compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or <c>::1</c>, as the W3C's Secure
-/// Contexts judges an origin potentially trustworthy. Any other leaves the machine in the clear,
-/// which a bearer credential never crosses (RFC 6750 §5.3).
+/// resolves to: under TLS, its scheme <c>wss</c> or <c>https</c>; or on the loopback — a client by
+/// the host it names, as the WHATWG URL Standard's host parser reads it, <see cref="UrlHost"/>:
+/// <c>localhost</c> or a name that ends in <c>.localhost</c>, compared in ASCII lower case, an IPv4
+/// address in 127.0.0.0/8, or <c>::1</c>, as the W3C's Secure Contexts judges an origin potentially
+/// trustworthy; a server by the address it listens on, an IP address written bare (spec 15.12), in
+/// 127.0.0.0/8 or <c>::1</c>, which that parser reads alike. Any other leaves the machine in the
+/// clear, which a bearer credential never crosses (RFC 6750 §5.3).
 /// </summary>
 internal static class TransportSecurity
 {

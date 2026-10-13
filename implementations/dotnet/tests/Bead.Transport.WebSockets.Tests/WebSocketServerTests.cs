@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -60,7 +61,18 @@ public sealed class WebSocketServerTests
 
     private static readonly Procedure Unsubscribe = new() { ServiceId = 1, ProcedureId = 5, ProcedureName = "unsubscribe", ServiceRevision = 1 };
 
+    private static readonly Procedure Whoami = new() { ServiceId = 1, ProcedureId = 6, ProcedureName = "whoami", ServiceRevision = 1 };
+
     // helpers
+
+    /// <summary>Whether this platform opens two sockets from one address and port.</summary>
+    public static bool OpensTwoSocketsFromOnePort
+    {
+        get
+        {
+            return SamePort.IsOpened;
+        }
+    }
 
     private static CancellationToken Cancelled
     {
@@ -272,22 +284,35 @@ public sealed class WebSocketServerTests
         return ends;
     }
 
-    // a relay's server — relaying as `relay` says, a session required by default — with a device
-    // behind it at destination 7, and a client connected to it; every router under `limits`. The
-    // TypeScript side's leg B is a pipe to a bare router; this side has no piped transport, so its
-    // device is a server of its own, reached by a client's router registered as the destination
+    // a relay's server — relaying as `relay` says, or by its ShareLegBSession, as a hub whose
+    // requesters log in at it does, a session required — with a device behind it at destination 7,
+    // and a client connected to it; every router under `limits`. The TypeScript side's leg B is a
+    // pipe to a bare router; this side has no piped transport, so its device is a server of its own,
+    // reached by a client's router registered as the destination
     private static async Task<Ends> ConnectRelayed(RouterLimits? limits, RelayOptions? relay)
     {
+        var hub = new StrongBox<WebSocketServer<string>>();
+        var sharing = new RelayOptions
+        {
+            BeforeRoute = new BeforeRequest(
+                (request) =>
+                {
+                    return hub.Value!.ShareLegBSession.Admits(request);
+                },
+                Failure.OfProtocol(ProtocolCode.SessionRequired)),
+        };
         var device = new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits } });
         var toDevice = new WebSocketClient(new WebSocketClientOptions { Limits = limits });
         var ends = new Ends(
-            new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits, Relay = relay } }),
+            new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits, Relay = relay ?? sharing } }),
             new WebSocketClient(new WebSocketClientOptions { Limits = limits }))
         {
             Device = device,
             ToDevice = toDevice,
         };
         var server = ends.Server;
+
+        hub.Value = server;
 
         await Connect(toDevice, await PortOf(device));
         server.Router.RegisterDestination(toDevice.Router, new DestinationOptions { DestinationId = 7, Label = "the device" });
@@ -415,7 +440,7 @@ public sealed class WebSocketServerTests
     // definition
 
     [Fact]
-    public async Task Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    public async Task Each_server_is_an_IBeadServer_with_RequireCredential_and_ShareLegBSession()
     {
         await using var server = new WebSocketServer<string>();
 
@@ -424,8 +449,10 @@ public sealed class WebSocketServerTests
         Assert.Same(server.Transport, beadServer.Transport);
         Assert.Same(server.Router, beadServer.Router);
         Assert.Same(server.RequireSession, beadServer.RequireSession);
-        Assert.NotNull(server.RequireSessionOrCredential);
-        Assert.Same(server.RequireSessionOrCredential, beadServer.RequireSessionOrCredential);
+        Assert.NotNull(server.RequireCredential);
+        Assert.Same(server.RequireCredential, beadServer.RequireCredential);
+        Assert.NotNull(server.ShareLegBSession);
+        Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
     }
 
     [Fact]
@@ -1204,5 +1231,74 @@ public sealed class WebSocketServerTests
         // one subscription, the one call 1 made: this side's router counts them, and names none
         Assert.Equal(1, await SubscriptionsOf(ends.Server));
         Assert.Equal([1u], subscribing);
+    }
+
+    [Fact(Skip = SamePort.Reason, SkipUnless = nameof(OpensTwoSocketsFromOnePort))]
+    public async Task Keeps_two_sockets_from_one_address_and_port_to_two_of_its_addresses_as_two_connections_each_in_its_own_session_and_closes_both_going_away_as_it_stops()
+    {
+        // a server on every address, each socket bound to one address and port of the loopback
+        var server = new WebSocketServer<string>();
+        var port = (await server.Transport.Start(new WebSocketTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled)).Port;
+        var localPort = new StrongBox<int>(0);
+        using var aliceHandshakes = new SamePort(localPort);
+        using var otherHandshakes = new SamePort(localPort);
+        var alice = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Invoker = aliceHandshakes.Invoker } });
+        var other = new WebSocketClient(new WebSocketClientOptions { Transport = new WebSocketTransportClientOptions { Invoker = otherHandshakes.Invoker } });
+
+        // who opened a session on each connection, as its handle names it
+        var names = new ConcurrentDictionary<string, string>();
+
+        try
+        {
+            server.Services.GetRequestResolver(OpenSession, TextAnswered)((request, response) =>
+            {
+                var session = server.Sessions.Set(server.Sessions.Create(request.ConnectionHandle));
+
+                names[request.ConnectionHandle] = request.Payload;
+
+                return response.Answer(session.SessionToken?.ToString() ?? "");
+            });
+            server.Services.GetRequestResolver(Whoami, TextAnswered with { BeforeRequest = server.RequireSession })((request, response) =>
+            {
+                return response.Answer(names.GetValueOrDefault(request.ConnectionHandle, "nobody"));
+            });
+            server.Services.GetRequestResolver(Echo, TextAnswered with { BeforeRequest = server.RequireSession })((request, response) =>
+            {
+                return response.Answer(request.Payload.ToUpperInvariant());
+            });
+
+            await alice.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port }, Cancelled);
+            await alice.Services.GetRequest(OpenSession, TextAsked)("alice")().WaitAsync(Patience, Cancelled);
+            await other.Connect(new WebSocketConnectOptions { Host = "127.0.0.2", Port = port }, Cancelled);
+
+            // one address and one port, two connections: the second is in no session of the first's
+            var clients = server.Transport.Clients;
+
+            Assert.Equal((localPort.Value, localPort.Value), (clients[0].Port, clients[1].Port));
+            Assert.NotEqual(clients[0].ConnectionHandle, clients[1].ConnectionHandle);
+
+            var refused = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return other.Services.GetRequest(Whoami, TextAsked)("")().WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal((ushort)ProtocolCode.SessionRequired, refused.Code);
+            Assert.Equal("alice", await alice.Services.GetRequest(Whoami, TextAsked)("")().WaitAsync(Patience, Cancelled));
+            Assert.Equal("HI", await alice.Services.GetRequest(Echo, TextAsked)("hi")().WaitAsync(Patience, Cancelled));
+
+            // the stop reaches each, going away, and resolves
+            await server.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+            Assert.True(await Eventually(() =>
+            {
+                return (aliceHandshakes.CloseCode, otherHandshakes.CloseCode) == (1001, 1001);
+            }), $"{aliceHandshakes.CloseCode} {otherHandshakes.CloseCode}");
+        }
+        finally
+        {
+            await alice.DisposeAsync();
+            await other.DisposeAsync();
+            await server.DisposeAsync();
+        }
     }
 }

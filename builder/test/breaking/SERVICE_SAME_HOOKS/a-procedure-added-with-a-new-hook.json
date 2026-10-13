@@ -28,7 +28,8 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_HOOKS",
-      "pointer": "/services/0"
+      "pointer": "/services/0",
+      "subject": "service:1/hook:greeted"
     }
   ]
 }

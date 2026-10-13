@@ -22,6 +22,7 @@ import {
   withPropsVersion,
   withRepeatedVersion,
   withStatedVersion,
+  withoutWaivers,
 } from '../release.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../release.mjs', import.meta.url));
@@ -50,7 +51,7 @@ const CI_STEP = [
   '      - run: |',
   '          node builder/src/cli.ts check --except SPEC_VERSION_NEWER spec/interop-blueprint.json',
   '          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - \\',
-  "            --except 'PROCEDURE_SAME_NAME@/services/0/procedures/2' --error-format github",
+  "            --except 'PROCEDURE_SAME_NAME@service:1/procedure:3' --error-format github",
   '          git archive --format=tar "$tag" | ./beadc.sh breaking --against - --except=buf:FIELD_SAME_TYPE@hello/v1',
   '',
 ].join('\n');
@@ -186,7 +187,7 @@ describe('texts', () => {
 
   test("the breaking step's waivers, and 0006's gates owed that name a version", () => {
     assert.deepEqual(breakingWaivers(CI_STEP), [
-      'PROCEDURE_SAME_NAME@/services/0/procedures/2',
+      'PROCEDURE_SAME_NAME@service:1/procedure:3',
       'buf:FIELD_SAME_TYPE@hello/v1',
     ]);
     assert.deepEqual(breakingWaivers('run: node builder/src/cli.ts breaking --against -\n'), []);
@@ -196,6 +197,21 @@ describe('texts', () => {
     assert.deepEqual(gatesOwedAt(GATES_OWED, '10.2.0'), ['a gate owed until 10.2.0']);
     assert.deepEqual(gatesOwedAt(GATES_OWED, '0.3.0'), []);
     assert.deepEqual(gatesOwedAt('# 0006\n', '0.2.0'), []);
+  });
+
+  test("a waiver taken out of the breaking step, as written, and nothing of another line's", () => {
+    const without = withoutWaivers(CI_STEP, breakingWaivers(CI_STEP));
+    assert.deepEqual(breakingWaivers(without), []);
+    assert.equal(
+      without,
+      CI_STEP.replace(
+        " \\\n            --except 'PROCEDURE_SAME_NAME@service:1/procedure:3'",
+        ' \\\n'
+      ).replace(' --except=buf:FIELD_SAME_TYPE@hello/v1', '')
+    );
+    assert.match(without, /--except NOT_A_WAIVER/);
+    assert.match(without, /check --except SPEC_VERSION_NEWER/);
+    assert.equal(withoutWaivers(CI_STEP, ['buf:FIELD_SAME_TYPE@hello']), CI_STEP);
   });
 });
 
@@ -684,7 +700,7 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     assert.match(localDay(new Date()), /^\d{4}-\d{2}-\d{2}$/);
   });
 
-  test("it lists each waiver of CI's breaking step, and each of 0006's gates owed that names it", () => {
+  test("it lists each of 0006's gates owed that names it", () => {
     const root = releasing();
     write(root, {
       '.github/workflows/ci.yml': CI_STEP,
@@ -697,10 +713,53 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     });
     assert.deepEqual(owed, [
       "owed by hand: the [0.2.0] line on the spec's 0.2.0 (spec-v0.2.0)",
-      "owed by hand: --except PROCEDURE_SAME_NAME@/services/0/procedures/2, a waiver of CI's beadc breaking step, which v0.2.0 makes moot: take it out of .github/workflows/ci.yml on develop once v0.2.0 is pushed",
-      "owed by hand: --except buf:FIELD_SAME_TYPE@hello/v1, a waiver of CI's beadc breaking step, which v0.2.0 makes moot: take it out of .github/workflows/ci.yml on develop once v0.2.0 is pushed",
       "owed by hand: decision 0006's gate owed until 0.2.0 moves to its table: `beadc breaking`, which holds a blueprint to the last release's",
     ]);
+  });
+
+  test('prepare on a hotfix writes ci.yml without every waiver; on a release, it leaves them', () => {
+    // * a release branch from develop: its waivers are live, its changes not yet released
+    const release = releasing();
+    write(release, { '.github/workflows/ci.yml': CI_STEP });
+    const released = prepared(release, { moves: { spec: 'minor' } });
+    assert.equal(read(release, '.github/workflows/ci.yml'), CI_STEP);
+    assert.ok(!released.plan.written.includes('.github/workflows/ci.yml'));
+
+    // a hotfix from main, whose CI keeps the waivers of the release it tags, all moot
+    const hotfix = releasing();
+    git(hotfix, 'checkout', '-q', 'main');
+    write(hotfix, { '.github/workflows/ci.yml': CI_STEP });
+    git(hotfix, 'add', '-A');
+    git(hotfix, 'commit', '-qm', 'ci: the waivers of 0.1.0');
+    write(hotfix, { 'CHANGELOG.md': changelog(['A fix.']) });
+    git(hotfix, 'commit', '-qam', 'fix: one');
+    git(hotfix, 'checkout', '-q', '-b', 'hotfix/0.1.1');
+    const { plan, logged } = prepared(hotfix);
+    assert.ok(plan.written.includes('.github/workflows/ci.yml'));
+    assert.deepEqual(breakingWaivers(read(hotfix, '.github/workflows/ci.yml')), []);
+    assert.deepEqual(
+      logged.filter((line) => {
+        return line.startsWith('taken out of ');
+      }),
+      [
+        'taken out of .github/workflows/ci.yml: --except PROCEDURE_SAME_NAME@service:1/procedure:3, moot since the release main holds',
+        'taken out of .github/workflows/ci.yml: --except buf:FIELD_SAME_TYPE@hello/v1, moot since the release main holds',
+      ]
+    );
+  });
+
+  test("it owes the documents brought to the release where the tree keeps the records' index, and none where it does not", () => {
+    const kept = releasing();
+    write(kept, { 'docs/decisions/README.md': '# Decisions\n' });
+    const owing = (root) => {
+      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+        return line.includes('bead-release-documents');
+      });
+    };
+    assert.deepEqual(owing(kept), [
+      'owed by hand: the documents brought to 0.2.0, by the bead-release-documents workflow (.claude/workflows/README.md)',
+    ]);
+    assert.deepEqual(owing(releasing()), []);
   });
 
   test('--dry-run prints the plan and writes nothing', () => {
@@ -774,6 +833,38 @@ describe('tag', () => {
       /v0\.2\.5: its tree states the product 0\.2\.0, where 0\.2\.5 is due/
     );
     assert.equal(git(root, 'tag', '--list', 'spec-v*'), 'spec-v0.1.0');
+  });
+
+  test('tag writes ci.yml without the waivers it makes moot, and says to commit it before the push', () => {
+    // * the release carried two waivers; develop, after the cut, one more for its next release
+    const root = releasing();
+    write(root, { '.github/workflows/ci.yml': CI_STEP });
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'ci: the waivers of 0.2.0');
+    prepared(root, { moves: { spec: 'minor' } });
+    git(root, 'commit', '-qam', 'chore(release): 0.2.0');
+    finish(root);
+    const next = CI_STEP.replace(
+      '--except=buf:FIELD_SAME_TYPE@hello/v1',
+      '--except=buf:FIELD_SAME_TYPE@hello/v1 --except NAME_NO_DELETE@service:1/procedure:9'
+    );
+    write(root, { '.github/workflows/ci.yml': next });
+    git(root, 'commit', '-qam', 'ci: a waiver of the next release');
+    const logged = [];
+    tag(root, {
+      log: (line) => {
+        logged.push(line);
+      },
+    });
+    assert.deepEqual(breakingWaivers(read(root, '.github/workflows/ci.yml')), [
+      'NAME_NO_DELETE@service:1/procedure:9',
+    ]);
+    assert.deepEqual(logged.slice(-4), [
+      'taken out of .github/workflows/ci.yml: --except PROCEDURE_SAME_NAME@service:1/procedure:3, which v0.2.0 makes moot',
+      'taken out of .github/workflows/ci.yml: --except buf:FIELD_SAME_TYPE@hello/v1, which v0.2.0 makes moot',
+      'next: git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/ci.yml',
+      'push: git push --atomic origin main develop v0.2.0 spec-v0.2.0',
+    ]);
   });
 
   test('its gate on develop reports a line filed under the released version', () => {

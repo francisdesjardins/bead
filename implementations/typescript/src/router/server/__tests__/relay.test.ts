@@ -30,15 +30,15 @@ import { createRouterClient } from '../../client/router-client';
 import { readEnvelope, writeEnvelope } from '../../shared/envelope';
 import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import { createRelay } from '../relay';
-import { createRouterServer, requireSessionOrCredential } from '../router-server';
+import { createRouterServer, shareLegBSession } from '../router-server';
 import type { IRelayOptions, RelayTarget } from '../types';
 
 // helpers
 
 type Handle = TransportServerConnectionHandle;
 
-const first: Handle = 'type=WS;ip=127.0.0.1;port=50001';
-const device: Handle = 'type=WS;ip=127.0.0.1;port=50002';
+const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
+const device: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
 
 /** What a leg B request was asked with. */
 interface IAsked {
@@ -269,7 +269,7 @@ test.describe('createRelay, credentials', () => {
   };
 
   test('answers a call leg B cannot carry DESTINATION_UNREACHABLE, nothing tried: a JWT whose aud names not its destination’s audience, or to one of none; an ELSEWHERE to one of none, or over a leg B that carries none; either in the clear', () => {
-    const plain: Handle = 'type=WS;ip=192.0.2.1;port=50003';
+    const plain: Handle = 'type=WS;ip=192.0.2.1;port=50003;ordinal=1';
     const { relay } = createCarryingRelay(
       new Map([
         [device, { carriesCredential: false, isSecure: true }],
@@ -488,7 +488,7 @@ test.describe('createRelay, over HTTP', () => {
     // leg A: a client of the relay's, in process
     const pipe = createPipedTransports({ connectionHandle: first });
     using relaying = createRouterServer(pipe.server, {
-      relay: { beforeRoute: requireSessionOrCredential },
+      relay: { beforeRoute: shareLegBSession },
     });
     using legA = createRouterClient(pipe.client);
     const procedure = { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 1 };
@@ -859,6 +859,7 @@ test.describe('createRelay', () => {
     expect(answers).toEqual([]);
   });
 
+  // spec 14.5
   test('answers as failed, once, what leg A cannot carry, and lets why be reported', async () => {
     const { answers, control, relay } = createTestRelay();
     const tooLarge = new FailureError({

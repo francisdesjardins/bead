@@ -449,21 +449,22 @@ export interface IRouterServer<
   }): Promise<void>;
   /**
    * Ends a credential's session by its identifier on every connection that keeps it, and nothing
-   * else (spec 13.9): each subscription it bounds ends with SESSION_REQUIRED on its call id, a call
-   * still in flight left to its own answer. Resolves once each failure was tried; one that cannot go
-   * out is reported to `error`. One no connection keeps ends nothing. Ending refuses no credential:
-   * one that still holds opens its session anew.
+   * else (spec 13.10): each subscription it bounds ends with SESSION_REQUIRED on its call id, a
+   * call still in flight left to its own answer. Resolves once each failure was tried; one that
+   * cannot go out is reported to `error`. One no connection keeps ends nothing. Ending refuses no
+   * credential: one that still holds opens its session anew.
    */
   endSession(identifier: SessionIdentifier): Promise<void>;
   /**
    * Ends every credential's session of an issuer by that issuer, as when a key of its leaks, on every
-   * connection that keeps one, and nothing else (spec 13.9): each `JWT`'s session whose identifier's
-   * issuer is `issuer`, octet for octet, whatever its `sid` or `sub`, each subscription it bounds
-   * ending with SESSION_REQUIRED on its call id, a call still in flight left to its own answer; an
-   * `ELSEWHERE`'s identifier names no issuer. Resolves once each failure was tried; one that cannot
-   * go out is reported to `error`. An issuer no connection's session names ends nothing; one that is
-   * no string rejects with a {@link ProgrammerError}. Ending refuses no credential: one that still
-   * holds opens its session anew, a token a leaked key signed among them while that key serves.
+   * connection that keeps one, and nothing else (spec 13.10): each `JWT`'s session whose
+   * identifier's issuer is `issuer`, octet for octet, whatever its `sid` or `sub`, each subscription
+   * it bounds ending with SESSION_REQUIRED on its call id, a call still in flight left to its own
+   * answer; an `ELSEWHERE`'s identifier names no issuer. Resolves once each failure was tried; one
+   * that cannot go out is reported to `error`. An issuer no connection's session names ends nothing;
+   * one that is no string rejects with a {@link ProgrammerError}. Ending refuses no credential: one
+   * that still holds opens its session anew, a token a leaked key signed among them while that key
+   * serves.
    */
   endSessionsOf(issuer: string): Promise<void>;
   emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean;
@@ -613,8 +614,8 @@ export interface IRouterServerOptions {
 /**
  * A connection of the relay's own router that a destination names: something behind the relay that
  * connected to it, which the relay asks as the server asks a client, by a command. Once that
- * connection closes, the destination is unreachable, whoever connects under the same handle next:
- * the application unregisters it, and registers the newcomer anew once it knows it.
+ * connection closes, the destination is unreachable, and no connection takes its handle again: the
+ * application unregisters it, and registers the next connection anew once it knows it.
  */
 export interface IConnectionTarget {
   connectionHandle: TransportServerConnectionHandle;
@@ -661,7 +662,7 @@ export interface IRelayOptions {
    * Whether a request may be relayed, asked on its header — its destination included — and the
    * call's session, before its destination is looked up, so a requester presenting none or `OPAQUE`
    * that is not admitted learns only whether any is registered: only `true` admits. Without it, the
-   * relay admits nobody; a server's admits by `requireSessionOrCredential`. Synchronous, as every
+   * relay admits nobody; a server's admits by `requireCredential`. Synchronous, as every
    * admission.
    */
   beforeRoute?: IBeforeRequest<TransportServerConnectionHandle> | undefined;

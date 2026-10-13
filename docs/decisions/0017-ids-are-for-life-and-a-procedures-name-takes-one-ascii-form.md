@@ -65,7 +65,7 @@ white space part words, `-` leaves out, `*` stands for any run and a parenthesis
 where an ASCII letter matches in either case (debugging 6.1, 6.4); a TypeScript key and a C# member;
 and the Common Language Specification, for a consumer that marks its assembly CLS-compliant, under
 which two identifiers that differ only in case are one (ECMA-335, Partition I, §8.5.1, CLS rule 4).
-No assembly here is so marked (`git grep -i CLSCompliant` finds nothing), so the CLS binds a
+No assembly here is so marked, no project and no source naming `CLSCompliant`, so the CLS binds a
 consumer's code, never Bead's. The builder generates one file for each `.proto` file, so a file
 system that ignores case never meets two names.
 
@@ -93,10 +93,10 @@ routing; 4.10 never writes one, and neither side's writer does (`header.ts`, wit
 - A block at the low end, 0 to 255, as CoAP keeps 0 to 255 for the IETF's own options and as IANA
   keeps ports 0 to 1023 as System Ports ([RFC 6335
   §6](https://www.rfc-editor.org/rfc/rfc6335#section-6)). It moves service 1: the interop's
-  (`spec/interop-blueprint.json`), with the bytes of 29 conversations and every `service="1"` label of
-  `spec/metrics.json`, and the demo's (`implementations/typescript/demo/procedures.ts`); and every
-  test that declares a service below 256, which `serviceId: 2` and `ServiceId = 2` alone reach in 26
-  TypeScript test files and 12 C# ones.
+  (`spec/interop-blueprint.json`), with the bytes of the conversations that call it and every
+  `service="1"` label of `spec/metrics.json`, and the demo's
+  (`implementations/typescript/demo/procedures.ts`); and every test that declares a service below
+  256, which `serviceId: 2` and `ServiceId = 2` alone reach in both sides' test files.
   [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) lets the wire be revised in
   place until it is published.
 - Left to the first protocol service's decision: a protocol service that needs an id past 0 takes
@@ -137,11 +137,11 @@ first letter lowered, and only that.
   two addresses on one router or core.
 - **What needs no memory at every declaration, what needs memory where 0013 put it.** Chosen. Each
   router checks the ids' ranges, the revision's and the name's form, a pure function over the
-  procedure: no lock, no table, nothing held. The registry keeps its refusals, compares names as
-  section 16 compares them, and gains one: a service at another revision. One name an address and
-  one revision a service then hold on a side that counts, and in a blueprint through `beadc check`;
-  on a side that counts nothing, two names at one address show only in its trace, the one reader
-  left, which is debugging's.
+  procedure: no lock, no table, nothing held. The registry keeps its refusals, and compares names as
+  section 16 compares them. One name an address then holds on a side that counts, and in a
+  blueprint through `beadc check`; on a side that counts nothing, two names at one address show only
+  in its trace, the one reader left, which is debugging's. A service's revision keys no series, so
+  the registry takes a service at any.
 
 **Ids for life.**
 
@@ -170,11 +170,13 @@ bind the builder.
 
 - Everything a blueprint holds besides: services' and failures' names, a package's scope,
   reservations, hooks, the release rules and the derivation from a `.proto`. The spec defines none
-  of these and no conformance file cites them; a builder-only change would move the spec's minor,
-  which moves "when an implementation must change to keep passing"
+  of these and no conformance file cites them. A blueprint matter of the interop's moves the spec's
+  version, as its files are the spec's, the blueprint's schema among them
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
+  one of the builder alone moves the builder's
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 - **What binds a side.** Chosen: the ids' ranges and service 0; a procedure's name, its form, its
-  reading and its fold; one name an address and one revision a service, held where a side counts;
+  reading and its fold; one name an address, held where a side counts, and one revision a service;
   ids for life and the revision's meaning, as SHOULDs naming `beadc breaking`; the refusal and its
   order. The rest binds the builder's blueprint, held by the builder's tests.
 
@@ -233,8 +235,9 @@ as debugging 6.4 reads a pattern.
 **One name an address, one revision a service.** A side declares each address under one name,
 written the same each time, each name of a service at one address, and each service at one revision:
 an address keeps its spelling, where the fold joins two addresses. A side that counts refuses a
-declaration that does not, in its registry (debugging 7.3, which gains
-`another revision of its service`); `beadc check` holds a blueprint to it.
+declaration that breaks either of the first two, in its registry (debugging 7.3); one of a service at
+another revision counts into its series, which no label carries, as Prometheus identifies a series by
+its name and its labels. `beadc check` holds a blueprint to all three.
 
 **For life, and a revision's meaning.** Within a service, an id or a name a release declared stays
 its declaration's in every later one, or is reserved; a revision counts the releases of a service's
@@ -278,7 +281,7 @@ name, a revision or a reservation.
 | A service's id       | yes         | its range, at every declaration                                   | its range; unique in a blueprint; reservations; for life |
 | A procedure's id     | yes         | its range, at every declaration                                   | its range; unique in its service; reservations; for life |
 | A procedure's name   | no          | its form, at every declaration; folded uniqueness where it counts | the same, reservations, for life                         |
-| A service's revision | no          | its range; one a service where it counts                          | its range; `breaking` its moves                          |
+| A service's revision | no          | its range, at every declaration                                   | its range; `breaking` its moves                          |
 
 **`spec/identities.json` pins what a router refuses with no memory**, under its schema, its
 generator `make_identities.py` from the standard library alone
@@ -290,7 +293,8 @@ beside them,
 procedure kinds. It lists the ways a side declares by a stable id, and each side's harness keys its
 table by them. A builder plays `names` and `ids` as one-procedure blueprints.
 
-**`spec/metrics.json` pins what a registry refuses**, folded, its revision among it.
+**`spec/metrics.json` pins what a registry refuses**, folded, and the series a service declared at a
+second revision counts into.
 
 **`beadc check` and `beadc breaking` hold a blueprint to section 16** and to the builder's own rules
 ([0006](0006-a-rule-has-its-gate.md)).
@@ -306,9 +310,10 @@ one at each login (`demo/page.ts`): there, each call scans its name's 1 to 63 ch
 allocation and no lock. A registry's fold compares character by character, never building a folded
 string, and takes a name held at its address exactly as it is, unfolded (`MetricsRegistry.cs`).
 
-**Uniqueness and the revision hold only where a side counts, and in a blueprint.** A side given no
-registry takes `1/1 echo` and `1/2 echo` both; its trace then shows the two, which is all that reads
-them.
+**Uniqueness holds only where a side counts, and in a blueprint.** A side given no registry takes
+`1/1 echo` and `1/2 echo` both; its trace then shows the two, which is all that reads them. A side
+that counts takes a service at two revisions, two generated copies of it in one process say, and
+counts both into one series, its trace telling each call's revision.
 
 **A filter word reaches a name in every service.** `echo` in two services is two procedures that one
 `echo` pattern keeps, as debugging 6.5 has it; a qualifier of service in a filter is the companion's
@@ -320,10 +325,6 @@ decision, not this one.
 **Service 0's one id.** The protocol's procedures share service 0 and its revision, allocated by
 procedure id in section 16's table; the day the first is defined, 4.10 and both writers change, and
 a peer built before answers it `SERVICE_UNKNOWN`, as it answers any service it lacks.
-
-**Versions move as [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) says**, in
-the release that carries section 16 with section 17
-([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)).
 
 ## The Tenth Man
 
@@ -343,7 +344,7 @@ conformance sentence for sections 16 and 17. Its objections, each with the answe
 | Two of the fold's three reasons are false, and the filter reason refutes 16.8                                                                                                          | Accepted: the reasons that hold are the `procedure` label read beside its `service`, a filter's letters matching in either case, and a consumer that marks its assembly CLS-compliant; ids and names are for life within a service, and section 16 says a filter word reaches a name in every service                                                                         |
 | "Unique within its package" serves neither consumer of a service's name                                                                                                                | Accepted: the scope is chosen by its consumers, unique within a blueprint, folded; full names in the transcoding's routes with `NAME_TARGET` per namespace was weighed beside it, and the user keeps the blueprint                                                                                                                                                            |
 | The 63-character bound rests on two misread standards and a false claim about C                                                                                                        | Accepted: the bound stays a plain choice, for short labels, keys and routes, citing no standard; "by construction" goes; a side that keeps no names refuses out of its range alone, its names the blueprint's that `beadc check` holds                                                                                                                                        |
-| A cheaper option was never weighed: stateless checks at the router, stateful ones in the registry                                                                                      | Accepted: the router checks ranges and form, a pure function; the registry keeps names, folded, and holds the revision; the per-router table was weighed beside it, its cost in the Context, and the user takes the split                                                                                                                                                     |
+| A cheaper option was never weighed: stateless checks at the router, stateful ones in the registry                                                                                      | Accepted: the router checks ranges and form, a pure function; the registry keeps names, folded, a revision keying none of its series; the per-router table was weighed beside it, its cost in the Context, and the user takes the split                                                                                                                                       |
 | "A call pays nothing" is false where a requester is made for each call                                                                                                                 | Accepted: no table and no lock at the router; the registry takes an exact name at its address without folding and folds character by character, never building a string; the claim reads "a call that makes no requester pays nothing"                                                                                                                                        |
 | The service manager refuses first, with another type, so 16.10's order does not hold at that layer                                                                                     | Accepted in part: the service manager's one reason of its own, a notification asked for again otherwise, follows the router's check, which `getNotification` runs first, so 16.10's order holds there too; its "asked for otherwise" keeps its type, about the manager's state, and the record names it before the registry's reasons                                         |
 | The file plays three of the five declaration paths, and no input that is not a number                                                                                                  | Accepted: the file lists five ways, a resolver on each router, a requester on each, a notification on a client's, each harness keyed by them; `"1"`, `true` and `null` join the ids and revisions, crossing the C# row, as `durations.json` pins `"1000"` and `true`                                                                                                          |

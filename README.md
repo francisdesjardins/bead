@@ -6,8 +6,8 @@
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
 relays, and transfers of large payloads under credit. Each envelope is written at fixed big-endian
-offsets, behind an 8-byte prefix whose first byte is the layout, `0xA1` today, so a reader knows
-before anything else whether it can read the rest.
+offsets, behind an 8-byte prefix whose first byte is the layout, `0xA1`, so a reader knows before
+anything else whether it can read the rest.
 
 This repository holds the protocol and its implementations, side by side:
 
@@ -20,7 +20,7 @@ This repository holds the protocol and its implementations, side by side:
 - **an interop service** each side offers, which the other side's client calls over both
   transports.
 
-Nothing is published yet.
+Nothing is published.
 
 ## Why Bead
 
@@ -29,8 +29,8 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a
-publish/subscribe broker (coming).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and next a
+topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -45,16 +45,36 @@ publish/subscribe broker (coming).
   commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec and its conformance files are the contract. The
   TypeScript and C# implementations both play them, and call each other in CI over both transports.
-- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
+- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed;
+  a project that binds `proto` brings protobuf-es, an optional peer.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
-from a browser over WebSocket or plain HTTP, or across a publish/subscribe broker that already joins
-services and devices (coming). Think of a dashboard or a collaborative tool that follows state as it
-changes, an app that uploads large files while it keeps working, a back office whose server needs to
-ask the client something, or a gateway that forwards calls it never reads. A browser speaks Bead
-natively, with no proxy in between. Over a broker, Bead adds what topics alone lack: calls with
-their answers and failures, cancels, each client's own pace, and transfers under credit. Both ends
-keep the same API, whatever carries the envelopes.
+from a browser over WebSocket or plain HTTP, and, [where Bead goes](#where-bead-goes), across a
+topic-based publish/subscribe broker that already joins services and devices. Think of a dashboard
+or a collaborative tool that follows state as it changes, an app that uploads large files while it
+keeps working, a back office whose server needs to ask the client something, or a gateway that
+forwards calls it never reads. A browser speaks Bead natively, with no proxy in between. Over a
+broker, Bead is to add what topics alone lack: calls with their answers and failures, cancels, each
+client's own pace, and transfers under credit. Both ends keep the same API, whatever carries the
+envelopes.
+
+## Where Bead goes
+
+- **0.5.0**: a topic-based publish/subscribe broker as one more transport, one core and one
+  adapter a broker, Bead's envelope, routers and sessions the same at each end
+  ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
+- **A 0.4.x**: `trustedProxies` on the WebSocket server too, and a hop bound for proxies whose
+  address a deployment cannot name
+  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+- **After 0.4.0**: a penetration test of Bead's servers.
+- **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
+  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
+  latency bench and a constrained C side, each bound by the records that
+  [the index](docs/decisions/README.md#where-bead-goes) names.
+- **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
+  one port, mounted in an application's own web server, which would take the place of the
+  small local proxy that couples the two transports
+  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)).
 
 ## Layout
 
@@ -63,8 +83,8 @@ spec/                         spec.md, debugging.md, the conformance files both 
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
 implementations/
-  typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
-  dotnet/                     Bead.slnx: src/, interop/, tests/
+  typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
+  dotnet/                     Bead.slnx: src/, interop/, tests/; and tools/, outside it
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
   Dockerfile                  beadc's image, built from the root, its tests run on the image itself
   wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
@@ -89,14 +109,15 @@ share, above all `spec/`, which both read in their tests.
 
 [`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each
 file of entries is named by a section whose clauses it plays, and each entry cites the units it
-checks. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a side traces, filters
-and counts beside the wire, under a version of its own. Beside them:
+checks: [`units.txt`](spec/units.txt) lists every unit, whether an entry cites it or why none does,
+and the hash of its text. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a
+side traces, filters and counts beside the wire, under a version of its own. Beside them:
 
 | File                                                    | What it holds                                                                                                                                                                                         |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 83 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
+| [`transports.json`](spec/transports.json)               | 104 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
@@ -126,10 +147,12 @@ git diff --exit-code -- spec
 Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
 `spec.md` states as its `specVersion`, or, for `debug-filters.json` and `metrics.json`, the version
 `debugging.md` states as its `debuggingVersion`. `spec/check.py` holds both, that the spec's sections
-and the groups of vectors name each other, that every unit an entry cites is its document's, and
-that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint is in
-its form and `interop-service.json` states its procedures; then it reports
-which groups and files each side's tests read, and fails on one a side does not. It runs on Python
+and the groups of vectors name each other, that every unit an entry cites is its document's, that
+each ledger gives every unit of its document its status, each reason held by its rule, and the
+hash of its text, which moves only where `python spec/check.py --write-units 15.7` names the unit,
+and that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint
+is in its form and `interop-service.json` states its procedures; then it reports which groups and
+files each side's tests read, and fails on one a side does not. It runs on Python
 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 
 ```sh
@@ -155,7 +178,7 @@ yarn check        # types, lint and its plugin's cases, format, comment budget, 
 yarn test         # the unit tests, and the interop against the C# server
 ```
 
-The package is `@francisdesjardins/bead`, private for now; its `exports` point at the sources. Its
+The package is `@francisdesjardins/bead`, private; its `exports` point at the sources. Its
 [README](implementations/typescript/README.md) describes each layer.
 
 ## C#
@@ -244,6 +267,17 @@ cd implementations/typescript && BEAD_INTEROP_REQUIRED=1 yarn test:interop
 cd implementations/dotnet && BEAD_INTEROP_REQUIRED=1 dotnet test --project tests/Bead.Interop.Tests
 ```
 
+A page of another origin calls both HTTP servers in Chromium: `yarn test:browser`, in a Playwright
+config of its own, serves a page on `localhost` whose bundled HTTP client calls each side's interop
+server on `127.0.0.1`, which names the page's origin as `BEAD_INTEROP_ORIGINS` lists it. Its C#
+half starts `Bead.Interop.Server` with `dotnet run`, and skips or fails as the interop does.
+
+```sh
+cd implementations/typescript
+yarn playwright install chromium
+BEAD_INTEROP_REQUIRED=1 yarn test:browser
+```
+
 ## The demo
 
 A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
@@ -324,6 +358,12 @@ against each server.
   half's oxfmt options and its packages' descriptors — and its wrappers, its `buf.yaml` and its git
   lines as `beadc wrapper` and `beadc init` write them, under a name `init` takes. It needs the
   builder installed.
+- `node tools/protobuf-conformance.mjs typescript|csharp|differential`: protobuf's conformance
+  suite through one side's generated `proto` codec, its failure list held both ways and its count
+  of tests to the floor `tools/protobuf-conformance/runner.json` pins with the runner, fetched by
+  its sha512; or one corpus of `Probe` through both sides, read alike. The suite runs on Linux or
+  macOS, where the runner has a binary; it needs the TypeScript side and the builder installed,
+  and .NET for the C# side.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder.
 
@@ -382,9 +422,10 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
 (regenerate, then diff, then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9
 (install, check, test, the demo's static build, and the root's files under the same formatter),
-`dotnet` (format, build, the builder's C# goldens among its projects, test, and the interop both
-ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, protoc by its pin's sha256, test with
-`BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
+`dotnet` (format, build, the builder's C# goldens among its projects, test, the interop both ways
+with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium against both HTTP servers),
+`builder` (install, protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and
+`BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
 `beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
 Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
@@ -396,10 +437,28 @@ itself, each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repo
 24.9, the floor the TypeScript half declares (what each example copies, or takes from beadc's
 wrapper and init, held to its source; beadc on Node holding `examples/hello`'s generated files;
 buf's lint and layout over its `.proto`; each half's gates and both its builds; then each client
-against each server, both modes of each half, sixteen pairs), and `commits` (the subjects, the
-links, the versions, then the root's tools' own tests).
+against each server, both modes of each half, sixteen pairs), `protobuf-conformance` (protobuf's
+conformance suite, its runner by its pin's sha512, through each side's generated `proto` codec, each
+held to its failure list and the floor, the C# testee's format, then one corpus of `Probe` through
+both sides), and `commits` (the subjects, the links, the versions, then the root's tools' own
+tests).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
 the one check a branch requires, waits on GitHub Pro or a public repository.
+
+## How Bead is made
+
+The ideas, the protocol's design and the TypeScript side are mine. TypeScript is where my expertise
+has been these last years; the other languages are less familiar to me, and I am not an expert in
+every RFC the spec cites. Much of the rest is written by AI agents working under this repository's
+rules: the other implementations, the generator, and many of the spec's readings of RFCs and other
+standards.
+
+Those rules keep every language to one behaviour. They hold each one to the same conformance files,
+to the interop between sides, and to a strict linter and analyzer set, and they put every change
+that reaches across the languages through an adversarial review before it lands. What these gates
+hold is held. Where a side departs from TypeScript's idioms, or where the spec reads a standard, it
+has been checked by tests and by those reviews, not by a specialist. Corrections from people who
+know better are welcome.
 
 ## Contributing
 

@@ -1,0 +1,16 @@
+{
+  // The consumer of what the TypeScript target marks, compiled as the goldens it imports are: their
+  // configuration, which `yarn type-check` runs it under after theirs.
+  "extends": "../golden/typescript/tsconfig.json",
+  "compilerOptions": {
+    // ! `paths` resolve from the configuration that states them: the runtime's entries, from here
+    "paths": {
+      "@francisdesjardins/bead/service": [
+        "../../../implementations/typescript/src/service/service.ts"
+      ],
+      "@francisdesjardins/bead/proto": ["../../../implementations/typescript/src/proto/records.ts"],
+      "@bufbuild/protobuf": ["../../node_modules/@bufbuild/protobuf/dist/esm/index.d.ts"]
+    }
+  },
+  "include": ["*.ts"]
+}

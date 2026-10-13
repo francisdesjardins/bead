@@ -15,7 +15,7 @@ public sealed partial class DurationsTests
 {
     // constants
 
-    private const string Handle = "type=WS;ip=127.0.0.1;port=50001";
+    private const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
 
     private const string Host = "127.0.0.1";
 

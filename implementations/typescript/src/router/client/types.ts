@@ -41,12 +41,20 @@ export interface IRouterClient<
    * The credential every call presents but one that gives its own, or `NONE` (spec 13.4): a `JWT`, or
    * an `ELSEWHERE` with what its transport carries beside each request; none when not given, and
    * once a call that presented it was refused SESSION_REQUIRED, which `credentialWithdrawn` tells.
-   * A refusal withdraws it only while it is still the credential the refused call presented, by
-   * value: given other bytes since, it is kept; set again to the same bytes, it is withdrawn.
-   * `OPAQUE`, which a call asks for alone, or a `JWT` past what its limits hold, is a
-   * {@link ProgrammerError}, and nothing changes.
+   * Withdrawn, every call that would present it fails before it goes, SESSION_REQUIRED, nothing
+   * sent, until it is given again — a credential, or `undefined`, which says "none" in writing; a
+   * call that gives its own credential, `NONE` among them, goes: a call that needs no identity
+   * presents none, and so does the call that renews. A refusal withdraws it only while it is still
+   * the credential the refused call presented, by value: given other bytes since, it is kept; set
+   * again to the same bytes, it is withdrawn. `OPAQUE`, which a call asks for alone, or a `JWT` past
+   * what its limits hold, is a {@link ProgrammerError}, and nothing changes.
    */
   credential: DefaultCredential | undefined;
+  /**
+   * Whether the default credential was withdrawn, and not given since (spec 13.4): while it is, a
+   * call that gives no credential of its own fails before it goes, SESSION_REQUIRED.
+   */
+  readonly isCredentialWithdrawn: boolean;
   /**
    * What it reads, writes and holds by: its options', {@link LIMIT_DEFAULTS}' where they say nothing.
    * A relay reads them, to refuse at the opening what this router would refuse after.
@@ -205,7 +213,8 @@ export type RouterClientEventMap = {
   activity: [activity: RouterClientActivity];
   /**
    * The default credential was withdrawn, a call that presented it refused SESSION_REQUIRED: its
-   * scheme alone, never its bytes, so the application renews it.
+   * scheme alone, never its bytes, so the application renews it, by a call that presents none, and
+   * gives it again. Until then, a call that would present it fails before it goes.
    */
   credentialWithdrawn: [credentialScheme: CredentialScheme];
   /**

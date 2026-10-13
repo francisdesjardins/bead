@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Bead's interop service, spec/interop-service.json",
   "type": "object",
-  "required": ["$comment", "specVersion", "relay", "procedures", "credentials"],
+  "required": ["$comment", "specVersion", "relay", "procedures", "credentials", "verifiers"],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -71,7 +71,7 @@
       "additionalProperties": false,
       "properties": {
         "jwt": {
-          "description": "A JWT's keys, its audience and its key set (spec 13.8).",
+          "description": "A JWT's keys, its audience and its key set (spec 13.8, 13.9).",
           "type": "object",
           "required": ["keys", "audience", "keySet"],
           "additionalProperties": false,
@@ -103,7 +103,7 @@
               "minLength": 1
             },
             "keySet": {
-              "description": "The key set the server is given, with the issuers it answers for (spec 13.8): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; the most calls that wait for one issuer's deadline at once; and what it does asked for any other issuer.",
+              "description": "The key set the server is given, with the issuers it answers for (spec 13.9): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; the most calls that wait for one issuer's deadline at once; and what it does asked for any other issuer.",
               "type": "object",
               "required": ["issuers", "maximumWaitingCalls", "answers"],
               "additionalProperties": false,
@@ -144,7 +144,7 @@
                   }
                 },
                 "maximumWaitingCalls": {
-                  "description": "The most calls that wait for one issuer's deadline at once, a call on its ask under way never counted (spec 13.8).",
+                  "description": "The most calls that wait for one issuer's deadline at once, a call on its ask under way never counted (spec 13.9).",
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 2147483647
@@ -182,9 +182,122 @@
           }
         }
       }
+    },
+    "verifiers": {
+      "description": "What both sides' interop tests hold the interop service's own readers to, read from here: its ELSEWHERE verifier's verdicts, and what endSessionsOf takes and refuses.",
+      "type": "object",
+      "required": ["elsewhere", "endSessionsOf"],
+      "additionalProperties": false,
+      "properties": {
+        "elsewhere": {
+          "description": "Each value the ELSEWHERE verifier is given, as its transport carried it, and its verdict; and what it rejects with.",
+          "type": "object",
+          "required": ["rejection", "verdicts"],
+          "additionalProperties": false,
+          "properties": {
+            "rejection": {
+              "description": "The message the verifier rejects with, as credentials.elsewhere.settles states it.",
+              "type": "string",
+              "minLength": 1
+            },
+            "verdicts": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/verdict"
+              }
+            }
+          }
+        },
+        "endSessionsOf": {
+          "description": "The requests endSessionsOf takes, each with the issuer it reads, and those it refuses, each by throwing its refusal.",
+          "type": "object",
+          "required": ["takes", "refuses", "refusal"],
+          "additionalProperties": false,
+          "properties": {
+            "takes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["request", "issuer"],
+                "additionalProperties": false,
+                "properties": {
+                  "request": {
+                    "description": "The request, a JSON value."
+                  },
+                  "issuer": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "refuses": {
+              "description": "Each request it refuses, a JSON value.",
+              "type": "array",
+              "minItems": 1
+            },
+            "refusal": {
+              "description": "The message it throws for each request it refuses.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
+    "verdict": {
+      "description": "A value the ELSEWHERE verifier is given, and what it settles with: holds, with the sub its session takes as its id and in its data, and its end, in milliseconds since the epoch, when it has one; none; or rejects. after, where given, is how many milliseconds pass on its server's clock before it settles; at once otherwise.",
+      "type": "object",
+      "required": ["carried", "verdict"],
+      "additionalProperties": false,
+      "properties": {
+        "carried": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "verdict": {
+          "enum": ["holds", "none", "rejects"]
+        },
+        "sub": {
+          "type": "string",
+          "minLength": 1
+        },
+        "end": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        }
+      },
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "holds"
+          }
+        }
+      },
+      "then": {
+        "required": ["sub"]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {
+              "required": ["sub"]
+            },
+            {
+              "required": ["end"]
+            }
+          ]
+        }
+      }
+    },
     "jwtAlgorithm": {
       "description": "A JWT key's one algorithm (RFC 8725 §3.1).",
       "enum": ["ES256", "HS256"]

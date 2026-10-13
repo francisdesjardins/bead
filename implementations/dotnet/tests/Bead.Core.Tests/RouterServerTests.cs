@@ -16,9 +16,9 @@ public sealed partial class RouterServerTests : IDisposable
 {
     // constants
 
-    private const string First = "type=WS;ip=127.0.0.1;port=50001";
-    private const string Second = "type=WS;ip=127.0.0.1;port=50002";
-    private const string Third = "type=WS;ip=127.0.0.1;port=50003";
+    private const string First = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
+    private const string Second = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
+    private const string Third = "type=WS;ip=127.0.0.1;port=50003;ordinal=1";
 
     // what a test notifies to see who is subscribed
     private const string Probe = "probe";
@@ -900,6 +900,7 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_transport.Sent);
     }
 
+    // spec 11.7.3
     [Fact]
     public async Task A_connection_that_closes_is_no_longer_notified_and_one_that_cannot_take_it_keeps_none_from_the_others()
     {
@@ -1657,6 +1658,7 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_errors);
     }
 
+    // debugging 5.1
     [Fact]
     public async Task Tells_debug_each_envelope_with_its_connection_and_its_header_without_its_token()
     {
@@ -1938,6 +1940,48 @@ public sealed partial class RouterServerTests : IDisposable
         await Settle();
 
         Assert.Equal(["first notification 5 e"], SentSince());
+        Assert.Empty(_errors);
+    }
+
+    // debugging 4.2
+    [Fact]
+    public async Task Tells_the_failure_its_router_answered_in_the_resolver_s_place()
+    {
+        var news = StartPaced(new PacingLimits { MaximumQueuedNotifications = 1 });
+
+        // the steps of the call in flight: their direction, what came in and went out, and why
+        var told = new List<(DebugDirection Direction, object? Rx, object? Tx, (ProtocolCode, string, RouterSide?)? Error)>();
+
+        Services.Debug += (error, step) =>
+        {
+            if (step.CallId == 3)
+            {
+                told.Add((
+                    step.Direction,
+                    step.Rx,
+                    step.Tx,
+                    error is FailureException failure ? ((ProtocolCode)failure.Failure.Code, failure.Failure.Detail, failure.Side) : null));
+            }
+        };
+        Deliver(First, PacedOf(3, "hold"));
+        await Settle();
+
+        foreach (var word in new[] { "a", "b", "c" })
+        {
+            await news.Notify(word).WaitAsync(Patience, Cancelled);
+        }
+
+        _released.SetResult();
+        await Settle();
+
+        // its resolver's answer goes nowhere, told once with the failure that went in its place
+        Assert.Equal(["first notification 3 a", "first failure 3 CapacityExceeded"], SentSince());
+        Assert.Equal(
+            [
+                (DebugDirection.Rx, "hold", null, null),
+                (DebugDirection.Tx, "hold", "ok", (ProtocolCode.CapacityExceeded, "the notifications queued for call 3 went past their bounds", RouterSide.Server)),
+            ],
+            told);
         Assert.Empty(_errors);
     }
 

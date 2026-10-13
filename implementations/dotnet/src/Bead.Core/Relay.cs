@@ -9,7 +9,7 @@ public sealed record RelayOptions
     /// Whether a request may be relayed, asked on its header — its destination included — and its
     /// call's session, before its destination is looked up, so a requester presenting none or OPAQUE
     /// who is not admitted learns only whether any is registered (spec 14.3, step 1). Without it,
-    /// the relay admits nobody.
+    /// the relay admits nobody; a server's admits by <see cref="Server{TData}.RequireCredential"/>.
     /// </summary>
     public BeforeRequest? BeforeRoute { get; init; }
 

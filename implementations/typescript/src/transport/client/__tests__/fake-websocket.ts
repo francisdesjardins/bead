@@ -77,8 +77,11 @@ export const createFakeWebSocket = ({ canPing = false }: { canPing?: boolean } =
     // `ws`'s own: a ping, its answer, and a drop that closes as a network does, with 1006
     return canPing
       ? Object.assign(socket, {
-          on: (_event: 'pong', listener: () => void) => {
-            pongs.push(listener);
+          // a pong's listener alone: the fake never refuses an upgrade
+          on: (event: string, listener: () => void) => {
+            if (event === 'pong') {
+              pongs.push(listener);
+            }
           },
           ping: () => {
             socket.pings += 1;

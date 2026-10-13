@@ -50,7 +50,8 @@
   "findings": [
     {
       "rule": "SERVICE_NO_DELETE",
-      "pointer": "/reservedServices/ids"
+      "pointer": "/reservedServices/ids",
+      "subject": "service:2"
     }
   ]
 }
