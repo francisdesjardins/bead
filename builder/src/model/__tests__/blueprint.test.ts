@@ -208,3 +208,19 @@ test('with rules off, a reading ends after the schema', () => {
     )
   ).toEqual([{ rule: 'SERVICE_ID_RANGE', pointer: '/services/0/serviceId' }]);
 });
+
+test('an empty list of services or of procedures says what a .proto left out', () => {
+  for (const [path, message] of [
+    ['/services', 'no service declares (bead.service)'],
+    ['/services/0/procedures', 'a Bead service declares no rpc'],
+  ] as const) {
+    const reading = read(applyPatch(interop(), [{ op: 'replace', path, value: [] }]));
+
+    expect(
+      reading.diagnostics.map((diagnostic) => {
+        return [diagnostic.rule, diagnostic.pointer, diagnostic.message];
+      }),
+      path
+    ).toEqual([['BLUEPRINT_SCHEMA', path, message]]);
+  }
+});

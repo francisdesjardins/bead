@@ -85,6 +85,7 @@ export const RULES = Object.freeze({
   NOTIFICATION_RESULT: { level: Level.BLUEPRINT, severity: Severity.WARNING },
   FAILURE_UNKNOWN: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   BINDING_SOURCE: { level: Level.BLUEPRINT, severity: Severity.ERROR },
+  PROTO_FILE: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   NAME_TARGET: { level: Level.BOTH, severity: Severity.ERROR },
   DESCRIPTION_TARGET: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   SPEC_VERSION_NEWER: { level: Level.BLUEPRINT, severity: Severity.WARNING },
@@ -138,8 +139,11 @@ export const RULES = Object.freeze({
   },
   NAME_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
   SERVICE_REVISION: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
-  // and a comparison not run
+  // and what the run says of itself: a comparison not run, an earlier that contradicts itself, a
+  // waiver that waived nothing
   PROTO_SKIPPED: { level: Level.BREAKING, severity: Severity.WARNING },
+  AGAINST_BLUEPRINT: { level: Level.BREAKING, severity: Severity.WARNING },
+  WAIVER_UNUSED: { level: Level.BREAKING, severity: Severity.WARNING },
 } as const satisfies Readonly<Record<string, IRule>>);
 
 /** A rule's name. */

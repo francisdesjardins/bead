@@ -8,7 +8,7 @@ const FIXTURES = fileURLToPath(new URL('../../test/fixtures/', import.meta.url))
 const INTEROP = fileURLToPath(new URL('../../../spec/interop-blueprint.json', import.meta.url));
 const COPY = fileURLToPath(new URL('../../test/proto/OPTIONS_COPY/', import.meta.url));
 
-test("checks the fixtures' roots, both services in one blueprint", () => {
+test("checks the fixtures' roots, every service in one blueprint", () => {
   const checked = checkRoots([FIXTURES]);
 
   expect(checked.diagnostics).toEqual([]);
@@ -16,7 +16,7 @@ test("checks the fixtures' roots, both services in one blueprint", () => {
     checked.blueprint?.services.map((service) => {
       return service.serviceName;
     })
-  ).toEqual(['Interop', 'Comments']);
+  ).toEqual(['Interop', 'Comments', 'OldComments']);
   expect(checked.set?.length).toBeGreaterThan(0);
 });
 

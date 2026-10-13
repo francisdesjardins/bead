@@ -1276,6 +1276,12 @@ procedure states none. A test of `service-manager.test.ts` holds it, over every 
 `IProcedure`; `name` alone is set on purpose, to the procedure's name. The C# side merges no
 procedure into a delegate, a platform row of the matrix.
 
+**On the TypeScript side, the layer's mapped types iterate `keyof S` and filter it**, so that a
+descriptor's `@deprecated` reaches each member mapped from it: a requester, a notification, a
+window's key, a command's requester, a notifier and a resolver's key, each reported where it is used
+by `no-deprecated`, typescript-eslint's and oxlint's; a test of `service-client.test.ts` and one of
+`service-server.test.ts`, named alike, hold it.
+
 **The tests of both sides depend on a protobuf library**, each its platform's stock one, as a
 development dependency: the TypeScript side's lockfile gains `@bufbuild/protobuf`,
 `@bufbuild/protoc-gen-es` and `@bufbuild/buf`, which carries a binary per platform and runs under

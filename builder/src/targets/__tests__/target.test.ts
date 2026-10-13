@@ -74,8 +74,9 @@ test("the header names the messages' generator and the oldest runtime its output
     first,
     '// Do not edit: regenerate with beadc.',
     `// Messages: protoc-gen-es ${protocGenEsVersion()}, for @bufbuild/protobuf ${PROTOBUF_FLOOR} or later.`,
+    // the messages fixture marks a deprecation: protoc-gen-es's directive closes the header
+    '/* eslint-disable */',
     '',
-    expect.stringMatching(/^import /u),
   ]);
   expect(headOf(csharpTarget.generate(input, { messages: Messages.GENERATE }))).toEqual([
     first,

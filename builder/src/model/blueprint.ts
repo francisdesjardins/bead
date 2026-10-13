@@ -75,6 +75,7 @@ export interface IFailureEntry {
   readonly code: number;
   readonly failureName: string;
   readonly description?: string;
+  readonly deprecation?: IDeprecation;
 }
 
 /** A service: its ids, its catalogue, its reservations and its procedures. */
@@ -133,6 +134,12 @@ const BYTE_ORDER_MARK = '\uFEFF';
 const COMPOSITE_KEYWORDS = new Set(['oneOf', 'anyOf', 'if', 'not']);
 const UNDER_A_BRANCH = /\/(?:oneOf|anyOf)\/\d+\//u;
 const ADMISSION = /^\/services\/\d+\/procedures\/\d+\/admission$/u;
+
+// what a list left empty means, at the places where a .proto leaves one so
+const EMPTY_LIST: readonly (readonly [RegExp, string])[] = [
+  [/^\/services$/u, 'no service declares (bead.service)'],
+  [/^\/services\/\d+\/procedures$/u, 'a Bead service declares no rpc'],
+];
 
 /** The rule each place of the format's schema gives its refusals (decision 0022's D19). */
 const RULE_OF_PLACE: readonly (readonly [RegExp, RuleName, string])[] = [
@@ -200,6 +207,11 @@ const RULE_OF_PLACE: readonly (readonly [RegExp, RuleName, string])[] = [
     /^\/services\/\d+\/procedures\/\d+\/failures\/\d+$/u,
     'NAME_FORM',
     "a failure's name is upper-case ASCII letters and digits in words parted by one underscore (builder/README.md)",
+  ],
+  [
+    /^\/(?:services\/\d+\/proto\/file|proto\/messages\/\d+\/file|proto\/files\/\d+\/path)$/u,
+    'PROTO_FILE',
+    'a proto path is a path from its root, parts by /, none . or .., ending in .proto',
   ],
   [
     /^\/services\/\d+\/procedures\/\d+\/notification$/u,
@@ -362,12 +374,20 @@ const schemaFindingsOf = (
       const key = `${refusal.place} ${refusal.error.keyword}`;
 
       if (!findings.has(key)) {
+        const empty =
+          refusal.error.keyword === 'minItems'
+            ? EMPTY_LIST.find(([pattern]) => {
+                return pattern.test(refusal.place);
+              })
+            : undefined;
         const message =
-          refusal.error.keyword === 'additionalProperties'
-            ? 'a member the format does not know'
-            : refusal.error.keyword === 'required'
-              ? 'a member the format requires, missing'
-              : (refusal.error.message ?? 'refused');
+          empty !== undefined
+            ? empty[1]
+            : refusal.error.keyword === 'additionalProperties'
+              ? 'a member the format does not know'
+              : refusal.error.keyword === 'required'
+                ? 'a member the format requires, missing'
+                : (refusal.error.message ?? 'refused');
 
         findings.set(key, { place: refusal.place, message });
       }

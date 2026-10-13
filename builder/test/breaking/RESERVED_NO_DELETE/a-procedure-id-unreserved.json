@@ -19,7 +19,8 @@
   "findings": [
     {
       "rule": "RESERVED_NO_DELETE",
-      "pointer": "/services/0/reserved/procedureIds"
+      "pointer": "/services/0/reserved/procedureIds",
+      "subject": "service:1/procedure:19"
     }
   ]
 }

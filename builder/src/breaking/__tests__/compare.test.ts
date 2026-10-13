@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,6 +21,12 @@ const CASES = fileURLToPath(new URL('../../../test/breaking/', import.meta.url))
 const PROTO_CASES = join(CASES, 'proto');
 const SHARED_EARLIER = join(PROTO_CASES, 'earlier');
 
+// a finding of a case of test/breaking/<RULE>/: its rule at its pointer, and its subject, which a
+// waiver names
+interface IBreakingVerdict extends IVerdict {
+  readonly subject?: string;
+}
+
 // a case of test/breaking/<RULE>/: the patches of each side, its category, and its findings there
 interface IBreakingCase {
   readonly rule: string;
@@ -28,7 +34,7 @@ interface IBreakingCase {
   readonly category: Category;
   readonly earlier: readonly IOperation[];
   readonly current: readonly IOperation[];
-  readonly findings: readonly IVerdict[];
+  readonly findings: readonly IBreakingVerdict[];
 }
 
 // a finding of a .proto case: its rule, at its line and column
@@ -51,7 +57,7 @@ const breakingCases = (): IBreakingCase[] => {
           category?: Category;
           earlier?: IOperation[];
           current: IOperation[];
-          findings: IVerdict[];
+          findings: IBreakingVerdict[];
         };
 
         return {
@@ -96,9 +102,13 @@ const earlierOf = (value: unknown): IBlueprint => {
   return reading.blueprint;
 };
 
-const verdictsOf = (diagnostics: readonly IDiagnostic[]): IVerdict[] => {
+const verdictsOf = (diagnostics: readonly IDiagnostic[]): IBreakingVerdict[] => {
   return diagnostics.map((diagnostic) => {
-    return { rule: diagnostic.rule, pointer: diagnostic.pointer ?? '' };
+    return {
+      rule: diagnostic.rule,
+      pointer: diagnostic.pointer ?? '',
+      ...(diagnostic.subject === undefined ? {} : { subject: diagnostic.subject }),
+    };
   });
 };
 
@@ -126,7 +136,7 @@ const runCase = (each: IBreakingCase, category: Category): IDiagnostic[] => {
 
 // spec 16.8: an id or a name a release declared stays its declaration's, or is reserved, and the
 // cases find each change between two releases that would part them
-test('each case of test/breaking/ gives its rules at their pointers, under its category', () => {
+test('each case of test/breaking/ gives its rules at their pointers and their subjects, under its category', () => {
   const cases = breakingCases();
 
   expect(cases.length).toBeGreaterThan(0);
@@ -361,4 +371,98 @@ test('each .proto case gives its rules at their lines and columns', () => {
       }
     }
   }
+});
+
+test("a revision moves with what a file gives its messages on the wire or in a target, never with another language's option", () => {
+  test.setTimeout(60_000);
+
+  // the parcel service, binding a message of its own file, under `head` and the file's options
+  const rootOf = (name: string, head: readonly string[]): string => {
+    const root = test.info().outputPath(name);
+    const file = join(root, 'parcel', 'v1', 'parcel.proto');
+
+    mkdirSync(join(root, 'parcel', 'v1'), { recursive: true });
+    writeFileSync(
+      file,
+      [
+        ...head,
+        '',
+        'package parcel.v1;',
+        '',
+        'import "bead/options.proto";',
+        '',
+        'option (bead.file) = {',
+        '  admission: {',
+        '    none: {}',
+        '  }',
+        '};',
+        '',
+        'service ParcelService {',
+        '  option (bead.service) = {',
+        '    id: 1',
+        '    revision: 1',
+        '  };',
+        '',
+        '  rpc Send(Parcel) returns (Parcel) {',
+        '    option (bead.procedure) = {id: 1};',
+        '  }',
+        '}',
+        '',
+        'message Parcel {',
+        '  Parcel inner = 1;',
+        '}',
+        '',
+      ].join('\n')
+    );
+    return root;
+  };
+  const revisionsOf = (name: string, head: readonly string[]): string[] => {
+    const earlier = checkRoots(
+      [rootOf('earlier', ['syntax = "proto3";', 'option go_package = "example.com/parcel";'])],
+      { image: true }
+    );
+    const current = checkRoots([rootOf(name, head)], { image: true });
+
+    expect(current.diagnostics, name).toEqual([]);
+
+    if (
+      earlier.blueprint === undefined ||
+      earlier.set === undefined ||
+      current.blueprint === undefined ||
+      current.placeOf === undefined ||
+      current.set === undefined
+    ) {
+      throw new Error(`${name}: both sides compile`);
+    }
+
+    return compareBlueprints(current.blueprint, {
+      earlier: earlier.blueprint,
+      category: Category.API,
+      placeOf: current.placeOf,
+      messages: { earlier: messageIndexOf(earlier.set), current: messageIndexOf(current.set) },
+    }).map((diagnostic) => {
+      return diagnostic.rule;
+    });
+  };
+
+  // * another language's option: buf FILE's under API, never the revision's
+  expect(
+    revisionsOf('go-package', ['syntax = "proto3";', 'option go_package = "example.com/other";'])
+  ).toEqual([]);
+  // the edition, and a feature it resolves, which moves the bytes of a message field
+  expect(
+    revisionsOf('delimited', [
+      'edition = "2023";',
+      'option go_package = "example.com/parcel";',
+      'option features.message_encoding = DELIMITED;',
+    ])
+  ).toEqual(['SERVICE_REVISION']);
+  // the namespace the C# target writes the messages in
+  expect(
+    revisionsOf('namespace', [
+      'syntax = "proto3";',
+      'option go_package = "example.com/parcel";',
+      'option csharp_namespace = "Parcels";',
+    ])
+  ).toEqual(['SERVICE_REVISION']);
 });

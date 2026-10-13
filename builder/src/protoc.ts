@@ -16,13 +16,13 @@
 // dependencies
 
 import { type ExecSyncOptionsWithStringEncoding, execFileSync, execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { fromBinary } from '@bufbuild/protobuf';
 import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 
+import { temporaryFolderOf } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import type { IBlueprint } from './model/blueprint.ts';
 import { OPTIONS_FILE } from './roots.ts';
@@ -175,12 +175,13 @@ export const requireProtoc = (): IFoundProtoc => {
 /**
  * The C# files of the messages `blueprint` binds, from `set`, buf's FileDescriptorSet of its
  * `.proto` source, each at its namespace's folder as protoc writes it: none, and no protoc looked
- * for, when it binds none of a file of its own. Throws an {@link InputError} for no protoc, one off
+ * for, when it binds none of a file of its own; protoc's files written under `options.folder`'s
+ * `.beadc/`, the project's, where it names one. Throws an {@link InputError} for no protoc, one off
  * its pin, or protoc's own refusal, in its words.
  */
 export const generateCSharpMessages = (
   set: Uint8Array,
-  options: { readonly blueprint: IBlueprint }
+  options: { readonly blueprint: IBlueprint; readonly folder?: string }
 ): readonly IGeneratedFile[] => {
   const descriptors = fromBinary(FileDescriptorSetSchema, set);
   const dependencies = new Map(
@@ -210,7 +211,10 @@ export const generateCSharpMessages = (
   }
 
   const protoc = requireProtoc();
-  const folder = mkdtempSync(join(tmpdir(), 'beadc-protoc-'));
+  const folder = temporaryFolderOf(
+    'protoc-',
+    options.folder === undefined ? {} : { folder: options.folder }
+  );
   // in the set's order, which is buf's, Bead's options in a run of their own
   const ordered = descriptors.file
     .map((file) => {

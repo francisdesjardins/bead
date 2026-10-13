@@ -79,11 +79,13 @@
   "findings": [
     {
       "rule": "PROCEDURE_MESSAGE_SWITCHED",
-      "pointer": "/services/0/procedures/0/request/message"
+      "pointer": "/services/0/procedures/0/request/message",
+      "subject": "service:1/procedure:1"
     },
     {
       "rule": "PROCEDURE_SAME_MESSAGES",
-      "pointer": "/services/0/procedures/0/request/message"
+      "pointer": "/services/0/procedures/0/request/message",
+      "subject": "service:1/procedure:1"
     }
   ]
 }

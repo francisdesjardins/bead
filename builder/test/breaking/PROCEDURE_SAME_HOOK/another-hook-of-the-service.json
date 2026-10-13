@@ -39,7 +39,8 @@
   "findings": [
     {
       "rule": "PROCEDURE_SAME_HOOK",
-      "pointer": "/services/0/procedures/0/admission/hook"
+      "pointer": "/services/0/procedures/0/admission/hook",
+      "subject": "service:1/procedure:1"
     }
   ]
 }

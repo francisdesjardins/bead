@@ -19,7 +19,8 @@
   "findings": [
     {
       "rule": "PROCEDURE_SAME_NAME",
-      "pointer": "/services/0/procedures/0/procedureName"
+      "pointer": "/services/0/procedures/0/procedureName",
+      "subject": "service:1/procedure:1"
     }
   ]
 }

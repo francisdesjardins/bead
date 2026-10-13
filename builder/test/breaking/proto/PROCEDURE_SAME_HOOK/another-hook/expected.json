@@ -7,6 +7,11 @@
       "column": 10
     },
     {
+      "rule": "SERVICE_SAME_HOOKS",
+      "line": 19,
+      "column": 10
+    },
+    {
       "rule": "PROCEDURE_SAME_HOOK",
       "line": 46,
       "column": 19

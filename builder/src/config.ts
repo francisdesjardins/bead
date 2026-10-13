@@ -1,15 +1,17 @@
 // ── Config ────────────────────────────────────────────────────────────────────
 
 // `beadc.yaml`, at a project's root: its `version`, its `source` — `.proto` roots, or a blueprint —
-// where `beadc blueprint` writes, and the `outputs` `beadc generate` writes, a language and a folder
-// each, TypeScript or C#. Every path stays under the folder that holds it, since the image sees
+// where `beadc blueprint` writes, the `outputs` `beadc generate` writes, a language and a folder
+// each, TypeScript or C#, and whether `generate` takes out what it no longer writes, `clean`, buf's
+// opt-in, off unless set. Every path stays under the folder that holds it, since the image sees
 // nothing else; no output's folder holds another's, or another's messages, nor lies in one; a key
 // beadc does not read is refused, never left unchecked. An earlier release's, which `beadc breaking`
 // compares against, is read for its `version`, its `source` and its `blueprint` alone.
 
 // dependencies
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import nodePath, { type PlatformPath } from 'node:path';
 
 import { parse } from 'yaml';
@@ -64,6 +66,11 @@ export interface IAgainstConfig {
 export interface IConfig extends IAgainstConfig {
   /** What `beadc generate` writes, when `beadc.yaml` names any. */
   readonly outputs?: readonly Output[];
+  /**
+   * Whether `generate` takes out of each output's folder a file of a kind it writes that it no
+   * longer writes, as buf.gen.yaml's `clean`; off, it takes out nothing.
+   */
+  readonly clean?: boolean;
 }
 
 // a `beadc.yaml` read as a mapping: how it refuses, and how a path of it resolves under its folder
@@ -78,7 +85,10 @@ interface IDocument {
 /** The file beadc reads its project from. */
 export const CONFIG_FILE = 'beadc.yaml';
 
-const KEYS = new Set(['version', 'source', 'blueprint', 'outputs']);
+/** The folder beadc keeps its own files in, beside `beadc.yaml`, which `init`'s `.gitignore` ignores. */
+export const BEADC_FOLDER = '.beadc';
+
+const KEYS = new Set(['version', 'source', 'blueprint', 'outputs', 'clean']);
 const SOURCE_KEYS = new Set(['proto', 'blueprint']);
 const TYPESCRIPT_KEYS = new Set([
   'language',
@@ -385,8 +395,13 @@ export const parseConfig = (
     return { outputs };
   };
   const read = sourceOf(document);
+  const clean = value['clean'];
 
-  return { folder, ...read, ...outputsOf() };
+  if (clean !== undefined && typeof clean !== 'boolean') {
+    refuse('clean is true or false: whether generate takes out what it no longer writes');
+  }
+
+  return { folder, ...read, ...outputsOf(), ...(clean === true ? { clean } : {}) };
 };
 
 /**
@@ -399,6 +414,26 @@ export const againstOfText = (
   options: { readonly folder: string; readonly path?: PlatformPath }
 ): IAgainstConfig => {
   return { folder: options.folder, ...sourceOf(documentOf(text, options)) };
+};
+
+/**
+ * A temporary folder of beadc's, made: under `options.folder`'s `.beadc/` where a `beadc.yaml` was
+ * read, on the project's drive, which buf's build of one module over its roots and beadc's options
+ * needs; under the system's temporary folder otherwise. The caller takes it out.
+ */
+export const temporaryFolderOf = (
+  prefix: string,
+  options: { readonly folder?: string } = {}
+): string => {
+  if (options.folder === undefined) {
+    return mkdtempSync(nodePath.join(tmpdir(), `beadc-${prefix}`));
+  }
+
+  const own = nodePath.join(options.folder, BEADC_FOLDER);
+
+  mkdirSync(own, { recursive: true });
+
+  return mkdtempSync(nodePath.join(own, prefix));
 };
 
 /** The `beadc.yaml` nearest `from`, upward, or none. */

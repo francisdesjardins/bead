@@ -3,9 +3,10 @@
 // beadc's command line: `check`, `blueprint`, `generate`, `breaking`, `init`, `wrapper` and `version`
 // (decision 0022). It parses the call, runs the command, prints each finding a line, and exits 0, 1
 // on an error — a warning too under `--fail-on-warning`, a difference under `blueprint --check` or
-// `generate --check`, a breaking finding — or 2 when the input or the call is one beadc cannot take. `generate` and
-// `init` alone load the targets, by a dynamic import: they load a TypeScript compiler, which the
-// other commands never need.
+// `generate --check`, a breaking finding — or 2 when the input or the call is one beadc cannot
+// take, a path the file system refuses among them, in one line. `generate` and `init` alone load the
+// targets, by a dynamic import: they load a TypeScript compiler, which the other commands never
+// need.
 //
 //   node src/cli.ts check [<root or blueprint>]
 //   node src/cli.ts blueprint [<root or blueprint>] -o <file> [--descriptor-set-out <file>]
@@ -19,7 +20,15 @@
 
 // dependencies
 
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -32,6 +41,7 @@ import {
   escapeData,
   escapeProperty,
   formatDiagnostic,
+  githubFileOf,
   hasError,
   type IDiagnostic,
   InputError,
@@ -85,14 +95,21 @@ const USAGE = [
   '  version                       beadc, its tools, the format, the spec and the options',
   'flags: --error-format text|json|github, --fail-on-warning, --except <RULE> (a warning),',
   '       --descriptor-set-out <file> (blueprint, from a .proto),',
-  '       --category WIRE|API (breaking, API by default), --except <RULE>[@<pointer>] or',
-  '       buf:<RULE>[@<path>] (breaking, any finding)',
+  '       --category WIRE|API (breaking, API by default), --except <RULE>[@<subject>] or',
+  '       buf:<RULE>[@<path>] (breaking, any finding: a subject as its line prints it)',
   '       --language typescript|csharp (init, repeated; both when none is named)',
 ].join('\n');
 
 // what GitHub titles a difference under each --check
 const OFF_FORM = 'off its form';
 const NOT_GENERATED = 'not what beadc generates';
+
+// the wrappers' own flag, which reads a git ref beadc on Node never sees
+const AGAINST_REF = '--against-ref';
+
+// the file system's refusals, each a call beadc cannot take: a folder missing or a file where one is
+// meant, a file where a folder is meant, one there already, no right, no room
+const FILE_SYSTEM = new Set(['ENOENT', 'ENOTDIR', 'EISDIR', 'EEXIST', 'EACCES', 'EPERM', 'ENOSPC']);
 
 // helpers
 
@@ -185,19 +202,27 @@ const printDifference = (
       const line = difference.line === undefined ? '' : `,line=${String(difference.line)}`;
 
       print(
-        `::error file=${escapeProperty(file)}${line},title=${escapeProperty(title)}::${escapeData(message)}`
+        `::error file=${escapeProperty(githubFileOf(file))}${line},title=${escapeProperty(title)}::${escapeData(message)}`
       );
       break;
     }
   }
 };
 
-// writes `text` beside `path` first, then moves it over: a failure never shortens the file
+// writes `data` beside `path` first, its folder made, then moves it over: a failure never shortens
+// the file, and leaves no `.tmp` behind
 const writeWhole = (path: string, data: Uint8Array): void => {
   const temporary = `${path}.tmp`;
 
-  writeFileSync(temporary, data);
-  renameSync(temporary, path);
+  mkdirSync(dirname(path), { recursive: true });
+
+  try {
+    writeFileSync(temporary, data);
+    renameSync(temporary, path);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 };
 
 // a difference under `blueprint --check`, with its fix
@@ -284,6 +309,11 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
 
   if (!call.check) {
     writePlan(plan, config);
+
+    for (const { path, source } of plan.stale) {
+      print(`beadc: generate takes out ${displayOf(path)}: ${source} no longer gives it`);
+    }
+
     return Exit.DONE;
   }
 
@@ -404,6 +434,17 @@ const callOf = (
 /** Runs beadc with `args`, its command first, and gives its exit code. */
 export const run = async (args: readonly string[]): Promise<Exit> => {
   try {
+    // ! a wrapper's flag, given to beadc on Node: named, with the form that does its work here
+    if (
+      args.some((arg) => {
+        return arg === AGAINST_REF || arg.startsWith(`${AGAINST_REF}=`);
+      })
+    ) {
+      throw new InputError(
+        `${AGAINST_REF} is the wrappers' own: on Node, pipe git archive <ref> into --against -`
+      );
+    }
+
     const { values, positionals } = parseArgs({
       args: [...args],
       allowPositionals: true,
@@ -475,6 +516,16 @@ export const run = async (args: readonly string[]): Promise<Exit> => {
       (error as { code?: unknown }).code?.toString().startsWith('ERR_PARSE_ARGS')
     ) {
       printError(`beadc: ${(error as Error).message}`);
+      return Exit.INPUT;
+    }
+
+    // * a path the file system refuses is a call beadc cannot take: one line, never a stack
+    const { code, path, syscall } = error as { code?: unknown; path?: unknown; syscall?: unknown };
+
+    if (typeof code === 'string' && FILE_SYSTEM.has(code)) {
+      printError(
+        `beadc: ${typeof path === 'string' ? displayOf(path) : 'a path'}: ${code}${typeof syscall === 'string' ? ` on ${syscall}` : ''}, which the file system refuses`
+      );
       return Exit.INPUT;
     }
 

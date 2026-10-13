@@ -18,11 +18,13 @@
   "findings": [
     {
       "rule": "NAME_NO_DELETE",
-      "pointer": "/services/0/failures"
+      "pointer": "/services/0/failures",
+      "subject": "service:1/failure:8"
     },
     {
       "rule": "FAILURE_NO_DELETE",
-      "pointer": "/services/0/reserved/failureCodes"
+      "pointer": "/services/0/reserved/failureCodes",
+      "subject": "service:1/failure:8"
     }
   ]
 }

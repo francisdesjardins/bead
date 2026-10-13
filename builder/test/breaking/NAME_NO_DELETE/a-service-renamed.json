@@ -14,11 +14,13 @@
   "findings": [
     {
       "rule": "NAME_NO_DELETE",
-      "pointer": "/reservedServices/names"
+      "pointer": "/reservedServices/names",
+      "subject": "service:1"
     },
     {
       "rule": "SERVICE_SAME_NAME",
-      "pointer": "/services/0/serviceName"
+      "pointer": "/services/0/serviceName",
+      "subject": "service:1"
     }
   ]
 }

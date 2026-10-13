@@ -14,7 +14,8 @@
   "findings": [
     {
       "rule": "PROCEDURE_FAILURE_NO_DELETE",
-      "pointer": "/services/0/procedures/1/failures"
+      "pointer": "/services/0/procedures/1/failures",
+      "subject": "service:1/procedure:2/failure:7"
     }
   ]
 }

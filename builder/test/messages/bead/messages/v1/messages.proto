@@ -29,18 +29,26 @@ service GreeterService {
 
   // Notifies the time, as a well-known type.
   rpc Watch(Greeting) returns (bead.Json) {
+    option deprecated = true;
     option (bead.procedure) = {
       id: 2
       notifies: {message: "google.protobuf.Timestamp"}
+      deprecation_message: "Use sayHello."
     };
   }
 
   // Asks the client its name.
   rpc Name(bead.Text) returns (Greeting) {
+    option deprecated = true;
     option (bead.procedure) = {
       id: 3
       command: {}
     };
+  }
+
+  // Says goodbye, in a message protobuf deprecates: nothing of Bead's is.
+  rpc SayGoodbye(Farewell) returns (Farewell.Reply) {
+    option (bead.procedure) = {id: 4};
   }
 }
 
@@ -65,6 +73,18 @@ message Greeting {
 
   // A name it answers to, when it has one.
   optional string nickname = 6;
+}
+
+// A farewell, which protobuf deprecates.
+message Farewell {
+  option deprecated = true;
+
+  // Its answer, nested: deprecated through it.
+  message Reply {
+    string text = 1;
+  }
+
+  string name = 1;
 }
 
 // The greeter's failures.

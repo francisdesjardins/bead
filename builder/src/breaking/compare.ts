@@ -3,13 +3,15 @@
 // `beadc breaking`'s own rules: two blueprints, the earlier and the current, compared by id — a
 // service by its id, a procedure by its id within its service, a failure by its code — each finding
 // placed in the current input at its pointer, a deletion at the reservation that would waive it
-// (decision 0022). `WIRE` keeps a peer built from the earlier talking with one built from the
-// current; `API` holds every `WIRE` rule and keeps code written against the earlier's generated API
-// compiling and meaning the same, so a service or a procedure gone is its finding even where `WIRE`
-// waives it, deprecated, then its id reserved. A revision is never lowered, and moves where its
-// service changed: a finding of any rule, an addition, or a message its bindings reach where both
-// sides are buf images. Read through the model, never as bytes: an earlier in another member or
-// array order, and a description, change nothing.
+// (decision 0022), and keyed by its subject: its entity by the ids no shift moves, AIP-122's
+// hierarchy of kinds and ids written `kind:id`, which is what a waiver names. `WIRE` keeps a peer
+// built from the earlier talking with one built from the current; `API` holds every `WIRE` rule and
+// keeps code written against the earlier's generated API compiling and meaning the same, so a
+// service or a procedure gone is its finding even where `WIRE` waives it, deprecated, then its id
+// reserved. A revision is never lowered, and moves where its service changed: a finding of any
+// rule, an addition, a deprecation, or a message its bindings reach where both sides are buf images,
+// with what of its file reaches the wire or a target's API. Read through the model, never as bytes:
+// an earlier in another member or array order, and a description, change nothing.
 
 // dependencies
 
@@ -19,6 +21,8 @@ import {
   DescriptorProtoSchema,
   type EnumDescriptorProto,
   EnumDescriptorProtoSchema,
+  FeatureSetSchema,
+  type FileDescriptorProto,
   FileDescriptorSetSchema,
 } from '@bufbuild/protobuf/wkt';
 
@@ -27,6 +31,7 @@ import {
   type AdmissionRule,
   type IBinding,
   type IBlueprint,
+  type IFailureEntry,
   type IProcedureEntry,
   type IRange,
   type IServiceEntry,
@@ -57,11 +62,13 @@ export interface ICompareOptions {
   readonly messages?: { readonly earlier: MessageIndex; readonly current: MessageIndex };
 }
 
-// a finding before its place: its rule, its pointer into the current, the service it is on
+// a finding before its place: its rule, its pointer into the current, its subject, the service it
+// is on
 interface IFinding {
   readonly rule: RuleName;
   readonly pointer: string;
   readonly message: string;
+  readonly subject: string;
   readonly serviceId?: number;
 }
 
@@ -72,6 +79,12 @@ const ADMISSION_RANK = Object.freeze({ none: 0, session: 1, hook: 2 } as const);
 
 // the bindings a procedure may hold
 const SIDES = Object.freeze(['request', 'result', 'notification'] as const);
+
+// the kind of entity each reserved list of a service holds ids of
+const RESERVED_KIND = Object.freeze({
+  procedureIds: 'procedure',
+  failureCodes: 'failure',
+} as const);
 
 // helpers
 
@@ -118,6 +131,13 @@ const idsText = (ids: readonly number[]): string => {
     : `${runs.slice(0, -1).join(', ')} and ${String(runs.at(-1))}`;
 };
 
+/** A range as a subject keys it: `4`, or `4-6`, as the earlier declared it. */
+export const rangeKeyOf = (range: IRange): string => {
+  return range.first === range.last
+    ? String(range.first)
+    : `${String(range.first)}-${String(range.last)}`;
+};
+
 const holdsName = (names: readonly string[], name: string): boolean => {
   return names.some((each) => {
     return areOneName(each, name);
@@ -142,7 +162,8 @@ const bindingText = (binding: IBinding): string => {
     : `${binding.encoding} ${binding.message}`;
 };
 
-const hooksOf = (service: IServiceEntry): string[] => {
+/** The hooks a service's procedures name, in their names' order. */
+export const hooksOf = (service: IServiceEntry): string[] => {
   return [
     ...new Set(
       service.procedures.flatMap((procedure) => {
@@ -154,7 +175,10 @@ const hooksOf = (service: IServiceEntry): string[] => {
   ].sort();
 };
 
-const sameDeprecation = (one: IProcedureEntry | IServiceEntry, other: typeof one): boolean => {
+const sameDeprecation = (
+  one: IProcedureEntry | IServiceEntry | IFailureEntry,
+  other: typeof one
+): boolean => {
   return (
     (one.deprecation === undefined) === (other.deprecation === undefined) &&
     one.deprecation?.message === other.deprecation?.message
@@ -199,45 +223,62 @@ const fingerprintOf = (bytes: Uint8Array): string => {
   return Buffer.from(bytes).toString('base64');
 };
 
+// * what of a file reaches the wire or a Bead target's API, beside its declarations: its syntax,
+// its edition and its own features, which with the edition give each declaration's resolved
+// features, and `csharp_namespace`, which the C# target's namespace reads. Not another language's
+// option, buf FILE's under API, nor `(bead.file)`, the blueprint's compare's
+const fileFingerprintOf = (file: FileDescriptorProto): string => {
+  const features = file.options?.features;
+
+  return JSON.stringify([
+    file.syntax,
+    file.edition,
+    features === undefined ? '' : fingerprintOf(toBinary(FeatureSetSchema, features)),
+    file.options?.csharpNamespace ?? '',
+  ]);
+};
+
 // definition
 
 /**
  * The messages and enums of `image`, buf's image or a set, by full name: each one's descriptor's
- * bytes, its nested declarations taken out, which are entries of their own, and the full names its
- * fields' types give. A descriptor holds no source info: a comment moves nothing.
+ * bytes, its nested declarations taken out, which are entries of their own, with what of its file
+ * reaches the wire or a target's API, and the full names its fields' types give. A descriptor holds
+ * no source info: a comment moves nothing.
  */
 export const messageIndexOf = (image: Uint8Array): MessageIndex => {
   const index = new Map<string, IMessageEntry>();
-  const noteEnum = (proto: EnumDescriptorProto, scope: string): void => {
-    index.set(`${scope}${proto.name}`, {
-      fingerprint: fingerprintOf(toBinary(EnumDescriptorProtoSchema, proto)),
-      references: [],
-    });
-  };
-  const noteMessage = (proto: DescriptorProto, scope: string): void => {
-    const name = `${scope}${proto.name}`;
-    const own = clone(DescriptorProtoSchema, proto);
-
-    own.nestedType = [];
-    own.enumType = [];
-    index.set(name, {
-      fingerprint: fingerprintOf(toBinary(DescriptorProtoSchema, own)),
-      references: proto.field.flatMap((field) => {
-        return field.typeName === '' ? [] : [field.typeName.replace(/^\./u, '')];
-      }),
-    });
-
-    for (const nested of proto.nestedType) {
-      noteMessage(nested, `${name}.`);
-    }
-
-    for (const nested of proto.enumType) {
-      noteEnum(nested, `${name}.`);
-    }
-  };
 
   for (const file of fromBinary(FileDescriptorSetSchema, image).file) {
     const scope = file.package === '' ? '' : `${file.package}.`;
+    const ofFile = fileFingerprintOf(file);
+    const noteEnum = (proto: EnumDescriptorProto, at: string): void => {
+      index.set(`${at}${proto.name}`, {
+        fingerprint: `${fingerprintOf(toBinary(EnumDescriptorProtoSchema, proto))} ${ofFile}`,
+        references: [],
+      });
+    };
+    const noteMessage = (proto: DescriptorProto, at: string): void => {
+      const name = `${at}${proto.name}`;
+      const own = clone(DescriptorProtoSchema, proto);
+
+      own.nestedType = [];
+      own.enumType = [];
+      index.set(name, {
+        fingerprint: `${fingerprintOf(toBinary(DescriptorProtoSchema, own))} ${ofFile}`,
+        references: proto.field.flatMap((field) => {
+          return field.typeName === '' ? [] : [field.typeName.replace(/^\./u, '')];
+        }),
+      });
+
+      for (const nested of proto.nestedType) {
+        noteMessage(nested, `${name}.`);
+      }
+
+      for (const nested of proto.enumType) {
+        noteEnum(nested, `${name}.`);
+      }
+    };
 
     for (const message of file.messageType) {
       noteMessage(message, scope);
@@ -253,8 +294,8 @@ export const messageIndexOf = (image: Uint8Array): MessageIndex => {
 
 /**
  * Bead's breaking rules over `current` against `options.earlier`, under `options.category`: each
- * finding at the place `options.placeOf` gives its pointer into the current, its pointer kept, in
- * the order of the pointers. Pure: it reads nothing and runs nothing.
+ * finding at the place `options.placeOf` gives its pointer into the current, its pointer and its
+ * subject kept, in the order of the pointers. Pure: it reads nothing and runs nothing.
  */
 export const compareBlueprints = (current: IBlueprint, options: ICompareOptions): IDiagnostic[] => {
   const { earlier } = options;
@@ -273,6 +314,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
     const serviceId = was.serviceId;
     const service = `/services/${String(at)}`;
     const named = `service ${String(serviceId)} ${was.serviceName}`;
+    const serviceSubject = `service:${String(serviceId)}`;
 
     if (now === undefined) {
       const deprecated = was.deprecation !== undefined;
@@ -285,12 +327,14 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'SERVICE_NO_DELETE',
           pointer: '/reservedServices/ids',
           message: `${named}, the earlier's /services/${String(wasAt)}, is gone${deprecated ? '' : ', never deprecated'}${reserved ? '' : ', its id not reserved'}: a peer's call is answered SERVICE_UNKNOWN; deprecate it in a release, then reserve its id`,
+          subject: serviceSubject,
         });
       } else if (options.category === Category.API) {
         find({
           rule: 'SERVICE_NO_DELETE',
           pointer: '/reservedServices/ids',
           message: `${named}, the earlier's /services/${String(wasAt)}, is gone, deprecated and its id reserved: its generated client and server go with it; take it out in a release that moves the major, the minor before 1.0, and waive this there`,
+          subject: serviceSubject,
         });
       }
 
@@ -299,6 +343,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'NAME_NO_DELETE',
           pointer: '/reservedServices/names',
           message: `${named}, the earlier's /services/${String(wasAt)}, is gone, its name not reserved: a name never comes to label another service; reserve it`,
+          subject: serviceSubject,
         });
       }
 
@@ -311,6 +356,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         rule: 'SERVICE_SAME_NAME',
         pointer: `${service}/serviceName`,
         message: `${named} is ${now.serviceName} now: its generated types are imported by its name`,
+        subject: serviceSubject,
         serviceId,
       });
     } else if (
@@ -322,6 +368,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         rule: 'SERVICE_SAME_NAME',
         pointer: `${service}/proto/fullName`,
         message: `${named} was ${was.proto.fullName}, now ${now.proto.fullName}: its generated types are imported by its name`,
+        subject: serviceSubject,
         serviceId,
       });
     }
@@ -331,18 +378,35 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         rule: 'SERVICE_SAME_FILE',
         pointer: `${service}/proto/file`,
         message: `${named} was declared in ${was.proto.file}, now in ${now.proto.file}: the TypeScript target writes its code beside its file, which every import names`,
+        subject: serviceSubject,
         serviceId,
       });
     }
 
+    // * one finding a hook gone or added: its server's options name each, required
     const hooksBefore = hooksOf(was);
     const hooksNow = hooksOf(now);
 
-    if (hooksBefore.join(',') !== hooksNow.join(',')) {
+    for (const hook of hooksBefore.filter((each) => {
+      return !hooksNow.includes(each);
+    })) {
       find({
         rule: 'SERVICE_SAME_HOOKS',
         pointer: service,
-        message: `${named} named the hooks [${hooksBefore.join(', ')}], now [${hooksNow.join(', ')}]: its server's options name each, required`,
+        message: `${named} named the hook ${hook}, and names it no more: its server's options name each hook, required`,
+        subject: `${serviceSubject}/hook:${hook}`,
+        serviceId,
+      });
+    }
+
+    for (const hook of hooksNow.filter((each) => {
+      return !hooksBefore.includes(each);
+    })) {
+      find({
+        rule: 'SERVICE_SAME_HOOKS',
+        pointer: service,
+        message: `${named} names the hook ${hook} now: its server's options name each hook, required`,
+        subject: `${serviceSubject}/hook:${hook}`,
         serviceId,
       });
     }
@@ -358,6 +422,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
       });
       const kept = now.failures[nowAt];
       const failureNamed = `failure ${String(failure.code)} ${failure.failureName}`;
+      const failureSubject = `${serviceSubject}/failure:${String(failure.code)}`;
 
       if (kept === undefined) {
         if (!covers(now.reserved.failureCodes, failure.code)) {
@@ -365,6 +430,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'FAILURE_NO_DELETE',
             pointer: `${service}/reserved/failureCodes`,
             message: `${failureNamed} of ${named} is gone, its code not reserved: a code reused means another failure to an earlier peer; reserve it`,
+            subject: failureSubject,
             serviceId,
           });
         }
@@ -373,6 +439,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'NAME_NO_DELETE',
           pointer: `${service}/failures`,
           message: `${failureNamed} of ${named} is gone from its catalogue: its generated member goes with it`,
+          subject: failureSubject,
           serviceId,
         });
       } else if (kept.failureName !== failure.failureName) {
@@ -380,8 +447,11 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'FAILURE_SAME_NAME',
           pointer: `${service}/failures/${String(nowAt)}/failureName`,
           message: `${failureNamed} of ${named} is ${kept.failureName} now: its catalogue's member is named by it`,
+          subject: failureSubject,
           serviceId,
         });
+      } else if (!sameDeprecation(failure, kept)) {
+        changed.add(serviceId);
       }
     }
 
@@ -395,7 +465,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
       changed.add(serviceId);
     }
 
-    // its reservations, for life
+    // its reservations, for life: one finding a range the earlier declared, keyed to it as declared
     const reservedIds = (key: 'procedureIds' | 'failureCodes', what: string): void => {
       for (const range of was.reserved[key]) {
         const lost = [...idsOf([range])].filter((id) => {
@@ -407,6 +477,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'RESERVED_NO_DELETE',
             pointer: `${service}/reserved/${key}`,
             message: `${what} ${idsText(lost)} of ${named}, reserved in the earlier, are reserved no more: a reservation is for life`,
+            subject: `${serviceSubject}/${RESERVED_KIND[key]}:${rangeKeyOf(range)}`,
             serviceId,
           });
         }
@@ -432,6 +503,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'RESERVED_NO_DELETE',
           pointer: `${service}/reserved/procedureNames`,
           message: `the procedure name ${name} of ${named}, reserved in the earlier, is reserved no more: a reservation is for life`,
+          subject: `${serviceSubject}/name:${name}`,
           serviceId,
         });
       }
@@ -453,6 +525,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
       const after = now.procedures[nowAt];
       const procedure = `${service}/procedures/${String(nowAt)}`;
       const procedureNamed = `procedure ${String(before.procedureId)} ${before.procedureName} of ${named}`;
+      const procedureSubject = `${serviceSubject}/procedure:${String(before.procedureId)}`;
 
       // * the name the earlier gave an id stays that id's, or is reserved (16.8)
       if (
@@ -467,6 +540,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'NAME_NO_DELETE',
           pointer: `${service}/reserved/procedureNames`,
           message: `the name ${before.procedureName}, procedure ${String(before.procedureId)}'s in the earlier, is neither its name nor reserved${holder === undefined ? '' : `, and procedure ${String(holder.procedureId)} holds it`}: a name never comes to label another procedure; reserve it`,
+          subject: procedureSubject,
           serviceId,
         });
       }
@@ -482,6 +556,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'PROCEDURE_NO_DELETE',
             pointer: `${service}/reserved/procedureIds`,
             message: `${procedureNamed}, the earlier's /services/${String(wasAt)}/procedures/${String(beforeAt)}, is gone${deprecated ? '' : ', never deprecated'}${reserved ? '' : ', its id not reserved'}: a peer's call is answered PROCEDURE_UNKNOWN; deprecate it in a release, then reserve its id`,
+            subject: procedureSubject,
             serviceId,
           });
         } else if (options.category === Category.API) {
@@ -489,6 +564,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'PROCEDURE_NO_DELETE',
             pointer: `${service}/reserved/procedureIds`,
             message: `${procedureNamed}, the earlier's /services/${String(wasAt)}/procedures/${String(beforeAt)}, is gone, deprecated and its id reserved: its requester and its resolver go with it; take it out in a release that moves the major, the minor before 1.0, and waive this there`,
+            subject: procedureSubject,
             serviceId,
           });
         }
@@ -502,6 +578,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'PROCEDURE_SAME_NAME',
           pointer: `${procedure}/procedureName`,
           message: `${procedureNamed} is ${after.procedureName} now: its requester, its resolver and the metrics and filters that name it follow its name`,
+          subject: procedureSubject,
           serviceId,
         });
       }
@@ -511,6 +588,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'PROCEDURE_SAME_KIND',
           pointer: `${procedure}/procedureKind`,
           message: `${procedureNamed} was a ${before.procedureKind}, now a ${after.procedureKind}: the caller and the answerer trade places`,
+          subject: procedureSubject,
           serviceId,
         });
       } else if (before.procedureKind === 'notifies' && after.procedureKind !== 'notifies') {
@@ -518,6 +596,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'PROCEDURE_STILL_NOTIFIES',
           pointer: `${procedure}/procedureKind`,
           message: `${procedureNamed} notified, and no longer does: an earlier subscriber is answered and hears nothing more`,
+          subject: procedureSubject,
           serviceId,
         });
       } else if (before.procedureKind !== after.procedureKind) {
@@ -537,6 +616,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'PROCEDURE_SAME_ENCODING',
             pointer: `${procedure}/${side}`,
             message: `${procedureNamed}'s ${side} was ${bindingText(one)}, now ${bindingText(other)}: its bytes are read another way`,
+            subject: procedureSubject,
             serviceId,
           });
         } else if (one.message !== other.message) {
@@ -544,12 +624,14 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'PROCEDURE_MESSAGE_SWITCHED',
             pointer: `${procedure}/${side}/message`,
             message: `${procedureNamed}'s ${side} was ${String(one.message)}, now ${String(other.message)}: buf compares a message with its namesake alone, so nobody compared these two; check them by hand, then waive this`,
+            subject: procedureSubject,
             serviceId,
           });
           find({
             rule: 'PROCEDURE_SAME_MESSAGES',
             pointer: `${procedure}/${side}/message`,
             message: `${procedureNamed}'s ${side} was ${String(one.message)}, now ${String(other.message)}: its generated types change`,
+            subject: procedureSubject,
             serviceId,
           });
         }
@@ -564,6 +646,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'PROCEDURE_SAME_LIMIT',
           pointer: `${procedure}/maximumPayloadBytes`,
           message: `${procedureNamed}'s limit was ${limitText(before.maximumPayloadBytes)}, now ${limitText(after.maximumPayloadBytes)}: both ends hold it, and nothing announces it`,
+          subject: procedureSubject,
           serviceId,
         });
       }
@@ -583,6 +666,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'PROCEDURE_ADMISSION_TIGHTENED',
           pointer: `${procedure}/admission`,
           message: `${procedureNamed} was admitted by ${admissionText(before.admission)}, now by ${admissionText(after.admission)}: a peer it admitted is refused`,
+          subject: procedureSubject,
           serviceId,
         });
       } else if (hookBefore !== undefined && hookAfter !== undefined && hookBefore !== hookAfter) {
@@ -590,6 +674,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           rule: 'PROCEDURE_SAME_HOOK',
           pointer: `${procedure}/admission/hook`,
           message: `${procedureNamed} was admitted by the hook ${hookBefore}, now by ${hookAfter}: beadc cannot read a hook's code, and its generated member is another`,
+          subject: procedureSubject,
           serviceId,
         });
       } else if (rankAfter < rankBefore) {
@@ -609,6 +694,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
             rule: 'PROCEDURE_FAILURE_NO_DELETE',
             pointer: `${procedure}/failures`,
             message: `failure ${String(code)} ${kept.failureName} is taken out of ${procedureNamed}'s failures, its catalogue keeping it: the procedure's generated failures lose a member`,
+            subject: `${procedureSubject}/failure:${String(code)}`,
             serviceId,
           });
         }
@@ -666,6 +752,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         rule: 'NAME_NO_DELETE',
         pointer: '/reservedServices/names',
         message: `the name ${was.serviceName}, service ${String(was.serviceId)}'s in the earlier, is neither its name nor reserved${holder === undefined ? '' : `, and service ${String(holder.serviceId)} holds it`}: a name never comes to label another service; reserve it`,
+        subject: `service:${String(was.serviceId)}`,
         serviceId: was.serviceId,
       });
     }
@@ -682,6 +769,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         rule: 'RESERVED_NO_DELETE',
         pointer: '/reservedServices/ids',
         message: `the service ids ${idsText(lost)}, reserved in the earlier, are reserved no more: a reservation is for life`,
+        subject: `service:${rangeKeyOf(range)}`,
       });
     }
   }
@@ -692,6 +780,7 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         rule: 'RESERVED_NO_DELETE',
         pointer: '/reservedServices/names',
         message: `the service name ${name}, reserved in the earlier, is reserved no more: a reservation is for life`,
+        subject: `name:${name}`,
       });
     }
   }
@@ -713,18 +802,21 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
     }
 
     const named = `service ${String(now.serviceId)} ${now.serviceName}`;
+    const subject = `service:${String(now.serviceId)}`;
 
     if (now.serviceRevision < was.serviceRevision) {
       find({
         rule: 'SERVICE_REVISION',
         pointer: `/services/${String(at)}/serviceRevision`,
         message: `${named}'s revision is ${String(now.serviceRevision)}, lower than the earlier's ${String(was.serviceRevision)}: it counts the releases of its contract, and never goes back`,
+        subject,
       });
     } else if (changed.has(now.serviceId) && now.serviceRevision === was.serviceRevision) {
       find({
         rule: 'SERVICE_REVISION',
         pointer: `/services/${String(at)}/serviceRevision`,
         message: `${named}'s contract changed and its revision is the earlier's, ${String(was.serviceRevision)}: ${String(was.serviceRevision + 1)} at least is due`,
+        subject,
       });
     }
   });
@@ -737,10 +829,13 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
 
   return sortFindings(
     kept.map((finding) => {
-      return diagnosticOf(finding.rule, {
-        message: finding.message,
-        place: { ...options.placeOf(finding.pointer), pointer: finding.pointer },
-      });
+      return {
+        ...diagnosticOf(finding.rule, {
+          message: finding.message,
+          place: { ...options.placeOf(finding.pointer), pointer: finding.pointer },
+        }),
+        subject: finding.subject,
+      };
     })
   );
 };

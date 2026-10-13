@@ -33,11 +33,13 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_HOOKS",
-      "pointer": "/services/0"
+      "pointer": "/services/0",
+      "subject": "service:1/hook:nobody"
     },
     {
       "rule": "PROCEDURE_NO_DELETE",
-      "pointer": "/services/0/reserved/procedureIds"
+      "pointer": "/services/0/reserved/procedureIds",
+      "subject": "service:1/procedure:5"
     }
   ]
 }

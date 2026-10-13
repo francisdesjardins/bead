@@ -16,7 +16,8 @@
   "findings": [
     {
       "rule": "PROCEDURE_SAME_ENCODING",
-      "pointer": "/services/0/procedures/9/notification"
+      "pointer": "/services/0/procedures/9/notification",
+      "subject": "service:1/procedure:10"
     }
   ]
 }

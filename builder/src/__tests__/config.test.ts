@@ -252,3 +252,20 @@ test('an earlier beadc.yaml gives its source and blueprint, its outputs unread',
     }, refused).toThrow(InputError);
   }
 });
+
+test("reads clean, buf's opt-in, off unless set, and refuses one that is no boolean", () => {
+  const folder = '/work';
+  const read = (clean: string): IConfig => {
+    return parseConfig(`version: 1\nsource:\n  blueprint: api.json\n${clean}`, {
+      folder,
+      path: path.posix,
+    });
+  };
+
+  expect(read('').clean).toBeUndefined();
+  expect(read('clean: false\n').clean).toBeUndefined();
+  expect(read('clean: true\n').clean).toBe(true);
+  expect(() => {
+    return read('clean: yes please\n');
+  }).toThrow(InputError);
+});

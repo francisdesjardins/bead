@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // `typescript/no-deprecated` alone, type-aware, for the uses `deprecationsIn` lints apart:
+  // `fixtures.ts` names this file, and the package's lint, which holds the same rule, reads none of it.
+  "plugins": ["typescript"],
+  "categories": { "correctness": "off" },
+  "rules": { "typescript/no-deprecated": "error" },
+  "options": { "typeAware": true }
+}

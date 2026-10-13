@@ -14,7 +14,8 @@
   "findings": [
     {
       "rule": "PROCEDURE_SAME_KIND",
-      "pointer": "/services/0/procedures/0/procedureKind"
+      "pointer": "/services/0/procedures/0/procedureKind",
+      "subject": "service:1/procedure:1"
     }
   ]
 }
