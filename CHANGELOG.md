@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-13
+
 ### Added
 
 - A WebSocket server believes `X-Forwarded-For` from the proxies it is told of, `trustedProxies`,
@@ -24,6 +26,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.5.0 (`spec-v0.5.0`); its companion, `spec/debugging.md`, stays at 0.2.0.
 - A relay refuses a call that opens a subscription with the detail "this relay carries no
   subscription", on both sides: a relay carries none, and one that would is a decision of its own.
 
@@ -1245,7 +1248,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.1...develop
+[0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/francisdesjardins/bead/compare/v0.1.0...v0.2.0

@@ -14,7 +14,7 @@
     "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's deadline at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
-  "specVersion": "0.4.0",
+  "specVersion": "0.5.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "conversations": [
     {

@@ -58,7 +58,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0031](../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md):
   the `proto` encoding, section 17.9.
 
-**Version: 0.4.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.5.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
