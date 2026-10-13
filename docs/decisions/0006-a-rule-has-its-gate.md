@@ -26,6 +26,7 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | The conformance files are what their generators write                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | `spec`                                                                        |
 | The conformance files keep their frame ([0004](0004-one-behaviour-in-every-language.md)), and every side reads them                                                                                                                                                                                                                                                                                                                                                                                                                                        | `spec`                                                                        |
 | A unit's text moves only with its ledger, acknowledged by name, and every unit no entry cites gives a reason the check holds ([0004](0004-one-behaviour-in-every-language.md))                                                                                                                                                                                                                                                                                                                                                                             | `spec`                                                                        |
+| Every count the tables of files of `docs/support.md` and the README state is what the files it counts hold, and the tests of protobuf's conformance suite its runner's floor ([0004](0004-one-behaviour-in-every-language.md))                                                                                                                                                                                                                                                                                                                             | `spec`                                                                        |
 | No configuration holds a published test key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `spec`                                                                        |
 | The interop's blueprint keeps its schema and its form, its arrays in their order, and `interop-service.json` its procedures, by name ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                                                                                                                                                        | `spec`                                                                        |
 | Every implementation reads the wire alike, as the conformance files state it, but what a row of the matrix excuses                                                                                                                                                                                                                                                                                                                                                                                                                                         | `typescript`, `dotnet`                                                        |
@@ -69,15 +70,17 @@ without protoc, `BEADC_WRAPPERS_REQUIRED=1` a wrapper's test that would skip wit
 PowerShell 7.6 or, on Windows, the right to make a symbolic link, and `BEADC_IMAGE_REQUIRED=1` one
 that would skip without beadc's image; `tools/check-versions.mjs` fails where no `v*` is reached and
 where a released section of the CHANGELOG has no tag, and a document none of whose files repeats its
-version; the `beadc breaking` step compares against the newest `vX.Y.Z` whose commit is not HEAD's,
-read by the tag's commit and never by ancestry, so a release's own commit holds against the release
-before it, and fails where that tag is 0.3.0 or later and carries no blueprint, and on every
-warning, a waiver that waived nothing among them; a branch behind a release's merge-back merges
-`develop` first; protobuf's conformance suite fails a side whose successes and expected failures are
-not 2,833, or whose skips are not 2,816, and its text-format suite's skips not 909, and a testee
-answers a binary request for a message it lacks as a runtime error, never a skip, but the unstable
-edition's, which no stock generator compiles. A floor is passed by a wide margin and fails only when
-code really went away, which is worth being told.
+version; `spec/check.py` fails where a table of files has lost a row whose counts it holds, or a row
+the words that state one, or the runner's floor the suite its row counts, and on a number a row
+states that no count holds; the `beadc breaking` step compares against the newest `vX.Y.Z` whose
+commit is not HEAD's, read by the tag's commit and never by ancestry, so a release's own commit
+holds against the release before it, and fails where that tag is 0.3.0 or later and carries no
+blueprint, and on every warning, a waiver that waived nothing among them; a branch behind a
+release's merge-back merges `develop` first; protobuf's conformance suite fails a side whose
+successes and expected failures are not 2,833, or whose skips are not 2,816, and its text-format
+suite's skips not 909, and a testee answers a binary request for a message it lacks as a runtime
+error, never a skip, but the unstable edition's, which no stock generator compiles. A floor is
+passed by a wide margin and fails only when code really went away, which is worth being told.
 
 **A ceiling is a policy, and is chosen as one.** The comment budget's, 50 words to a comment and 120
 to an internal JSDoc, is a decision about what a reader's attention is worth, never a snapshot of
@@ -119,8 +122,6 @@ vector cannot.
   ([0004](0004-one-behaviour-in-every-language.md));
 - a check of the C# side's parameters, which no analyzer of .NET's recommended set counts
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md));
-- a check of the counts `docs/support.md`'s table of files states, against `spec/check.py`'s report
-  ([0004](0004-one-behaviour-in-every-language.md));
 - tests for `tools/check-commits.mjs` and `tools/check-links.mjs`, which the step that runs the
   root's tools' tests, in Node's runner, would hold.
 
