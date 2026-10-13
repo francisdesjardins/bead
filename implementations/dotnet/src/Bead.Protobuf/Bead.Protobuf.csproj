@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    A proto payload's records, read against its message's descriptor before Google.Protobuf reads
+    them (0028): what the code beadc generates for a proto binding calls, so that Bead.Core still
+    references no Google.Protobuf. The TypeScript side's twin is @francisdesjardins/bead/proto.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Bead.Protobuf</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- the library a project that binds proto references already, for its generated messages -->
+    <PackageReference Include="Google.Protobuf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the tests hold a message's shape, built once from its descriptor -->
+    <InternalsVisibleTo Include="Bead.Protobuf.Tests" />
+  </ItemGroup>
+</Project>

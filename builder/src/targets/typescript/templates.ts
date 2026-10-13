@@ -3,11 +3,12 @@
 // What the TypeScript target prints for one service, through protoplugin's symbols (decision 0022):
 // its descriptors, its catalogue, its resolvers' and its options' types, a server class where only
 // resolvers are written, and a client class holding a requester of each procedure by its name; the
-// file's contract with the runtime follows its services. Every import is a symbol, so protoplugin
-// writes each once and aliases a clash; every doc comment is `f.jsDoc`'s, which writes `*/` as `*\/`.
-// A deprecation is marked `@deprecated` on each declaration the file writes for it, as protoc-gen-es
-// marks a deprecated rpc, and a name `on`, `of` or `is` takes is marked by an overload of its own,
-// written only where something is deprecated.
+// file's contract with the runtime follows its services. A `proto` codec has the runtime check a
+// payload's records by its message's descriptor before protobuf-es reads it (decision 0028). Every
+// import is a symbol, so protoplugin writes each once and aliases a clash; every doc comment is
+// `f.jsDoc`'s, which writes `*/` as `*\/`. A deprecation is marked `@deprecated` on each
+// declaration the file writes for it, as protoc-gen-es marks a deprecated rpc, and a name `on`, `of`
+// or `is` takes is marked by an overload of its own, written only where something is deprecated.
 
 // dependencies
 
@@ -29,6 +30,8 @@ import { deprecationTextOf } from '../target.ts';
 export interface ITemplateOptions {
   /** The module the file imports the runtime from, as `f.import` takes it. */
   readonly runtime: string;
+  /** The module the file imports the check of a `proto` payload's records from, alike. */
+  readonly protoRuntime: string;
   /** The descriptor of a message a `proto` binding names, by its full name. */
   readonly messageOf: (fullName: string) => DescMessage;
 }
@@ -112,7 +115,7 @@ export const printService = (
   f: GeneratedFile,
   details: ITemplateOptions & { readonly service: IServiceEntry }
 ): void => {
-  const { service, runtime, messageOf } = details;
+  const { service, runtime, protoRuntime, messageOf } = details;
   const name = service.serviceName;
   const shown = service.proto?.fullName ?? name;
   const procedures = `${name}Procedures`;
@@ -161,6 +164,8 @@ export const printService = (
     const message = messageOf(binding.message);
     const schema = f.importSchema(message);
 
+    // ! the check first, by the schema protobuf-es reads with: it refuses what protobuf refuses
+    // where protobuf-es reads on
     return [
       fromRuntime('payloadCodecOf'),
       '<',
@@ -169,7 +174,11 @@ export const printService = (
       f.import('MessageInitShape', '@bufbuild/protobuf', true),
       '<typeof ',
       schema,
-      '>>({ decode: (bytes) => { return ',
+      '>>({ decode: (bytes) => { ',
+      f.import('checkProtoRecords', protoRuntime),
+      '(bytes, ',
+      schema,
+      '); return ',
       f.runtime.fromBinary,
       '(',
       schema,

@@ -12,7 +12,7 @@ import { applyPatch, blueprintCases } from '../../../model/__tests__/patch.ts';
 import { RULES, Severity } from '../../../rules.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../../version.ts';
 import { type IGeneratedFile, type ITargetInput, Messages } from '../../target.ts';
-import { DEFAULT_RUNTIME, type ITypeScriptOptions } from '../options.ts';
+import { DEFAULT_PROTO_RUNTIME, DEFAULT_RUNTIME, type ITypeScriptOptions } from '../options.ts';
 import { typescriptTarget } from '../typescript.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -43,6 +43,7 @@ const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
 const INTEROP_OPTIONS: ITypeScriptOptions = {
   importExtension: 'none',
   runtime: '../../src/service/service',
+  protoRuntime: '../../src/proto/records',
   messages: Messages.GENERATE,
 };
 
@@ -50,6 +51,7 @@ const INTEROP_OPTIONS: ITypeScriptOptions = {
 const DEFAULTS: ITypeScriptOptions = {
   importExtension: 'ts',
   runtime: DEFAULT_RUNTIME,
+  protoRuntime: DEFAULT_PROTO_RUNTIME,
   messages: Messages.GENERATE,
 };
 
@@ -293,8 +295,48 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('export class CommentsServer<Data = unknown> {');
   expect(content).toContain('export class OtherServer<Data = unknown> {');
-  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_2;/gu)).toHaveLength(1);
+  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_3;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
+});
+
+test("the codec a target writes checks a payload's records by its message's descriptor before its library reads it", () => {
+  const input = fixtureInput(MESSAGES);
+  const content = contentOf(
+    typescriptTarget.generate(input, DEFAULTS),
+    'bead/messages/v1/messages_bead.ts'
+  );
+  const decoders = content.match(/decode: \(bytes\) => \{.*?\}\); \}/gu) ?? [];
+
+  expect(content).toContain(`import { checkProtoRecords } from "${DEFAULT_PROTO_RUNTIME}";\n`);
+  expect(decoders.length).toBeGreaterThan(0);
+
+  // * the check first, by the very schema fromBinary reads with
+  for (const decoder of decoders) {
+    expect(decoder).toMatch(
+      /^decode: \(bytes\) => \{ checkProtoRecords\(bytes, (\w+)\); return fromBinary\(\1, bytes, \{ recursionLimit: 101 \}\); \}$/u
+    );
+  }
+
+  // a relative module is imported at the file's depth, as the runtime's is
+  for (const [importExtension, extension] of [
+    ['none', ''],
+    ['js', '.js'],
+    ['ts', '.ts'],
+  ] as const) {
+    expect(
+      contentOf(
+        typescriptTarget.generate(input, { ...INTEROP_OPTIONS, importExtension }),
+        'bead/messages/v1/messages_bead.ts'
+      )
+    ).toContain(
+      `import { checkProtoRecords } from "../../../../../src/proto/records${extension}";\n`
+    );
+  }
+
+  // a file that binds no proto message imports no check
+  expect(
+    contentOf(typescriptTarget.generate(interopInput(), INTEROP_OPTIONS), 'interop_bead.ts')
+  ).not.toContain('checkProtoRecords');
 });
 
 test('writes */ as *\\/ and keeps two paragraphs', () => {

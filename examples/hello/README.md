@@ -115,9 +115,11 @@ and neither writes to its standard error. CI's `examples` job runs all of it, on
 ## What a project outside this repository writes instead
 
 The example reaches each runtime from its source, as no runtime is published yet: the TypeScript
-half by Yarn's `portal:` protocol, the C# half by a `ProjectReference`. A project of its own names
-the published package instead, `"@francisdesjardins/bead": "<version>"` and
-`<PackageReference Include="Bead.Transport.WebSockets" Version="<version>" />`, once they are.
+half by Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assembly it uses,
+`Bead.Protobuf` among them, whose check its generated `proto` codecs call. A project of its own
+names the published package instead, `"@francisdesjardins/bead": "<version>"`,
+`<PackageReference Include="Bead.Transport.WebSockets" Version="<version>" />` and
+`<PackageReference Include="Bead.Protobuf" Version="<version>" />`, once they are.
 
 From source, the TypeScript runtime is its `.ts` files, which a consumer's compiler compiles under
 the consumer's options. [`typescript/tsconfig.consumer.json`](typescript/tsconfig.consumer.json)

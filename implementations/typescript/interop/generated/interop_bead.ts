@@ -2,7 +2,7 @@
 // Do not edit: regenerate with beadc.
 
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "../../src/service/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_2, PAYLOAD_CODECS, requestOf } from "../../src/service/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_3, PAYLOAD_CODECS, requestOf } from "../../src/service/service";
 
 
 /**
@@ -373,4 +373,4 @@ export class InteropClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_2;
+void GENERATED_CODE_SUPPORTS_VERSION_3;

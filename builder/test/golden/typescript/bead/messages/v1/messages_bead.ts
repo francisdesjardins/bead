@@ -4,11 +4,12 @@
 /* eslint-disable */
 
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolverCallback, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_2, PAYLOAD_CODECS, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_3, PAYLOAD_CODECS, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
 import type { Farewell, Farewell_Reply, Greeting, Greeting_Reply } from "./messages_pb.ts";
 import { Farewell_ReplySchema, FarewellSchema, Greeting_ReplySchema, GreetingSchema } from "./messages_pb.ts";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { checkProtoRecords } from "@francisdesjardins/bead/proto";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { TimestampSchema } from "@bufbuild/protobuf/wkt";
 
@@ -26,8 +27,8 @@ export const GreeterProcedures = Object.freeze({
     admission: 'none',
     failures: { NOBODY: 1 },
     procedure: { procedureId: 1, procedureName: 'sayHello', serviceId: 3, serviceRevision: 1 },
-    request: payloadCodecOf<Greeting, MessageInitShape<typeof GreetingSchema>>({ decode: (bytes) => { return fromBinary(GreetingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GreetingSchema, create(GreetingSchema, given)); } }),
-    result: payloadCodecOf<Greeting_Reply, MessageInitShape<typeof Greeting_ReplySchema>>({ decode: (bytes) => { return fromBinary(Greeting_ReplySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(Greeting_ReplySchema, create(Greeting_ReplySchema, given)); } }),
+    request: payloadCodecOf<Greeting, MessageInitShape<typeof GreetingSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, GreetingSchema); return fromBinary(GreetingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GreetingSchema, create(GreetingSchema, given)); } }),
+    result: payloadCodecOf<Greeting_Reply, MessageInitShape<typeof Greeting_ReplySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, Greeting_ReplySchema); return fromBinary(Greeting_ReplySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(Greeting_ReplySchema, create(Greeting_ReplySchema, given)); } }),
   }),
   /**
    * Notifies the time, as a well-known type. Admits every call.
@@ -37,9 +38,9 @@ export const GreeterProcedures = Object.freeze({
   watch: requestOf({
     admission: 'none',
     failures: {},
-    notification: payloadCodecOf<Timestamp, MessageInitShape<typeof TimestampSchema>>({ decode: (bytes) => { return fromBinary(TimestampSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TimestampSchema, create(TimestampSchema, given)); } }),
+    notification: payloadCodecOf<Timestamp, MessageInitShape<typeof TimestampSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TimestampSchema); return fromBinary(TimestampSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TimestampSchema, create(TimestampSchema, given)); } }),
     procedure: { deprecation: { message: 'Use sayHello.' }, procedureId: 2, procedureName: 'watch', serviceId: 3, serviceRevision: 1 },
-    request: payloadCodecOf<Greeting, MessageInitShape<typeof GreetingSchema>>({ decode: (bytes) => { return fromBinary(GreetingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GreetingSchema, create(GreetingSchema, given)); } }),
+    request: payloadCodecOf<Greeting, MessageInitShape<typeof GreetingSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, GreetingSchema); return fromBinary(GreetingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GreetingSchema, create(GreetingSchema, given)); } }),
     result: PAYLOAD_CODECS.json,
   }),
   /**
@@ -52,7 +53,7 @@ export const GreeterProcedures = Object.freeze({
     failures: {},
     procedure: { deprecation: {}, procedureId: 3, procedureName: 'name', serviceId: 3, serviceRevision: 1 },
     request: PAYLOAD_CODECS.text,
-    result: payloadCodecOf<Greeting, MessageInitShape<typeof GreetingSchema>>({ decode: (bytes) => { return fromBinary(GreetingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GreetingSchema, create(GreetingSchema, given)); } }),
+    result: payloadCodecOf<Greeting, MessageInitShape<typeof GreetingSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, GreetingSchema); return fromBinary(GreetingSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(GreetingSchema, create(GreetingSchema, given)); } }),
   }),
   /**
    * Says goodbye, in a message protobuf deprecates: nothing of Bead's is. Admits every call.
@@ -61,8 +62,8 @@ export const GreeterProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 4, procedureName: 'sayGoodbye', serviceId: 3, serviceRevision: 1 },
-    request: payloadCodecOf<Farewell, MessageInitShape<typeof FarewellSchema>>({ decode: (bytes) => { return fromBinary(FarewellSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(FarewellSchema, create(FarewellSchema, given)); } }),
-    result: payloadCodecOf<Farewell_Reply, MessageInitShape<typeof Farewell_ReplySchema>>({ decode: (bytes) => { return fromBinary(Farewell_ReplySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(Farewell_ReplySchema, create(Farewell_ReplySchema, given)); } }),
+    request: payloadCodecOf<Farewell, MessageInitShape<typeof FarewellSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, FarewellSchema); return fromBinary(FarewellSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(FarewellSchema, create(FarewellSchema, given)); } }),
+    result: payloadCodecOf<Farewell_Reply, MessageInitShape<typeof Farewell_ReplySchema>>({ decode: (bytes) => { checkProtoRecords(bytes, Farewell_ReplySchema); return fromBinary(Farewell_ReplySchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(Farewell_ReplySchema, create(Farewell_ReplySchema, given)); } }),
   }),
 });
 
@@ -191,4 +192,4 @@ export class GreeterClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_2;
+void GENERATED_CODE_SUPPORTS_VERSION_3;

@@ -20,6 +20,7 @@ import { InputError } from './diagnostics.ts';
 import { NAMESPACE } from './targets/csharp/options.ts';
 import { Messages } from './targets/target.ts';
 import {
+  DEFAULT_PROTO_RUNTIME,
   DEFAULT_RUNTIME,
   IMPORT_EXTENSIONS,
   type ImportExtension,
@@ -37,6 +38,8 @@ export interface ITypeScriptOutput {
   readonly importExtension: ImportExtension;
   /** A package's name, or a path relative to `out` without its extension. */
   readonly runtime: string;
+  /** The module of the check of a `proto` payload's records, as `runtime` names its own. */
+  readonly protoRuntime: string;
   readonly messages: Messages;
   /** Where another generator writes the messages, for `external`. */
   readonly messagesOut?: string;
@@ -95,6 +98,7 @@ const TYPESCRIPT_KEYS = new Set([
   'out',
   'importExtension',
   'runtime',
+  'protoRuntime',
   'messages',
   'messagesOut',
 ]);
@@ -299,6 +303,7 @@ export const parseConfig = (
 
     const importExtension = given['importExtension'] ?? 'ts';
     const runtime = given['runtime'] ?? DEFAULT_RUNTIME;
+    const protoRuntime = given['protoRuntime'] ?? DEFAULT_PROTO_RUNTIME;
     const messages = given['messages'] ?? Messages.GENERATE;
 
     if (!(IMPORT_EXTENSIONS as readonly unknown[]).includes(importExtension)) {
@@ -311,6 +316,14 @@ export const parseConfig = (
 
     if (RELATIVE.test(runtime) && EXTENSION.test(runtime)) {
       refuse(`${key}.runtime: ${runtime} names no extension; importExtension gives it`);
+    }
+
+    if (!isText(protoRuntime) || path.isAbsolute(protoRuntime)) {
+      return refuse(`${key}.protoRuntime is a package's name, or a path relative to out`);
+    }
+
+    if (RELATIVE.test(protoRuntime) && EXTENSION.test(protoRuntime)) {
+      refuse(`${key}.protoRuntime: ${protoRuntime} names no extension; importExtension gives it`);
     }
 
     if (!MESSAGES.includes(messages)) {
@@ -326,6 +339,7 @@ export const parseConfig = (
       out: resolved(given['out'], `${key}.out`),
       importExtension: importExtension as ImportExtension,
       runtime,
+      protoRuntime,
       messages: messages as Messages,
       ...('messagesOut' in given
         ? { messagesOut: resolved(given['messagesOut'], `${key}.messagesOut`) }

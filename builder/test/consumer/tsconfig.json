@@ -3,11 +3,12 @@
   // configuration, which `yarn type-check` runs it under after theirs.
   "extends": "../golden/typescript/tsconfig.json",
   "compilerOptions": {
-    // ! `paths` resolve from the configuration that states them: the runtime's entry, from here
+    // ! `paths` resolve from the configuration that states them: the runtime's entries, from here
     "paths": {
       "@francisdesjardins/bead/service": [
         "../../../implementations/typescript/src/service/service.ts"
-      ]
+      ],
+      "@francisdesjardins/bead/proto": ["../../../implementations/typescript/src/proto/records.ts"]
     }
   },
   "include": ["*.ts"]

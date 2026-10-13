@@ -1,0 +1,9 @@
+# The tests protobuf's conformance suite fails through the C# side's generated codec, each with the
+# runner's message, its reason on the comment line above (decision 0028). The runner fails a listed
+# test that passes, so the list is held both ways.
+
+# an extension is read as an unknown field: the generated codec gives no registry
+Recommended.Editions.ProtobufInput.RejectInvalidUtf8.String.Extension # Should have failed to parse, but didn't.
+# Google.Protobuf writes a message's unknown fields back by number and wire type, not in their
+# order: docs/support.md, "A proto message's unknown fields, written back"
+Required.*.ProtobufInput.UnknownOrdering.ProtobufOutput # Unknown field mismatch

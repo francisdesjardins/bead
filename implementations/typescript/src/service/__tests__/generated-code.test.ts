@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { GENERATED_CODE_SUPPORTS_VERSION_2 } from '../generated-code';
+import { GENERATED_CODE_SUPPORTS_VERSION_3 } from '../generated-code';
 
 // definition
 
 test.describe('the contract with generated code', () => {
   test('holds the constant of the contract this runtime supports', () => {
-    expect(GENERATED_CODE_SUPPORTS_VERSION_2).toBe(true);
+    expect(GENERATED_CODE_SUPPORTS_VERSION_3).toBe(true);
   });
 });

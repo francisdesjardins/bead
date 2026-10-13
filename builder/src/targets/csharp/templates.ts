@@ -5,12 +5,13 @@
 // which the service layer's options take typed by the service; the sealed classes its server and its
 // client hold, a member a command, a procedure that notifies or its notification; a server class
 // where only resolvers are written; and a client class holding a requester of each procedure by its
-// rpc's name. The file's contract with the runtime follows its services. Every type is qualified
-// from `global::`, so no type of the namespace takes a runtime type's place; every description goes
-// through `docOf`, the one writer of a documentation comment. A deprecation is marked
-// `[Obsolete]`, its text and Bead's diagnostic id, on each declaration the file writes for it, as
-// protoc's C# generator and gRPC's mark a deprecated rpc, through `obsoleteOf`, the one writer of
-// the mark.
+// rpc's name. A `proto` codec has `Bead.Protobuf` check a payload's records by its message's
+// descriptor before Google.Protobuf reads it (decision 0028). The file's contract with the runtime
+// follows its services. Every type is qualified from `global::`, so no type of the namespace takes
+// a runtime type's place; every description goes through `docOf`, the one writer of a documentation
+// comment. A deprecation is marked `[Obsolete]`, its text and Bead's diagnostic id, on each
+// declaration the file writes for it, as protoc's C# generator and gRPC's mark a deprecated rpc,
+// through `obsoleteOf`, the one writer of the mark.
 
 // dependencies
 
@@ -330,6 +331,10 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       `global::Bead.PayloadCodecs.Of<${message}>(`,
       `${inner}(bytes) =>`,
       `${inner}{`,
+      `${body}// ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf`,
+      `${body}// refuses where a stock library reads on (decision 0028)`,
+      `${body}global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, ${message}.Descriptor);`,
+      '',
       `${body}// ! spec 17.9's bound, set here rather than left to the library's default. The payload is`,
       `${body}// read as a message field holds one, after its length, and the top message counts: 101 is`,
       `${body}// 100 below it`,

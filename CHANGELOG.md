@@ -59,6 +59,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   loads from another origin calls each side's interop server over HTTP with the bundled HTTP client,
   and CI's .NET job runs it against both. Both interop servers name the origins
   `BEAD_INTEROP_ORIGINS` lists.
+- `protoRuntime` in a TypeScript output of `beadc.yaml`: the module a generated `proto` codec
+  imports `checkProtoRecords` from, `@francisdesjardins/bead/proto` by default, or a path relative
+  to the output, as `runtime` names its own.
+- Each side reads a `proto` payload's records against its message's descriptor before its stock
+  library does, and refuses what protobuf refuses where a library reads on: a record past the end of
+  its message, a packed record whose values do not end at its length, a varint of more than 10
+  bytes, a tag of more than 5 bytes or past 32 bits, a length past the bytes after it, a field at a
+  wire type its type does not take, and a map's entry with a field it does not declare (spec 17.9.5,
+  17.9.6; decision 0028). The check lives in `@francisdesjardins/bead/proto`, `checkProtoRecords`,
+  and in the `Bead.Protobuf` assembly, `ProtoRecords.Check`; the four open rows of the support
+  matrix where a stock library read what protobuf refuses close, and a known field at a wire type
+  its type does not take, and a map's entry's undeclared field, are two rows of its "Leveled down".
+- Each side's generated `proto` codec plays protobuf's conformance suite, v36.2, and both read one
+  corpus alike, in CI, through `tools/protobuf-conformance.mjs`, its runner fetched by its pin,
+  `tools/protobuf-conformance/runner.json`; Google.Protobuf's order of the unknown fields it writes
+  back, and its leaving out a map's entry's key at its default, which protobuf-es writes, are
+  platform rows of the support matrix.
 
 ### Changed
 
@@ -158,10 +175,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI's `beadc breaking` step compares against the newest `vX.Y.Z` whose commit is not HEAD's, and
   fails on every warning; `tools/release.mjs tag` writes `ci.yml` without the waivers the release
   makes moot, and `prepare` on a hotfix without every waiver.
+- `spec/codecs.proto` is edition 2023, and `Probe` gains a packed field, a repeated fixed32, a map
+  and a delimited field, `counts`, `stamps`, `children` and `delimited`; a `proto` row's `read`
+  gives each where it holds any, and how deep messages nest below it through each; `codecs.json`
+  gains 20 `proto` payloads and excuses no side from a `proto` payload but
+  `a string's leading U+FEFF`. Spec 17.9.3 counts a group and a map's entry as a message toward the
+  depth bound.
+- Generated code names `GENERATED_CODE_SUPPORTS_VERSION_3`, `GeneratedCode.SupportsVersion3`, and
+  its `proto` codec checks a payload's records before its library reads them; a C# project that
+  binds `proto` references `Bead.Protobuf`. The runtimes no longer carry version 2, so code
+  generated before 0.4.0 must be regenerated.
 
 ### Removed
 
 - `spec/uncited.txt`, `spec/debugging-uncited.txt` and `--write-uncited`, which the ledgers replace.
+- `GENERATED_CODE_SUPPORTS_VERSION_2` and `GeneratedCode.SupportsVersion2`: the runtime no longer
+  serves code generated before 0.4.0, which reads a `proto` payload unchecked (decision 0028).
 
 ### Fixed
 

@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../implementations/dotnet/src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <!-- the check a proto codec runs before Google.Protobuf reads, which it carries -->
+    <ProjectReference Include="../../../implementations/dotnet/src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <PackageReference Include="Google.Protobuf" />
     <!-- in both builds, so one lock file holds both: only the external one runs it -->
     <PackageReference Include="Grpc.Tools" PrivateAssets="all" />

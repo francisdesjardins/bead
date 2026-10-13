@@ -27,6 +27,10 @@ public sealed class GreeterProcedures
             Request = global::Bead.PayloadCodecs.Of<global::Bead.Messages.V1.Greeting>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Messages.V1.Greeting.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -54,6 +58,10 @@ public sealed class GreeterProcedures
             Result = global::Bead.PayloadCodecs.Of<global::Bead.Messages.V1.Greeting.Types.Reply>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Messages.V1.Greeting.Types.Reply.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -90,6 +98,10 @@ public sealed class GreeterProcedures
             Request = global::Bead.PayloadCodecs.Of<global::Bead.Messages.V1.Greeting>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Messages.V1.Greeting.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -118,6 +130,10 @@ public sealed class GreeterProcedures
             Notification = global::Bead.PayloadCodecs.Of<global::Google.Protobuf.WellKnownTypes.Timestamp>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Google.Protobuf.WellKnownTypes.Timestamp.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -155,6 +171,10 @@ public sealed class GreeterProcedures
             Result = global::Bead.PayloadCodecs.Of<global::Bead.Messages.V1.Greeting>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Messages.V1.Greeting.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -190,6 +210,10 @@ public sealed class GreeterProcedures
             Request = global::Bead.PayloadCodecs.Of<global::Bead.Messages.V1.Farewell>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Messages.V1.Farewell.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -217,6 +241,10 @@ public sealed class GreeterProcedures
             Result = global::Bead.PayloadCodecs.Of<global::Bead.Messages.V1.Farewell.Types.Reply>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Bead.Messages.V1.Farewell.Types.Reply.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -444,5 +472,5 @@ public sealed class GreeterClient
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion2;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion3;
 }

@@ -35,6 +35,9 @@ src/
   Bead.Core/                    the codec, the router's core, both sides' routers, the service,
                                 session and notification managers, the relay, the server over
                                 them, and the service layer a service is served and called through
+  Bead.Protobuf/                the check of a proto payload's records against its message's
+                                descriptor, which a generated proto codec calls before
+                                Google.Protobuf reads them: Bead.Core references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
@@ -55,6 +58,10 @@ tests/
                                 under this side's rules as a consumer compiles them
   Shared/                       what several test projects link: the test clock, the durations'
                                 helper, the JSON payloads, the addresses a server listens on
+tools/
+  Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
+                                Generated/ is what tools/protobuf-conformance.mjs generates at run
+                                time; failing.txt, its failure list (decision 0028)
 ```
 
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
@@ -83,6 +90,13 @@ share.
   `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a connect by `localhost` to a server on
   one family never waits out the other's refusal; an HTTP client given a `Handler` keeps the
   handler's behaviour.
+- **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
+  `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
+  own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
+  stock library reads on, a field at a wire type its type does not take and a map's entry with a
+  field it does not declare among them (spec 17.9, [decision
+  0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+  A project that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
 - **The clock** is a `TimeProvider`, named `Clock`, which every layer takes and exposes ([decision
   0011](../../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 

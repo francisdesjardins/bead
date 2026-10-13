@@ -201,6 +201,7 @@ const outputFilesOf = (
     ...typescriptTarget.generate(input, {
       importExtension: output.importExtension,
       runtime: output.runtime,
+      protoRuntime: output.protoRuntime,
       messages: output.messages,
       ...(messagesOut === '' ? {} : { messagesOut }),
     }),

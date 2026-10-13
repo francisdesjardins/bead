@@ -429,8 +429,8 @@ await server.transport.start({ port });
 
 ### The service layer
 
-`@francisdesjardins/bead/service` is the layer a service is served and called through, and the one
-entry generated code imports
+`@francisdesjardins/bead/service` is the layer a service is served and called through, and the
+entry generated code imports, beside `./proto` where a file binds `proto`
 ([0018](../../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)).
 A service is its procedures, each a typed descriptor — `requestOf` for a request, `notification`
 given for one that notifies, `commandOf` for a command — holding its procedure, who may call it, the
@@ -480,7 +480,17 @@ The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last re
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
 functions, a protobuf message's from protobuf-es's `fromBinary(schema, bytes, { recursionLimit:
 101 })` and `toBinary` — 101, since protobuf-es counts the top message, and section 17.9 bounds a
-message 100 deep below it.
+message 100 deep below it. Before it reads, generated code calls `checkProtoRecords(bytes, schema)`
+from `@francisdesjardins/bead/proto`, which reads the payload's records against the message's own
+descriptor and throws a `SyntaxError` where they are no encoding of it and protobuf-es would read on,
+or where sections 17.9.5 and 17.9.6 refuse them: a field at a wire type its type does not take, and
+a map's entry with a field other than its key and its value
+([0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+Each message's shape is built once, from its descriptor; `./proto` takes `@bufbuild/protobuf` as an
+optional peer, by its types alone, so no protobuf code loads with it. Protobuf's conformance suite
+plays the generated codec, the check in front, through the testee in `tools/protobuf-conformance/`,
+which the root's `tools/protobuf-conformance.mjs` generates its code into and runs, with its failure
+list, `failing.txt`.
 
 ```ts
 const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
