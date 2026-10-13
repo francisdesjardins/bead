@@ -77,6 +77,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tools/protobuf-conformance/runner.json`; Google.Protobuf's order of the unknown fields it writes
   back, and its leaving out a map's entry's key at its default, which protobuf-es writes, are
   platform rows of the support matrix.
+- The DevTools panel reads a call whole. Calls shows a row a call, its steps and its envelopes met by
+  its call id on its connection, its outcome in words, a command the server made read the right way
+  round, and its envelopes beneath it in words; a subscription keeps its last 50 notifications and
+  counts the others. A call's detail has five tabs: Overview, its failure whole; Payload, as a tree;
+  Exchange, its envelopes as beads on its thread in SVG, a third lane for a destination behind a
+  relay, a transfer's bytes against its credit; Diff, a notification against the one before it, an
+  answer against its procedure's last; and Trace, the stack that made it, each frame opened in
+  Sources. State rebuilds a client's session, calls in flight, subscriptions and their credit, and
+  transfers at any moment a cursor stands on, replaying nothing; Timeline draws every call on one
+  axis of time, and a span dragged across it bounds the list. The bar pauses (`Ctrl+E`), clears
+  (`Ctrl+L`), keeps the log across a reload, exports the records as JSON, `bead-devtools-log`, and
+  imports them back, and its Requests, Commands, Notifications and Failed buttons filter in one
+  click; the keyboard moves through the calls, and a call's context menu copies its payloads or a
+  snippet that makes it again by the page's own service manager. Metrics shows a row a procedure and
+  its calls a second over the last minute, a procedure's name showing its calls alone; Wire names
+  each procedure a client told, says a listen for a `POST` with no body, and copies an exchange as
+  the skeleton of an entry of `spec/conversations.json`. An empty panel says why and offers to
+  reload the page.
 - The extension's hook, while a panel watches, tells the panel more of each call: a failure whole —
   where it was raised, the relays it crossed, its destination, the call id its envelope named — the
   call's options whole, `destinationId` and `closeOnTimeout` among them, each payload as a tree of
@@ -223,6 +241,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A router tells its service manager the failure it answered a request with in its resolver's
   place: `IRouterLike` gains `answeredOf`, `AnsweredOf` on the C# side, which a router of the
   application's own implements (decision 0013).
+- The DevTools panel shows a call a row, its envelopes beneath it, and Envelopes is a mode of
+  Calls; a filter refused keeps the last that held, as debugging 6.9 keeps one given in place, the
+  field marked and its reason said; a selection the filter or the client hides is let go with a
+  word; the page's state stays apart from the records let go; and below 720 pixels the panel folds
+  its detail under its list.
+- The DevTools extension holds what every browser shares — the hook, the panel and its model, the
+  wire's and the registry's readers, the messages — apart from Chrome's glue, in
+  `implementations/typescript/devtools/chrome/`: its manifest, its bridge, its background, its
+  DevTools page, and the panel's host made of Chrome's API.
 
 ### Removed
 

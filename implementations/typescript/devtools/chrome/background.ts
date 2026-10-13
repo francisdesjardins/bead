@@ -6,9 +6,9 @@
 
 // dependencies
 
-import { chromeOf, type IPort } from './chrome';
-import type { BackgroundMessage, IPanelGreeting, PanelMessage } from './messages';
-import { PORTS } from './messages';
+import { chromeOf, type IPort } from './api';
+import type { BackgroundMessage, IPanelGreeting, PanelMessage } from '../messages';
+import { PORTS } from '../messages';
 
 // helpers
 

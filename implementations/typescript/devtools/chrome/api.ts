@@ -3,6 +3,10 @@
 // The part of Chrome's extension API the extension uses, typed here rather than by a package of
 // declarations, so the package's types hold no `chrome` global outside this folder.
 
+// dependencies
+
+import type { IHarEntry } from '../host';
+
 // interfaces
 
 /** An event of the API: listeners added and taken away. */
@@ -21,27 +25,22 @@ export interface IPort {
   postMessage(message: unknown): void;
 }
 
-/** An exchange the Network panel saw, as DevTools hands it to an extension: a HAR entry. */
-export interface IHarEntry {
-  readonly request: {
-    method: string;
-    postData?: { encoding?: string; mimeType?: string; text?: string } | undefined;
-    url: string;
-  };
-  readonly response: { content: { mimeType?: string }; status: number };
-  readonly startedDateTime: string;
-  getContent(callback: (content: string | null, encoding: string) => void): void;
-}
+// types
+
+/** Opens a resource in Sources at a line, from 0. */
+// oxlint-disable-next-line bead/options-last -- Chrome's own, `openResource(url, lineNumber, callback)`
+type OpenResource = (...parts: [url: string, line: number, done?: () => void]) => void;
 
 /** The part of `chrome` the extension reads. */
 export interface IChrome {
   devtools?:
     | {
-        inspectedWindow: { tabId: number };
+        inspectedWindow: { tabId: number; reload?: (() => void) | undefined };
         network: { onRequestFinished: IExtensionEvent<(entry: IHarEntry) => void> };
         panels: {
           // oxlint-disable-next-line bead/options-last -- Chrome's own, `create(title, iconPath, pagePath)`
           create: (...parts: [title: string, icon: string, page: string]) => void;
+          openResource?: OpenResource | undefined;
           themeName?: string;
         };
       }

@@ -1,72 +1,65 @@
 // ── DevTools panel ────────────────────────────────────────────────────────────
 
-// The Bead panel (decision 0015): the clients the inspected page announced, their calls and their
-// envelopes, filtered by the package's own filter, what their registries count, and, for a page
-// with no hook, the HTTP transport's exchanges the Network panel saw. Opened outside DevTools, as
-// its tests open it, it reads its tab from `?tabId=` and has no Network panel to read.
+// The Bead panel (decision 0015), the same in every browser: the clients the inspected page
+// announced and their calls, a row a call with its envelopes beneath, filtered by the package's
+// own filter; a call's detail; the state of a connection at any moment the panel recorded; every
+// call on a time axis; what the registries count; and, for a page with no hook, the HTTP
+// transport's exchanges the Network panel saw. What it asks of its browser is its host's.
 
 // dependencies
 
-import { CredentialScheme, FailureScope, ProtocolCode } from '../src/router/client/router-client';
-import { EnvelopeKind } from '../src/router/shared/constants';
-import { filterDebug, filterEnvelopeDebug } from '../src/router/shared/debug-filter';
-import type { IDebugEvent } from '../src/router/shared/types';
-import { chromeOf, type IHarEntry, type IPort } from './chrome';
-import { type IProcedureMetrics, metricsOf, quantileOf } from './exposition';
+import type { IHarEntry, IHostPort, IPanelHost } from './host';
 import type {
   ActivityRecord,
   BackgroundMessage,
-  ICallRecord,
-  IEnvelopeRecord,
   IPanelGreeting,
   ISourceRecord,
   PanelMessage,
 } from './messages';
-import { PORTS, PROTOCOLS } from './messages';
-import { bytesOfContent, isBeadType, type IWireReading, readBody } from './wire';
-
-// interfaces
-
-/** An HTTP exchange the Network panel saw, read. */
-interface IExchange {
-  method: string;
-  /** What its request's body held, or why it could not be read. */
-  request: IWireReading | string;
-  /** What its answer's body held, or why it could not be read; none until DevTools gives it. */
-  response?: IWireReading | string | undefined;
-  startedAt: string;
-  status: number;
-  url: string;
-}
+import { PROTOCOLS } from './messages';
+import { metricsOf } from './exposition';
+import { createCallBook, type ICall, type ICallBook } from './model/calls';
+import {
+  endOf,
+  requestPayloadOf,
+  answerPayloadOf,
+  startOf,
+  statusOf,
+  subscriptionOf,
+} from './model/facts';
+import { hasWord, KEEP_ALL, keeperOf, keepsCall, toggleWord } from './model/filter';
+import { type IReading, withReading } from './model/history';
+import { logOf, readLog } from './model/log';
+import type { ISpan } from './model/scale';
+import { codeOfCall } from './model/snippets';
+import { spanOfCalls } from './model/state';
+import { clockOf, numberOf } from './model/words';
+import { callRowsOf, envelopeListRowsOf } from './views/calls';
+import { type DetailTab, detailOf } from './views/detail';
+import { make, noteOf } from './views/dom';
+import { metricsViewOf } from './views/metrics';
+import { stateViewOf } from './views/state';
+import { timelineViewOf } from './views/timeline';
+import { type IExchange, wireViewOf } from './views/wire';
+import { bytesOfContent, isBeadType, readBody } from './wire';
 
 // types
 
-type View = 'calls' | 'envelopes' | 'metrics' | 'wire';
+type View = 'calls' | 'metrics' | 'state' | 'timeline' | 'wire';
 
 // constants
 
-/** The records each list keeps, newest first; the oldest are let go past them. */
-const KEPT = 1_000;
+/** The exchanges the Wire view keeps, newest first. */
+const EXCHANGES_KEPT = 1_000;
 
-/** How often the registries are read, while the Metrics view is shown, in milliseconds. */
-const METRICS_MILLISECONDS = 1_000;
+/** How often the panel redraws what time moves — a call in flight — and reads the registries. */
+const TICK_MILLISECONDS = 1_000;
 
 /** How long a panel whose port closed waits before it opens another, in milliseconds. */
 const RECONNECT_MILLISECONDS = 1_000;
 
-const namesOf = (values: Record<string, number>): ReadonlyMap<number, string> => {
-  return new Map(
-    Object.entries(values).map(([name, value]) => {
-      return [value, name];
-    })
-  );
-};
-
-const CODE_NAMES = namesOf(ProtocolCode);
-const KIND_NAMES = namesOf(EnvelopeKind);
-const SCHEME_NAMES = namesOf(CredentialScheme);
-
-const numbers = new Intl.NumberFormat('en-CA', { maximumFractionDigits: 3 });
+/** How long a word the panel says, "Copied" say, stays. */
+const TOAST_MILLISECONDS = 1_600;
 
 // helpers
 
@@ -80,653 +73,1093 @@ const elementOf = (id: string): HTMLElement => {
   return element;
 };
 
-/** An element of `tag`, its class and its text. */
-const make = (
-  tag: string,
-  { className, text }: { className?: string; text?: string }
-): HTMLElement => {
-  const element = document.createElement(tag);
-
-  if (className !== undefined) {
-    element.className = className;
-  }
-
-  if (text !== undefined) {
-    element.textContent = text;
-  }
-
-  return element;
-};
-
-const timeOf = (milliseconds: number): string => {
-  const date = new Date(milliseconds);
-
-  return `${date.toLocaleTimeString('en-CA', { hour12: false })}.${String(date.getMilliseconds()).padStart(3, '0')}`;
-};
-
-const arrowOf = (direction: string): string => {
-  return direction === 'tx' ? '→' : '←';
-};
-
-/** What a call's step ended with, as a person reads it. */
-const outcomeOf = ({ direction, error }: ICallRecord): string => {
-  if (error === undefined) {
-    return direction === 'tx' ? '' : 'ok';
-  }
-
-  if (error.code === undefined) {
-    return error.name;
-  }
-
-  return error.scope === FailureScope.APPLICATION
-    ? `the procedure's code ${String(error.code)}`
-    : (CODE_NAMES.get(error.code) ?? `code ${String(error.code)}`);
-};
-
-/** A header's fields after its kind and call id, as one line. */
-const headerLineOf = (header: IEnvelopeRecord['header']): string => {
-  return Object.entries(header)
-    .filter(([name]) => {
-      return name !== 'kind' && name !== 'callId';
-    })
-    .map(([name, value]) => {
-      return name === 'credentialScheme'
-        ? `credential ${SCHEME_NAMES.get(Number(value)) ?? String(value)}`
-        : `${name} ${String(value)}`;
-    })
-    .join(', ');
-};
-
-/** Whether `record` passes the filter `spec` makes, read by the package's own filter. */
-const keeperOf = (spec: string): ((record: ActivityRecord) => boolean) => {
-  let isKept = false;
-  const keep = (): void => {
-    isKept = true;
-  };
-  const calls = filterDebug(keep, spec);
-  const envelopes = filterEnvelopeDebug(keep, spec);
-
-  return (record) => {
-    isKept = false;
-
-    if (record.kind === 'call') {
-      calls(null, record as unknown as IDebugEvent);
-    } else {
-      envelopes({
-        direction: record.direction as 'rx' | 'tx',
-        header: { kind: Number(record.header['kind']) as EnvelopeKind },
-      });
-    }
-
-    return isKept;
-  };
+const isTyping = (target: EventTarget | null): boolean => {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLSelectElement ||
+    target instanceof HTMLTextAreaElement
+  );
 };
 
 // definition
 
-const chrome = chromeOf();
-const tabId =
-  chrome.devtools?.inspectedWindow.tabId ??
-  Number(new URLSearchParams(location.search).get('tabId'));
-const shown = {
-  calls: elementOf('calls'),
-  clear: elementOf('clear') as HTMLButtonElement,
-  detail: elementOf('detail'),
-  envelopes: elementOf('envelopes'),
-  filter: elementOf('filter') as HTMLInputElement,
-  filterState: elementOf('filter-state'),
-  metrics: elementOf('metrics'),
-  source: elementOf('source') as HTMLSelectElement,
-  status: elementOf('status'),
-  wire: elementOf('wire'),
-};
-const state = {
-  calls: [] as ICallRecord[],
-  dropped: 0,
-  envelopes: [] as IEnvelopeRecord[],
-  exchanges: [] as IExchange[],
-  expositions: new Map<number, string | null>(),
-  keeps: (_record: ActivityRecord): boolean => {
-    return true;
-  },
-  selected: undefined as ICallRecord | undefined,
-  sources: [] as ISourceRecord[],
-  view: 'calls' as View,
-};
-let port: IPort | undefined;
-let isDrawing = false;
+/** Starts the panel on its page, over what `host` gives it. */
+export const startPanel = (host: IPanelHost): void => {
+  const shown = {
+    calls: elementOf('calls'),
+    callsTable: elementOf('calls-table'),
+    clear: elementOf('clear') as HTMLButtonElement,
+    detail: elementOf('detail'),
+    empty: elementOf('empty'),
+    envelopes: elementOf('envelopes'),
+    envelopesTable: elementOf('envelopes-table'),
+    export: elementOf('export') as HTMLButtonElement,
+    filter: elementOf('filter') as HTMLInputElement,
+    filterState: elementOf('filter-state'),
+    footer: elementOf('footer'),
+    import: elementOf('import') as HTMLButtonElement,
+    importFile: elementOf('import-file') as HTMLInputElement,
+    list: elementOf('list'),
+    menu: elementOf('menu'),
+    metrics: elementOf('metrics'),
+    preserve: elementOf('preserve') as HTMLInputElement,
+    range: elementOf('range'),
+    record: elementOf('record') as HTMLButtonElement,
+    source: elementOf('source') as HTMLSelectElement,
+    state: elementOf('state'),
+    status: elementOf('status'),
+    timeline: elementOf('timeline'),
+    toast: elementOf('toast'),
+    wire: elementOf('wire'),
+  };
+  const state = {
+    at: undefined as number | undefined,
+    book: undefined as unknown as ICallBook,
+    detailTab: 'overview' as DetailTab,
+    dropped: 0,
+    exchanges: [] as IExchange[],
+    expanded: new Set<number>(),
+    expositions: new Map<number, string | null>(),
+    hidden: undefined as string | undefined,
+    history: new Map<number, IReading[]>(),
+    isFailedOnly: false,
+    isGone: false,
+    isRecording: true,
+    keeper: KEEP_ALL,
+    mode: 'calls' as 'calls' | 'envelopes',
+    pausedLetGo: 0,
+    range: undefined as ISpan | undefined,
+    selected: undefined as number | undefined,
+    sources: [] as ISourceRecord[],
+    view: 'calls' as View,
+    wasGone: false,
+  };
+  let port: IHostPort | undefined;
+  let isDrawing = false;
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-const tell = (message: PanelMessage): void => {
-  port?.postMessage(message);
-};
+  const sideOf = (source: number): string | undefined => {
+    return state.sources.find(({ id }) => {
+      return id === source;
+    })?.side;
+  };
 
-const isShownSource = (source: number): boolean => {
-  return shown.source.value === 'all' || shown.source.value === String(source);
-};
+  const newBook = (): ICallBook => {
+    return createCallBook({ sideOf });
+  };
 
-const drawCalls = (): void => {
-  const rows = state.calls
-    .filter((record) => {
-      return isShownSource(record.source) && state.keeps(record);
-    })
-    .map((record) => {
-      const row = document.createElement('tr');
-      const cells = [
-        timeOf(record.startedAt + (record.direction === 'rx' ? (record.duration ?? 0) : 0)),
-        arrowOf(record.direction),
-        record.type,
-        record.callId === undefined ? '' : `#${String(record.callId)}`,
-        record.procedureName,
-        record.duration === undefined ? '' : `${numbers.format(record.duration)} ms`,
-        outcomeOf(record),
-      ];
+  state.book = newBook();
 
-      row.append(
-        ...cells.map((text) => {
-          return make('td', { text });
+  const tell = (message: PanelMessage): void => {
+    port?.postMessage(message);
+  };
+
+  const say = (text: string): void => {
+    shown.toast.textContent = text;
+    shown.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      shown.toast.hidden = true;
+    }, TOAST_MILLISECONDS);
+  };
+
+  // a DevTools panel may be refused the clipboard's API; a selection copied is the fallback
+  const copy = (text: string): void => {
+    const fallback = (): void => {
+      const area = make('textarea', { text }) as HTMLTextAreaElement;
+
+      document.body.append(area);
+      area.select();
+      // oxlint-disable-next-line typescript/no-deprecated -- the one copy a panel denied the clipboard's API has
+      document.execCommand('copy');
+      area.remove();
+      say('Copied');
+    };
+
+    navigator.clipboard.writeText(text).then(
+      () => {
+        say('Copied');
+      },
+      () => {
+        fallback();
+      }
+    );
+  };
+
+  const nameOf = (call: ICall): string => {
+    if (call.procedureName !== undefined) {
+      return call.procedureName;
+    }
+
+    if (call.serviceId !== undefined && call.procedureId !== undefined) {
+      return (
+        state.book.nameOf({
+          procedureId: call.procedureId,
+          serviceId: call.serviceId,
+          source: call.source,
+        }) ?? `service ${String(call.serviceId)} · procedure ${String(call.procedureId)}`
+      );
+    }
+
+    return 'a call not seen open';
+  };
+
+  const isShownSource = (source: number): boolean => {
+    return shown.source.value === 'all' || shown.source.value === String(source);
+  };
+
+  // a call's client is named beside its id when more than one client's calls are shown
+  const isEveryClient = (): boolean => {
+    return (
+      shown.source.value === 'all' &&
+      new Set(
+        state.book.calls.map(({ source }) => {
+          return source;
+        })
+      ).size > 1
+    );
+  };
+
+  /** The calls the list shows, in the order they opened. */
+  const visibleCalls = (): ICall[] => {
+    const now = Date.now();
+
+    return state.book.calls.filter((call) => {
+      if (!isShownSource(call.source) || !keepsCall(call, state.keeper)) {
+        return false;
+      }
+
+      if (state.isFailedOnly && statusOf(call) !== 'failed') {
+        return false;
+      }
+
+      const { range } = state;
+
+      return (
+        range === undefined || (startOf(call) <= range.to && (endOf(call) ?? now) >= range.from)
+      );
+    });
+  };
+
+  const selectedCall = (): ICall | undefined => {
+    return state.book.calls.find(({ key }) => {
+      return key === state.selected;
+    });
+  };
+
+  const earlierOf = (call: ICall): ICall | undefined => {
+    return state.book.calls
+      .filter((other) => {
+        return (
+          other.key < call.key &&
+          other.source === call.source &&
+          other.serviceId === call.serviceId &&
+          other.procedureId === call.procedureId &&
+          statusOf(other) === 'answered' &&
+          answerPayloadOf(other) !== undefined
+        );
+      })
+      .at(-1);
+  };
+
+  const clientOf = (source: number): string => {
+    return `Client ${String(source)}`;
+  };
+
+  const drawEmpty = (visible: readonly ICall[]): void => {
+    const chosen = state.sources.find(({ id }) => {
+      return String(id) === shown.source.value;
+    });
+
+    if (chosen !== undefined && !PROTOCOLS.includes(chosen.protocol)) {
+      shown.empty.replaceChildren(
+        noteOf(
+          `Client ${String(chosen.id)} speaks hook protocol ${String(chosen.protocol)}, which this extension does not read. Update the extension to see its calls.`
+        )
+      );
+
+      return;
+    }
+
+    if (visible.length > 0) {
+      shown.empty.replaceChildren();
+
+      return;
+    }
+
+    if (state.book.calls.length > 0) {
+      shown.empty.replaceChildren(noteOf('No call passes this filter.'));
+
+      return;
+    }
+
+    if (state.sources.length > 0) {
+      shown.empty.replaceChildren(
+        noteOf('No call yet: the panel shows the calls made after it opened.')
+      );
+
+      return;
+    }
+
+    const reload = make('button', { attributes: { type: 'button' }, text: 'Reload the page' });
+
+    reload.addEventListener('click', () => {
+      host.reload?.();
+    });
+    shown.empty.replaceChildren(
+      make('div', {
+        children: [
+          make('h2', { text: 'No Bead client on this page yet.' }),
+          make('ul', {
+            children: [
+              make('li', {
+                text: 'The page loaded before the extension: a client announces itself as it is built, so reload the page.',
+              }),
+              make('li', {
+                text: 'Its clients were built with devtools: false, which announces nothing.',
+              }),
+              make('li', {
+                text: 'It makes no Bead client; over HTTP, its exchanges still show in Wire.',
+              }),
+            ],
+          }),
+          ...(host.reload === undefined ? [] : [reload]),
+        ],
+        className: 'empty',
+      })
+    );
+  };
+
+  const drawCalls = (): void => {
+    const visible = visibleCalls();
+    const now = Date.now();
+    const isAllClients = isEveryClient();
+
+    // * a selection the filter or the client now hides is let go, with a word why
+    if (
+      state.selected !== undefined &&
+      !visible.some(({ key }) => {
+        return key === state.selected;
+      })
+    ) {
+      state.selected = undefined;
+      state.hidden = 'The call selected is hidden by the filter, the client or the span chosen.';
+    }
+
+    shown.callsTable.hidden = state.mode !== 'calls';
+    shown.envelopesTable.hidden = state.mode !== 'envelopes';
+
+    for (const button of document.querySelectorAll<HTMLElement>('[data-mode]')) {
+      button.setAttribute('aria-pressed', String(button.dataset['mode'] === state.mode));
+    }
+
+    if (state.mode === 'calls') {
+      const keys = new Set(
+        visible.map(({ key }) => {
+          return key;
         })
       );
-      row.dataset['direction'] = record.direction;
-      row.title = [
-        `service ${String(record.serviceId)}, procedure ${String(record.procedureId)}`,
-        ...(record.connectionHandle === undefined ? [] : [`on ${record.connectionHandle}`]),
-      ].join(', ');
+      const first = visible[0]?.key ?? 0;
 
-      if (record.error !== undefined) {
-        row.classList.add('failed');
-      }
+      shown.calls.replaceChildren(
+        ...callRowsOf({
+          calls: visible,
+          expanded: state.expanded,
+          isAllClients,
+          markers: state.book.markers.filter(({ key }) => {
+            return key > first || keys.size === 0;
+          }),
+          nameOf,
+          now,
+          selected: state.selected,
+          span: state.range ?? spanOfCalls(visible),
+        })
+      );
+    } else {
+      shown.envelopes.replaceChildren(
+        ...envelopeListRowsOf({
+          envelopes: visible
+            .flatMap((call) => {
+              return call.envelopes
+                .filter((envelope) => {
+                  return state.keeper.keepsEnvelope(envelope);
+                })
+                .map((envelope) => {
+                  return { call, envelope };
+                });
+            })
+            .sort((one, other) => {
+              return one.envelope.at - other.envelope.at;
+            }),
+          isAllClients,
+          nameOf,
+        })
+      );
+    }
 
-      if (record === state.selected) {
-        row.classList.add('selected');
-      }
+    const range = state.range;
 
-      row.addEventListener('click', () => {
-        state.selected = record;
-        draw();
+    if (range === undefined) {
+      shown.range.replaceChildren();
+    } else {
+      const chip = make('button', {
+        attributes: { title: 'Show every span again', type: 'button' },
+        className: 'chip',
+        text: `${clockOf(range.from)} to ${clockOf(range.to)} ✕`,
       });
 
-      return row;
-    });
-
-  shown.calls.replaceChildren(...rows);
-  drawDetail();
-};
-
-const drawDetail = (): void => {
-  const record = state.selected;
-
-  if (record === undefined) {
-    shown.detail.replaceChildren(
-      make('p', { className: 'note', text: 'Select a call to see what went across.' })
-    );
-
-    return;
-  }
-
-  const facts: [string, string | undefined][] = [
-    ['Client', `client ${String(record.source)}`],
-    [
-      'Procedure',
-      `${record.procedureName} (service ${String(record.serviceId)}, revision ${String(record.serviceRevision)}, procedure ${String(record.procedureId)})`,
-    ],
-    ['Type', `${record.type}, ${record.direction === 'tx' ? 'out' : 'in'}`],
-    ['Call', record.callId === undefined ? undefined : `#${String(record.callId)}`],
-    ['Connection', record.connectionHandle],
-    ['Started', new Date(record.startedAt).toISOString()],
-    [
-      'Duration',
-      record.duration === undefined ? undefined : `${numbers.format(record.duration)} ms`,
-    ],
-    [
-      'Timeout',
-      record.timeout === undefined
-        ? undefined
-        : record.timeout === 'never'
-          ? 'never'
-          : `${numbers.format(record.timeout)} ms`,
-    ],
-    [
-      'Credential',
-      record.credentialScheme === undefined
-        ? undefined
-        : (SCHEME_NAMES.get(record.credentialScheme) ?? String(record.credentialScheme)),
-    ],
-    [
-      'Failed',
-      record.error === undefined
-        ? undefined
-        : [outcomeOf(record), record.error.detail ?? record.error.message].join(' — '),
-    ],
-  ];
-  const list = make('dl', { className: 'facts' });
-
-  for (const [name, value] of facts) {
-    if (value !== undefined) {
-      list.append(make('dt', { text: name }), make('dd', { text: value }));
+      chip.addEventListener('click', () => {
+        state.range = undefined;
+        draw();
+      });
+      shown.range.replaceChildren(chip);
     }
-  }
 
-  const payloads = (['tx', 'rx'] as const).flatMap((direction) => {
-    const preview = record[direction];
-
-    return preview === undefined
-      ? []
-      : [
-          make('h3', { text: direction === 'tx' ? 'Sent' : 'Received' }),
-          make('pre', { text: preview }),
-        ];
-  });
-
-  shown.detail.replaceChildren(list, ...payloads);
-};
-
-const drawEnvelopes = (): void => {
-  shown.envelopes.replaceChildren(
-    ...state.envelopes
-      .filter((record) => {
-        return isShownSource(record.source) && state.keeps(record);
-      })
-      .map((record) => {
-        const row = document.createElement('tr');
-        const kind = Number(record.header['kind']);
-
-        row.append(
-          make('td', { text: timeOf(record.at) }),
-          make('td', { text: arrowOf(record.direction) }),
-          make('td', { text: KIND_NAMES.get(kind) ?? `0x${kind.toString(16)}` }),
-          make('td', { text: `#${String(record.header['callId'] ?? '')}` }),
-          make('td', { text: headerLineOf(record.header) })
-        );
-        row.dataset['direction'] = record.direction;
-
-        return row;
-      })
-  );
-};
-
-/** A registry's lines, one a procedure that saw a call or a notification, as the demo shows them. */
-const metricsLineOf = (row: IProcedureMetrics): HTMLElement | undefined => {
-  const { buckets, count, notifications, outcomes, procedure, role, started, type } = row;
-  const chip = (text: string, className = 'chip'): HTMLElement => {
-    return make('span', { className, text });
+    drawEmpty(visible);
+    drawDetail();
   };
-  const milliseconds = (quantile: number): string => {
-    return `${numbers.format((quantileOf(buckets, quantile) ?? 0) * 1_000)} ms`;
-  };
-  const chips = [
-    ...(started === 0 ? [] : [chip(`${numbers.format(count)} ${role}`)]),
-    ...(type === 'request' || started === 0 ? [] : [chip(type, 'chip quiet')]),
-    ...(started > count ? [chip(`${numbers.format(started - count)} in flight`)] : []),
-    ...(count === 0
-      ? []
-      : [chip(`median ≈ ${milliseconds(0.5)}`), chip(`p95 ≈ ${milliseconds(0.95)}`)]),
-    ...[...outcomes, ...notifications]
-      .filter(([outcome, value]) => {
-        return outcome !== 'result' && value > 0;
-      })
-      .map(([outcome, value]) => {
-        const isFailure =
-          outcomes.has(outcome) || outcome === 'not sent' || outcome.startsWith('dropped');
 
-        return chip(`${numbers.format(value)} ${outcome}`, isFailure ? 'chip failure' : 'chip');
+  const drawDetail = (): void => {
+    for (const tab of document.querySelectorAll<HTMLElement>('[data-detail]')) {
+      tab.setAttribute('aria-selected', String(tab.dataset['detail'] === state.detailTab));
+    }
+
+    const call = selectedCall();
+
+    if (call === undefined) {
+      shown.detail.replaceChildren(
+        ...(state.hidden === undefined ? [] : [noteOf(state.hidden)]),
+        noteOf(
+          'Select a call to see what went across: its payloads, its envelopes, what changed, and what made it.'
+        )
+      );
+
+      return;
+    }
+
+    shown.detail.replaceChildren(
+      ...detailOf(call, {
+        context: {
+          client: clientOf(call.source),
+          copy,
+          earlier: earlierOf(call),
+          nameOf,
+          now: Date.now(),
+          openResource: host.openResource,
+        },
+        tab: state.detailTab,
+      })
+    );
+  };
+
+  const drawFooter = (): void => {
+    const calls = state.book.calls.filter(({ source }) => {
+      return isShownSource(source);
+    });
+    const count = (status: string): number => {
+      return calls.filter((call) => {
+        return statusOf(call) === status;
+      }).length;
+    };
+    const subscriptions = calls.filter((call) => {
+      return subscriptionOf(call) !== undefined;
+    });
+    const part = (value: number, words: string): HTMLElement => {
+      return make('span', { children: [make('b', { text: numberOf(value) }), ` ${words}`] });
+    };
+
+    shown.footer.replaceChildren(
+      part(calls.length, calls.length === 1 ? 'call' : 'calls'),
+      part(count('failed'), 'failed'),
+      part(count('flight'), 'in flight'),
+      part(subscriptions.length, `subscriptions, ${numberOf(count('open'))} open`),
+      part(state.dropped, 'records let go'),
+      make('span', {
+        text:
+          state.book.callsLetGo === 0
+            ? 'kept: the last 1,000 calls'
+            : `kept: the last 1,000 calls, ${numberOf(state.book.callsLetGo)} before them let go`,
       }),
-  ];
+      ...(state.isRecording
+        ? []
+        : [make('span', { text: `paused: ${numberOf(state.pausedLetGo)} records not recorded` })])
+    );
+  };
 
-  if (chips.length === 0) {
-    return undefined;
-  }
+  const draw = (): void => {
+    if (isDrawing) {
+      return;
+    }
 
-  const line = make('li', {});
-  const held = make('span', { className: 'chips' });
+    isDrawing = true;
+    requestAnimationFrame(() => {
+      isDrawing = false;
 
-  held.append(...chips);
-  line.append(make('span', { className: 'name', text: procedure }), held);
+      for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) {
+        view.hidden = view.dataset['view'] !== state.view;
+        view.classList.toggle('page-gone', state.isGone);
+      }
 
-  return line;
-};
+      for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
+        tab.setAttribute('aria-selected', String(tab.dataset['tab'] === state.view));
+      }
 
-const drawMetrics = (): void => {
-  const blocks = state.sources
-    .filter(({ id }) => {
-      return isShownSource(id);
-    })
-    .map(({ id }) => {
-      const block = make('section', { className: 'registry' });
-      const text = state.expositions.get(id);
+      shown.record.setAttribute('aria-pressed', String(state.isRecording));
+      shown.record.title = state.isRecording
+        ? 'Recording: pause (Ctrl+E)'
+        : 'Paused: record (Ctrl+E)';
 
-      block.append(make('h3', { text: `Client ${String(id)}` }));
+      for (const button of document.querySelectorAll<HTMLElement>('[data-quick]')) {
+        const word = button.dataset['quick'] ?? '';
 
-      if (text === undefined) {
-        block.append(make('p', { className: 'note', text: 'Reading…' }));
-      } else if (text === null) {
-        block.append(
-          make('p', {
-            className: 'note',
-            text: 'This client was given no metrics registry: give it one, as its metricsRegistry, to see what it counts.',
+        button.setAttribute(
+          'aria-pressed',
+          String(word === 'failed' ? state.isFailedOnly : hasWord(shown.filter.value, word))
+        );
+      }
+
+      drawFooter();
+
+      const calls = state.book.calls.filter(({ source }) => {
+        return isShownSource(source);
+      });
+
+      if (state.view === 'calls') {
+        drawCalls();
+      } else if (state.view === 'state') {
+        // a cursor being moved keeps its place: it redraws what it reads itself
+        if (document.activeElement?.id === 'at' && state.at !== undefined) {
+          return;
+        }
+
+        shown.state.replaceChildren(
+          ...stateViewOf({
+            at: state.at,
+            calls,
+            callsLetGo: state.book.callsLetGo,
+            nameOf,
+            now: Date.now(),
+            onScrub: (at) => {
+              state.at = at;
+              draw();
+            },
+            span: spanOfCalls(calls),
           })
         );
+      } else if (state.view === 'timeline') {
+        shown.timeline.replaceChildren(
+          ...timelineViewOf({
+            calls: visibleCalls(),
+            isAllClients: isEveryClient(),
+            nameOf,
+            now: Date.now(),
+            onRange: (range) => {
+              state.range = range;
+              draw();
+            },
+            range: state.range,
+            span: spanOfCalls(calls),
+          })
+        );
+      } else if (state.view === 'metrics') {
+        shown.metrics.replaceChildren(...metricsOfView());
       } else {
-        const lines = metricsOf(text, []).flatMap((row) => {
-          const line = metricsLineOf(row);
-
-          return line === undefined ? [] : [line];
-        });
-        const list = make('ul', { className: 'lines' });
-        const raw = make('details', {});
-
-        list.append(
-          ...(lines.length === 0
-            ? [make('li', { className: 'note', text: 'Nothing counted yet.' })]
-            : lines)
+        shown.wire.replaceChildren(
+          ...wireViewOf({
+            copy,
+            exchanges: state.exchanges,
+            isAvailable: host.onExchange !== undefined,
+            nameOf: (address) => {
+              return state.book.nameOf(address);
+            },
+          })
         );
-        raw.append(
-          make('summary', { text: 'Its exposition, as a scrape reads it' }),
-          make('pre', { text })
-        );
-        block.append(list, raw);
       }
-
-      return block;
     });
+  };
 
   // an open exposition stays open across a redraw
-  const open = new Set(
-    [...shown.metrics.querySelectorAll('details[open]')].map((details) => {
-      return details.parentElement?.querySelector('h3')?.textContent;
-    })
-  );
-
-  for (const block of blocks) {
-    const details = block.querySelector('details');
-
-    if (details !== null && open.has(block.querySelector('h3')?.textContent)) {
-      details.open = true;
-    }
-  }
-
-  shown.metrics.replaceChildren(
-    ...(blocks.length === 0
-      ? [make('p', { className: 'note', text: 'No client announced itself yet.' })]
-      : blocks)
-  );
-};
-
-const readingOf = (reading: IWireReading | string | undefined): string => {
-  if (reading === undefined) {
-    return 'reading…';
-  }
-
-  if (typeof reading === 'string') {
-    return reading;
-  }
-
-  const lines = reading.envelopes.map(({ failure, header, payloadBytes }) => {
-    const kind = Number(header['kind']);
-
-    return [
-      KIND_NAMES.get(kind) ?? 'advisory',
-      `#${String(header['callId'] ?? '')}`,
-      headerLineOf(header),
-      payloadBytes === undefined ? '' : `${numbers.format(payloadBytes)} bytes`,
-      failure === undefined
-        ? ''
-        : `${CODE_NAMES.get(failure.code) ?? `code ${String(failure.code)}`} ${failure.detail}`,
-    ]
-      .filter(Boolean)
-      .join(' ');
-  });
-
-  return (
-    [
-      ...lines,
-      ...(reading.problem === undefined ? [] : [`does not read: ${reading.problem}`]),
-    ].join('\n') || 'no envelope'
-  );
-};
-
-const drawWire = (): void => {
-  if (chrome.devtools?.network === undefined) {
-    shown.wire.replaceChildren(
-      make('p', {
-        className: 'note',
-        text: 'The Network panel’s exchanges reach this panel in DevTools alone.',
+  const metricsOfView = (): Node[] => {
+    const open = new Set(
+      [...shown.metrics.querySelectorAll<HTMLElement>('details[open]')].map((details) => {
+        return details.closest<HTMLElement>('[data-source]')?.dataset['source'];
       })
     );
+    const views = metricsViewOf({
+      expositions: state.expositions,
+      history: state.history,
+      onProcedure: (procedure) => {
+        shown.filter.value = procedure;
+        applyFilter();
+        state.view = 'calls';
+        draw();
+      },
+      sources: state.sources
+        .map(({ id }) => {
+          return id;
+        })
+        .filter(isShownSource),
+    });
 
-    return;
-  }
+    for (const view of views) {
+      if (view instanceof HTMLElement && open.has(view.dataset['source'])) {
+        const details = view.querySelector('details');
 
-  shown.wire.replaceChildren(
-    ...(state.exchanges.length === 0
-      ? [
-          make('p', {
-            className: 'note',
-            text: 'No exchange of application/prs.bead yet: the HTTP transport’s appear here, read with the package’s codec.',
-          }),
-        ]
-      : state.exchanges.map((exchange) => {
-          const block = make('section', { className: 'exchange' });
-          const path = new URL(exchange.url).pathname;
-
-          block.append(
-            make('h3', { text: `${exchange.method} ${path} — ${String(exchange.status)}` }),
-            make('pre', { text: `→ ${readingOf(exchange.request).replaceAll('\n', '\n→ ')}` }),
-            make('pre', { text: `← ${readingOf(exchange.response).replaceAll('\n', '\n← ')}` })
-          );
-
-          return block;
-        }))
-  );
-};
-
-const draw = (): void => {
-  if (isDrawing) {
-    return;
-  }
-
-  isDrawing = true;
-  requestAnimationFrame(() => {
-    isDrawing = false;
-
-    for (const view of document.querySelectorAll<HTMLElement>('[data-view]')) {
-      view.hidden = view.dataset['view'] !== state.view;
-    }
-
-    for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
-      tab.setAttribute('aria-selected', String(tab.dataset['tab'] === state.view));
-    }
-
-    if (state.view === 'calls') {
-      drawCalls();
-    } else if (state.view === 'envelopes') {
-      drawEnvelopes();
-    } else if (state.view === 'metrics') {
-      drawMetrics();
-    } else {
-      drawWire();
-    }
-  });
-};
-
-const drawSources = (): void => {
-  const chosen = shown.source.value;
-  const options = [
-    new Option('All clients', 'all'),
-    ...state.sources.map(({ id, protocol }) => {
-      return new Option(
-        PROTOCOLS.includes(protocol)
-          ? `Client ${String(id)}`
-          : `Client ${String(id)}, protocol ${String(protocol)}, unknown`,
-        String(id)
-      );
-    }),
-  ];
-
-  shown.source.replaceChildren(...options);
-  shown.source.value = options.some(({ value }) => {
-    return value === chosen;
-  })
-    ? chosen
-    : 'all';
-};
-
-const take = (records: ActivityRecord[]): void => {
-  for (const record of records) {
-    const list: ActivityRecord[] = record.kind === 'call' ? state.calls : state.envelopes;
-
-    list.unshift(record);
-
-    if (list.length > KEPT) {
-      list.length = KEPT;
-    }
-  }
-};
-
-const hear = (message: BackgroundMessage): void => {
-  switch (message.type) {
-    case 'expositions':
-      for (const { source, text } of message.expositions) {
-        state.expositions.set(source, text);
+        if (details !== null) {
+          details.open = true;
+        }
       }
-      break;
-    case 'page-connected':
-      shown.status.textContent = 'connected to the page';
-      shown.status.dataset['state'] = 'open';
-      tell({ type: 'read-expositions' });
-      break;
-    case 'page-gone':
-      shown.status.textContent = 'the page is gone: waiting for it';
-      shown.status.dataset['state'] = 'closed';
-      state.sources = [];
-      drawSources();
-      break;
-    case 'records':
-      state.dropped += message.dropped;
-      take(message.records);
-      break;
-    case 'sources':
-      state.sources = message.sources;
-      drawSources();
-      break;
-    default:
-      break;
-  }
+    }
 
-  if (state.dropped > 0) {
-    shown.status.textContent = `connected to the page; ${numbers.format(state.dropped)} records let go in bursts`;
-  }
+    return views;
+  };
 
-  draw();
-};
+  const drawSources = (): void => {
+    const chosen = shown.source.value;
+    const options = [
+      new Option('All clients', 'all'),
+      ...state.sources.map(({ id, protocol }) => {
+        return new Option(
+          PROTOCOLS.includes(protocol)
+            ? clientOf(id)
+            : `${clientOf(id)}, protocol ${String(protocol)}, unknown`,
+          String(id)
+        );
+      }),
+    ];
 
-const connect = (): void => {
-  const opened = chrome.runtime.connect({ name: PORTS.panel });
-  const greeting: IPanelGreeting = { tabId, type: 'panel' };
+    shown.source.replaceChildren(...options);
+    shown.source.value = options.some(({ value }) => {
+      return value === chosen;
+    })
+      ? chosen
+      : 'all';
+  };
 
-  opened.onMessage.addListener((message) => {
-    hear(message as BackgroundMessage);
-  });
-  // the background, a service worker, may stop: the panel reaches it again
-  opened.onDisconnect.addListener(() => {
-    port = undefined;
-    shown.status.textContent = 'reconnecting…';
-    shown.status.dataset['state'] = 'closed';
-    setTimeout(connect, RECONNECT_MILLISECONDS);
-  });
-  opened.postMessage(greeting);
-  port = opened;
-};
+  const clear = (): void => {
+    state.book = newBook();
+    state.dropped = 0;
+    state.exchanges = [];
+    state.expanded.clear();
+    state.selected = undefined;
+    state.hidden = undefined;
+    state.range = undefined;
+    state.at = undefined;
+    state.pausedLetGo = 0;
+    draw();
+  };
 
-const takeExchange = (entry: IHarEntry): void => {
-  const { postData } = entry.request;
+  const take = (records: readonly ActivityRecord[]): void => {
+    for (const record of records) {
+      state.book.take(record);
+    }
+  };
 
-  if (!isBeadType(postData?.mimeType) && !isBeadType(entry.response.content.mimeType)) {
-    return;
-  }
+  const setStatus = (text: string, isOpen: boolean): void => {
+    shown.status.textContent = text;
+    shown.status.dataset['state'] = isOpen ? 'open' : 'closed';
+  };
 
-  const requestBytes =
-    postData?.text === undefined || postData.text === ''
-      ? undefined
-      : bytesOfContent({ encoding: postData.encoding, text: postData.text });
-  const exchange: IExchange = {
-    method: entry.request.method,
-    request:
-      postData === undefined
-        ? 'no body'
+  const hear = (message: BackgroundMessage): void => {
+    switch (message.type) {
+      case 'expositions':
+        for (const { source, text } of message.expositions) {
+          state.expositions.set(source, text);
+
+          if (text !== null) {
+            state.history.set(
+              source,
+              withReading(state.history.get(source) ?? [], {
+                at: Date.now(),
+                rows: metricsOf(text, []),
+              })
+            );
+          }
+        }
+        break;
+      case 'page-connected':
+        // * the page came back after it went: a reload, which clears the log unless it is preserved
+        if (state.wasGone) {
+          if (shown.preserve.checked) {
+            state.book.mark({ at: Date.now(), kind: 'reload' });
+          } else {
+            clear();
+          }
+        }
+
+        state.wasGone = false;
+        state.isGone = false;
+        setStatus('connected to the page', true);
+        tell({ type: 'read-expositions' });
+        break;
+      case 'page-gone':
+        state.wasGone = true;
+        state.isGone = true;
+        setStatus('the page is gone: its calls stay until you clear them', false);
+        break;
+      case 'records':
+        if (!state.isRecording) {
+          state.pausedLetGo += message.records.length + message.dropped;
+          break;
+        }
+
+        if (message.dropped > 0) {
+          state.dropped += message.dropped;
+          state.book.mark({ at: Date.now(), count: message.dropped, kind: 'gap' });
+        }
+
+        take(message.records);
+        break;
+      case 'sources':
+        state.sources = message.sources;
+        drawSources();
+        break;
+      default:
+        break;
+    }
+
+    draw();
+  };
+
+  const connect = (): void => {
+    const opened = host.connect();
+    const greeting: IPanelGreeting = { tabId: host.tabId, type: 'panel' };
+
+    opened.onMessage((message) => {
+      hear(message as BackgroundMessage);
+    });
+    // the background, a service worker, may stop: the panel reaches it again
+    opened.onDisconnect(() => {
+      port = undefined;
+      setStatus('reconnecting…', false);
+      setTimeout(connect, RECONNECT_MILLISECONDS);
+    });
+    opened.postMessage(greeting);
+    port = opened;
+  };
+
+  const takeExchange = (entry: IHarEntry): void => {
+    const { postData } = entry.request;
+
+    if (!isBeadType(postData?.mimeType) && !isBeadType(entry.response.content.mimeType)) {
+      return;
+    }
+
+    const requestBytes =
+      postData?.text === undefined || postData.text === ''
+        ? undefined
+        : bytesOfContent({ encoding: postData.encoding, text: postData.text });
+    const isEmpty = postData?.text === undefined || postData.text === '';
+    const exchange: IExchange = {
+      method: entry.request.method,
+      request: isEmpty
+        ? entry.request.method === 'POST'
+          ? 'listen'
+          : 'no body'
         : requestBytes === undefined
           ? 'its body is not one DevTools hands an extension'
           : readBody(requestBytes, 'envelope'),
-    startedAt: entry.startedDateTime,
-    status: entry.response.status,
-    url: entry.request.url,
+      requestBytes: requestBytes?.length ?? 0,
+      startedAt: Date.parse(entry.startedDateTime),
+      status: entry.response.status,
+      url: entry.request.url,
+    };
+
+    state.exchanges.unshift(exchange);
+    state.exchanges.length = Math.min(state.exchanges.length, EXCHANGES_KEPT);
+    entry.getContent((content, encoding) => {
+      const bytes = content === null ? undefined : bytesOfContent({ encoding, text: content });
+
+      exchange.responseBytes = bytes?.length ?? 0;
+      exchange.response =
+        content === null || content === ''
+          ? 'no body'
+          : bytes === undefined
+            ? 'its body did not come as bytes'
+            : readBody(bytes, 'batch');
+      draw();
+    });
+    draw();
   };
 
-  state.exchanges.unshift(exchange);
-  state.exchanges.length = Math.min(state.exchanges.length, KEPT);
-  entry.getContent((content, encoding) => {
-    const bytes = content === null ? undefined : bytesOfContent({ encoding, text: content });
+  const applyFilter = (): void => {
+    const spec = shown.filter.value;
 
-    exchange.response =
-      content === null || content === ''
-        ? 'no body'
-        : bytes === undefined
-          ? 'its body did not come as bytes'
-          : readBody(bytes, 'batch');
-    draw();
-  });
-  draw();
-};
-
-// the panel follows DevTools' theme, not the system's
-document.documentElement.dataset['theme'] =
-  chrome.devtools?.panels.themeName === 'dark' ? 'dark' : 'light';
-
-for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
-  tab.addEventListener('click', () => {
-    state.view = tab.dataset['tab'] as View;
-
-    if (state.view === 'metrics') {
-      tell({ type: 'read-expositions' });
+    try {
+      state.keeper = keeperOf(spec);
+      shown.filter.removeAttribute('aria-invalid');
+      shown.filterState.textContent = '';
+    } catch (reason) {
+      // * the last filter that held stays, as a filter given in place does (debugging 6.9)
+      shown.filter.setAttribute('aria-invalid', 'true');
+      shown.filterState.textContent = `${reason instanceof Error ? reason.message : String(reason)}; the last filter that held stays`;
     }
 
     draw();
+  };
+
+  const select = (key: number | undefined): void => {
+    state.selected = key;
+    state.hidden = undefined;
+    draw();
+  };
+
+  const toggleExpanded = (key: number, isExpanded?: boolean): void => {
+    if (isExpanded ?? !state.expanded.has(key)) {
+      state.expanded.add(key);
+    } else {
+      state.expanded.delete(key);
+    }
+
+    draw();
+  };
+
+  const toggleRecording = (): void => {
+    state.isRecording = !state.isRecording;
+    say(
+      state.isRecording
+        ? 'Recording'
+        : 'Paused: the hook still listens, and the panel lets its records go'
+    );
+    draw();
+  };
+
+  const closeMenu = (): void => {
+    shown.menu.hidden = true;
+    shown.menu.replaceChildren();
+  };
+
+  const openMenu = (call: ICall, { x, y }: { x: number; y: number }): void => {
+    const name = nameOf(call);
+    const code = codeOfCall(call);
+    const request = requestPayloadOf(call);
+    const answer = answerPayloadOf(call);
+    const items: [string, (() => void) | undefined][] = [
+      [
+        'Copy its request',
+        request === undefined
+          ? undefined
+          : () => {
+              copy(request.text);
+            },
+      ],
+      [
+        'Copy its answer',
+        answer === undefined
+          ? undefined
+          : () => {
+              copy(answer.text);
+            },
+      ],
+      [
+        'Copy as code',
+        code === undefined
+          ? undefined
+          : () => {
+              copy(code);
+            },
+      ],
+      [
+        `Hide ${name}`,
+        call.procedureName === undefined
+          ? undefined
+          : () => {
+              shown.filter.value = toggleWord(shown.filter.value, `-${name}`);
+              applyFilter();
+            },
+      ],
+      [
+        `Show ${name} alone`,
+        call.procedureName === undefined
+          ? undefined
+          : () => {
+              shown.filter.value = name;
+              applyFilter();
+            },
+      ],
+      [
+        'Show its envelopes',
+        () => {
+          toggleExpanded(call.key, true);
+        },
+      ],
+    ];
+
+    shown.menu.replaceChildren(
+      ...items.map(([text, action]) => {
+        const button = make('button', {
+          attributes: {
+            role: 'menuitem',
+            title:
+              text === 'Copy as code' && action === undefined
+                ? 'Its payload is cut short, or the server made it'
+                : undefined,
+            type: 'button',
+          },
+          text,
+        }) as HTMLButtonElement;
+
+        button.disabled = action === undefined;
+        button.addEventListener('click', () => {
+          closeMenu();
+          action?.();
+        });
+
+        return button;
+      })
+    );
+    shown.menu.hidden = false;
+    shown.menu.style.left = `${String(Math.min(x, innerWidth - shown.menu.offsetWidth - 4))}px`;
+    shown.menu.style.top = `${String(Math.min(y, innerHeight - shown.menu.offsetHeight - 4))}px`;
+    shown.menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  };
+
+  const callOfRow = (target: EventTarget | null): ICall | undefined => {
+    const row = target instanceof Element ? target.closest<HTMLElement>('tr[data-key]') : null;
+    const key = Number(row?.dataset['key']);
+
+    return state.book.calls.find((call) => {
+      return call.key === key;
+    });
+  };
+
+  const exportLog = (): void => {
+    const log = logOf(
+      { dropped: state.dropped, records: state.book.recordsOf(), sources: state.sources },
+      { savedAt: new Date() }
+    );
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(log, null, 2)], { type: 'application/json' })
+    );
+    const link = make('a', {
+      attributes: { download: `bead-${log.savedAt.replaceAll(':', '-')}.json`, href: url },
+    });
+
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    say(`Exported ${numberOf(log.records.length)} records`);
+  };
+
+  const importLog = async (file: File): Promise<void> => {
+    try {
+      const log = readLog(await file.text());
+
+      clear();
+      state.sources = log.sources;
+      state.dropped = log.dropped;
+      // * the page's own records would mix with the file's: the panel pauses as it reads one
+      state.isRecording = false;
+      drawSources();
+      take(log.records);
+      say(`Imported ${numberOf(log.records.length)} records from ${file.name}; recording paused`);
+    } catch (reason) {
+      say(
+        `${file.name} does not read: ${reason instanceof Error ? reason.message : String(reason)}`
+      );
+    }
+
+    draw();
+  };
+
+  // the panel follows DevTools' theme, not the system's
+  document.documentElement.dataset['theme'] = host.theme;
+
+  for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
+    tab.addEventListener('click', () => {
+      state.view = tab.dataset['tab'] as View;
+
+      if (state.view === 'metrics') {
+        tell({ type: 'read-expositions' });
+      }
+
+      draw();
+    });
+  }
+
+  for (const tab of document.querySelectorAll<HTMLElement>('[data-detail]')) {
+    tab.addEventListener('click', () => {
+      state.detailTab = tab.dataset['detail'] as DetailTab;
+      draw();
+    });
+  }
+
+  for (const button of document.querySelectorAll<HTMLElement>('[data-mode]')) {
+    button.addEventListener('click', () => {
+      state.mode = button.dataset['mode'] === 'envelopes' ? 'envelopes' : 'calls';
+      draw();
+    });
+  }
+
+  for (const button of document.querySelectorAll<HTMLElement>('[data-quick]')) {
+    button.addEventListener('click', () => {
+      const word = button.dataset['quick'] ?? '';
+
+      if (word === 'failed') {
+        state.isFailedOnly = !state.isFailedOnly;
+        draw();
+
+        return;
+      }
+
+      shown.filter.value = toggleWord(shown.filter.value, word);
+      applyFilter();
+    });
+  }
+
+  shown.filter.addEventListener('input', applyFilter);
+  shown.source.addEventListener('change', draw);
+  shown.clear.addEventListener('click', clear);
+  shown.record.addEventListener('click', toggleRecording);
+  shown.export.addEventListener('click', exportLog);
+  shown.import.addEventListener('click', () => {
+    shown.importFile.click();
   });
-}
+  shown.importFile.addEventListener('change', () => {
+    const [file] = shown.importFile.files ?? [];
 
-shown.filter.addEventListener('input', () => {
-  const spec = shown.filter.value;
+    if (file !== undefined) {
+      void importLog(file);
+    }
 
-  try {
-    state.keeps = keeperOf(spec);
-    shown.filterState.textContent = '';
-  } catch (reason) {
-    state.keeps = () => {
-      return true;
-    };
-    shown.filterState.textContent = reason instanceof Error ? reason.message : String(reason);
-  }
+    shown.importFile.value = '';
+  });
 
+  shown.calls.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const twist = target?.closest<HTMLElement>('[data-twist]');
+
+    if (twist !== null && twist !== undefined) {
+      toggleExpanded(Number(twist.dataset['twist']));
+
+      return;
+    }
+
+    const call = callOfRow(target);
+
+    if (call !== undefined) {
+      select(call.key);
+      shown.list.focus({ preventScroll: true });
+    }
+  });
+
+  shown.envelopes.addEventListener('click', (event) => {
+    const call = callOfRow(event.target);
+
+    if (call !== undefined) {
+      select(call.key);
+    }
+  });
+
+  shown.calls.addEventListener('contextmenu', (event) => {
+    const call = callOfRow(event.target);
+
+    if (call !== undefined) {
+      event.preventDefault();
+      select(call.key);
+      openMenu(call, { x: event.clientX, y: event.clientY });
+    }
+  });
+
+  shown.list.addEventListener('keydown', (event) => {
+    const rows = [...shown.calls.querySelectorAll<HTMLElement>('tr[data-key]')];
+    const index = rows.findIndex((row) => {
+      return Number(row.dataset['key']) === state.selected;
+    });
+    const call = selectedCall();
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+
+      const next =
+        rows[Math.max(0, Math.min(rows.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))];
+
+      if (next !== undefined) {
+        select(Number(next.dataset['key']));
+        requestAnimationFrame(() => {
+          shown.calls
+            .querySelector(`tr[data-key="${String(state.selected)}"]`)
+            ?.scrollIntoView({ block: 'nearest' });
+        });
+      }
+    } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && call !== undefined) {
+      event.preventDefault();
+      toggleExpanded(call.key, event.key === 'ArrowRight');
+    } else if (event.key === 'Enter' && call !== undefined) {
+      event.preventDefault();
+      shown.detail.focus();
+    } else if (
+      (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) &&
+      call !== undefined
+    ) {
+      event.preventDefault();
+
+      const box = shown.calls
+        .querySelector(`tr[data-key="${String(call.key)}"]`)
+        ?.getBoundingClientRect();
+
+      openMenu(call, { x: box?.left ?? 0, y: box?.bottom ?? 0 });
+    }
+  });
+
+  shown.menu.addEventListener('keydown', (event) => {
+    const items = [...shown.menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+
+    if (event.key === 'Escape') {
+      closeMenu();
+      shown.list.focus();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      items[
+        (index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % Math.max(items.length, 1)
+      ]?.focus();
+    }
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (
+      !shown.menu.hidden &&
+      !(event.target instanceof Node && shown.menu.contains(event.target))
+    ) {
+      closeMenu();
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    const isModified = event.ctrlKey || event.metaKey;
+
+    if (isModified && event.key.toLowerCase() === 'e') {
+      event.preventDefault();
+      toggleRecording();
+    } else if (isModified && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      clear();
+    } else if (event.key === '/' && !isTyping(event.target)) {
+      event.preventDefault();
+      shown.filter.focus();
+    }
+  });
+
+  // what time moves, each second: a call in flight's wait, and the registries, while Metrics shows
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') {
+      return;
+    }
+
+    if (state.view === 'metrics') {
+      tell({ type: 'read-expositions' });
+    } else if (
+      state.book.calls.some((call) => {
+        return statusOf(call) === 'flight';
+      })
+    ) {
+      draw();
+    }
+  }, TICK_MILLISECONDS);
+
+  host.onExchange?.(takeExchange);
+  connect();
   draw();
-});
-
-shown.source.addEventListener('change', draw);
-
-shown.clear.addEventListener('click', () => {
-  state.calls = [];
-  state.envelopes = [];
-  state.exchanges = [];
-  state.dropped = 0;
-  state.selected = undefined;
-  draw();
-});
-
-// the registries, each second the Metrics view is shown
-setInterval(() => {
-  if (state.view === 'metrics' && document.visibilityState === 'visible') {
-    tell({ type: 'read-expositions' });
-  }
-}, METRICS_MILLISECONDS);
-
-chrome.devtools?.network.onRequestFinished.addListener(takeExchange);
-connect();
-draw();
+};

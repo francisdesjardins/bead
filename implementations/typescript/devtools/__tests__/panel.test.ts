@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { pathToFileURL } from 'node:url';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { FailureScope, ProtocolCode } from '../../src/router/client/router-client';
+import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
 import type { BackgroundMessage } from '../messages';
 import { assertBuilt, EXTENSION } from './fixtures';
+import { IDS, T0, TRAFFIC } from './traffic';
 
 // interfaces
 
@@ -13,7 +14,9 @@ import { assertBuilt, EXTENSION } from './fixtures';
 interface IFake {
   deliver: (message: BackgroundMessage) => void;
   finish: (entry: object) => void;
+  opened: [url: string, line: number][];
   posted: unknown[];
+  reloads: number;
 }
 
 // helpers
@@ -29,7 +32,6 @@ const openPanel = async (page: Page): Promise<void> => {
       finished: [] as ((entry: unknown) => void)[],
       message: [] as ((message: unknown) => void)[],
     };
-    const posted: unknown[] = [];
     const eventOf = (list: ((value: never) => void)[]) => {
       return {
         addListener: (listener: (value: never) => void) => {
@@ -49,15 +51,28 @@ const openPanel = async (page: Page): Promise<void> => {
           listener(entry);
         }
       },
-      posted,
+      opened: [],
+      posted: [],
+      reloads: 0,
     };
 
     Object.assign(globalThis, {
       chrome: {
         devtools: {
-          inspectedWindow: { tabId: 7 },
+          inspectedWindow: {
+            reload: () => {
+              fake.reloads += 1;
+            },
+            tabId: 7,
+          },
           network: { onRequestFinished: eventOf(listeners.finished) },
-          panels: { create: () => {}, themeName: 'dark' },
+          panels: {
+            create: () => {},
+            openResource: (url: string, line: number) => {
+              fake.opened.push([url, line]);
+            },
+            themeName: 'dark',
+          },
         },
         runtime: {
           connect: ({ name }: { name: string }) => {
@@ -67,7 +82,7 @@ const openPanel = async (page: Page): Promise<void> => {
               onDisconnect: eventOf(listeners.disconnect),
               onMessage: eventOf(listeners.message),
               postMessage: (message: unknown) => {
-                posted.push(message);
+                fake.posted.push(message);
               },
             };
           },
@@ -90,32 +105,30 @@ const deliver = async (page: Page, message: BackgroundMessage): Promise<void> =>
   }, message);
 };
 
-const postedOf = (page: Page): Promise<unknown[]> => {
+const fakeOf = (page: Page): Promise<IFake> => {
   return page.evaluate(() => {
-    return (globalThis as unknown as { fake: IFake }).fake.posted;
+    const { fake } = globalThis as unknown as { fake: IFake };
+
+    return { ...fake, deliver: undefined, finish: undefined } as unknown as IFake;
   });
+};
+
+/** The panel, its page connected, a client announced, and the traffic heard. */
+const openWithTraffic = async (page: Page): Promise<void> => {
+  await openPanel(page);
+  await deliver(page, { type: 'page-connected' });
+  await deliver(page, { sources: [{ id: 1, protocol: 1, side: 'client' }], type: 'sources' });
+  await deliver(page, { dropped: 0, records: [...TRAFFIC], type: 'records' });
+};
+
+const rowOf = (page: Page, name: string) => {
+  return page.locator('#calls tr.call', { hasText: name });
 };
 
 /** Bytes as text whose every character is one of them, as DevTools may give a request's body. */
 const latin1Of = (bytes: Uint8Array): string => {
   return String.fromCharCode(...bytes);
 };
-
-const CALL = Object.freeze({
-  callId: 5,
-  connectionHandle: 'server',
-  direction: 'rx',
-  duration: 3,
-  kind: 'call',
-  procedureId: 3,
-  procedureName: 'read',
-  rx: '{"value": 1}',
-  serviceId: 1,
-  serviceRevision: 1,
-  source: 1,
-  startedAt: 1_000,
-  type: 'request',
-} as const);
 
 // definition
 
@@ -125,7 +138,7 @@ test.describe('the panel', () => {
   }) => {
     await openPanel(page);
 
-    expect(await postedOf(page)).toEqual([{ tabId: 7, type: 'panel' }]);
+    expect((await fakeOf(page)).posted).toEqual([{ tabId: 7, type: 'panel' }]);
     expect(
       await page.evaluate(() => {
         return document.documentElement.dataset['theme'];
@@ -134,70 +147,243 @@ test.describe('the panel', () => {
 
     await page.click('[data-tab="metrics"]');
     await expect
-      .poll(() => {
-        return postedOf(page);
+      .poll(async () => {
+        return (await fakeOf(page)).posted;
       })
       .toContainEqual({ type: 'read-expositions' });
   });
 
-  test('shows the page’s clients and their calls, filters them as the package’s filter does, and says why a filter is refused', async ({
-    page,
-  }) => {
+  test('says why it shows nothing yet, and reloads the page it inspects', async ({ page }) => {
     await openPanel(page);
-    await deliver(page, { type: 'page-connected' });
-    await deliver(page, {
-      sources: [
-        { id: 1, protocol: 1, side: 'client' },
-        { id: 2, protocol: 2, side: 'client' },
-      ],
-      type: 'sources',
-    });
-    await deliver(page, {
-      dropped: 0,
-      records: [
-        { ...CALL, direction: 'tx', duration: undefined, rx: undefined, tx: '""' },
-        CALL,
-        {
-          ...CALL,
-          error: {
-            code: ProtocolCode.ACCESS_DENIED,
-            message: 'denied',
-            name: 'FailureError',
-            scope: FailureScope.PROTOCOL,
-          },
-          procedureName: 'increment',
-        },
-      ],
-      type: 'records',
-    });
 
-    await expect(page.locator('#status')).toHaveText('connected to the page');
-    await expect(page.locator('#source option')).toHaveText([
-      'All clients',
-      'Client 1',
-      'Client 2, protocol 2, unknown',
-    ]);
-    await expect(page.locator('#calls tr')).toHaveCount(3);
-    await expect(page.locator('#calls tr.failed')).toContainText('ACCESS_DENIED');
-
-    await page.fill('#filter', 'd(rx), -increment');
-    await expect(page.locator('#calls tr')).toHaveCount(1);
-    await expect(page.locator('#calls tr')).toContainText('#5');
-    await page.locator('#calls tr').click();
-    await expect(page.locator('#detail')).toContainText('{"value": 1}');
-    await expect(page.locator('#detail')).toContainText('Call#5');
-    await expect(page.locator('#detail')).toContainText('Connectionserver');
-
-    await page.fill('#filter', 'd(up)');
-    await expect(page.locator('#filter-state')).not.toBeEmpty();
-    await expect(page.locator('#calls tr')).toHaveCount(3);
-
-    await deliver(page, { type: 'page-gone' });
-    await expect(page.locator('#status')).toHaveText('the page is gone: waiting for it');
-    await expect(page.locator('#source option')).toHaveText(['All clients']);
+    await expect(page.locator('#empty')).toContainText('No Bead client on this page yet.');
+    await expect(page.locator('#empty')).toContainText('devtools: false');
+    await page.click('#empty button');
+    expect((await fakeOf(page)).reloads).toBe(1);
   });
 
-  test('shows what a registry counts, and says when a client was given none', async ({ page }) => {
+  test('shows a call a row, newest first, its outcome in words, a command read the right way round', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    await expect(page.locator('#status')).toHaveText('connected to the page');
+    await expect(page.locator('#source option')).toHaveText(['All clients', 'Client 1']);
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+    await expect(page.locator('#calls tr.call').first()).toContainText('stats');
+    await expect(rowOf(page, 'increment')).toContainText('ACCESS_DENIED, beyond 1 relay');
+    await expect(rowOf(page, 'increment')).toContainText('→ dest 7');
+    await expect(rowOf(page, 'slow')).toContainText('cancelled');
+    await expect(rowOf(page, 'counter')).toContainText('2 heard · ended by the server');
+    await expect(rowOf(page, 'clock')).toContainText('command, in');
+    await expect(rowOf(page, 'clock')).toContainText('"14:03:13"');
+    await expect(rowOf(page, 'download')).toContainText('↓ 2.5 MiB');
+    await expect(page.locator('#footer')).toContainText('10 calls');
+    await expect(page.locator('#footer')).toContainText('3 failed');
+  });
+
+  test('unfolds a call into its envelopes in words, and lists every envelope in its Envelopes mode', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    await rowOf(page, 'download').locator('[data-twist]').click();
+    await expect(page.locator('#calls tr.envelope')).toHaveText([
+      /→ REQUEST/,
+      /← RESULT · opens a transfer of 2\.5 MiB/,
+      /→ CREDIT · up to 2\.5 MiB/,
+      /← CHUNK · at 1 MiB · more/,
+      /← CHUNK · at 2 MiB · last/,
+    ]);
+
+    await page.click('[data-mode="envelopes"]');
+    await expect(page.locator('#envelopes tr')).toHaveCount(25);
+    await page.fill('#filter', 'e(credit)');
+    await expect(page.locator('#envelopes tr')).toHaveCount(3);
+  });
+
+  test('filters as the package’s filter does, keeps the last filter that held when one is refused, and says why', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    await page.click('[data-quick="t(command)"]');
+    await expect(page.locator('#filter')).toHaveValue('t(command)');
+    await expect(page.locator('#calls tr.call')).toHaveCount(1);
+    await expect(page.locator('#calls tr.call')).toContainText('#2');
+
+    await page.fill('#filter', 'd(up)');
+    await expect(page.locator('#filter')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.locator('#filter-state')).toContainText('not "up"');
+    await expect(page.locator('#calls tr.call')).toHaveCount(1);
+
+    await page.fill('#filter', '');
+    await page.click('[data-quick="failed"]');
+    await expect(page.locator('#calls tr.call')).toHaveCount(3);
+  });
+
+  test('lets a selection go, with a word, once the filter hides it', async ({ page }) => {
+    await openWithTraffic(page);
+
+    await rowOf(page, 'whoami').click();
+    await expect(page.locator('#detail')).toContainText('#3');
+    await page.fill('#filter', '-whoami');
+    await expect(page.locator('#detail')).toContainText(
+      'The call selected is hidden by the filter'
+    );
+  });
+
+  test('details a call: its overview, its payload as a tree, its thread, what changed, and the stack that made it', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    await rowOf(page, 'increment').click();
+    await expect(page.locator('#detail')).toContainText('raised beyond 1 relay, for destination 7');
+    await page.click('[data-detail="exchange"]');
+    await expect(page.locator('#detail .thread circle')).toHaveCount(2);
+    await expect(page.locator('#detail .thread')).toContainText('not seen from the page');
+
+    await rowOf(page, 'whoami').click();
+    await page.click('[data-detail="payload"]');
+    await expect(page.locator('#detail .tree')).toContainText('"role": "writer"');
+    await page.click('[data-detail="trace"]');
+    await expect(page.locator('#detail .frames').first()).toContainText('onWhoami');
+    await page.locator('#detail .frames button', { hasText: 'src/page.ts:42:7' }).click();
+    expect((await fakeOf(page)).opened).toEqual([['http://localhost:5173/src/page.ts', 41]]);
+
+    await rowOf(page, 'counter').click();
+    await page.click('[data-detail="diff"]');
+    await expect(page.locator('#detail .diff .added').first()).toHaveText('+   "value": 47');
+  });
+
+  test('rebuilds the state at a moment the cursor stands on, replaying nothing', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await page.click('[data-tab="state"]');
+
+    await expect(page.locator('#state')).toContainText('a session, OPAQUE, announced by whoami #3');
+    await expect(page.locator('#state')).toContainText('ended by the server');
+
+    await page.locator('#at').evaluate((range: HTMLInputElement, at) => {
+      range.focus();
+      range.value = String(at);
+      range.dispatchEvent(new Event('input'));
+    }, T0 + 1_430);
+    await expect(page.locator('#state .sect').nth(1)).toContainText(
+      `download #${String(IDS.download)}`
+    );
+    await expect(page.locator('#state .sect').nth(2)).toContainText('open');
+    await expect(page.locator('#live')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('draws every call on a time axis, and bounds the list to the span dragged across it', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await page.click('[data-tab="timeline"]');
+
+    await expect(page.locator('#timeline .hit')).toHaveCount(10);
+
+    const box = await page.locator('#timeline svg').boundingBox();
+
+    if (box === null) {
+      throw new Error('the timeline has no box');
+    }
+
+    await page.mouse.move(box.x + box.width * 0.8, box.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width * 0.99, box.y + 40, { steps: 4 });
+    await page.mouse.up();
+    await page.click('[data-tab="calls"]');
+    await expect(page.locator('#range .chip')).toBeVisible();
+    await expect(page.locator('#calls tr.call')).not.toHaveCount(10);
+    await page.click('#range .chip');
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+  });
+
+  test('marks the records let go where they were, and keeps the page’s state apart from them', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await deliver(page, { dropped: 1_834, records: [], type: 'records' });
+
+    await expect(page.locator('#calls tr.marker.gap')).toContainText('1,834 records let go here');
+    await expect(page.locator('#footer')).toContainText('1,834 records let go');
+    await expect(page.locator('#status')).toHaveText('connected to the page');
+
+    await deliver(page, { type: 'page-gone' });
+    await expect(page.locator('#status')).toHaveText(
+      'the page is gone: its calls stay until you clear them'
+    );
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+    await deliver(page, { type: 'page-connected' });
+    await expect(page.locator('#calls tr.call')).toHaveCount(0);
+  });
+
+  test('pauses, preserves its log across a reload, and exports its records and imports them back', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    await page.check('#preserve');
+    await deliver(page, { type: 'page-gone' });
+    await deliver(page, { type: 'page-connected' });
+    await expect(page.locator('#calls tr.marker.reload')).toContainText('Page reloaded');
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+
+    await page.keyboard.press('Control+e');
+    await expect(page.locator('#record')).toHaveAttribute('aria-pressed', 'false');
+    await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 4), type: 'records' });
+    await expect(page.locator('#footer')).toContainText('paused: 4 records not recorded');
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
+    const saved = await download.path();
+    const log = JSON.parse(await readFile(saved, 'utf8')) as { format: string; records: unknown[] };
+
+    expect(log.format).toBe('bead-devtools-log');
+    expect(log.records).toHaveLength(TRAFFIC.length);
+
+    await page.keyboard.press('Control+l');
+    await expect(page.locator('#calls tr.call')).toHaveCount(0);
+    await page.locator('#import-file').setInputFiles(saved);
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+    await expect(page.locator('#toast')).toContainText('Imported 46 records');
+  });
+
+  test('answers to the keyboard and to a context menu, and copies a call as code', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    await rowOf(page, 'stats').click();
+    await page.keyboard.press('ArrowDown');
+    await expect(rowOf(page, 'read')).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowRight');
+    await expect(rowOf(page, 'read').locator('[data-twist]')).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+
+    await rowOf(page, 'increment').click({ button: 'right' });
+    await expect(page.locator('#menu')).toBeVisible();
+    await page.locator('#menu button', { hasText: 'Hide increment' }).click();
+    await expect(page.locator('#filter')).toHaveValue('-increment');
+    await expect(page.locator('#calls tr.call')).toHaveCount(9);
+
+    await rowOf(page, 'whoami').click({ button: 'right' });
+    await page.locator('#menu button', { hasText: 'Copy as code' }).click();
+    await expect(page.locator('#toast')).toHaveText('Copied');
+
+    await page.keyboard.press('/');
+    await expect(page.locator('#filter')).toBeFocused();
+  });
+
+  test('shows what a registry counts and its calls a second, and says when a client was given none', async ({
+    page,
+  }) => {
     await openPanel(page);
     await deliver(page, {
       sources: [
@@ -226,23 +412,23 @@ test.describe('the panel', () => {
     });
     await page.click('[data-tab="metrics"]');
 
-    await expect(page.locator('#metrics li', { hasText: 'read' })).toContainText('2 made');
+    await expect(page.locator('#metrics tr[data-procedure="read"]')).toContainText('made');
+    await expect(page.locator('#metrics tr[data-procedure="read"] .spark')).toBeVisible();
     await expect(page.locator('#metrics .chip.failure')).toHaveText('1 SESSION_REQUIRED');
     await expect(page.locator('#metrics')).toContainText(
       'This client was given no metrics registry'
     );
+
+    await page.locator('#metrics tr[data-procedure="read"] button').click();
+    await expect(page.locator('[data-tab="calls"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#filter')).toHaveValue('read');
   });
 
-  test('reads the HTTP transport’s exchanges from the Network panel’s entries, with the package’s codec', async ({
+  test('reads the HTTP transport’s exchanges from the Network panel’s entries, with the package’s codec, names learned from calls', async ({
     page,
   }) => {
     const request = writeEnvelope({
-      header: {
-        callId: 1,
-        kind: EnvelopeKind.REQUEST,
-        procedureId: 3,
-        serviceId: 1,
-      },
+      header: { callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 12, serviceId: 1 },
       kind: EnvelopeKind.REQUEST,
       payload: encoder.encode('hello'),
     });
@@ -256,7 +442,7 @@ test.describe('the panel', () => {
     new DataView(batch.buffer).setUint32(0, result.length);
     batch.set(result, 4);
 
-    await openPanel(page);
+    await openWithTraffic(page);
     await page.evaluate(
       ([requestText, responseBase64]) => {
         const { fake } = globalThis as unknown as { fake: IFake };
@@ -274,6 +460,14 @@ test.describe('the panel', () => {
           startedDateTime: '2026-10-04T12:00:00.000Z',
         });
         fake.finish({
+          getContent: (callback: (content: string, encoding: string) => void) => {
+            callback('', 'base64');
+          },
+          request: { method: 'POST', url: 'http://localhost:8080/bead' },
+          response: { content: { mimeType: 'application/prs.bead' }, status: 200 },
+          startedDateTime: '2026-10-04T12:00:01.000Z',
+        });
+        fake.finish({
           getContent: () => {},
           request: { method: 'GET', url: 'http://localhost:8080/page.js' },
           response: { content: { mimeType: 'text/javascript' }, status: 200 },
@@ -284,11 +478,18 @@ test.describe('the panel', () => {
     );
     await page.click('[data-tab="wire"]');
 
-    await expect(page.locator('#wire .exchange')).toHaveCount(1);
-    await expect(page.locator('#wire h3')).toHaveText('POST /bead — 200');
-    await expect(page.locator('#wire pre').first()).toContainText(
-      'REQUEST #1 procedureId 3, serviceId 1'
+    await expect(page.locator('#wire .exchange')).toHaveCount(2);
+    await expect(page.locator('#wire .request-line').first()).toHaveText('POST /bead');
+    await expect(page.locator('#wire .exchange').first()).toContainText('nothing: a listen');
+    await expect(page.locator('#wire .exchange').last()).toContainText(
+      '→ REQUEST · #1 · token · 5 bytes'
     );
-    await expect(page.locator('#wire pre').last()).toContainText('RESULT #1 2 bytes');
+    await expect(page.locator('#wire .exchange').last()).toContainText('← RESULT · #1 · 2 bytes');
+    await page
+      .locator('#wire .exchange')
+      .last()
+      .locator('button', { hasText: 'Copy as conversation' })
+      .click();
+    await expect(page.locator('#toast')).toHaveText('Copied');
   });
 });
