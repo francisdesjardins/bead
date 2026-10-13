@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   network of prefix 0 among them, and the same walk of the upgrade's field, so a connection behind
   a proxy it names is named and told by its client's address, never the proxy's. It bounds no
   address, so nothing else moves (spec 15.12; decision 0030).
+- `spec/check.py` holds every count the tables of files of `docs/support.md` and the README state
+  to the files it counts: the vectors and each group's, the conversations, the transports' cases by
+  transport and by clock, the clock cases, the durations' places, ways and inputs, the identities'
+  names, ids, kinds, ways and folds, the codecs' payloads and values, the filters and their calls,
+  the expositions and the exits, and what each side plays; the protobuf suite's tests to its
+  runner's floor; and a table or a row that loses a count, or a row that states a number none
+  holds, fails (decision 0006).
 
 ### Changed
 

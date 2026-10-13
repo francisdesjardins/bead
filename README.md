@@ -150,9 +150,10 @@ and the groups of vectors name each other, that every unit an entry cites is its
 each ledger gives every unit of its document its status, each reason held by its rule, and the
 hash of its text, which moves only where `python spec/check.py --write-units 15.7` names the unit,
 and that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint
-is in its form and `interop-service.json` states its procedures; then it reports which groups and
-files each side's tests read, and fails on one a side does not. It runs on Python
-3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
+is in its form and `interop-service.json` states its procedures, and that each count the table
+above and the matrix's, in [`docs/support.md`](docs/support.md), state is what the files hold;
+then it reports which groups and files each side's tests read, and fails on one a side does not.
+It runs on Python 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 
 ```sh
 python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1

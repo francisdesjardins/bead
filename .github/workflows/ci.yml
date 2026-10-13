@@ -35,8 +35,9 @@ jobs:
   # The conformance files are what their generators write: regenerated, they must come out
   # identical to the committed ones, byte for byte. Then spec/check.py, from its hash-locked
   # dependencies: each file under its schema, the version of its document, the spec's sections and
-  # the vector groups naming each other, the companion's expositions read as 0.0.4, and each side's
-  # tests reading every group.
+  # the vector groups naming each other, the companion's expositions read as 0.0.4, each side's
+  # tests reading every group, and each count the tables of files of docs/support.md and the README
+  # state.
   spec:
     name: Spec
     runs-on: ubuntu-26.04
