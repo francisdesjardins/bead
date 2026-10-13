@@ -1,0 +1,13 @@
+{
+  // The testee of protobuf's conformance suite, with the code tools/protobuf-conformance.mjs
+  // generates into `generated/` at run time: that tool type-checks it once generated, since neither
+  // the package's own type-check nor its lint can read it without that code. beadc's output names
+  // each file it imports by its `.ts`, as Node runs it.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2024", "ESNext.Disposable", "ESNext.Iterator", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["*.ts", "generated/**/*.ts"]
+}

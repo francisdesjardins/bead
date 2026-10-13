@@ -220,6 +220,9 @@
     "**/*_pb.ts",
     // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
     "tools/oxlint-plugin.cases.ts",
+    // protobuf's conformance testee, read with the code generated into it at run time alone:
+    // `tools/protobuf-conformance.mjs` type-checks it then
+    "tools/protobuf-conformance/**",
     ".yarn/**"
   ]
 }
