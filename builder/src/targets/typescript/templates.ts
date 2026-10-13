@@ -3,8 +3,11 @@
 // What the TypeScript target prints for one service, through protoplugin's symbols (decision 0022):
 // its descriptors, its catalogue, its resolvers' and its options' types, a server class where only
 // resolvers are written, and a client class holding a requester of each procedure by its name; the
-// file's contract with the runtime follows its services. Every import is a symbol, so protoplugin writes each once and aliases a
-// clash; every doc comment is `f.jsDoc`'s, which writes `*/` as `*\/`.
+// file's contract with the runtime follows its services. Every import is a symbol, so protoplugin
+// writes each once and aliases a clash; every doc comment is `f.jsDoc`'s, which writes `*/` as `*\/`.
+// A deprecation is marked `@deprecated` on each declaration the file writes for it, as protoc-gen-es
+// marks a deprecated rpc, and a name `on`, `of` or `is` takes is marked by an overload of its own,
+// written only where something is deprecated.
 
 // dependencies
 
@@ -14,9 +17,11 @@ import type { GeneratedFile, Printable } from '@bufbuild/protoplugin';
 import type {
   AdmissionRule,
   IBinding,
+  IDeprecation,
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
+import { deprecationTextOf } from '../target.ts';
 
 // types
 
@@ -52,6 +57,11 @@ const literalOf = (text: string): string => {
   const escaped = JSON.stringify(text).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'");
 
   return `'${escaped}'`;
+};
+
+/** A doc comment's tail for `deprecation`: none, or `@deprecated` and its text, after a blank line. */
+export const deprecatedOf = (deprecation: IDeprecation | undefined): string => {
+  return deprecation === undefined ? '' : `\n\n@deprecated ${deprecationTextOf(deprecation)}`;
 };
 
 // what a procedure admits, in the words its doc comment ends with
@@ -121,6 +131,22 @@ export const printService = (
       })
     ),
   ].sort();
+  // a procedure's own deprecation, or its service's, which a blueprint written by hand may give alone
+  const deprecationOf = (procedure: IProcedureEntry): IDeprecation | undefined => {
+    return procedure.deprecation ?? service.deprecation;
+  };
+  const deprecatedAnswered = answered.filter((procedure) => {
+    return deprecationOf(procedure) !== undefined;
+  });
+  const deprecatedCommands = service.procedures.filter((procedure) => {
+    return procedure.procedureKind === 'command' && deprecationOf(procedure) !== undefined;
+  });
+  const deprecatedFailures = service.failures.filter((failure) => {
+    return failure.deprecation !== undefined;
+  });
+  // every type the file declares for a deprecated service is marked, protoplugin's reading of a
+  // deprecated parent
+  const serviceDeprecated = deprecatedOf(service.deprecation);
   const fromRuntime = (symbol: string, typeOnly = false): Printable => {
     return f.import(symbol, runtime, typeOnly);
   };
@@ -160,6 +186,42 @@ export const printService = (
   };
   const server = [fromRuntime('IServiceServer', true), `<typeof ${procedures}, Data>`];
   const client = [fromRuntime('IServiceClient', true), `<typeof ${procedures}>`];
+  // the catalogue's type: the runtime's, behind an overload of `of` and of `is` a deprecated failure
+  const failuresTypeOf = (): Printable => {
+    if (deprecatedFailures.length === 0) {
+      return [];
+    }
+
+    const names = service.failures
+      .map((failure) => {
+        return literalOf(failure.failureName);
+      })
+      .join(' | ');
+    const overloads: Printable[] = [];
+
+    for (const failure of deprecatedFailures) {
+      const named = literalOf(failure.failureName);
+      const deprecated = deprecatedOf(failure.deprecation);
+
+      overloads.push(
+        f.jsDoc(
+          `${failure.description ?? `The failure ${failure.failureName}.`}${deprecated}`,
+          '  '
+        ),
+        '\n',
+        `  of(name: ${named}, detail?: string): `,
+        fromRuntime('IListedFailure', true),
+        `<${named}>;\n`,
+        f.jsDoc(`Whether a failure received is ${failure.failureName}.${deprecated}`, '  '),
+        '\n',
+        `  is(error: unknown, name: ${named}): error is `,
+        fromRuntime('IListedFailureError', true),
+        `<${named}>;\n`
+      );
+    }
+
+    return [': {\n', ...overloads, '} & ', fromRuntime('IFailureCatalogue', true), `<${names}>`];
+  };
 
   // * the descriptors, the catalogue and the types: what a module of resolvers imports
   f.print();
@@ -167,7 +229,7 @@ export const printService = (
     f.jsDoc(
       `The procedures of \`${shown}\`: service ${String(service.serviceId)}, revision ${String(service.serviceRevision)}.${
         service.description === undefined ? '' : `\n\n${service.description}`
-      }`
+      }${serviceDeprecated}`
     )
   );
   f.print(f.export('const', procedures), ' = Object.freeze({');
@@ -181,7 +243,7 @@ export const printService = (
 
     f.print(
       f.jsDoc(
-        `${procedure.description === undefined ? '' : `${procedure.description} `}${admitsOf(procedure.admission)}`,
+        `${procedure.description === undefined ? '' : `${procedure.description} `}${admitsOf(procedure.admission)}${deprecatedOf(deprecationOf(procedure))}`,
         '  '
       )
     );
@@ -209,11 +271,12 @@ export const printService = (
   f.print();
   f.print(
     f.jsDoc(
-      `The failures of \`${shown}\`, by name: service ${String(service.serviceId)}'s catalogue.`
+      `The failures of \`${shown}\`, by name: service ${String(service.serviceId)}'s catalogue.${serviceDeprecated}`
     )
   );
   f.print(
     f.export('const', `${name}Failures`),
+    failuresTypeOf(),
     ' = ',
     fromRuntime('failuresOf'),
     '({ codes: { ',
@@ -227,7 +290,7 @@ export const printService = (
   f.print();
   f.print(
     f.jsDoc(
-      "Each procedure's resolver, by its name: for resolvers written in a module of their own."
+      `Each procedure's resolver, by its name: for resolvers written in a module of their own.${serviceDeprecated}`
     )
   );
   f.print(
@@ -239,7 +302,7 @@ export const printService = (
   f.print();
   f.print(
     f.jsDoc(
-      `What the server side of \`${shown}\` is given: its hooks, by the names its procedures give them.`
+      `What the server side of \`${shown}\` is given: its hooks, by the names its procedures give them.${serviceDeprecated}`
     )
   );
   f.print(
@@ -249,7 +312,9 @@ export const printService = (
     `<typeof ${procedures}>[0], undefined>;`
   );
   f.print();
-  f.print(f.jsDoc(`The hooks of \`${shown}\`, by the names its procedures give them.`));
+  f.print(
+    f.jsDoc(`The hooks of \`${shown}\`, by the names its procedures give them.${serviceDeprecated}`)
+  );
   f.print(
     f.export('type', `${name}Admissions`),
     ` = NonNullable<${name}ServerOptions['admissions']>;`
@@ -257,7 +322,7 @@ export const printService = (
   f.print();
   f.print(
     f.jsDoc(
-      `What a client side of \`${shown}\` is given besides its Bead client: the windows of its notifications, and whether it validates.`
+      `What a client side of \`${shown}\` is given besides its Bead client: the windows of its notifications, and whether it validates.${serviceDeprecated}`
     )
   );
   f.print(
@@ -268,7 +333,9 @@ export const printService = (
   );
   f.print();
   f.print(
-    f.jsDoc(`The window each procedure of \`${shown}\` that notifies is asked for; none, unpaced.`)
+    f.jsDoc(
+      `The window each procedure of \`${shown}\` that notifies is asked for; none, unpaced.${serviceDeprecated}`
+    )
   );
   f.print(f.export('type', `${name}Windows`), ` = NonNullable<${name}ClientOptions['windows']>;`);
 
@@ -276,14 +343,37 @@ export const printService = (
   f.print();
   f.print(
     f.jsDoc(
-      `The server side of \`${shown}\`, offered on one Bead server: only its resolvers are written.`
+      `The server side of \`${shown}\`, offered on one Bead server: only its resolvers are written.${serviceDeprecated}`
     )
   );
   f.print(f.export('class', `${name}Server`), '<Data = unknown> {');
 
   for (const [member, doc] of SERVER_MEMBERS) {
     f.print(f.jsDoc(doc, '  '));
-    f.print(`  public readonly ${member}: `, server, `['${member}'];`);
+
+    // * a deprecated procedure's name, registered by an overload of its own ahead of the layer's
+    // signature, which a name of a wider type resolves to
+    if (member === 'on' && deprecatedAnswered.length > 0) {
+      f.print('  public readonly on: {');
+
+      for (const procedure of deprecatedAnswered) {
+        const named = literalOf(procedure.procedureName);
+
+        f.print(
+          f.jsDoc(
+            `Registers the resolver of ${procedure.procedureName}.${deprecatedOf(deprecationOf(procedure))}`,
+            '    '
+          )
+        );
+        // ! generic, its name held to the one: the layer's generic `on`, assigned to a signature
+        // of fixed types, is inferred apart from its name and refused for a raw or a JSON payload
+        f.print(`    <Name extends ${named}>(name: Name, callback: ${name}Resolvers[Name]): void;`);
+      }
+
+      f.print('  } & ', server, "['on'];");
+    } else {
+      f.print(`  public readonly ${member}: `, server, `['${member}'];`);
+    }
   }
 
   f.print();
@@ -319,14 +409,17 @@ export const printService = (
   f.print();
   f.print(
     f.jsDoc(
-      `The client side of \`${shown}\`, over one Bead client: a requester of each procedure its server answers, by its name.`
+      `The client side of \`${shown}\`, over one Bead client: a requester of each procedure its server answers, by its name.${serviceDeprecated}`
     )
   );
   f.print(f.export('class', `${name}Client`), ' {');
 
   for (const procedure of answered) {
     f.print(
-      f.jsDoc(procedure.description ?? `The requester of \`${procedure.procedureName}\`.`, '  ')
+      f.jsDoc(
+        `${procedure.description ?? `The requester of \`${procedure.procedureName}\`.`}${deprecatedOf(deprecationOf(procedure))}`,
+        '  '
+      )
     );
     f.print(
       `  public readonly ${procedure.procedureName}: `,
@@ -343,7 +436,36 @@ export const printService = (
   );
   f.print('  public readonly notifications: ', client, "['notifications'];");
   f.print(f.jsDoc('Registers the resolver of a command it answers, by its name.', '  '));
-  f.print('  public readonly on: ', client, "['on'];");
+
+  // * a deprecated command's name, registered by an overload of its own, as the server's
+  if (deprecatedCommands.length > 0) {
+    f.print('  public readonly on: {');
+
+    for (const procedure of deprecatedCommands) {
+      const named = literalOf(procedure.procedureName);
+
+      f.print(
+        f.jsDoc(
+          `Registers the resolver of ${procedure.procedureName}.${deprecatedOf(deprecationOf(procedure))}`,
+          '    '
+        )
+      );
+      // ! generic, as the server's; its callback is the layer's, its connection's handle read off
+      // the layer's `on`, which the runtime names under no export of its own
+      f.print(
+        `    <Name extends ${named}>(name: Name, callback: `,
+        fromRuntime('ServiceResolverCallback', true),
+        `<(typeof ${procedures})[Name], Parameters<Parameters<`,
+        client,
+        `['on']>[1]>[0]['connectionHandle']>): void;`
+      );
+    }
+
+    f.print('  } & ', client, "['on'];");
+  } else {
+    f.print('  public readonly on: ', client, "['on'];");
+  }
+
   f.print();
   f.print(
     f.jsDoc(

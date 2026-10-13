@@ -494,6 +494,6 @@ test('writes a C# output from a blueprint at its root, in its namespace, and --c
 
   writeFileSync(written, readFileSync(written, 'utf8').replace('Acme.Interop;', 'Acme.Other;'));
   expect(findingsOf(folder)).toEqual([
-    'gen/InteropBead.cs:7: line 7 differs from what beadc generate writes',
+    'gen/InteropBead.cs:8: line 8 differs from what beadc generate writes',
   ]);
 });

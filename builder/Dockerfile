@@ -89,6 +89,8 @@ COPY spec/ spec/
 COPY implementations/typescript/package.json implementations/typescript/tsconfig.base.json implementations/typescript/.oxlintrc.base.json implementations/typescript/
 COPY implementations/typescript/tools/playwright-base.mjs implementations/typescript/tools/
 COPY implementations/typescript/interop/generated/ implementations/typescript/interop/generated/
+# the runtime the goldens import, whose types carry a deprecation to each use the consumer test lints
+COPY --exclude=**/__tests__ implementations/typescript/src/ implementations/typescript/src/
 COPY implementations/dotnet/.editorconfig implementations/dotnet/
 COPY implementations/dotnet/interop/Bead.Interop/Generated/ implementations/dotnet/interop/Bead.Interop/Generated/
 COPY --from=deps /bead/builder/node_modules/ builder/node_modules/

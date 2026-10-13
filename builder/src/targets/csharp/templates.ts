@@ -7,17 +7,22 @@
 // where only resolvers are written; and a client class holding a requester of each procedure by its
 // rpc's name. The file's contract with the runtime follows its services. Every type is qualified
 // from `global::`, so no type of the namespace takes a runtime type's place; every description goes
-// through `docOf`, the one writer of a documentation comment.
+// through `docOf`, the one writer of a documentation comment. A deprecation is marked
+// `[Obsolete]`, its text and Bead's diagnostic id, on each declaration the file writes for it, as
+// protoc's C# generator and gRPC's mark a deprecated rpc, through `obsoleteOf`, the one writer of
+// the mark.
 
 // dependencies
 
 import type {
   AdmissionRule,
   IBinding,
+  IDeprecation,
   IProcedureEntry,
   IServiceEntry,
 } from '../../model/blueprint.ts';
 import { csharpNameOfFailure } from '../names.ts';
+import { DEPRECATION_ID, deprecationTextOf } from '../target.ts';
 
 // types
 
@@ -135,6 +140,26 @@ export const docOf = (
   ];
 };
 
+// the mark of a deprecation: `[Obsolete]`, its text and Bead's diagnostic id, which a consumer
+// keeps a warning apart from every other library's
+const attributeOf = (deprecation: IDeprecation): string => {
+  return `[global::System.Obsolete(${literalOf(deprecationTextOf(deprecation))}, DiagnosticId = ${literalOf(DEPRECATION_ID)})]`;
+};
+
+/** The mark of `deprecation` at `indent`: none, or one `[Obsolete]` line. */
+export const obsoleteOf = (deprecation: IDeprecation | undefined, indent: string): string[] => {
+  return deprecation === undefined ? [] : [`${indent}${attributeOf(deprecation)}`];
+};
+
+// ! a required member's accessors, its getter marked: C# refuses `[Obsolete]` on a required member
+// of a type that is not obsolete itself (CS9042), and every use but the file's own initializer reads
+// the getter
+const accessorsOf = (deprecation: IDeprecation | undefined): string => {
+  return deprecation === undefined
+    ? '{ get; init; }'
+    : `{ ${attributeOf(deprecation)} get; init; }`;
+};
+
 // what a procedure admits, in the words its doc comment ends with, as the TypeScript target writes them
 const admitsOf = (admission: AdmissionRule): string => {
   if (admission === 'none') {
@@ -235,6 +260,13 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
   const answered = service.procedures.filter((procedure) => {
     return procedure.procedureKind !== 'command';
   });
+  // a procedure's own deprecation, or its service's, which a blueprint written by hand may give alone
+  const deprecationOf = (procedure: IProcedureEntry): IDeprecation | undefined => {
+    return procedure.deprecation ?? service.deprecation;
+  };
+  // * every type the file declares for a deprecated service is marked, as protoc's C# generator
+  // marks a deprecated message's nested types through it
+  const serviceMark = obsoleteOf(service.deprecation, '');
   const commands = service.procedures.filter((procedure) => {
     return procedure.procedureKind === 'command';
   });
@@ -347,6 +379,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
     lines.push(
       '',
       `/// <summary>${details.doc}</summary>`,
+      ...serviceMark,
       `public sealed class ${type}${implemented === undefined ? '' : ` : ${implemented}`}`,
       '{'
     );
@@ -386,6 +419,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       },
       ''
     ),
+    ...serviceMark,
     `public sealed class ${procedures}`,
     '{',
     `${INDENT}private ${procedures}()`,
@@ -415,6 +449,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
         },
         INDENT
       ),
+      ...obsoleteOf(deprecationOf(procedure), INDENT),
       `${INDENT}public static ${descriptorOf(procedure)} ${upperFirst(procedure.procedureName)} { get; } = new(`,
       `${INDENT}${INDENT}${procedureOf(procedure, service)},`,
       `${INDENT}${INDENT}new ${bindings}`,
@@ -445,6 +480,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
   lines.push(
     '',
     `/// <summary>The failures of ${shown}: service ${String(service.serviceId)}'s catalogue, and whether a failure received is one of it.</summary>`,
+    ...serviceMark,
     `public static class ${failures}`,
     '{'
   );
@@ -477,6 +513,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
             : { description: failure.description },
           `${INDENT}${INDENT}`
         ),
+        ...obsoleteOf(failure?.deprecation, `${INDENT}${INDENT}`),
         `${INDENT}${INDENT}public static ${rpc} ${csharpNameOfFailure(failureName)} { get; } = new(${String(failure?.code)});`
       );
     }
@@ -546,7 +583,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
     commands.map((procedure) => {
       return {
         doc: requesterDocOf(procedure, INDENT),
-        declaration: `public required ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} { get; init; }`,
+        declaration: `public required ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
       };
     })
   );
@@ -560,7 +597,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
         doc: [
           `${INDENT}/// <summary>Notifies the subscribers of <c>${procedure.procedureName}</c>.</summary>`,
         ],
-        declaration: `public required global::System.Func<${notifiedOf(procedure)}, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> ${upperFirst(procedure.procedureName)} { get; init; }`,
+        declaration: `public required global::System.Func<${notifiedOf(procedure)}, global::Bead.NotifyOptions?, global::System.Threading.Tasks.Task> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
       };
     })
   );
@@ -579,6 +616,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
       return {
         doc: [
           `${INDENT}/// <summary>The window of <c>${procedure.procedureName}</c>, a whole number above 0.</summary>`,
+          ...obsoleteOf(deprecationOf(procedure), INDENT),
         ],
         declaration: `public int? ${upperFirst(procedure.procedureName)} { get; init; }`,
       };
@@ -594,7 +632,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
         doc: [
           `${INDENT}/// <summary>The notification of <c>${procedure.procedureName}</c>.</summary>`,
         ],
-        declaration: `public required global::Bead.INotification<${typeOf(procedure.request)}, ${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} { get; init; }`,
+        declaration: `public required global::Bead.INotification<${typeOf(procedure.request)}, ${notifiedOf(procedure)}> ${upperFirst(procedure.procedureName)} ${accessorsOf(deprecationOf(procedure))}`,
       };
     })
   );
@@ -632,6 +670,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
     '',
     `/// <summary>The server side of ${shown}, offered on one Bead server: only its resolvers are written.</summary>`,
     '/// <typeparam name="TData">What a session of its server keeps.</typeparam>',
+    ...serviceMark,
     `public sealed class ${server}<TData>`,
     '{',
     `${INDENT}private readonly ${layer} _service;`,
@@ -715,6 +754,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
   lines.push(
     '',
     `/// <summary>The client side of ${shown}, over one Bead client: a requester of each procedure its server answers, by its name.</summary>`,
+    ...serviceMark,
     `public sealed class ${client}`,
     '{',
     `${INDENT}private readonly global::Bead.ServiceClient<${procedures}> _service;`,
@@ -746,6 +786,7 @@ export const printService = (service: IServiceEntry, options: ICSharpTemplateOpt
     lines.push(
       '',
       ...requesterDocOf(procedure, INDENT),
+      ...obsoleteOf(deprecationOf(procedure), INDENT),
       `${INDENT}public ${requesterOf(procedure)} ${upperFirst(procedure.procedureName)} { get; }`
     );
   }

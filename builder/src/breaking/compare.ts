@@ -27,6 +27,7 @@ import {
   type AdmissionRule,
   type IBinding,
   type IBlueprint,
+  type IFailureEntry,
   type IProcedureEntry,
   type IRange,
   type IServiceEntry,
@@ -154,7 +155,10 @@ const hooksOf = (service: IServiceEntry): string[] => {
   ].sort();
 };
 
-const sameDeprecation = (one: IProcedureEntry | IServiceEntry, other: typeof one): boolean => {
+const sameDeprecation = (
+  one: IProcedureEntry | IServiceEntry | IFailureEntry,
+  other: typeof one
+): boolean => {
   return (
     (one.deprecation === undefined) === (other.deprecation === undefined) &&
     one.deprecation?.message === other.deprecation?.message
@@ -382,6 +386,8 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
           message: `${failureNamed} of ${named} is ${kept.failureName} now: its catalogue's member is named by it`,
           serviceId,
         });
+      } else if (!sameDeprecation(failure, kept)) {
+        changed.add(serviceId);
       }
     }
 

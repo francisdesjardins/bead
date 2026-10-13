@@ -147,6 +147,9 @@
               },
               "description": {
                 "$ref": "#/$defs/description"
+              },
+              "deprecation": {
+                "$ref": "#/$defs/deprecation"
               }
             }
           }

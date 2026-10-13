@@ -1,0 +1,11 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // `typescript/no-deprecated` alone, type-aware, over a consumer of the goldens and the goldens
+  // themselves: what `typescript.test.ts` lints apart, and the builder's lint, which ignores this
+  // folder, reads none of it.
+  "plugins": ["typescript"],
+  "categories": { "correctness": "off" },
+  "rules": { "typescript/no-deprecated": "error" },
+  "options": { "typeAware": true }
+}

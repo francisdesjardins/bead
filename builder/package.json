@@ -24,7 +24,7 @@
     "options:generate": "node tools/check-options.mjs --write",
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
-    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.json && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.floor.json"
+    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.json && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.floor.json && node node_modules/typescript-7/bin/tsc -p test/consumer/tsconfig.json"
   },
   "dependencies": {
     "@bufbuild/buf": "1.73.0",

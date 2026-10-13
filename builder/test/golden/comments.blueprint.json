@@ -20,6 +20,7 @@
       "failures": [
         {
           "code": 1,
+          "deprecation": {},
           "description": "Too late, on its first line; and on its second.",
           "failureName": "LATE"
         },
@@ -45,6 +46,9 @@
         },
         {
           "admission": "session",
+          "deprecation": {
+            "message": "Use escapes."
+          },
           "failures": [],
           "procedureId": 2,
           "procedureKind": "request",
@@ -58,6 +62,7 @@
         },
         {
           "admission": "session",
+          "deprecation": {},
           "failures": [],
           "procedureId": 3,
           "procedureKind": "request",
@@ -73,7 +78,8 @@
           "admission": "session",
           "description": "A block comment, its second line.",
           "failures": [
-            "LATE"
+            "LATE",
+            "EARLY"
           ],
           "procedureId": 4,
           "procedureKind": "request",
@@ -125,6 +131,43 @@
       "serviceId": 2,
       "serviceName": "Comments",
       "serviceRevision": 3
+    },
+    {
+      "deprecation": {
+        "message": "Use CommentsService."
+      },
+      "description": "The comments service as it was, deprecated: every type its file declares for it is marked.",
+      "failures": [],
+      "procedures": [
+        {
+          "admission": "session",
+          "deprecation": {
+            "message": "Use CommentsService."
+          },
+          "failures": [],
+          "procedureId": 1,
+          "procedureKind": "request",
+          "procedureName": "escapes",
+          "request": {
+            "encoding": "text"
+          },
+          "result": {
+            "encoding": "text"
+          }
+        }
+      ],
+      "proto": {
+        "file": "bead/comments/v1/comments.proto",
+        "fullName": "bead.comments.v1.OldCommentsService"
+      },
+      "reserved": {
+        "failureCodes": [],
+        "procedureIds": [],
+        "procedureNames": []
+      },
+      "serviceId": 4,
+      "serviceName": "OldComments",
+      "serviceRevision": 1
     }
   ],
   "specVersion": "0.2.0"

@@ -75,6 +75,7 @@ export interface IFailureEntry {
   readonly code: number;
   readonly failureName: string;
   readonly description?: string;
+  readonly deprecation?: IDeprecation;
 }
 
 /** A service: its ids, its catalogue, its reservations and its procedures. */

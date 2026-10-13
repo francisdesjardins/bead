@@ -1,0 +1,15 @@
+{
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/failures/0/deprecation",
+      "value": {}
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_REVISION",
+      "pointer": "/services/0/serviceRevision"
+    }
+  ]
+}
