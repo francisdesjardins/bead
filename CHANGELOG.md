@@ -139,8 +139,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The conformance files cite the units they play and left uncited: 4.2 by the vectors of a kept
   bit, 5.1 by those that fail two checks, 5.2 by the header refusals whose detail says which check
   failed, 9.6 by the entries of the gate, 12.6 by the transfers placed out of order or delivered
-  whole, 13.9.4, 14.5.3 and 17.2 by the entries that play them; `metrics.json` cites the rows of the
-  companion's 7.2, 7.6, 8.1 and 11.3 its expositions write.
+  whole, 13.10.4, 14.5.3 and 17.2 by the entries that play them; `metrics.json` cites the rows of
+  the companion's 7.2, 7.6, 8.1 and 11.3 its expositions write.
 - `spec/conversations.json` pins the interop's failure details, fail's, ticks', denied's, logout's
   and register's, and each credit's `paced`, which its schema requires and `metrics.json`'s exits
   repeat; the generators take each interop code from the blueprint's catalogue, and `spec/check.py`
@@ -170,6 +170,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   adds two cases over HTTP, a count in two field lines or as a list, and a listen without
   `bead-after` whatever its target holds; the case of a count that does not parse widens to RFC
   9651's grammar, its parameters ignored, and `bead-listen`'s case to a parameter.
+- `spec.md` 13.8's key set is a clause of its own, 13.9, each of its rules an item, 13.9.1 to
+  13.9.7, and 13.9 and 13.10 are 13.10 and 13.11; 15.2's order at a WebSocket's address is its
+  items, 15.2.1 to 15.2.8, the stop's 503 the last. `conversations.json` and `transports.json` cite
+  the item each entry plays, and name in their `$comment` both of the interop's files.
+- A document's minor moves when an implementation that conforms to its last version must change to
+  conform to this one (decision 0008); `spec.md` names the interop's blueprint and what its service
+  does as files of its version; the companion moves by `spec.md`'s rule, under a version of its own;
+  a blueprint matter of the interop's moves the spec's version, one of the builder alone the
+  builder's (decision 0017).
 
 - `--except <RULE>@<scope>` names a finding's subject of the rule's kind; a pointer is refused, and
   so is `--except WAIVER_UNUSED`. `SERVICE_SAME_HOOKS` finds once a hook, and `RESERVED_NO_DELETE`'s
@@ -229,6 +238,18 @@ archive` writing a submodule as an empty folder.
 - `--against-ref`, given to beadc on Node, is refused, naming the pipe that does its work.
 - `init` names the cause of a file Windows PowerShell's `>` wrote, and the README labels its pwsh
   block.
+- `spec.md` states what was left to a reader: a listener's return and its `error` listener are their
+  platform's (15.1, decision 0023); a server's stop (15.1, 15.3); the 503 of an upgrade once a stop
+  began closes its connection and is told, as the other refusals at a WebSocket's address (15.2); a
+  client may wait what a `Retry-After` asks, which Bead's own clients do not read (15.7); what the
+  HTTP connection's token is worth in the clear, TLS off the machine being the deployment's (15.4,
+  decision 0020); the side sending a result's transfer reports its stall (12.7); BCP 14's key words,
+  verbatim, and "is never" for what "may not" forbade; the core rules of RFC 5234 in every grammar,
+  the filter's terminals Unicode scalar values; 9.10 beside 9.4 in 15.1, and records 0022 and 0026
+  in the index.
+- `debugging.md` 8.1 names where its families part from OpenTelemetry's RPC conventions, and the
+  shape their `_handled_total` families take; each of its references to a unit of `spec.md` names
+  it.
 
 ### Security
 

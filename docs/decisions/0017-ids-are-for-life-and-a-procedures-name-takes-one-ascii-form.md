@@ -93,10 +93,10 @@ routing; 4.10 never writes one, and neither side's writer does (`header.ts`, wit
 - A block at the low end, 0 to 255, as CoAP keeps 0 to 255 for the IETF's own options and as IANA
   keeps ports 0 to 1023 as System Ports ([RFC 6335
   §6](https://www.rfc-editor.org/rfc/rfc6335#section-6)). It moves service 1: the interop's
-  (`spec/interop-blueprint.json`), with the bytes of 29 conversations and every `service="1"` label of
-  `spec/metrics.json`, and the demo's (`implementations/typescript/demo/procedures.ts`); and every
-  test that declares a service below 256, which `serviceId: 2` and `ServiceId = 2` alone reach in 26
-  TypeScript test files and 12 C# ones.
+  (`spec/interop-blueprint.json`), with the bytes of the conversations that call it and every
+  `service="1"` label of `spec/metrics.json`, and the demo's
+  (`implementations/typescript/demo/procedures.ts`); and every test that declares a service below
+  256, which `serviceId: 2` and `ServiceId = 2` alone reach in both sides' test files.
   [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) lets the wire be revised in
   place until it is published.
 - Left to the first protocol service's decision: a protocol service that needs an id past 0 takes
@@ -170,8 +170,10 @@ bind the builder.
 
 - Everything a blueprint holds besides: services' and failures' names, a package's scope,
   reservations, hooks, the release rules and the derivation from a `.proto`. The spec defines none
-  of these and no conformance file cites them; a builder-only change would move the spec's minor,
-  which moves "when an implementation must change to keep passing"
+  of these and no conformance file cites them. A blueprint matter of the interop's moves the spec's
+  version, as its files are the spec's, the blueprint's schema among them
+  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
+  one of the builder alone moves the builder's
   ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 - **What binds a side.** Chosen: the ids' ranges and service 0; a procedure's name, its form, its
   reading and its fold; one name an address and one revision a service, held where a side counts;
