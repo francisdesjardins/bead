@@ -2,7 +2,8 @@
 
 // The script of a page a browser loads from an origin of its own: the HTTP client, bundled for the
 // browser, calls the interop service's HTTP server at another origin, whose answers the browser
-// hands it only as CORS lets it (spec 15.12; decision 0027).
+// hands it only as CORS lets it (spec 15.12; decision 0027), and whose preflight it caches by the
+// connection's one URL (spec 15.9; decision 0029).
 
 // dependencies
 
@@ -87,5 +88,41 @@ const callAcrossOrigins = async (target: ICrossOriginTarget): Promise<ICrossOrig
   };
 };
 
-(globalThis as { callAcrossOrigins?: typeof callAcrossOrigins }).callAcrossOrigins =
-  callAcrossOrigins;
+/**
+ * Connects to the server at `target`, subscribes to `ticks`, and ticks `count` times, each tick
+ * heard before the next goes, so each comes back in a batch of its own; then disconnects. What it
+ * heard, in order, or why its connect failed.
+ */
+const listenAcrossOrigins = async (
+  target: ICrossOriginTarget,
+  { count }: { count: number }
+): Promise<{ connectFailure?: string; heard?: unknown[] }> => {
+  const client = createHTTPClient();
+
+  try {
+    await client.connect(target);
+  } catch (error) {
+    return { connectFailure: String(error) };
+  }
+
+  const interop = new InteropClient(client);
+  const heard: unknown[] = [];
+  let ticked = Promise.withResolvers<void>();
+  const registration = await interop.notifications.ticks(null, (value) => {
+    heard.push(value);
+    ticked.resolve();
+  })();
+
+  for (let value = 1; value <= count; value += 1) {
+    await interop.tick({ value })();
+    await ticked.promise;
+    ticked = Promise.withResolvers<void>();
+  }
+
+  await registration.unregister();
+  await client.transport.disconnect();
+
+  return { heard };
+};
+
+Object.assign(globalThis, { callAcrossOrigins, listenAcrossOrigins });

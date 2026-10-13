@@ -190,17 +190,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private static readonly End Unknown = new(StatusCodes.Status404NotFound, HttpRefusals.ConnectionUnknown);
     private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy, new Dictionary<string, string> { ["retry-after"] = "1" });
 
-    // a CORS preflight's answer from an origin the server lists, whatever it asks for: the browser
-    // judges its request against it (Fetch §4.8). `*` is a wildcard for a request without
-    // credentials (Fetch §3.3.4), which every request to the server is, and no wildcard covers
-    // Authorization, which is named
-    private static readonly End Preflight = new(StatusCodes.Status204NoContent, null, new Dictionary<string, string>
-    {
-        ["access-control-allow-methods"] = "GET, POST, DELETE",
-        ["access-control-allow-headers"] = "authorization, *",
-        ["access-control-max-age"] = "7200",
-    });
-
     private readonly HttpTransportServerOptions _options;
     private readonly TimeProvider _clock;
 
@@ -651,15 +640,31 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return type == HttpTransport.MediaType && encoding is null or "identity";
     }
 
-    // whether a connect says its client listens: ?1 or ?0, absent being ?0; anything else is none
+    // whether a connect says its client listens: an Item whose bare item is a Boolean, its
+    // parameters ignored (RFC 9651 §2.3), absent being ?0; anything else is none
     private static bool? ListeningOf(HttpRequest request)
     {
-        return (HeaderOf(request, HttpTransport.ListenHeader) ?? "?0") switch
+        return StructuredFields.ParseItem(HeaderOf(request, HttpTransport.ListenHeader) ?? "?0")?.BareItem as bool?;
+    }
+
+    // a CORS preflight's answer from an origin the server lists, whatever method it asks for: the
+    // browser judges its request against it (Fetch §4.8). Authorization is named, since no wildcard
+    // covers it; then the names the preflight asks, its lines joined by ", " (RFC 9110 §5.3), since
+    // a browser may cache a name where it caches no wildcard; then `*`, a wildcard for a request
+    // without credentials (Fetch §3.3.4), which every request to the server is. No Vary names what
+    // it asked: no cache stores an answer to OPTIONS (RFC 9110 §9.3.7)
+    private static End PreflightOf(HttpRequest request)
+    {
+        // ! joined by ", " here, as Node joins them: StringValues.ToString() joins by ","
+        var asked = string.Join(", ", request.Headers.AccessControlRequestHeaders.AsEnumerable());
+        string[] allowed = asked.Length == 0 ? ["authorization", "*"] : ["authorization", asked, "*"];
+
+        return new End(StatusCodes.Status204NoContent, null, new Dictionary<string, string>
         {
-            "?0" => false,
-            "?1" => true,
-            _ => null,
-        };
+            ["access-control-allow-methods"] = "GET, POST, DELETE",
+            ["access-control-allow-headers"] = string.Join(", ", allowed),
+            ["access-control-max-age"] = "7200",
+        });
     }
 
     // a header as the request gives it, given twice as one; none when absent, which is not empty
@@ -680,13 +685,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return value.Length == 0 ? null : value;
     }
 
-    // a count a listen gives: absent is 0, and anything but 1 to 15 digits is none
-    private static long? CountOf(HttpRequest request, string name)
+    // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or
+    // more, its parameters ignored (RFC 9651 §2.3), its lines joined, so two lines never parse.
+    // Absent, it is 0, or none where it is required; anything else is none
+    private static long? CountOf(HttpRequest request, string name, CountOptions? options = null)
     {
-        var values = request.Query[name];
-        var value = values.Count == 0 ? "0" : values[0] ?? "";
+        if (HeaderOf(request, name) is not { } value)
+        {
+            return options is { IsRequired: true } ? null : 0;
+        }
 
-        return value.Length is >= 1 and <= 15 && value.All(char.IsAsciiDigit) ? long.Parse(value, System.Globalization.CultureInfo.InvariantCulture) : null;
+        return StructuredFields.ParseItem(value)?.BareItem is long count and >= 0 ? count : null;
     }
 
     // a token as the server draws it: 22 characters of base64url
@@ -992,7 +1001,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // a preflight is no refusal, so EndWith, never Finish: nothing told, no connection drawn
         if (isListed && HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
         {
-            await EndWith(context, Preflight);
+            await EndWith(context, PreflightOf(request));
 
             return;
         }
@@ -1625,8 +1634,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     {
         Holding?.Invoke(connection.ConnectionHandle);
 
-        var after = CountOf(context.Request, "after");
-        var wait = CountOf(context.Request, "wait");
+        var after = CountOf(context.Request, HttpTransport.AfterHeader, new CountOptions { IsRequired = true });
+        var wait = CountOf(context.Request, HttpTransport.WaitHeader);
         var listening = new Listening(connection);
         End? refused = null;
 
@@ -1907,6 +1916,12 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // how the transport ends an exchange of its own: its status, the refusal it is marked with, and
     // its headers
     private sealed record End(int Status, string? Reason = null, IReadOnlyDictionary<string, string>? Headers = null);
+
+    // how a listen's count is read: whether its field is required, or 0 when left out
+    private sealed record CountOptions
+    {
+        public bool IsRequired { get; init; }
+    }
 
     // what an exchange waiting on the transport ends with: an answer's envelope or a listen's batch,
     // the number of a batch's first, an end of the transport's own, or its connection gone — after

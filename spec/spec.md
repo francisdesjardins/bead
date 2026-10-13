@@ -1161,21 +1161,21 @@ with no detail, and its server's tell (section 15.1) is then what says why. Any 
 not 2xx — a gateway's 502, a proxy's 404 — may come after the request ran: the client counts the
 exchange lost.
 
-| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                               |
-| ------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                  |
-| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                           |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                                 |
-| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
-| 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                        |
-| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                              |
-| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                   |
-| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                    |
-| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                   |
-| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                             |
-| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                |
-| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                |
-| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                         |
+| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                         |
+| ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                            |
+| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                                                     |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                                                           |
+| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
+| 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                                                  |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                                                        |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                             |
+| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                              |
+| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
+| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                       |
+| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                          |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                          |
+| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                   |
 
 Every response on the path carries `cache-control: no-store`, `x-content-type-options: nosniff`
 and `vary: Origin`, since which one a request gets turns on its `Origin`
@@ -1216,33 +1216,45 @@ section 15.6's order.
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,
-`bead-listen: ?1` (the boolean of [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651)), and the
-server's 201 says it back when it takes the listen. It holds for the connection's life. To a client
-that does not listen, a request that opens a subscription is refused, `SUBSCRIPTION_UNSUPPORTED`, a
-request of the server's fails before it goes, and a relay passes it no request (section 14.3).
+`bead-listen: ?1`, an Item of [RFC 9651](https://www.rfc-editor.org/rfc/rfc9651#section-3.3.6) whose
+bare item is a Boolean, its parameters ignored
+([§2.3](https://www.rfc-editor.org/rfc/rfc9651#section-2.3)), and the server's 201 says it back when
+it takes the listen. It holds for the connection's life. To a client that does not listen, a request
+that opens a subscription is refused, `SUBSCRIPTION_UNSUPPORTED`, a request of the server's fails
+before it goes, and a relay passes it no request (section 14.3).
 
-15.9. The server numbers each such envelope into the connection's outbox, from 1. A listen,
-`GET /bead?after=&wait=`, acknowledges every envelope up to `after`, which leave the outbox, and
-brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope after
-its length on 4 bytes, big-endian, the number of the first in `bead-sequence`, the others following
-one by one. With nothing left, the server holds the listen up to `wait` milliseconds — 30 seconds at
-most by default — and ends it 204; a second listen takes the first's place. A `wait` the server
-reads is its peer's, not an application's (section 1.4): its `after` and its `wait` are each a
-count, 0 when left out, and otherwise, once the query is decoded, one to fifteen ASCII digits and
-nothing else; a `wait` of 0 answers at once, and one past the server's bound is held to it. A client
-reads a batch as it comes, and hears each envelope as it comes whole; what a listen lost carried
-past what was heard comes again to the next, so nothing is lost and nothing heard twice. A failure
-that ends a subscription, in a batch, may come before the result that answered its call, in a
-`POST`'s body: the client pairs the failure with the call still waiting, which fails with it
-(section 9.7), and reports the result that follows as `CALL_UNKNOWN`. It withdraws no default
-(section 13.4): a request's own answer comes in its `POST`'s body alone (section 15.5), so a failure
-a batch brings for a call still waiting ends a subscription its server had answered. An outbox past
-its bound — two envelopes' worth by default — closes its connection, its client having fallen
-behind. An envelope that would take its outbox past that bound is one its transport had all the
-same, as a notification handed to it counts as sent (`debugging.md` section 10.1): it is lost with
-the connection, and a relay whose request is so lost answers leg A `DESTINATION_LOST` (section
-14.5). A batch carries no credential beside its envelopes, nor does an answer: a command of the
-server's that presents `ELSEWHERE` over HTTP fails before it goes, `DESTINATION_UNREACHABLE`.
+15.9. The server numbers each such envelope into the connection's outbox, from 1. A listen, a `GET`
+of the connection's path, acknowledges every envelope up to its `bead-after`, which leave the
+outbox, and brings back all that is left in a batch of type `application/prs.bead-batch`: each
+envelope after its length on 4 bytes, big-endian, the number of the first in `bead-sequence`, the
+others following one by one. With nothing left, the server holds the listen up to its `bead-wait`
+milliseconds — 30 seconds at most by default — and ends it 204; a second listen takes the first's
+place. A `bead-wait` the server reads is its peer's, not an application's (section 1.4).
+`bead-after` and `bead-wait` are each an Item whose bare item is an Integer of
+[RFC 9651 §3.3.1](https://www.rfc-editor.org/rfc/rfc9651#section-3.3.1), 0 or more, its parameters
+ignored ([§2.3](https://www.rfc-editor.org/rfc/rfc9651#section-2.3)), and so is `bead-sequence`, 1
+or more. A listen carries its `bead-after`; a `bead-wait` left out is 0. A listen without
+`bead-after`, or with a count that does not parse
+([§4.2](https://www.rfc-editor.org/rfc/rfc9651#section-4.2), its field lines combined, two among
+them), or whose bare item is no Integer of 0 or more
+([§2.2](https://www.rfc-editor.org/rfc/rfc9651#section-2.2)), is malformed. A listen's target is
+read for its path alone, as every exchange's is, so a listen has the one URL every exchange of its
+connection has, which a browser's CORS-preflight cache keys
+([Fetch §4.9](https://fetch.spec.whatwg.org/#cors-preflight-cache)). A `bead-wait` of 0 answers at
+once, and one past the server's bound is held to it. A client reads a batch as it comes, and hears
+each envelope as it comes whole; what a listen lost carried past what was heard comes again to the
+next, so nothing is lost and nothing heard twice. A failure that ends a subscription, in a batch,
+may come before the result that answered its call, in a `POST`'s body: the client pairs the failure
+with the call still waiting, which fails with it (section 9.7), and reports the result that follows
+as `CALL_UNKNOWN`. It withdraws no default (section 13.4): a request's own answer comes in its
+`POST`'s body alone (section 15.5), so a failure a batch brings for a call still waiting ends a
+subscription its server had answered. An outbox past its bound — two envelopes' worth by default —
+closes its connection, its client having fallen behind. An envelope that would take its outbox past
+that bound is one its transport had all the same, as a notification handed to it counts as sent
+(`debugging.md` section 10.1): it is lost with the connection, and a relay whose request is so lost
+answers leg A `DESTINATION_LOST` (section 14.5). A batch carries no credential beside its envelopes,
+nor does an answer: a command of the server's that presents `ELSEWHERE` over HTTP fails before it
+goes, `DESTINATION_UNREACHABLE`.
 
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
@@ -1293,30 +1305,33 @@ name      = *( unreserved / "!" / "$" / "&" / "'" / "(" / ")" )
 port      = 1*DIGIT
 ```
 
-`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's. An authority that is not of it is
-no host, a userinfo and a colon with no port among them. A target in absolute-form is read when it
-is `http://` or `https://`, its scheme in lower case as HTTP servers read it, then an authority
-that is not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A
-server answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one
-`Host` field line, a target in absolute-form it does not read, or an authority that is no host,
-before it reads anything else of it
-([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
-transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
-alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
-authority is no host, `PROTOCOL_ERROR`, no response written
+`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's. An authority that is not of it is no
+host, a userinfo and a colon with no port among them. A target in absolute-form is read when it is
+`http://` or `https://`, its scheme in lower case as HTTP servers read it, then an authority that is
+not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server
+answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host`
+field line, a target in absolute-form it does not read, or an authority that is no host, before it
+reads anything else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no
+refusal of the transport's own, unmarked. The `Host` beside a target in absolute-form is judged as
+one field line alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of
+a request whose authority is no host, `PROTOCOL_ERROR`, no response written
 ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
 a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over
 HTTP/1.1, with none of the fields every response on the path carries, as an HTTP server writes its
 own before the transport reads the request, and its stream reset over HTTP/2, before anything else
-of the request is judged: [RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)
-calls the first invalid, and keeps the second, historical ISO-8859-1 content, out of every field
-defined since; an origin is ASCII
-([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), and so is every field Bead
-reads. An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a
-request may name besides those every server takes, `hosts`, and the origins an exchange may come
-from besides its own, `origins`, none when not given. Its own is its request's authority under
-`http` or `https`: an `Origin` that is `http://` or `https://` followed by that authority, compared
-ASCII case-insensitively, the field read as the serialized origin it carries
+of the request is judged: [RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5) calls
+the first invalid, and keeps the second, historical ISO-8859-1 content, out of every field defined
+since; an origin is ASCII ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), and
+so is every field Bead reads. A field value that starts or ends with a space or a tab is malformed
+too ([RFC 9113 §8.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.1)): over HTTP/2 its
+stream is reset `PROTOCOL_ERROR`, judged with the rest of this rule, before anything else of the
+request; over HTTP/1.1 and at a WebSocket's address, the parser strips that whitespace first, no
+part of the value ([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)). An empty
+`Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may name
+besides those every server takes, `hosts`, and the origins an exchange may come from besides its
+own, `origins`, none when not given. Its own is its request's authority under `http` or `https`: an
+`Origin` that is `http://` or `https://` followed by that authority, compared ASCII
+case-insensitively, the field read as the serialized origin it carries
 ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), never parsed as a URL; a
 browser writes both from one URL alike. Any other `Origin` is none of its own, whatever host it
 names: `null`, which a browser sends for an opaque origin — a sandboxed frame's, a `file:` or a
@@ -1334,19 +1349,24 @@ writes to a request whose `Origin` `origins` names, whatever its status, carries
 browser reads no answer to a preflight that is not ok
 ([Fetch §4.8](https://fetch.spec.whatwg.org/#cors-preflight-fetch)). None carries
 `access-control-allow-credentials`: Bead's credential is no cookie but the request's own (section
-15.5), so every request to it is one without credentials, for which the Fetch Standard reads `*`
-as a wildcard ([§3.3.4](https://fetch.spec.whatwg.org/#http-new-header-syntax)). A preflight is an
+15.5), so every request to it is one without credentials, for which the Fetch Standard reads `*` as
+a wildcard ([§3.3.4](https://fetch.spec.whatwg.org/#http-new-header-syntax)). A preflight is an
 `OPTIONS` that carries `Access-Control-Request-Method`: from an origin `origins` names, it is
 answered 204, its body empty, with `access-control-allow-methods: GET, POST, DELETE`,
-`access-control-allow-headers: authorization, *`, `authorization` named since no wildcard covers
-it, and `access-control-max-age: 7200`, whatever it asks for: the browser judges its request
-against them. A preflight is no refusal, draws no connection, and is told by none; any other
-`OPTIONS` is a method the server does not take (section 15.6). A page of the server's own origin,
-its scheme the server's, needs none; a page of its authority under the other scheme is another
-origin to its browser, which the test above takes as the server's own, and is answered CORS only
-when `origins` names it. Whether a page reaches a server on the loopback or a private address is
-its browser's to judge, by its local network permission, never a field the server writes. A
-WebSocket server answers no CORS: no same-origin policy guards an upgrade (section 15.2).
+`access-control-allow-headers` naming `authorization`, then the preflight's
+`Access-Control-Request-Headers`, its lines joined by ", "
+([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), when it asks any, then `*` —
+`authorization` named since no wildcard covers it, the names asked since a browser may cache a name
+where it caches no wildcard; no `Vary` names what was asked, since no cache stores an answer to
+`OPTIONS` ([RFC 9110 §9.3.7](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.7)) — and
+`access-control-max-age: 7200`, whatever method it asks for: the browser judges its request against
+them. A preflight is no refusal, draws no connection, and is told by none; any other `OPTIONS` is a
+method the server does not take (section 15.6). A page of the server's own origin, its scheme the
+server's, needs none; a page of its authority under the other scheme is another origin to its
+browser, which the test above takes as the server's own, and is answered CORS only when `origins`
+names it. Whether a page reaches a server on the loopback or a private address is its browser's to
+judge, by its local network permission, never a field the server writes. A WebSocket server answers
+no CORS: no same-origin policy guards an upgrade (section 15.2).
 
 A request's host is its authority's `host`, its port aside, since a browser leaves a scheme's
 default port out ([RFC 9110 §4.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.3)), in the

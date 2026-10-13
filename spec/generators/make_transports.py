@@ -118,9 +118,11 @@ def post(on, body, *, fields=None):
     return send(on, 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD), *pairs(fields)], body=body)
 
 
-def listen(on, after, wait, *, fields=None):
-    return send(on, 'GET', f'/bead?after={after}&wait={wait}',
-                fields={'bead-connection-token': '{token}', **(fields or {})})
+def listen(on, after=None, wait=None, *, fields=None, target='/bead'):
+    """A listen at the connection's one URL, its cursor in bead-after and its wait in bead-wait (spec
+    15.9), each left out when None and written as given otherwise, a malformed count among them."""
+    counts = [(name, value) for name, value in (('bead-after', after), ('bead-wait', wait)) if value is not None]
+    return send(on, 'GET', target, fields=[('bead-connection-token', '{token}'), *counts, *pairs(fields)])
 
 
 def expect(on, status, *, fields=None, **body):
@@ -175,20 +177,25 @@ ECHO = request(1, 'echo', '"x"')
 CORS = {'access-control-allow-origin': PAGE, 'access-control-expose-headers': '*', 'vary': 'Origin',
         'access-control-allow-credentials': None}
 NO_CORS = {'access-control-allow-origin': None, 'access-control-expose-headers': None, 'vary': 'Origin'}
-# a preflight's answer, whatever it asks for: its fields fixed, the browser judging its request
-# against them (Fetch §4.8)
+# a preflight's answer, whatever method it asks for: the browser judges its request against it
+# (Fetch §4.8)
 PREFLIGHT = {**CORS,
              'access-control-allow-methods': 'GET, POST, DELETE',
-             'access-control-allow-headers': 'authorization, *',
              'access-control-max-age': '7200', 'cache-control': 'no-store',
              'x-content-type-options': 'nosniff', 'bead-refusal': None}
 
 
+def preflighted(asked=None):
+    """The answer to a preflight from a listed origin (spec 15.12): authorization named, the names the
+    preflight asks as they came, then any."""
+    return {**PREFLIGHT, 'access-control-allow-headers': ', '.join(['authorization', *([asked] if asked else []), '*'])}
+
+
 def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{host}'):
     """A CORS-preflight request (Fetch §3.3.2): an OPTIONS naming the method it asks for and the
-    fields it would write."""
+    fields it would write, a name among them given in several lines when it is."""
     return send(on, 'OPTIONS', target, host=host,
-                fields={'origin': origin, 'access-control-request-method': method, **(fields or {})})
+                fields=[('origin', origin), ('access-control-request-method', method), *pairs(fields)])
 
 
 # a bearer credential, RFC 6750's own example, its auth-scheme included
@@ -216,8 +223,9 @@ cases = [
          connect(), expect('connect', 201, fields={
              'bead-connection-token': {'shape': 'token'}, 'cache-control': 'no-store',
              'x-content-type-options': 'nosniff', 'bead-listen': None}, body='')]),
-    ('a connect that says it listens is told back that it does', ['15.8', '15.6.2'], None, [
-        connect(listen=True), expect('connect', 201, fields={'bead-listen': '?1'})]),
+    ('a connect that says it listens is told back that it does, a parameter of its bead-listen ignored', ['15.8', '15.6.2'], None, [
+        connect(listen=True), expect('connect', 201, fields={'bead-listen': '?1'}),
+        connect('parameter', fields={'bead-listen': '?1;x'}), expect('parameter', 201, fields={'bead-listen': '?1'})]),
     # 15.5: one envelope a POST
     ('a request is answered in the body of a 200', ['15.5.1', '15.6.1'], None, [
         *drawn(), post('echo', ECHO), answered('echo', result(1, '"x"'))]),
@@ -308,8 +316,7 @@ cases = [
          post('large', request(1, 'echo', '"' + 'x' * 60 + '"'),
               fields=[('authorization', BEARER), ('authorization', BEARER)]),
          refused('large', 400, 'malformed'),
-         send('listen', 'GET', '/bead?after=x&wait=0', fields={'bead-connection-token': '{token}'}),
-         refused('listen', 409, 'listen-undeclared'),
+         listen('listen', 'x', 0), refused('listen', 409, 'listen-undeclared'),
          post('echo', ECHO), answered('echo', result(1, '"x"'))]),
     # 15.5: a connect carries no request, and its Authorization is read by no one
     ('a connect with two Authorization fields draws its connection: only a POST that presents a token is refused for them',
@@ -323,7 +330,8 @@ cases = [
          send('connect', 'POST', fields={'content-type': BEAD, 'bead-listen': '?1'}, length='00'),
          expect('connect', 201, fields={'bead-connection-token': {'capture': 'token', 'shape': 'token'},
                                         'bead-listen': '?1'}),
-         send('listen', 'GET', '/bead?after=0&wait=0', fields={'bead-connection-token': '{token}'}, length='00'),
+         send('listen', 'GET', fields=[('bead-connection-token', '{token}'), ('bead-after', '0'), ('bead-wait', '0')],
+              length='00'),
          expect('listen', 204, body='')]),
     ('a host the server does not take is refused 403, marked', ['15.6.5', '15.12'], {'hosts': ['bead.test']}, [
         connect(host='elsewhere.test'), refused('connect', 403, 'host-refused'),
@@ -423,14 +431,16 @@ cases = [
     ('an Origin of null is taken when origins names it', ['15.12'], {'origins': ['null']}, [
         connect(fields={'origin': 'null'}), expect('connect', 201)]),
     # 15.12: CORS, to the origins a server names (Fetch §3.3), and to no other
-    ('a preflight from an origin the server names is answered 204, naming that origin, the methods, Authorization and any other field, for 7200 seconds, whatever it asks for',
+    ('a preflight from an origin the server names is answered 204, naming that origin, the methods, Authorization, the fields it asks for in its lines joined and any other field, for 7200 seconds, whatever method it asks for',
      ['15.6', '15.6.3', '15.12'], {'origins': [PAGE]}, [
          preflight('connect', 'POST', fields={'access-control-request-headers': 'bead-listen,content-type,traceparent'}),
-         expect('connect', 204, fields=PREFLIGHT, body=''),
-         preflight('listen', 'GET', fields={'access-control-request-headers': 'bead-connection-token'},
-                   target='/bead?after=0&wait=0'),
-         expect('listen', 204, fields=PREFLIGHT, body=''),
-         preflight('put', 'PUT'), expect('put', 204, fields=PREFLIGHT, body='')]),
+         expect('connect', 204, fields=preflighted('bead-listen,content-type,traceparent'), body=''),
+         preflight('listen', 'GET', fields={'access-control-request-headers': 'bead-after,bead-connection-token,bead-wait'}),
+         expect('listen', 204, fields=preflighted('bead-after,bead-connection-token,bead-wait'), body=''),
+         preflight('lines', 'GET', fields=[('access-control-request-headers', 'bead-after'),
+                                           ('access-control-request-headers', 'bead-wait')]),
+         expect('lines', 204, fields=preflighted('bead-after, bead-wait'), body=''),
+         preflight('put', 'PUT'), expect('put', 204, fields=preflighted(), body='')]),
     # the 415 is sent whole, since post writes Bead's type before the fields it is given; whoami takes
     # the call id 5, the subscription keeping 1
     ('every answer to an origin the server names carries that origin and exposes every field: a connect, a request with its Authorization, a batch, a refusal and a DELETE',
@@ -478,7 +488,7 @@ cases = [
     ('an Origin of null that origins names is answered as any origin it names: its preflight 204, its exchanges naming null',
      ['15.6.3', '15.12'], {'origins': ['null']}, [
          preflight('preflight', 'POST', origin='null'),
-         expect('preflight', 204, fields={**PREFLIGHT, 'access-control-allow-origin': 'null'}, body=''),
+         expect('preflight', 204, fields={**preflighted(), 'access-control-allow-origin': 'null'}, body=''),
          connect('connect', fields={'origin': 'null'}),
          expect('connect', 201, fields={**CORS, 'access-control-allow-origin': 'null'})]),
     # 15.12: the bounds, past which the server answers 429 or 503
@@ -531,16 +541,41 @@ cases = [
         *drawn(), listen('listen', 0, 0), refused('listen', 409, 'listen-undeclared')]),
     ('a listen whose count is none, or past what was sent, is refused 400, marked', ['15.6.4', '15.9'], None, [
         *drawn(listening=True),
-        send('none', 'GET', '/bead?after=x&wait=0', fields={'bead-connection-token': '{token}'}),
-        refused('none', 400, 'malformed'), listen('past', 5, 0), refused('past', 400, 'malformed')]),
-    ('a listen whose after is empty, or of sixteen digits, is refused 400, marked, and one whose after is left out is 0',
+        listen('none', 'x', 0), refused('none', 400, 'malformed'), listen('past', 5, 0), refused('past', 400, 'malformed')]),
+    # 15.9: each count an Item of RFC 9651 whose bare item is an Integer, 0 or more, its parameters
+    # ignored (§2.3); a parse failure (§4.2) or a violated constraint (§2.2) malformed
+    ('a listen whose bead-after does not parse as an Item, is no Integer or is below 0 is refused 400, marked; its parameters are ignored, -0 is 0, and spaces around it are no part of it',
      ['15.6.4', '15.9'], None, [
         *drawn(listening=True),
-        send('empty', 'GET', '/bead?after=&wait=0', fields={'bead-connection-token': '{token}'}),
-        refused('empty', 400, 'malformed'),
-        send('sixteen', 'GET', '/bead?after=0000000000000000&wait=0', fields={'bead-connection-token': '{token}'}),
-        refused('sixteen', 400, 'malformed'),
-        send('absent', 'GET', '/bead?wait=0', fields={'bead-connection-token': '{token}'}), expect('absent', 204, body='')]),
+        listen('empty', '', 0), refused('empty', 400, 'malformed'),
+        listen('sixteen', '0' * 16, 0), refused('sixteen', 400, 'malformed'),
+        listen('plus', '+0', 0), refused('plus', 400, 'malformed'),
+        listen('key', '0;X=1', 0), refused('key', 400, 'malformed'),
+        listen('decimal', '0.0', 0), refused('decimal', 400, 'malformed'),
+        listen('string', '"0"', 0), refused('string', 400, 'malformed'),
+        listen('negative', '-1', 0), refused('negative', 400, 'malformed'),
+        listen('minus', '-0', 0), expect('minus', 204, body=''),
+        listen('parameter', '0;x=1', '0;y="a;b"'), expect('parameter', 204, body=''),
+        listen('spaced', '  0 ', '\t0'), expect('spaced', 204, body='')]),
+    ('a listen whose bead-after or bead-wait comes in two field lines, alike or not, or as a list, is refused 400, marked',
+     ['15.6.4', '15.9'], None, [
+        *drawn(listening=True),
+        send('after', 'GET', fields=[('bead-connection-token', '{token}'), ('bead-after', '0'), ('bead-after', '0'),
+                                     ('bead-wait', '0')]),
+        refused('after', 400, 'malformed'),
+        send('wait', 'GET', fields=[('bead-connection-token', '{token}'), ('bead-after', '0'), ('bead-wait', '0'),
+                                    ('bead-wait', '1')]),
+        refused('wait', 400, 'malformed'),
+        listen('list', '0, 0', 0), refused('list', 400, 'malformed'),
+        listen('one', 0, 0), expect('one', 204, body='')]),
+    ('a listen without bead-after is refused 400, marked, whatever its target holds; one with it is taken whatever its query, and a bead-wait left out is 0',
+     ['15.6.4', '15.9'], None, [
+        *drawn(listening=True),
+        listen('stale', target='/bead?after=0&wait=0'), refused('stale', 400, 'malformed'),
+        listen('bare', None, 0), refused('bare', 400, 'malformed'),
+        listen('query', 0, 0, target='/bead?after=5&x=1'), expect('query', 204, body=''),
+        listen('empty', 0, 0, target='/bead?'), expect('empty', 204, body=''),
+        listen('nowait', 0), expect('nowait', 204, body='')]),
     ('an outbox past its bound closes its connection, and cuts the exchange whose request it was handed',
      ['15.7', '15.9', '15.12.6'], {'maximumOutboxBytes': 16}, [
         *drawn(listening=True), post('subscribe', SUBSCRIBE), answered('subscribe', result(1, 'null')),
@@ -643,9 +678,10 @@ def relayed_over_http():
         return request(call_id, 'echo', '"x"', flags=0x0A, words=4 + len(block.split()) // 4,
                        tail=f'{word(destination, 4)}  {block}')
 
-    def as_device(on, method, target='/bead', body=None):
-        return send(on, method, target, fields=[('bead-connection-token', '{device}'), ('content-type', BEAD)]
-                    if method == 'POST' else {'bead-connection-token': '{device}'}, body=body)
+    def as_device(on, method, target='/bead', body=None, fields=None):
+        return send(on, method, target, fields=[('bead-connection-token', '{device}'),
+                                                *([('content-type', BEAD)] if method == 'POST' else []), *pairs(fields)],
+                    body=body)
 
     # leg A's call in its connection's session, which names the destination and presents none
     login = request(1, 'login', '{"name":"ada"}')
@@ -668,7 +704,7 @@ def relayed_over_http():
              post('elsewhere', relayed(1, elsewhere_block), fields={'authorization': BEARER}),
              answered('elsewhere', failure(1, DESTINATION_UNREACHABLE)),
              post('jwt', relayed(3, jwt_block)),
-             as_device('listen', 'GET', '/bead?after=0&wait=60000'),
+             as_device('listen', 'GET', fields=[('bead-after', '0'), ('bead-wait', '60000')]),
              expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'}, batch=[leg_b]),
              as_device('answer', 'POST', body='A1 11 00 02  00 00 00 02 | ' + text('"x"')),
              expect('answer', 204, body=''),

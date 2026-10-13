@@ -417,6 +417,8 @@ public sealed class HttpTransportClientTests
             Uri = request.RequestUri?.ToString() ?? "";
             ConnectionToken = HeaderOf(request, HttpTransport.ConnectionTokenHeader);
             Listen = HeaderOf(request, HttpTransport.ListenHeader);
+            After = HeaderOf(request, HttpTransport.AfterHeader);
+            Wait = HeaderOf(request, HttpTransport.WaitHeader);
             Authorization = HeaderOf(request, "Authorization");
             _token = cancellationToken;
 
@@ -437,6 +439,11 @@ public sealed class HttpTransportClientTests
         public string? ConnectionToken { get; }
 
         public string? Listen { get; }
+
+        // a listen's counts, in their fields
+        public string? After { get; }
+
+        public string? Wait { get; }
 
         public string? Authorization { get; }
 
@@ -1441,24 +1448,88 @@ public sealed class HttpTransportClientTests
 
         Assert.Equal("?1", faked.Fetch.Calls[0].Listen);
         Assert.Equal(
-            ($"http://{Host}:8080/bead?after=0&wait=1000", Token, HttpMethod.Get),
-            (listen.Uri, listen.ConnectionToken, listen.Method));
+            ($"http://{Host}:8080/bead", "0", "1000", Token, HttpMethod.Get),
+            (listen.Uri, listen.After, listen.Wait, listen.ConnectionToken, listen.Method));
 
         listen.Answer(Batch(1, first, second));
 
-        Assert.Contains("?after=2&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
+        Assert.Equal("2", (await faked.Fetch.CallOf(2)).After);
         Assert.Equal([first, second], faked.Heard);
         Assert.Equal([null, null], new[] { await Next(credentials), await Next(credentials) });
 
         // nothing, and it listens again at the same point
         (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 204 });
 
-        Assert.Contains("?after=2&", (await faked.Fetch.CallOf(3)).Uri, StringComparison.Ordinal);
+        Assert.Equal("2", (await faked.Fetch.CallOf(3)).After);
 
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
 
         Assert.True(faked.Fetch.Calls[3].IsAborted);
         Assert.Equal(TimeSpan.FromSeconds(25), new HttpTransportClientOptions().Wait);
+    }
+
+    // spec 15.9
+    [Fact]
+    public async Task Listens_at_its_connection_s_URL_alone_its_cursor_in_bead_after_and_its_wait_in_bead_wait()
+    {
+        var fetch = new Fetch();
+        await using var faked = new Faked(new HttpTransportClient(ListeningOn(new FakeTimeProvider()) with { Handler = fetch, Wait = TimeSpan.Zero }), fetch);
+        var connecting = faked.Client.Connect(new HttpConnectOptions { Host = Host, Port = 8_080, Pathname = "/api/bead" }, Cancelled);
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+
+        (await fetch.CallOf(0)).Answer(new Answer
+        {
+            Status = 201,
+            Headers = new Dictionary<string, string> { [HttpTransport.ConnectionTokenHeader] = Token, [HttpTransport.ListenHeader] = "?1" },
+        });
+        await connecting.WaitAsync(Patience, Cancelled);
+        (await fetch.CallOf(1)).Answer(Batch(1, envelope));
+        (await fetch.CallOf(2)).Answer(new Answer { Status = 204 });
+        await fetch.CallOf(3);
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+
+        // the connect, the listens, the DELETE: one URL, which a browser's preflight cache keys
+        Assert.Equal(
+            [$"http://{Host}:8080/api/bead"],
+            fetch.Calls.Select((call) =>
+            {
+                return call.Uri;
+            }).Distinct());
+        Assert.Equal(
+            [("0", "0"), ("1", "0"), ("1", "0")],
+            fetch.Calls.Skip(1).Take(3).Select((call) =>
+            {
+                return (call.After, call.Wait);
+            }));
+    }
+
+    [Fact]
+    public async Task Reads_the_201_s_bead_listen_and_a_batch_s_bead_sequence_as_RFC_9651_Items_their_parameters_ignored()
+    {
+        var fetch = new Fetch();
+        await using var faked = new Faked(new HttpTransportClient(ListeningOn(new FakeTimeProvider()) with { Handler = fetch }), fetch);
+        var connecting = faked.Client.Connect(new HttpConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+
+        (await fetch.CallOf(0)).Answer(new Answer
+        {
+            Status = 201,
+            Headers = new Dictionary<string, string> { [HttpTransport.ConnectionTokenHeader] = Token, [HttpTransport.ListenHeader] = "?1;x" },
+        });
+        await connecting.WaitAsync(Patience, Cancelled);
+        (await fetch.CallOf(1)).Answer(Batch(1, envelope) with
+        {
+            Headers = new Dictionary<string, string>
+            {
+                ["content-type"] = HttpTransport.BatchMediaType,
+                [HttpTransport.SequenceHeader] = "1;x=2",
+            },
+        });
+
+        Assert.Equal("1", (await fetch.CallOf(2)).After);
+        Assert.Equal([envelope], faked.Heard);
+
+        await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 
     [Fact]
@@ -1565,7 +1636,7 @@ public sealed class HttpTransportClientTests
         // what was cut on its way comes whole at last, and is heard once
         fetch.Calls[12].Answer(Batch(1, envelope));
 
-        Assert.Contains("?after=1&", (await fetch.CallOf(13)).Uri, StringComparison.Ordinal);
+        Assert.Equal("1", (await fetch.CallOf(13)).After);
         Assert.Equal([envelope], faked.Heard);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
@@ -1762,9 +1833,10 @@ public sealed class HttpTransportClientTests
         var answers = new[]
         {
             Batch(1, envelope) with { Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.BatchMediaType } },
-            // numbered other than from the one after the last it heard
+            // numbered other than from the one after the last it heard, or by no Integer of RFC 9651
             numbered("one"),
-            numbered("01"),
+            numbered("1.0"),
+            numbered("1, 1"),
             numbered("2"),
             Batch(1) with { Body = [0, 0, 0, 0, .. framed] },
             Batch(1) with { Body = [] },
@@ -1794,9 +1866,9 @@ public sealed class HttpTransportClientTests
             }));
         }
 
-        Assert.Equal([true, true, true, true, true, true, true, true, true, true, true, false], told);
+        Assert.Equal([true, true, true, true, true, true, true, true, true, true, true, true, false], told);
         // what came whole before what does not read was heard, as it came
-        Assert.Equal([0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0], heardOf);
+        Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0], heardOf);
 
         // one of the limit exactly is heard
         await using var atLimit = await ConnectFake(ListeningOn(new FakeTimeProvider()) with { MaximumBodyBytes = 24 });
@@ -1804,7 +1876,7 @@ public sealed class HttpTransportClientTests
 
         (await atLimit.Fetch.CallOf(1)).Answer(Batch(1, largest));
 
-        Assert.Contains("?after=1&", (await atLimit.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
+        Assert.Equal("1", (await atLimit.Fetch.CallOf(2)).After);
         Assert.Equal([largest], atLimit.Heard);
         await atLimit.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
@@ -1814,7 +1886,7 @@ public sealed class HttpTransportClientTests
     {
         await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()) with { Wait = TimeSpan.FromMilliseconds(1.5) });
 
-        Assert.EndsWith("&wait=2", (await faked.Fetch.CallOf(1)).Uri, StringComparison.Ordinal);
+        Assert.Equal("2", (await faked.Fetch.CallOf(1)).Wait);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 
@@ -1824,7 +1896,7 @@ public sealed class HttpTransportClientTests
         var time = new FakeTimeProvider();
         await using var faked = await ConnectFake(ListeningOn(time) with { Pause = TimeSpan.FromMilliseconds(60), Wait = TimeSpan.Zero });
 
-        Assert.EndsWith("&wait=0", (await faked.Fetch.CallOf(1)).Uri, StringComparison.Ordinal);
+        Assert.Equal("0", (await faked.Fetch.CallOf(1)).Wait);
 
         (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 204 });
         time.Advance(TimeSpan.FromMilliseconds(59));
@@ -1878,7 +1950,7 @@ public sealed class HttpTransportClientTests
         faked.Client.Error += errors.Enqueue;
         (await faked.Fetch.CallOf(1)).Answer(Batch(1, EnvelopeOf(EnvelopeKind.Notification, (1, 0)), EnvelopeOf(EnvelopeKind.Notification, (3, 0))));
 
-        Assert.Contains("?after=2&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
+        Assert.Equal("2", (await faked.Fetch.CallOf(2)).After);
         Assert.Equal((2, 2), (faked.Heard.Count, Volatile.Read(ref told)));
         Assert.Equal([thrown], errors);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
@@ -1916,7 +1988,7 @@ public sealed class HttpTransportClientTests
         (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 502 });
         (await faked.Fetch.CallOf(2)).Answer(Batch(1, envelope));
 
-        Assert.Contains("?after=1&", (await faked.Fetch.CallOf(3)).Uri, StringComparison.Ordinal);
+        Assert.Equal("1", (await faked.Fetch.CallOf(3)).After);
         Assert.Equal([envelope], faked.Heard);
         Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
@@ -1938,12 +2010,12 @@ public sealed class HttpTransportClientTests
         (await faked.Fetch.CallOf(1)).Answer(Batch(1) with { Pieces = pieces[..cut] });
 
         // the rest, in the next listen: from the one after the first
-        Assert.Contains("?after=1&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
+        Assert.Equal("1", (await faked.Fetch.CallOf(2)).After);
         Assert.Equal([first], faked.Heard);
 
         (await faked.Fetch.CallOf(2)).Answer(Batch(2) with { Pieces = pieces[cut..] });
 
-        Assert.Contains("?after=2&", (await faked.Fetch.CallOf(3)).Uri, StringComparison.Ordinal);
+        Assert.Equal("2", (await faked.Fetch.CallOf(3)).After);
         Assert.Equal([first, second], faked.Heard);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
@@ -1957,12 +2029,12 @@ public sealed class HttpTransportClientTests
 
         (await faked.Fetch.CallOf(1)).Answer(Batch(1) with { Pieces = [framed[..(4 + first.Length + 2)]], Cut = new IOException("terminated") });
 
-        Assert.Contains("?after=1&", (await faked.Fetch.CallOf(2)).Uri, StringComparison.Ordinal);
+        Assert.Equal("1", (await faked.Fetch.CallOf(2)).After);
 
         // one loss after it is the first in a row: listened again, at once
         (await faked.Fetch.CallOf(2)).Fail();
 
-        Assert.Contains("?after=1&", (await faked.Fetch.CallOf(3)).Uri, StringComparison.Ordinal);
+        Assert.Equal("1", (await faked.Fetch.CallOf(3)).After);
         Assert.Equal([first], faked.Heard);
         Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);

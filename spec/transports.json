@@ -102,7 +102,7 @@
       ]
     },
     {
-      "name": "a connect that says it listens is told back that it does",
+      "name": "a connect that says it listens is told back that it does, a parameter of its bead-listen ignored",
       "clauses": [
         "15.8",
         "15.6.2"
@@ -123,6 +123,21 @@
             }
           },
           "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1;x\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "parameter"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-listen": "?1"
+            }
+          },
+          "on": "parameter"
         }
       ]
     },
@@ -1443,7 +1458,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=x&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: x\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -1565,7 +1580,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-length: 00\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\ncontent-length: 00\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -2846,7 +2861,7 @@
       ]
     },
     {
-      "name": "a preflight from an origin the server names is answered 204, naming that origin, the methods, Authorization and any other field, for 7200 seconds, whatever it asks for",
+      "name": "a preflight from an origin the server names is answered 204, naming that origin, the methods, Authorization, the fields it asks for in its lines joined and any other field, for 7200 seconds, whatever method it asks for",
       "clauses": [
         "15.6",
         "15.6.3",
@@ -2874,11 +2889,11 @@
               "vary": "Origin",
               "access-control-allow-credentials": null,
               "access-control-allow-methods": "GET, POST, DELETE",
-              "access-control-allow-headers": "authorization, *",
               "access-control-max-age": "7200",
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
-              "bead-refusal": null
+              "bead-refusal": null,
+              "access-control-allow-headers": "authorization, bead-listen,content-type,traceparent, *"
             },
             "body": ""
           },
@@ -2886,7 +2901,7 @@
         },
         {
           "send": {
-            "head": "OPTIONS /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\norigin: https://page.test\r\naccess-control-request-method: GET\r\naccess-control-request-headers: bead-connection-token\r\nconnection: close\r\n\r\n"
+            "head": "OPTIONS /bead HTTP/1.1\r\nhost: {host}\r\norigin: https://page.test\r\naccess-control-request-method: GET\r\naccess-control-request-headers: bead-after,bead-connection-token,bead-wait\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -2899,15 +2914,40 @@
               "vary": "Origin",
               "access-control-allow-credentials": null,
               "access-control-allow-methods": "GET, POST, DELETE",
-              "access-control-allow-headers": "authorization, *",
               "access-control-max-age": "7200",
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
-              "bead-refusal": null
+              "bead-refusal": null,
+              "access-control-allow-headers": "authorization, bead-after,bead-connection-token,bead-wait, *"
             },
             "body": ""
           },
           "on": "listen"
+        },
+        {
+          "send": {
+            "head": "OPTIONS /bead HTTP/1.1\r\nhost: {host}\r\norigin: https://page.test\r\naccess-control-request-method: GET\r\naccess-control-request-headers: bead-after\r\naccess-control-request-headers: bead-wait\r\nconnection: close\r\n\r\n"
+          },
+          "on": "lines"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "fields": {
+              "access-control-allow-origin": "https://page.test",
+              "access-control-expose-headers": "*",
+              "vary": "Origin",
+              "access-control-allow-credentials": null,
+              "access-control-allow-methods": "GET, POST, DELETE",
+              "access-control-max-age": "7200",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "bead-refusal": null,
+              "access-control-allow-headers": "authorization, bead-after, bead-wait, *"
+            },
+            "body": ""
+          },
+          "on": "lines"
         },
         {
           "send": {
@@ -2924,11 +2964,11 @@
               "vary": "Origin",
               "access-control-allow-credentials": null,
               "access-control-allow-methods": "GET, POST, DELETE",
-              "access-control-allow-headers": "authorization, *",
               "access-control-max-age": "7200",
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
-              "bead-refusal": null
+              "bead-refusal": null,
+              "access-control-allow-headers": "authorization, *"
             },
             "body": ""
           },
@@ -3043,7 +3083,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\norigin: https://page.test\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\norigin: https://page.test\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -3411,11 +3451,11 @@
               "vary": "Origin",
               "access-control-allow-credentials": null,
               "access-control-allow-methods": "GET, POST, DELETE",
-              "access-control-allow-headers": "authorization, *",
               "access-control-max-age": "7200",
               "cache-control": "no-store",
               "x-content-type-options": "nosniff",
-              "bead-refusal": null
+              "bead-refusal": null,
+              "access-control-allow-headers": "authorization, *"
             },
             "body": ""
           },
@@ -3733,7 +3773,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 60000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -3841,7 +3881,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -3914,7 +3954,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 60000\r\nconnection: close\r\n\r\n"
           },
           "on": "first"
         },
@@ -3926,7 +3966,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 60000\r\nconnection: close\r\n\r\n"
           },
           "on": "second"
         },
@@ -4067,7 +4107,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "all"
         },
@@ -4094,7 +4134,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=1&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 1\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "left"
         },
@@ -4116,7 +4156,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=2&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 2\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "none"
         },
@@ -4158,7 +4198,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -4211,7 +4251,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=x&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: x\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "none"
         },
@@ -4235,7 +4275,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=5&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 5\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "past"
         },
@@ -4260,7 +4300,7 @@
       ]
     },
     {
-      "name": "a listen whose after is empty, or of sixteen digits, is refused 400, marked, and one whose after is left out is 0",
+      "name": "a listen whose bead-after does not parse as an Item, is no Integer or is below 0 is refused 400, marked; its parameters are ignored, -0 is 0, and spaces around it are no part of it",
       "clauses": [
         "15.6.4",
         "15.9"
@@ -4288,7 +4328,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: \r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "empty"
         },
@@ -4312,7 +4352,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0000000000000000&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0000000000000000\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "sixteen"
         },
@@ -4336,16 +4376,392 @@
         },
         {
           "send": {
-            "head": "GET /bead?wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: +0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
           },
-          "on": "absent"
+          "on": "plus"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "plus"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0;X=1\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "key"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "key"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0.0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "decimal"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "decimal"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: \"0\"\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "string"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "string"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: -1\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "negative"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "negative"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: -0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "minus"
         },
         {
           "expect": {
             "status": 204,
             "body": ""
           },
-          "on": "absent"
+          "on": "minus"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0;x=1\r\nbead-wait: 0;y=\"a;b\"\r\nconnection: close\r\n\r\n"
+          },
+          "on": "parameter"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "parameter"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after:   0 \r\nbead-wait: \t0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "spaced"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "spaced"
+        }
+      ]
+    },
+    {
+      "name": "a listen whose bead-after or bead-wait comes in two field lines, alike or not, or as a list, is refused 400, marked",
+      "clauses": [
+        "15.6.4",
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "after"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "after"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nbead-wait: 1\r\nconnection: close\r\n\r\n"
+          },
+          "on": "wait"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "wait"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0, 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "list"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "list"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "one"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "one"
+        }
+      ]
+    },
+    {
+      "name": "a listen without bead-after is refused 400, marked, whatever its target holds; one with it is taken whatever its query, and a bead-wait left out is 0",
+      "clauses": [
+        "15.6.4",
+        "15.9"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nbead-listen: ?1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": "?1"
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=0&wait=0 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "stale"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "stale"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "bare"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "bare"
+        },
+        {
+          "send": {
+            "head": "GET /bead?after=5&x=1 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "query"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "query"
+        },
+        {
+          "send": {
+            "head": "GET /bead? HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "nowait"
+        },
+        {
+          "expect": {
+            "status": 204,
+            "body": ""
+          },
+          "on": "nowait"
         }
       ]
     },
@@ -4608,7 +5024,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=1000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 1000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -4661,7 +5077,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 60000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -4715,7 +5131,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=10000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 10000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -4969,7 +5385,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=20000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 20000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -5089,7 +5505,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=20000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 20000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -5352,7 +5768,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=5000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 5000\r\nconnection: close\r\n\r\n"
           },
           "on": "first"
         },
@@ -5379,7 +5795,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=20000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\nbead-after: 0\r\nbead-wait: 20000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },
@@ -5523,7 +5939,7 @@
         },
         {
           "send": {
-            "head": "GET /bead?after=0&wait=60000 HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\nconnection: close\r\n\r\n"
+            "head": "GET /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\nbead-after: 0\r\nbead-wait: 60000\r\nconnection: close\r\n\r\n"
           },
           "on": "listen"
         },

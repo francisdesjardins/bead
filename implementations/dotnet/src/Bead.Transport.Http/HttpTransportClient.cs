@@ -534,6 +534,13 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
     }
 
+    // a field of Bead's the server writes, read as an Item of RFC 9651, its lines joined by ", "
+    // (RFC 9110 §5.3) and its parameters ignored (§2.3); none when absent or when it does not parse
+    private static StructuredFields.Item? ItemOf(HttpResponseMessage response, string name)
+    {
+        return response.Headers.TryGetValues(name, out var values) ? StructuredFields.ParseItem(string.Join(", ", values)) : null;
+    }
+
     // how long to wait before listening again after `losses` listens lost in a row, drawn apart so
     // the clients one restart dropped together come back apart, as EventSource's do; in whole
     // milliseconds, as every wait of Bead's
@@ -730,7 +737,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 }
 
                 // taken where the server said it back, and nowhere else
-                connection = new Drawn((connectionToken, uri), _options.IsListening && HeaderOf(response, HttpTransport.ListenHeader) == "?1");
+                connection = new Drawn((connectionToken, uri), _options.IsListening && ItemOf(response, HttpTransport.ListenHeader)?.BareItem is true);
             }
 
             lock (_gate)
@@ -1005,13 +1012,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     private async Task<Listened> ListenOnce((Drawn Connection, Cursor Cursor) listen)
     {
         var (connection, cursor) = listen;
-        var query = string.Create(CultureInfo.InvariantCulture, $"?after={cursor.After}&wait={(long)_options.Wait.TotalMilliseconds}");
         HttpResponseMessage response;
 
         try
         {
-            using var request = RequestOf(connection, (HttpMethod.Get, new Uri(connection.Uri + query)));
+            // at the connection's one URL, its cursor and its wait in fields of their own (spec 15.9)
+            using var request = RequestOf(connection, (HttpMethod.Get, connection.Uri));
 
+            request.Headers.Add(HttpTransport.AfterHeader, cursor.After.ToString(CultureInfo.InvariantCulture));
+            request.Headers.Add(HttpTransport.WaitHeader, ((long)_options.Wait.TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
             response = await HttpOf().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, connection.Exchanges.Token);
         }
         catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
@@ -1034,7 +1043,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             }
 
             // numbered from the one after the last it heard, or it is no batch of this listen's
-            if (HeaderOf(response, HttpTransport.SequenceHeader) != (cursor.After + 1).ToString(CultureInfo.InvariantCulture))
+            if (ItemOf(response, HttpTransport.SequenceHeader)?.BareItem as long? != cursor.After + 1)
             {
                 return Listened.Broken;
             }
