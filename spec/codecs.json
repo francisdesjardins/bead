@@ -3,7 +3,7 @@
   "$comment": [
     "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0018), which every implementation's harness plays through its side's codecs.",
     "payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.",
-    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, the bound of 17.9.3 set in the call as generated code sets it. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; and nested, how many messages nest below it through child. A harness checks those three and nothing else, since protobuf fixes no message's bytes whole.",
+    "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), and the bound of 17.9.3 set in the call. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; and delimited, where it is set, what was read of it, its text, number and nested. A harness checks these and nothing else, since protobuf fixes no message's bytes whole.",
     "values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.",
     "json: a JSON value, as the file holds it: on the TypeScript side JSON.parse of the file, so that a member named __proto__ is a member; on the C# side a JsonElement of the file.",
     "double: a double by its 64 bits, in hexadecimal: on the TypeScript side read through a DataView; on the C# side a JsonElement of JsonSerializer.SerializeToElement(BitConverter.Int64BitsToDouble(bits)), which holds no NaN and no infinity.",
@@ -943,13 +943,7 @@
         "17.9.1"
       ],
       "bytes": "48 80 80 80 80 80 80 80 80 80 80 00",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "An unknown proto varint of more than 10 bytes",
-          "language": "TypeScript"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "an unknown record past the end of its message",
@@ -958,13 +952,7 @@
         "17.9.1"
       ],
       "bytes": "0A 01 61 1A 02 25 00 0A 01 62",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto record past the end of its message",
-          "language": "TypeScript"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a string past the end of its message",
@@ -973,13 +961,7 @@
         "17.9.1"
       ],
       "bytes": "1A 02 0A 03 61 62 63",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto record past the end of its message",
-          "language": "TypeScript"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a tag of 5 bytes within 32 bits",
@@ -1001,13 +983,7 @@
         "17.9.1"
       ],
       "bytes": "90 80 80 80 80 00 07",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto tag of more than 5 bytes, or past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a tag of 9 bytes",
@@ -1016,13 +992,7 @@
         "17.9.1"
       ],
       "bytes": "90 80 80 80 80 80 80 80 00 07",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto tag of more than 5 bytes, or past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a tag of 5 bytes past 32 bits",
@@ -1031,13 +1001,7 @@
         "17.9.1"
       ],
       "bytes": "90 80 80 80 40 07",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto tag of more than 5 bytes, or past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a tag of 7 bytes past 32 bits",
@@ -1046,13 +1010,7 @@
         "17.9.1"
       ],
       "bytes": "90 80 80 80 80 80 0F 07",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto tag of more than 5 bytes, or past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a tag past 32 bits, of an unknown field",
@@ -1061,13 +1019,7 @@
         "17.9.1"
       ],
       "bytes": "F8 FF FF FF 7F 01",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto tag of more than 5 bytes, or past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a tag of more than 10 bytes",
@@ -1085,17 +1037,7 @@
         "17.9.1"
       ],
       "bytes": "0A 80 80 80 80 10",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto length past 32 bits",
-          "language": "TypeScript"
-        },
-        {
-          "row": "A proto length past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
     },
     {
       "name": "a length past 32 bits, a field after",
@@ -1104,17 +1046,79 @@
         "17.9.1"
       ],
       "bytes": "0A 80 80 80 80 10 10 07",
-      "refused": "not its message",
-      "differs": [
-        {
-          "row": "A proto length past 32 bits",
-          "language": "TypeScript"
-        },
-        {
-          "row": "A proto length past 32 bits",
-          "language": "C#"
-        }
-      ]
+      "refused": "not its message"
+    },
+    {
+      "name": "a string at the varint wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "08 61",
+      "refused": "not its message"
+    },
+    {
+      "name": "a uint32 at the length-delimited wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "12 00",
+      "refused": "not its message"
+    },
+    {
+      "name": "a uint32 at the fixed32 wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "15 01 02 03 04",
+      "refused": "not its message"
+    },
+    {
+      "name": "a message at the varint wire type, a string after",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "18 03 0A 05 61 62 63 64 65",
+      "refused": "not its message"
+    },
+    {
+      "name": "stamps at the varint wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "58 01",
+      "refused": "not its message"
+    },
+    {
+      "name": "delimited at the length-delimited wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "6A 03 0A 01 61",
+      "refused": "not its message"
+    },
+    {
+      "name": "a map's key at the varint wire type",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.5"
+      ],
+      "bytes": "62 04 08 02 12 00",
+      "refused": "not its message"
+    },
+    {
+      "name": "a map's entry with a field it does not declare",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.6"
+      ],
+      "bytes": "62 0C 1A 0A 01 7A 12 06 0A 04 61 62 63 64",
+      "refused": "not its message"
     },
     {
       "name": "an end group no group opened",
@@ -1145,6 +1149,149 @@
         "17.9.1"
       ],
       "bytes": "23",
+      "refused": "not its message"
+    },
+    {
+      "name": "counts packed",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "52 03 01 02 03",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "counts": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "counts unpacked and packed, in one message",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "50 01 52 02 02 03",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "counts": [
+          1,
+          2,
+          3
+        ]
+      }
+    },
+    {
+      "name": "stamps unpacked",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "5D 01 00 00 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "stamps": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "stamps packed",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "5A 08 01 00 00 00 02 00 00 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 0,
+        "stamps": [
+          1,
+          2
+        ]
+      }
+    },
+    {
+      "name": "a packed fixed32 whose length is no multiple of 4",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "5A 05 01 00 00 00 02",
+      "refused": "not its message"
+    },
+    {
+      "name": "a packed uint32 whose last varint runs past its record, a field after",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "52 02 05 81 01 10 07",
+      "refused": "not its message"
+    },
+    {
+      "name": "a map's entry, its value before its key",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "62 07 12 03 0A 01 78 0A 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 2,
+        "children": {
+          "": {
+            "text": "0078",
+            "number": 0,
+            "nested": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "a group closed by its own end group",
+      "encoding": "proto",
+      "clauses": [
+        "17.9"
+      ],
+      "bytes": "6B 0A 01 61 6C",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 1,
+        "delimited": {
+          "text": "0061",
+          "number": 0,
+          "nested": 0
+        }
+      }
+    },
+    {
+      "name": "a group closed by another number's end group",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "6B 0A 01 61 44",
+      "refused": "not its message"
+    },
+    {
+      "name": "a group never closed",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.1"
+      ],
+      "bytes": "6B 0A 01 61",
       "refused": "not its message"
     },
     {
@@ -1180,6 +1327,35 @@
         "17.9.3"
       ],
       "bytes": "1A EC 01 1A E9 01 1A E6 01 1A E3 01 1A E0 01 1A DD 01 1A DA 01 1A D7 01 1A D4 01 1A D1 01 1A CE 01 1A CB 01 1A C8 01 1A C5 01 1A C2 01 1A BF 01 1A BC 01 1A B9 01 1A B6 01 1A B3 01 1A B0 01 1A AD 01 1A AA 01 1A A7 01 1A A4 01 1A A1 01 1A 9E 01 1A 9B 01 1A 98 01 1A 95 01 1A 92 01 1A 8F 01 1A 8C 01 1A 89 01 1A 86 01 1A 83 01 1A 80 01 1A 7E 1A 7C 1A 7A 1A 78 1A 76 1A 74 1A 72 1A 70 1A 6E 1A 6C 1A 6A 1A 68 1A 66 1A 64 1A 62 1A 60 1A 5E 1A 5C 1A 5A 1A 58 1A 56 1A 54 1A 52 1A 50 1A 4E 1A 4C 1A 4A 1A 48 1A 46 1A 44 1A 42 1A 40 1A 3E 1A 3C 1A 3A 1A 38 1A 36 1A 34 1A 32 1A 30 1A 2E 1A 2C 1A 2A 1A 28 1A 26 1A 24 1A 22 1A 20 1A 1E 1A 1C 1A 1A 1A 18 1A 16 1A 14 1A 12 1A 10 1A 0E 1A 0C 1A 0A 1A 08 1A 06 1A 04 1A 02 1A 00",
+      "refused": "nested past 100"
+    },
+    {
+      "name": "50 maps deep, 100 messages below the top, each entry counted",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "62 E9 01 12 E6 01 62 E3 01 12 E0 01 62 DD 01 12 DA 01 62 D7 01 12 D4 01 62 D1 01 12 CE 01 62 CB 01 12 C8 01 62 C5 01 12 C2 01 62 BF 01 12 BC 01 62 B9 01 12 B6 01 62 B3 01 12 B0 01 62 AD 01 12 AA 01 62 A7 01 12 A4 01 62 A1 01 12 9E 01 62 9B 01 12 98 01 62 95 01 12 92 01 62 8F 01 12 8C 01 62 89 01 12 86 01 62 83 01 12 80 01 62 7E 12 7C 62 7A 12 78 62 76 12 74 62 72 12 70 62 6E 12 6C 62 6A 12 68 62 66 12 64 62 62 12 60 62 5E 12 5C 62 5A 12 58 62 56 12 54 62 52 12 50 62 4E 12 4C 62 4A 12 48 62 46 12 44 62 42 12 40 62 3E 12 3C 62 3A 12 38 62 36 12 34 62 32 12 30 62 2E 12 2C 62 2A 12 28 62 26 12 24 62 22 12 20 62 1E 12 1C 62 1A 12 18 62 16 12 14 62 12 12 10 62 0E 12 0C 62 0A 12 08 62 06 12 04 62 02 12 00",
+      "read": {
+        "text": "",
+        "number": 0,
+        "nested": 100,
+        "children": {
+          "": {
+            "text": "",
+            "number": 0,
+            "nested": 98
+          }
+        }
+      }
+    },
+    {
+      "name": "51 maps deep, 102 messages below the top, each entry counted",
+      "encoding": "proto",
+      "clauses": [
+        "17.9.3"
+      ],
+      "bytes": "62 EF 01 12 EC 01 62 E9 01 12 E6 01 62 E3 01 12 E0 01 62 DD 01 12 DA 01 62 D7 01 12 D4 01 62 D1 01 12 CE 01 62 CB 01 12 C8 01 62 C5 01 12 C2 01 62 BF 01 12 BC 01 62 B9 01 12 B6 01 62 B3 01 12 B0 01 62 AD 01 12 AA 01 62 A7 01 12 A4 01 62 A1 01 12 9E 01 62 9B 01 12 98 01 62 95 01 12 92 01 62 8F 01 12 8C 01 62 89 01 12 86 01 62 83 01 12 80 01 62 7E 12 7C 62 7A 12 78 62 76 12 74 62 72 12 70 62 6E 12 6C 62 6A 12 68 62 66 12 64 62 62 12 60 62 5E 12 5C 62 5A 12 58 62 56 12 54 62 52 12 50 62 4E 12 4C 62 4A 12 48 62 46 12 44 62 42 12 40 62 3E 12 3C 62 3A 12 38 62 36 12 34 62 32 12 30 62 2E 12 2C 62 2A 12 28 62 26 12 24 62 22 12 20 62 1E 12 1C 62 1A 12 18 62 16 12 14 62 12 12 10 62 0E 12 0C 62 0A 12 08 62 06 12 04 62 02 12 00",
       "refused": "nested past 100"
     }
   ],

@@ -1537,9 +1537,20 @@ generator writes for the message. What is Bead's:
 
 1. Bytes that are no encoding of the message do not read (section 17.2).
 2. An empty payload is the message with no field set.
-3. A reader MUST refuse a message nested more than 100 deep below the top one, and sets that bound
-   in its library rather than leaving it to the library's default.
+3. A reader MUST refuse a message nested more than 100 deep below the top one, a group and a map's
+   entry each counting as a message, as a map's entry is one on the wire
+   ([Encoding](https://protobuf.dev/programming-guides/encoding/), "Maps"), and sets that bound in
+   its library rather than leaving it to the library's default.
 4. A string's leading U+FEFF is a character of it (section 17.4.2).
+5. A field the message declares, at a wire type its type does not take, does not read (section
+   17.2), a map's entry's key and value among them, where protobuf's reference parsers keep it as
+   an unknown field: one stock library reads it as its declared type, which may take a record past
+   its message, so every side refuses it. A repeated scalar of a numeric type takes its own wire
+   type and the length-delimited, packed or not
+   ([Encoding](https://protobuf.dev/programming-guides/encoding/), "Packed Repeated Fields").
+6. A map's entry with a field other than its key and its value does not read (section 17.2), where
+   protobuf's reference parsers skip it: one stock library reads such an entry apart, so every side
+   refuses it.
 
 Where two stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of

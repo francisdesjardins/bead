@@ -28,6 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
+    <!-- the check of a proto payload's records, which the codec generated code makes calls first -->
+    <ProjectReference Include="../../src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
   </ItemGroup>
 
