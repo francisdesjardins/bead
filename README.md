@@ -327,6 +327,12 @@ against each server.
   half's oxfmt options and its packages' descriptors — and its wrappers, its `buf.yaml` and its git
   lines as `beadc wrapper` and `beadc init` write them, under a name `init` takes. It needs the
   builder installed.
+- `node tools/protobuf-conformance.mjs typescript|csharp|differential`: protobuf's conformance
+  suite through one side's generated `proto` codec, its failure list held both ways and its count
+  of tests to the floor `tools/protobuf-conformance/runner.json` pins with the runner, fetched by
+  its sha512; or one corpus of `Probe` through both sides, read alike. The suite runs on Linux or
+  macOS, where the runner has a binary; it needs the TypeScript side and the builder installed,
+  and .NET for the C# side.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder.
 
@@ -399,8 +405,11 @@ itself, each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repo
 24.9, the floor the TypeScript half declares (what each example copies, or takes from beadc's
 wrapper and init, held to its source; beadc on Node holding `examples/hello`'s generated files;
 buf's lint and layout over its `.proto`; each half's gates and both its builds; then each client
-against each server, both modes of each half, sixteen pairs), and `commits` (the subjects, the
-links, the versions, then the root's tools' own tests).
+against each server, both modes of each half, sixteen pairs), `protobuf-conformance` (protobuf's
+conformance suite, its runner by its pin's sha512, through each side's generated `proto` codec, each
+held to its failure list and the floor, the C# testee's format, then one corpus of `Probe` through
+both sides), and `commits` (the subjects, the links, the versions, then the root's tools' own
+tests).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
 the one check a branch requires, waits on GitHub Pro or a public repository.
 

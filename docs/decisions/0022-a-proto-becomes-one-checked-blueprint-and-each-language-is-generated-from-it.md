@@ -222,14 +222,18 @@ C# a constructor of their own beside one that takes none. A client class takes i
 the layer's options, optional; it holds a requester of each procedure its server answers, under the
 procedure's name, its notifications under `notifications`, at the windows its caller gives, unpaced
 by default ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it
-answers. A file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_2` or
-`GeneratedCode.SupportsVersion2`, and imports nothing of Bead's but `./service`, from a path
-relative to its output's folder or a package's name; the C# it writes qualifies every type as
-`global::Bead.` and `global::`. The TypeScript target runs on `@bufbuild/protoplugin`, in beadc's
-process, its `target=ts`, its header written above protoplugin's imports, never its preamble, its
-imports printed as symbols. A service with no `proto` member is written at the folder's root under
-its name; one with a `proto` member at its file's path, whichever the source, as protoc and buf
-write a file at the path its descriptor names. The C# target is a printer of its own, in beadc's
+answers. A file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_3` or
+`GeneratedCode.SupportsVersion3`, and imports nothing of Bead's but `./service`, and `./proto` where
+it binds `proto`, from a path relative to its output's folder or a package's name; the C# it writes
+qualifies every type as `global::Bead.` and `global::`, and a project whose code binds `proto`
+references `Bead.Protobuf`, whose `ProtoRecords.Check` its codec calls before Google.Protobuf reads,
+as the TypeScript codec calls `checkProtoRecords` before `fromBinary`
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+The TypeScript target runs on `@bufbuild/protoplugin`, in beadc's process, its `target=ts`, its
+header written above protoplugin's imports, never its preamble, its imports printed as symbols. A
+service with no `proto` member is written at the folder's root under its name; one with a `proto`
+member at its file's path, whichever the source, as protoc and buf write a file at the path its
+descriptor names. The C# target is a printer of its own, in beadc's
 process, and names a message from its descriptor; it writes a service with a `proto` member in its
 namespace's folder at its file's name, beside protoc's file, protoc run with `base_namespace=`, the
 namespace the set's `csharp_namespace` from a `.proto` and the output's `namespace` from a

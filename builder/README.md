@@ -114,6 +114,7 @@ outputs:
     out: gen/ts # the output's folder
     importExtension: ts # what a relative import ends with: none, js or ts (the default)
     runtime: '@francisdesjardins/bead/service' # the default; or a path relative to out, no extension
+    protoRuntime: '@francisdesjardins/bead/proto' # the proto check's module, the default; or alike
     messages: generate # the default; or external, another generator's, with messagesOut
     # messagesOut: gen/messages # where messages: external finds them
   - language: csharp
@@ -336,7 +337,10 @@ from buf's set, or empty for a blueprint alone. A file holds, for each of its se
 - **`<Name>Procedures`**, frozen: a descriptor each, `requestOf` or `commandOf`, its admission, its
   failures by name and code, its procedure as the runtime takes it, its deprecation and its payload
   limit among them, and its codecs, `PAYLOAD_CODECS.raw`, `.text` or `.json`, or `payloadCodecOf`
-  over protobuf-es's `fromBinary` and `toBinary`, at a nesting limit of 101, for a `proto` binding;
+  over protobuf-es's `fromBinary` and `toBinary`, at a nesting limit of 101, for a `proto` binding,
+  its decoder calling `checkProtoRecords(bytes, FooSchema)` first, which refuses, by the message's
+  own descriptor, what protobuf refuses where protobuf-es reads on
+  ([decision 0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
 - **`<Name>Failures`**, its catalogue; **`<Name>Resolvers`**, for resolvers written in a module of
   their own; **`<Name>ServerOptions`** and **`<Name>ClientOptions`**, the service layer's options,
   and **`<Name>Admissions`** and **`<Name>Windows`**, their hooks and their windows;
@@ -346,7 +350,7 @@ from buf's set, or empty for a blueprint alone. A file holds, for each of its se
 - **`<Name>Client`**, over its Bead client, its options after it: a requester of each procedure
   its server answers, by its name, its `notifications` and `on`;
 
-and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_2`
+and, once, the contract with the runtime, `GENERATED_CODE_SUPPORTS_VERSION_3`
 ([decision 0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)). Every doc comment is the description, then what
 the procedure admits, through protoplugin's `jsDoc`, which writes `*/` as `*\/`.
 
@@ -390,8 +394,10 @@ and no other.
 is aliased, as a service whose `<Name>Resolvers` is the runtime's `ServiceResolvers` imports
 `ServiceResolvers as ServiceResolvers$1`. `runtime` is the module the runtime comes from: a
 package's name, kept as given, or a path relative to the output's folder, without its extension,
-which each file imports at its depth. `importExtension` is what every relative import ends with,
-the messages' and the runtime's alike.
+which each file imports at its depth. `protoRuntime` is the module of the check of a `proto`
+payload's records, `@francisdesjardins/bead/proto` by default, named alike, and imported only by a
+file that binds `proto`, which takes `@bufbuild/protobuf` as its peer, already the messages'.
+`importExtension` is what every relative import ends with, the messages' and the runtime's alike.
 
 **Its messages.** Where a binding is `proto`, protoc-gen-es writes the messages in beadc's process
 (`target=ts,erasable_syntax=true`), as `buf generate` writes them: the files that declare them and
@@ -435,8 +441,12 @@ no type of the namespace takes a runtime type's place. A file holds, for each of
 - **`<Name>Procedures`**: a descriptor each, `RequestProcedure` or `CommandProcedure`, its
   procedure as the runtime takes it, its deprecation and its payload limit among them, its
   admission, and its codecs, `PayloadCodecs.Raw`, `.Text` or `.Json`, or `PayloadCodecs.Of` over
-  Google.Protobuf, at a nesting limit of 101, for a `proto` binding; then `All`, every one in their
-  ids' order;
+  Google.Protobuf, at a nesting limit of 101, for a `proto` binding, its decoder calling
+  `global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor)` first, which
+  refuses, by the message's own descriptor, what protobuf refuses where Google.Protobuf reads on
+  ([decision 0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)), so a project whose code binds `proto`
+  references the `Bead.Protobuf` assembly, which carries Google.Protobuf; then `All`, every one in
+  their ids' order;
 - **`<Name>Failures`**, a class of failures for each procedure that lists any, its values its own,
   and `Is`, which tells a failure received by the service's catalogue;
 - **`<Name>Admissions`** and **`<Name>Windows`**, the records of its hooks, each required, and of
@@ -450,7 +460,7 @@ no type of the namespace takes a runtime type's place. A file holds, for each of
 - **`<Name>Client`**, over its Bead client, the layer's options after it: a requester of each
   procedure its server answers, by its rpc's name, its `Notifications` and `On`;
 
-and, once, the contract with the runtime, `GeneratedCode.SupportsVersion2`. Every doc comment is the
+and, once, the contract with the runtime, `GeneratedCode.SupportsVersion3`. Every doc comment is the
 description, then what the procedure admits, through one writer: one `///` a line, the text
 XML-escaped, a `<para>` a paragraph where there are two, and each character C# reads as a line's
 end besides LF, CR, NEL, LS and PS, written as its reference, `&#xD;`; a string literal writes them

@@ -68,11 +68,12 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ### Services and their names
 
-| #                                                                                               | Decision                                                                                                               | Status   |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                     | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made | accepted |
-| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md) | A service's procedures are typed descriptors, served and called through one layer in each runtime                      | accepted |
-| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)    | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone            | accepted |
+| #                                                                                                   | Decision                                                                                                               | Status   |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                         | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made | accepted |
+| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)     | A service's procedures are typed descriptors, served and called through one layer in each runtime                      | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)        | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone            | accepted |
+| [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) | A `proto` payload's records are read against its message before its library reads them                                 | accepted |
 
 ### Transports and relays
 
@@ -120,7 +121,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ## Writing one
 
-The next decision is 0027. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0029. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 
