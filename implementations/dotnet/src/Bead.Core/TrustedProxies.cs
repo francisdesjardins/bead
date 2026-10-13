@@ -6,16 +6,16 @@ using System.Text;
 namespace Bead;
 
 /// <summary>
-/// The proxies an HTTP server believes <c>X-Forwarded-For</c> from, and the client's address it
-/// reads past them (spec 15.12): each an IP address in the form a server listens on, or a network,
-/// that address, <c>/</c> and its prefix's length (RFC 4632 §3.1, RFC 4291 §2.3), from 1, its bits
-/// past the prefix zero. While the address reached is one they hold, the next entry from the right
-/// is the client's, when it is an address in one of RFC 7239 §6's node forms, unquoted, its port
-/// dropped; any other entry ends the walk, as nginx's <c>real_ip_recursive</c> and Express's
-/// <c>trust proxy</c> walk it. Every address so read, and the socket's, is held in one form: an
-/// IPv4-mapped one as its IPv4 address (RFC 4291 §2.5.5.2), an IPv6 one in RFC 5952 §4's text,
-/// hexadecimal throughout, written here rather than by the platform, which writes some IPv6
-/// addresses with a dotted IPv4 tail.
+/// The proxies a server believes <c>X-Forwarded-For</c> from, over HTTP or over WebSocket alike, and
+/// the client's address it reads past them (spec 15.12): each an IP address in the form a server
+/// listens on, or a network, that address, <c>/</c> and its prefix's length (RFC 4632 §3.1, RFC
+/// 4291 §2.3), from 1, its bits past the prefix zero. While the address reached is one they hold,
+/// the next entry from the right is the client's, when it is an address in one of RFC 7239 §6's
+/// node forms, unquoted, its port dropped; any other entry ends the walk, as nginx's
+/// <c>real_ip_recursive</c> and Express's <c>trust proxy</c> walk it. Every address so read, and the
+/// socket's, is held in one form: an IPv4-mapped one as its IPv4 address (RFC 4291 §2.5.5.2), an
+/// IPv6 one in RFC 5952 §4's text, hexadecimal throughout, written here rather than by the
+/// platform, which writes some IPv6 addresses with a dotted IPv4 tail.
 /// </summary>
 internal static class TrustedProxies
 {

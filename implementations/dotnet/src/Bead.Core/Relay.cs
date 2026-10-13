@@ -693,7 +693,7 @@ internal sealed class Relay
 
             if (header.OpensSubscription)
             {
-                return Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription yet");
+                return Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription");
             }
 
             if (_registration.IsClosed)

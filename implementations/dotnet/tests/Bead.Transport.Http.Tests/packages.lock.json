@@ -162,19 +162,19 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.4.0, )"
+          "Bead.Core": "[0.4.1, )"
         }
       },
       "bead.transport.http": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.4.0, )"
+          "Bead.Core": "[0.4.1, )"
         }
       },
       "bead.transport.websockets": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.4.0, )"
+          "Bead.Core": "[0.4.1, )"
         }
       }
     }

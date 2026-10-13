@@ -60,17 +60,19 @@ envelopes.
 
 ## Where Bead goes
 
+A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
+own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+
+- **Next**: a penetration test of Bead's servers, before 0.5.0.
 - **0.5.0**: a topic-based publish/subscribe broker as one more transport, one core and one
   adapter a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
-- **A 0.4.x**: `trustedProxies` on the WebSocket server too, and a hop bound for proxies whose
-  address a deployment cannot name
-  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
-- **After 0.4.0**: a penetration test of Bead's servers.
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
   latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names.
+  [the index](docs/decisions/README.md#where-bead-goes) names; and a hop bound for proxies whose
+  address a deployment cannot name
+  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -117,7 +119,7 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 104 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
+| [`transports.json`](spec/transports.json)               | 106 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
@@ -151,9 +153,10 @@ and the groups of vectors name each other, that every unit an entry cites is its
 each ledger gives every unit of its document its status, each reason held by its rule, and the
 hash of its text, which moves only where `python spec/check.py --write-units 15.7` names the unit,
 and that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint
-is in its form and `interop-service.json` states its procedures; then it reports which groups and
-files each side's tests read, and fails on one a side does not. It runs on Python
-3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
+is in its form and `interop-service.json` states its procedures, and that each count the table
+above and the matrix's, in [`docs/support.md`](docs/support.md), state is what the files hold;
+then it reports which groups and files each side's tests read, and fails on one a side does not.
+It runs on Python 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 
 ```sh
 python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1
@@ -429,7 +432,7 @@ with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
 `beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
 Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
-`examples/hello`, against the last release that carries one, from 0.3.0, on Linux; its types, the
+`examples/hello`, against the last release, which carries both, on Linux; its types, the
 goldens' among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on
 Node 26, amd64 and arm64, each natively: beadc's image built, its test stage run on the image
 itself, each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and

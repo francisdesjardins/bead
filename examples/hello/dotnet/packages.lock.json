@@ -26,7 +26,7 @@
       "bead.transport.websockets": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.4.0, )"
+          "Bead.Core": "[0.4.1, )"
         }
       }
     }

@@ -793,7 +793,7 @@ types, lint, format and generated code no platform moves. On every leg, the wrap
 Windows, `BEADC_WRAPPERS_REQUIRED=1` turning a test that would skip without bash, pwsh 7.6 or, on
 Windows, the right to make a symbolic link into one that fails. On Linux, last, `beadc breaking`
 holds the interop's blueprint and `examples/hello` to the last release, `git archive` piped into
-`--against -`, 0.3.0 or any release after it: a last release that carries no blueprint fails the
+`--against -`: the last release carries both; one without a blueprint, or none found, fails the
 step, so it never passes by comparing nothing. The last release is the newest `vX.Y.Z`, as
 `tools/release.mjs` reads one, whose commit is not HEAD's, read by the tag's commit, never by
 ancestry, which the shallow fetch does not hold: on a release's own commit, `main`'s, the release

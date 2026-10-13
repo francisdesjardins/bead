@@ -952,6 +952,29 @@ websocket = [
          handshake('path', {'origin': 'http://{host}/'}), refused('path', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('own', {'origin': 'https://{host}'}), message('own', binary=ECHO),
          heard('own', envelope=result(1, '"x"'))]),
+    # 15.12: the client's address, walked from the right past each proxy a server names, at a
+    # WebSocket's address as over HTTP, every runner's socket on 127.0.0.1; a WebSocket server bounds
+    # no address, so its refusals tell what it reads
+    ('behind proxies it names, a WebSocket server\'s refusal of an upgrade tells the client\'s address, the rightmost X-Forwarded-For entry none of them holds, read in RFC 7239\'s node forms and held in one form, and its port the proxy\'s connection\'s',
+     ['15.2', '15.2.2', '15.2.7', '15.6.5', '15.12'], {'options': {'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}}, [
+         handshake('rebound', {'x-forwarded-for': '203.0.113.9'}, host='rebind.example'),
+         refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('walked', {'x-forwarded-for': '203.0.113.9, 198.51.100.7, 10.0.0.6'}, host='rebind.example'),
+         refused('walked', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('foreign', {'origin': 'https://elsewhere.test', 'x-forwarded-for': '192.0.2.7:51234'}),
+         refused('foreign', 403, 'origin-refused', UPGRADE_REFUSED),
+         handshake('bracketed', {'x-forwarded-for': '[2001:DB8::1]:443'}, host='rebind.example'),
+         refused('bracketed', 403, 'host-refused', UPGRADE_REFUSED),
+         handshake('unknown', {'x-forwarded-for': 'unknown, 10.0.0.5'}, host='rebind.example'),
+         refused('unknown', 403, 'host-refused', UPGRADE_REFUSED),
+         *upgrade('taken', {'x-forwarded-for': '203.0.113.9'}), message('taken', binary=ECHO),
+         heard('taken', envelope=result(1, '"x"'))]),
+    ('an upgrade\'s X-Forwarded-For from a socket no trustedProxies entry holds is not read: a WebSocket server\'s refusal tells the socket\'s address',
+     ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'trustedProxies': ['192.0.2.0/24']}}, [
+         handshake('rebound', {'x-forwarded-for': '192.0.2.1'}, host='rebind.example'),
+         refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
+         *upgrade('taken', {'x-forwarded-for': '192.0.2.1'}), message('taken', binary=ECHO),
+         heard('taken', envelope=result(1, '"x"'))]),
     # 15.2: the method, then whether a WebSocket is asked at all, then its version, then its form
     ('a request at a WebSocket\'s address of a method but GET or HEAD is refused 405, its Allow naming GET and HEAD, before its handshake is read',
      ['15.2', '15.2.3', '15.6.7'], {}, [
@@ -1185,7 +1208,7 @@ document = {
         'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and trustedProxies, the HTTP server\'s; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins and its trustedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

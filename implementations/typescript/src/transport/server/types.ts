@@ -53,9 +53,9 @@ export interface ITransportServerClient {
  */
 export interface ITransportServerRefusal {
   /**
-   * The client's address, as `clients` reports one (spec 15.12): over HTTP, the `X-Forwarded-For`
-   * entry reached past the proxies its `trustedProxies` names, else the socket's, in its one form;
-   * `undefined` for a socket already gone.
+   * The client's address, as `clients` reports one (spec 15.12): over HTTP or WebSocket, the
+   * `X-Forwarded-For` entry reached past the proxies its `trustedProxies` names, else the socket's,
+   * in its one form; `undefined` for a socket already gone.
    */
   address: string | undefined;
   /**
@@ -453,6 +453,20 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * connection is secure as the server listens on a loopback address alone.
    */
   secure?: boolean | undefined;
+  /**
+   * The proxies whose `X-Forwarded-For` the transport believes, on an upgrade (spec 15.12): each an
+   * IP address in the form a server listens on, or a network, that address, `/` and its prefix's
+   * length (RFC 4632 §3.1, RFC 4291 §2.3), from 1, its bits past the prefix zero. While the address
+   * reached is one they hold, the field's next entry from the right is the client's, when it is an
+   * address — bare, or as RFC 7239 §6 writes a node, its port dropped — held in one form,
+   * IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it: the address a connection's handle and
+   * `clients` name, and a refusal tells; its port stays the socket's. The transport bounds no
+   * address, so a proxy not listed costs nothing but that: every client behind it is named by the
+   * proxy's address. None, when not given, the loopback among them. A name, and a network of prefix
+   * 0, which would trust what every client writes, are a {@link ProgrammerError} as the server is
+   * built, as is any other entry. `Forwarded` is never read.
+   */
+  trustedProxies?: readonly string[] | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
   WebSocketServer: IWebSocketServerConstructor;
 }

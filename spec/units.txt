@@ -3,7 +3,7 @@
 # citation moved; --write-units <unit>… acknowledges the units it names, and no other.
 # The reasons: lead, defines, twins, builder, open and owed, each held as spec/check.py says;
 # a new unit's ? until its author gives it one.
-0 defines 40022650e84401fbf011afe9a12d269329a934b9b623e407554e79b1f9c10375
+0 defines 813984cd9d2f0391dec0c7c9ae20bf344ad332f65744dd1615a71ed8736799b5
 1.0 defines cb34b593ac2026092a4463553390b7c26748df98b21908cb4d3bc115a9673bf0
 1.1 cited 2eed9ca84c13035f2132c2f3584479a75b0f3af5bbd9f413e88211d11b5a16ff
 1.2 cited b975e9dc15551dfbd46cd3ac97cccff53bafdc7e90152f59befaf4c92ba0cd98
@@ -261,7 +261,7 @@
 15.9 cited cb42b8f1869e9bab2bf3a58be2c13815f7cb6514c7e848b95d4ecc76f68869d6
 15.10 twins dce8551b03f78c9e1d55c83e4eafe2680008fefdffe2f44ace28370605fca382
 15.11 cited 5a750526b9fe71fd55388a84a3ff3c389a37d56aefa13ef060970dd712241d92
-15.12 cited b1c309978efc6bf1a7cf817811bc3bed1ed90a4543fc7b39b36fe783f611b61a
+15.12 cited e1830229db0ffd79ffa4580bc6a08ea57735c42e3e5cdcb377a4a9fed7617122
 15.12.1 cited 6c96de3f0c8d783c1871532b79d4ba37bcabbf493a3f3811a9b763be2b218aac
 15.12.2 cited ed614631d14d0a93424ca12bdbd584ead593340312086646334a90a06ce0bd75
 15.12.3 cited 37f6e232034c55e2b1e9d7b40404539781f1af61dcaff5c7f6c1015c407d45ad

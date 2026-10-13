@@ -875,6 +875,35 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }));
     }
 
+    // spec 15.12
+    [Fact]
+    public void Refuses_as_it_is_built_a_trustedProxies_entry_that_is_a_name_or_a_network_of_prefix_0()
+    {
+        var name = Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { TrustedProxies = ["127.0.0.1", "proxy.internal"] });
+        });
+
+        Assert.Equal("TrustedProxies", name.ParamName);
+        Assert.Contains("\"proxy.internal\"", name.Message, StringComparison.Ordinal);
+
+        foreach (var entry in new[] { "0.0.0.0/0", "::/0" })
+        {
+            var everyone = Assert.Throws<ArgumentException>(() =>
+            {
+                return new WebSocketTransportServer(new WebSocketTransportServerOptions { TrustedProxies = [entry] });
+            });
+
+            Assert.Equal("TrustedProxies", everyone.ParamName);
+            Assert.Contains("would trust what every client writes", everyone.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Null(Record.Exception(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { TrustedProxies = ["127.0.0.1", "10.0.0.0/8", "::1", "fd00::/8"] });
+        }));
+    }
+
     [Fact]
     public async Task Refuses_a_method_but_GET_or_HEAD_405_after_its_host_and_before_its_upgrade_is_read_its_Allow_naming_GET_and_HEAD_marked_method_refused()
     {
@@ -1991,6 +2020,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     public async Task Raises_an_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error()
     {
         var events = new ConcurrentQueue<(string Name, string ConnectionHandle)>();
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Exception? error = null;
 
         _server.Error += (reason, connectionHandle) =>
@@ -2001,6 +2031,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         _server.Close += (wasClean, connectionHandle) =>
         {
             events.Enqueue((wasClean ? "clean close" : "close", connectionHandle));
+            closed.TrySetResult();
         };
 
         var (client, connectionHandle) = await Connect();
@@ -2010,6 +2041,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             // a text frame that is not UTF-8
             await client.SendAsync(new byte[] { 0xFF, 0xFE }, WebSocketMessageType.Text, true, Cancelled);
             await Next(_closes);
+            // ! the fixture's close listener runs before this one: wait for this one's, not the fixture's
+            await closed.Task.WaitAsync(Patience, Cancelled);
 
             Assert.Equal([("error", connectionHandle), ("close", connectionHandle)], events);
             Assert.IsType<WebSocketException>(error);
@@ -2153,6 +2186,83 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             Assert.Matches(@"^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$", connectionHandle);
             Assert.Equal("127.0.0.1", Assert.Single(_server.Clients).Address);
+        }
+    }
+
+    // spec 15.12
+    [Fact]
+    public async Task Takes_a_client_s_address_from_X_Forwarded_For_only_from_a_proxy_it_names_and_names_its_connection_by_it()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"], TrustedProxies = ["127.0.0.1"] });
+
+        var sockets = new List<TcpClient>();
+
+        // an upgrade from an address of the loopback's, its X-Forwarded-For given, taken: the handle
+        // its connection is named by, beside the socket's own port, which the server sees as its peer's
+        async Task<(string ConnectionHandle, int Port)> DrawOf(string forwarded, IPAddress from)
+        {
+            var tcp = new TcpClient(new IPEndPoint(from, 0));
+
+            sockets.Add(tcp);
+            await tcp.ConnectAsync(IPAddress.Loopback, _port, Cancelled);
+            await tcp.GetStream().WriteAsync(HandshakeOf("GET / HTTP/1.1", $"X-Forwarded-For: {forwarded}"), Cancelled);
+            await ReadHead(tcp.GetStream());
+
+            return (await Next(_connections), ((IPEndPoint)tcp.Client.LocalEndPoint!).Port);
+        }
+
+        try
+        {
+            var walked = await DrawOf("203.0.113.9, 198.51.100.7", IPAddress.Loopback);
+            // what is no address is not taken, nor what only a lenient parse reads as one
+            var noAddress = await DrawOf("evil;ordinal=1", IPAddress.Loopback);
+            var lenient = await DrawOf("1", IPAddress.Loopback);
+            // an IPv6 address as RFC 7239 writes a node, its port dropped, held as RFC 5952 writes it
+            var bracketed = await DrawOf("[2001:DB8::1]:443", IPAddress.Loopback);
+            // nor what a peer it does not name forwards: one of another address of the loopback's
+            var foreign = await DrawOf("192.0.2.1", IPAddress.Parse("127.0.0.2"));
+            var ordinal = OrdinalOf(walked.ConnectionHandle);
+
+            Assert.Equal(
+                [
+                    $"type=WS;ip=198.51.100.7;port={walked.Port};ordinal={ordinal}",
+                    $"type=WS;ip=127.0.0.1;port={noAddress.Port};ordinal={ordinal + 1}",
+                    $"type=WS;ip=127.0.0.1;port={lenient.Port};ordinal={ordinal + 2}",
+                    $"type=WS;ip=2001:db8::1;port={bracketed.Port};ordinal={ordinal + 3}",
+                    $"type=WS;ip=127.0.0.2;port={foreign.Port};ordinal={ordinal + 4}",
+                ],
+                new[] { walked.ConnectionHandle, noAddress.ConnectionHandle, lenient.ConnectionHandle, bracketed.ConnectionHandle, foreign.ConnectionHandle });
+            Assert.Equal(
+                [("198.51.100.7", walked.Port), ("127.0.0.1", noAddress.Port), ("127.0.0.1", lenient.Port), ("2001:db8::1", bracketed.Port), ("127.0.0.2", foreign.Port)],
+                _server.Clients.Select((client) =>
+                {
+                    return (client.Address, client.Port);
+                }));
+
+            // and a refusal tells the client's address so read, its field's lines joined, beside the
+            // socket's port; what is no address ends the walk at the proxy that wrote it
+            var upgrade = $"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n";
+            var lines = await RefusalOf($"GET / HTTP/1.1\r\nHost: rebind.example\r\n{upgrade}X-Forwarded-For: 203.0.113.9\r\nX-Forwarded-For: 198.51.100.7\r\n\r\n");
+            var unknown = await RefusalOf($"GET / HTTP/1.1\r\nHost: rebind.example\r\n{upgrade}X-Forwarded-For: unknown\r\n\r\n");
+
+            await Until(() =>
+            {
+                return _refusals.Count == 2;
+            });
+
+            Assert.Equal(
+                [
+                    new TransportServerRefusal("198.51.100.7", "rebind.example", null, lines.Port, WebSocketRefusals.Host, 403),
+                    new TransportServerRefusal("127.0.0.1", "rebind.example", null, unknown.Port, WebSocketRefusals.Host, 403),
+                ],
+                _refusals);
+        }
+        finally
+        {
+            foreach (var socket in sockets)
+            {
+                socket.Dispose();
+            }
         }
     }
 

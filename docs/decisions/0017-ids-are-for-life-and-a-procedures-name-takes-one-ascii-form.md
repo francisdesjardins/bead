@@ -46,8 +46,10 @@ names `İd`, `a\u0085b`, the empty name and `café` (`spec/generators/make_debug
 reach the registry's own surface, never a router (`router/server/__tests__/metrics.test.ts`,
 `MetricsTests.cs`).
 
-**The traps a name's check meets.** The interop's schema holds `procedureName` to
-`^[a-z][A-Za-z0-9]*$` (`spec/schemas/interop-service.schema.json`). Probed on 2026-10-05:
+**The traps a name's check meets.** A name's form written as a regular expression,
+`^[a-z][A-Za-z0-9]*$`, is read by each platform's own; the interop's schema holds `procedureName` to
+16.4's form by `spec/schemas/common.schema.json`'s pattern, which ends in a lookahead where `$`
+would let a line feed by. Probed on 2026-10-05:
 
 | Probe                                                 | Node 26.5.0                            | .NET 10.0.12                                     | Python 3.14.6, jsonschema 4.26.0             |
 | ----------------------------------------------------- | -------------------------------------- | ------------------------------------------------ | -------------------------------------------- |

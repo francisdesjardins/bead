@@ -549,7 +549,7 @@ export const createRelay = ({
         if (opensSubscription === true) {
           return {
             ...failures.subscriptionUnsupported,
-            detail: 'this relay carries no subscription yet',
+            detail: 'this relay carries no subscription',
           };
         }
 

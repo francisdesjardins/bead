@@ -416,13 +416,14 @@ wrapper; each side's job holds its generated code to its gates and the interop b
 `examples` job holds every example's copies and wrappers, holds `examples/hello` to what beadc
 generates and its `.proto` to buf's lint and layout, builds each half with its messages generated
 and external, and plays each client against each server; the `builder` job holds the interop's
-blueprint and `examples/hello` to the last release that carries a blueprint, the newest whose commit
-is not HEAD's, by `beadc breaking`, from 0.3.0, every warning failing; the `commits` job holds
+blueprint and `examples/hello` to the last release, the newest whose commit is not HEAD's, by
+`beadc breaking`, every warning failing; the `commits` job holds
 `tools/release.mjs`'s move of its version, through the root's
 tools' tests. A gate here that does not run is among 0006's gates owed.
 
-**`beadc breaking` holds from 0.3.0, the first release that carries a blueprint**: the step holds
-against 0.3.0 and every release after it, and fails on a last release that carries none.
+**`beadc breaking` holds against the last release**: that release carries the interop's blueprint
+and `examples/hello`'s, and one without a blueprint, or none found, fails the step, so it never
+passes by comparing nothing.
 
 ## The Tenth Man
 

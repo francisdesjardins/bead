@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { Server } from 'node:http';
-import { connect as connectTcp } from 'node:net';
+import { connect as connectTcp, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
@@ -806,6 +806,22 @@ test.describe('WSTransportServer, its hosts and origins', () => {
       ProgrammerError
     );
     expect(built({ hosts: ['*'], origins: ['https://bead.test'] })).not.toThrow();
+  });
+
+  // spec 15.12
+  test('refuses as it is built a trustedProxies entry that is a name or a network of prefix 0', () => {
+    const built = (trustedProxies: readonly string[]) => {
+      return () => {
+        return createWSTransportServer({ trustedProxies, WebSocketServer });
+      };
+    };
+
+    expect(built(['127.0.0.1', 'proxy.internal'])).toThrow(ProgrammerError);
+    expect(built(['127.0.0.1', 'proxy.internal'])).toThrow('proxy.internal');
+    for (const everyone of ['0.0.0.0/0', '::/0']) {
+      expect(built([everyone]), everyone).toThrow('it would trust what every client writes');
+    }
+    expect(built(['127.0.0.1', '10.0.0.0/8', '::1', 'fd00::/8'])).not.toThrow();
   });
 });
 
@@ -1662,6 +1678,112 @@ test.describe('WSTransportServer, the refusals it tells', () => {
       .toBe(true);
 
     expect(refusals).toEqual([told(localPort, { reason: 'busy', status: 503 })]);
+  });
+
+  // spec 15.12
+  test('takes a client’s address from X-Forwarded-For only from a proxy it names, and names its connection by it', async () => {
+    await using behind = await startDated({ hosts: ['bead.test'], trustedProxies: ['127.0.0.1'] });
+    // a peer no trustedProxies entry holds, the loopback here
+    await using before = await startDated({
+      hosts: ['bead.test'],
+      trustedProxies: ['192.0.2.0/24'],
+    });
+    const sockets: Socket[] = [];
+    // an upgrade carrying `forwarded`, taken: the handle its connection is named by, beside its
+    // socket's own port, which the server sees as its peer's
+    const drawOf = async (
+      { port, server }: { port: number; server: WSTransportServer },
+      forwarded: string
+    ) => {
+      const connection = nextServerEvent(server, 'connection');
+      const socket = await openTcp(port);
+
+      sockets.push(socket);
+      socket.on('data', () => {});
+      socket.on('error', () => {});
+      socket.write(requestOf('GET / HTTP/1.1', [`X-Forwarded-For: ${forwarded}`]));
+
+      const [, , connectionHandle] = await connection;
+
+      return { connectionHandle, port: socket.localPort };
+    };
+
+    try {
+      const walked = await drawOf(behind, '203.0.113.9, 198.51.100.7');
+      // what is no address is not taken, nor what only a lenient parse reads as one
+      const noAddress = await drawOf(behind, 'evil;ordinal=1');
+      const lenient = await drawOf(behind, '1');
+      // an IPv6 address as RFC 7239 writes a node, its port dropped, held as RFC 5952 writes it
+      const bracketed = await drawOf(behind, '[2001:DB8::1]:443');
+      // nor what a peer it does not name forwards
+      const foreign = await drawOf(before, '192.0.2.1');
+
+      expect(
+        [walked, noAddress, lenient, bracketed, foreign].map(({ connectionHandle }) => {
+          return connectionHandle;
+        })
+      ).toEqual([
+        `type=WS;ip=198.51.100.7;port=${String(walked.port)};ordinal=1`,
+        `type=WS;ip=${host};port=${String(noAddress.port)};ordinal=2`,
+        `type=WS;ip=${host};port=${String(lenient.port)};ordinal=3`,
+        `type=WS;ip=2001:db8::1;port=${String(bracketed.port)};ordinal=4`,
+        `type=WS;ip=${host};port=${String(foreign.port)};ordinal=1`,
+      ]);
+      expect(
+        [...behind.server.clients, ...before.server.clients].map(({ address, port }) => {
+          return [address, port];
+        })
+      ).toEqual([
+        ['198.51.100.7', walked.port],
+        [host, noAddress.port],
+        [host, lenient.port],
+        ['2001:db8::1', bracketed.port],
+        [host, foreign.port],
+      ]);
+
+      // and a refusal tells the client's address so read, its field's lines joined, beside the
+      // socket's port; what is no address ends the walk at the proxy that wrote it
+      const refusals = refusalsOf(behind.server);
+      const lines = await answerFromOf(
+        behind.port,
+        requestOf('GET / HTTP/1.1', [
+          'Host: rebind.example',
+          'X-Forwarded-For: 203.0.113.9',
+          'X-Forwarded-For: 198.51.100.7',
+        ])
+      );
+      const unknown = await answerFromOf(
+        behind.port,
+        requestOf('GET / HTTP/1.1', ['Host: rebind.example', 'X-Forwarded-For: unknown'])
+      );
+
+      expect([lines.answer, unknown.answer]).toEqual([
+        [403, 'host-refused'],
+        [403, 'host-refused'],
+      ]);
+      expect(refusals).toEqual([
+        {
+          address: '198.51.100.7',
+          authority: 'rebind.example',
+          origin: undefined,
+          port: lines.localPort,
+          reason: 'host-refused',
+          status: 403,
+        },
+        {
+          address: host,
+          authority: 'rebind.example',
+          origin: undefined,
+          port: unknown.localPort,
+          reason: 'host-refused',
+          status: 403,
+        },
+      ]);
+    } finally {
+      for (const socket of sockets) {
+        socket.destroy();
+      }
+    }
   });
 
   test('answers 400 unmarked, with none of the path’s fields, a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {

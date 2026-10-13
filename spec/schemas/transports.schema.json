@@ -62,7 +62,7 @@
       }
     },
     "options": {
-      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, and over HTTP the proxies it trusts.",
+      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, and the proxies it trusts.",
       "type": "object",
       "minProperties": 1,
       "$ref": "#/$defs/bounds",
