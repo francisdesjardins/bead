@@ -7,7 +7,7 @@ import { ProgrammerError } from '../../transport/shared/errors';
 import { commandOf, requestOf } from '../descriptors';
 import { createServiceClient } from '../service-client';
 import { createServiceServer } from '../service-server';
-import { CONNECTION, connectWorker, GreeterProcedures } from './fixtures';
+import { CONNECTION, connectWorker, deprecationsIn, GreeterProcedures } from './fixtures';
 
 // helpers
 
@@ -192,5 +192,14 @@ test.describe('createServiceClient', () => {
     // * the server's layer holds it too: the request went, and its resolver never saw it
     await expect(trusting.request.echo('')()).rejects.toBeInstanceOf(FailureError);
     expect(sent).toEqual([]);
+  });
+
+  test("a mapped member keeps its descriptor's @deprecated", async () => {
+    // * each requester, notification and window of a deprecated descriptor is flagged at each use, and none of another
+    expect(await deprecationsIn('deprecated-client-uses.ts')).toEqual({
+      directives: 4,
+      files: 1,
+      reports: [],
+    });
   });
 });
