@@ -15,7 +15,8 @@ export default defineConfig({
   projects: [
     {
       name: 'unit',
-      testMatch: ['**/__tests__/{exposition,preview,records,wire}.test.ts'],
+      testIgnore: ['**/__tests__/{hook,panel}.test.ts'],
+      testMatch: ['**/__tests__/*.test.ts'],
     },
     {
       name: 'extension',

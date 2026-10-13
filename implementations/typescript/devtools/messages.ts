@@ -5,6 +5,11 @@
 // panel by tab; and the panel. Every message is JSON, as a runtime port carries it: no bigint, no
 // bytes, no function.
 
+// dependencies
+
+import type { PreviewNode } from './preview';
+import type { IStackFrame } from './stack';
+
 // interfaces
 
 /** A client the page announced, as the panel names it. */
@@ -23,12 +28,16 @@ export interface ICallRecord {
    * notification.
    */
   callId?: number | undefined;
+  /** Whether its connection is closed when it goes unanswered past its timeout, as its options say. */
+  closeOnTimeout?: boolean | undefined;
   /** The connection its call is on, as its envelopes name it, `server` on a client; none without. */
   connectionHandle?: string | undefined;
   /** How long the call took once it answered, in milliseconds; none before. */
   duration?: number | undefined;
   /** Its credential, by its scheme's number alone; none when it gave none of its own. */
   credentialScheme?: number | undefined;
+  /** What it was for behind the peer, as its options name it; none for the peer itself. */
+  destinationId?: number | undefined;
   direction: string;
   /** What it failed with: its name, its message, and a failure's code, scope and detail. */
   error?: IErrorRecord | undefined;
@@ -37,30 +46,55 @@ export interface ICallRecord {
   procedureName: string;
   /** What came in, decoded, as a preview of bounded length. */
   rx?: string | undefined;
+  /** What came in, as a tree of the preview's bounds. */
+  rxTree?: PreviewNode | undefined;
   serviceId: number;
   serviceRevision: number;
   source: number;
+  /**
+   * The stack that made the call, as the hook took it while a panel watched, its own frames left
+   * out; none for a step of any other kind.
+   */
+  stack?: IStackFrame[] | undefined;
   /** When the call started, in milliseconds since the epoch. */
   startedAt: number;
   /** Its timeout in milliseconds, or `never`. */
   timeout?: number | 'never' | undefined;
   /** What went out, decoded, as a preview of bounded length. */
   tx?: string | undefined;
+  /** What went out, as a tree of the preview's bounds. */
+  txTree?: PreviewNode | undefined;
   type: string;
 }
 
-/** What a call failed with, made plain. */
+/**
+ * What a call failed with, made plain; for a failure, all it carries but its header: where it was
+ * raised and through how many relays, and the call it ended, as its envelope named it.
+ */
 export interface IErrorRecord {
+  /** The call id its failure envelope named; none for a failure raised before any envelope. */
+  callId?: number | undefined;
   code?: number | undefined;
+  /** What the call went to behind the peer, as the call named it. */
+  destinationId?: number | undefined;
   detail?: string | undefined;
   message: string;
   name: string;
+  /** Where it was raised: `local`, by this side's router; `peer`; or `relayed`, beyond a relay. */
+  origin?: string | undefined;
+  /** The relays it crossed, 0 when the peer raised it. */
+  relays?: number | undefined;
   scope?: number | undefined;
+  /** The side whose router raised it, for a protocol failure raised here. */
+  side?: string | undefined;
 }
 
 /** One envelope, as a source's router told it: its header, its credential by its scheme alone. */
 export interface IEnvelopeRecord {
-  /** When the hook heard it, in milliseconds since the epoch. */
+  /**
+   * When the hook heard it, in milliseconds since the epoch, to a fraction: the page's time origin
+   * and its monotonic reading since, so two envelopes of one turn still tell their order apart.
+   */
   at: number;
   connectionHandle: string;
   direction: string;

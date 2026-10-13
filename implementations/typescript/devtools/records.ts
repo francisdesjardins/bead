@@ -2,18 +2,29 @@
 
 // What the hook makes of each event a source's watch hears, before it leaves the page (decision
 // 0015): a plain record, JSON as a runtime port carries it — a credential by its scheme alone, a
-// payload by its preview, no signal and no function.
+// payload by its previews, no signal and no function.
 
 // dependencies
 
 import type { IRouterDebugInfo } from '../src/router/client/types';
 import type { IDebugEvent } from '../src/router/shared/types';
 import type { ICallRecord, IEnvelopeRecord, IErrorRecord } from './messages';
-import { previewOf } from './preview';
+import { previewOf, previewTreeOf } from './preview';
 
 // helpers
 
-/** What `error` says, made plain: its name and message, and a failure's code, scope and detail. */
+const numberOf = (value: unknown): number | undefined => {
+  return typeof value === 'number' ? value : undefined;
+};
+
+const textOf = (value: unknown): string | undefined => {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+};
+
+/**
+ * What `error` says, made plain: its name and message, and a failure's code, scope and detail,
+ * where it was raised, the relays it crossed, its destination, and the call id its envelope named.
+ */
 const errorOf = (error: unknown): IErrorRecord | undefined => {
   if (error === null || error === undefined) {
     return undefined;
@@ -23,14 +34,20 @@ const errorOf = (error: unknown): IErrorRecord | undefined => {
     return { message: previewOf(error) ?? '', name: typeof error };
   }
 
-  const { code, detail, scope } = error as Error & Record<string, unknown>;
+  const { code, destinationId, detail, header, origin, relays, scope, side } = error as Error &
+    Record<string, unknown>;
 
   return {
-    code: typeof code === 'number' ? code : undefined,
-    detail: typeof detail === 'string' && detail !== '' ? detail : undefined,
+    callId: numberOf((header as { callId?: unknown } | undefined)?.callId),
+    code: numberOf(code),
+    destinationId: numberOf(destinationId),
+    detail: textOf(detail),
     message: error.message,
     name: error.name,
-    scope: typeof scope === 'number' ? scope : undefined,
+    origin: textOf(origin),
+    relays: numberOf(relays),
+    scope: numberOf(scope),
+    side: textOf(side),
   };
 };
 
@@ -64,7 +81,10 @@ export const plainHeaderOf = (header: object): Record<string, boolean | number |
 
 // definition
 
-/** A step of a call, as `source`'s services told it, made plain. */
+/**
+ * A step of a call, as `source`'s services told it, made plain: its options all but its signal and
+ * its credential's token, its payloads previewed as text and as a tree.
+ */
 export const callRecordOf = (
   source: number,
   [error, event]: readonly [error: unknown, event: IDebugEvent]
@@ -75,8 +95,10 @@ export const callRecordOf = (
 
   return {
     callId: event.callId,
+    closeOnTimeout: options?.closeOnTimeout,
     connectionHandle: event.connectionHandle,
-    credentialScheme: typeof scheme === 'number' ? scheme : undefined,
+    credentialScheme: numberOf(scheme),
+    destinationId: options?.destinationId,
     direction: event.direction,
     duration: event.duration,
     error: errorOf(error),
@@ -84,12 +106,14 @@ export const callRecordOf = (
     procedureId: event.procedureId,
     procedureName: event.procedureName,
     rx: previewOf(event.rx),
+    rxTree: previewTreeOf(event.rx),
     serviceId: event.serviceId,
     serviceRevision: event.serviceRevision,
     source,
     startedAt: event.startedAt,
     timeout: timeout === undefined ? undefined : Number.isFinite(timeout) ? timeout : 'never',
     tx: previewOf(event.tx),
+    txTree: previewTreeOf(event.tx),
     type: event.type,
   };
 };

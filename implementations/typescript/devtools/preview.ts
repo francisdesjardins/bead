@@ -2,7 +2,8 @@
 
 // What the panel shows of a call's payload: a line of text, of bounded length, from whatever its
 // procedure decoded — text, bytes, an object — so it crosses a runtime port as JSON, and a large
-// payload costs the page no more than its preview.
+// payload costs the page no more than its preview; and the same, as a tree of the same bounds, which
+// the panel unfolds and compares.
 
 // interfaces
 
@@ -12,6 +13,36 @@ interface IPreviewing {
   depth: number;
   seen: ReadonlySet<object>;
 }
+
+/** What a container of a tree left out: the entries past fifty, and whether its budget ran out. */
+export interface IPreviewBounds {
+  cut?: true | undefined;
+  more?: number | undefined;
+}
+
+// types
+
+/**
+ * A payload previewed as a tree: what JSON holds as itself — a string, a finite number, a boolean,
+ * `null` — and the rest tagged by its `type`, each within the text preview's bounds: what nests,
+ * with `more` for the entries left out; bytes, by their length and their first ones in hexadecimal;
+ * a bigint, by its digits; a string cut short, with the characters left out; what JSON has no form
+ * for, as the text preview writes it; and a cut, past the depth, past the budget, or on a cycle.
+ * Every node is JSON, as a runtime port carries it.
+ */
+export type PreviewNode =
+  | boolean
+  | number
+  | string
+  | null
+  | (IPreviewBounds & { items: PreviewNode[]; type: 'array' | 'set' })
+  | (IPreviewBounds & { entries: [key: string, value: PreviewNode][]; type: 'object' })
+  | (IPreviewBounds & { entries: [key: PreviewNode, value: PreviewNode][]; type: 'map' })
+  | { hex: string; length: number; type: 'bytes' }
+  | { digits: string; type: 'bigint' }
+  | { more: number; text: string; type: 'text' }
+  | { text: string; type: 'other' }
+  | { reason: 'budget' | 'cycle' | 'depth'; type: 'cut' };
 
 // constants
 
@@ -52,6 +83,17 @@ const hexOf = (bytes: Uint8Array): string => {
     .join(' ');
 };
 
+/** The bytes of a byte array, or of a view on some; none for anything else. */
+const bytesOf = (value: unknown): Uint8Array | undefined => {
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+
+  return ArrayBuffer.isView(value)
+    ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+    : undefined;
+};
+
 /** What a value says of itself, when it holds nothing to go into; `undefined` when it does. */
 const leafOf = (value: unknown): string | undefined => {
   if (typeof value === 'string') {
@@ -77,11 +119,9 @@ const leafOf = (value: unknown): string | undefined => {
     return String(value);
   }
 
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
-    const bytes =
-      value instanceof ArrayBuffer
-        ? new Uint8Array(value)
-        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  const bytes = bytesOf(value);
+
+  if (bytes !== undefined) {
     const more = bytes.length > PREVIEW_BYTES ? ' …' : '';
 
     return `<${String(bytes.length)} bytes${bytes.length === 0 ? '' : `: ${hexOf(bytes)}${more}`}>`;
@@ -96,6 +136,116 @@ const leafOf = (value: unknown): string | undefined => {
   }
 
   return undefined;
+};
+
+/** A leaf's node: JSON's own value where it has one, else its tag, `leaf` its text preview. */
+const leafNodeOf = (value: unknown, leaf: string): PreviewNode => {
+  if (typeof value === 'string') {
+    return value.length > PREVIEW_CHARACTERS
+      ? {
+          more: value.length - PREVIEW_CHARACTERS,
+          text: value.slice(0, PREVIEW_CHARACTERS),
+          type: 'text',
+        }
+      : value;
+  }
+
+  if (typeof value === 'boolean' || value === null) {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : { text: leaf, type: 'other' };
+  }
+
+  if (typeof value === 'bigint') {
+    return { digits: String(value), type: 'bigint' };
+  }
+
+  const bytes = bytesOf(value);
+
+  return bytes === undefined
+    ? { text: leaf, type: 'other' }
+    : { hex: hexOf(bytes), length: bytes.length, type: 'bytes' };
+};
+
+/** The node of `value`, where `previewing` stands, spending from its budget as `partOf` does. */
+const nodeOf = (value: unknown, previewing: IPreviewing): PreviewNode => {
+  const { budget, depth, seen } = previewing;
+
+  if (budget.left <= 0) {
+    return { reason: 'budget', type: 'cut' };
+  }
+
+  const leaf = leafOf(value);
+
+  if (leaf !== undefined) {
+    budget.left -= leaf.length;
+
+    return leafNodeOf(value, leaf);
+  }
+
+  const object = value as object;
+
+  if (seen.has(object)) {
+    return { reason: 'cycle', type: 'cut' };
+  }
+
+  if (depth >= PREVIEW_DEPTH) {
+    return { reason: 'depth', type: 'cut' };
+  }
+
+  const inner: IPreviewing = { budget, depth: depth + 1, seen: new Set([...seen, object]) };
+  const [items, total] =
+    object instanceof Map || object instanceof Set
+      ? [firstOf<unknown>(object, PREVIEW_ITEMS), object.size]
+      : Array.isArray(object)
+        ? [object.slice(0, PREVIEW_ITEMS) as unknown[], object.length]
+        : [Object.entries(object).slice(0, PREVIEW_ITEMS), Object.keys(object).length];
+  const kind =
+    object instanceof Map
+      ? 'map'
+      : object instanceof Set
+        ? 'set'
+        : Array.isArray(object)
+          ? 'array'
+          : 'object';
+  const nodes: unknown[] = [];
+
+  // the entries the budget reaches, each spending from it as it is previewed
+  for (const item of items) {
+    if (budget.left <= 0) {
+      break;
+    }
+
+    if (kind === 'map') {
+      const [key, entry] = item as [unknown, unknown];
+
+      nodes.push([nodeOf(key, inner), nodeOf(entry, inner)]);
+    } else if (kind === 'object') {
+      const [key, entry] = item as [string, unknown];
+
+      nodes.push([key, nodeOf(entry, inner)]);
+    } else {
+      nodes.push(nodeOf(item, inner));
+    }
+  }
+
+  const bounds: IPreviewBounds = {
+    // a container the budget ran out in says so, as its text preview ends in an ellipsis
+    ...(nodes.length < items.length ? { cut: true as const } : {}),
+    ...(total > PREVIEW_ITEMS ? { more: total - PREVIEW_ITEMS } : {}),
+  };
+
+  if (kind === 'map') {
+    return { ...bounds, entries: nodes as [PreviewNode, PreviewNode][], type: kind };
+  }
+
+  if (kind === 'object') {
+    return { ...bounds, entries: nodes as [string, PreviewNode][], type: kind };
+  }
+
+  return { ...bounds, items: nodes as PreviewNode[], type: kind };
 };
 
 /** What a preview says of `value`, where `previewing` stands, spending from its budget. */
@@ -191,4 +341,16 @@ export const previewOf = (value: unknown): string | undefined => {
   });
 
   return preview.length > PREVIEW_CHARACTERS ? `${preview.slice(0, PREVIEW_CHARACTERS)}…` : preview;
+};
+
+/**
+ * A preview of `value` as a tree, of {@link previewOf}'s bounds, which the panel unfolds and
+ * compares; none when there is no value.
+ */
+export const previewTreeOf = (value: unknown): PreviewNode | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return nodeOf(value, { budget: { left: PREVIEW_CHARACTERS }, depth: 0, seen: new Set() });
 };

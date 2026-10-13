@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { PREVIEW_CHARACTERS, previewOf } from '../preview';
+import { PREVIEW_CHARACTERS, previewOf, previewTreeOf } from '../preview';
 
 // definition
 
@@ -61,5 +61,73 @@ test.describe('previewOf', () => {
       expect(preview.length).toBeLessThanOrEqual(PREVIEW_CHARACTERS + 1);
       expect(preview.endsWith('…')).toBe(true);
     }
+  });
+});
+
+test.describe('previewTreeOf', () => {
+  test('keeps what JSON holds as itself, and tags the rest: bytes, a bigint, a map, a set, what JSON has no form for', () => {
+    expect(previewTreeOf(undefined)).toBeUndefined();
+    expect(previewTreeOf({ a: [1, 'b', true], c: null })).toEqual({
+      entries: [
+        ['a', { items: [1, 'b', true], type: 'array' }],
+        ['c', null],
+      ],
+      type: 'object',
+    });
+    expect(previewTreeOf(new Uint8Array([0, 15, 255]))).toEqual({
+      hex: '00 0f ff',
+      length: 3,
+      type: 'bytes',
+    });
+    expect(previewTreeOf(12n)).toEqual({ digits: '12', type: 'bigint' });
+    expect(previewTreeOf(new Map([['k', 1]]))).toEqual({ entries: [['k', 1]], type: 'map' });
+    expect(previewTreeOf(new Set([1]))).toEqual({ items: [1], type: 'set' });
+    expect(previewTreeOf(Number.NaN)).toEqual({ text: 'NaN', type: 'other' });
+    expect(previewTreeOf(new Date(0))).toEqual({ text: '1970-01-01T00:00:00.000Z', type: 'other' });
+    expect(JSON.parse(JSON.stringify(previewTreeOf({ a: 1n, b: new Uint8Array(2) })))).toEqual(
+      previewTreeOf({ a: 1n, b: new Uint8Array(2) })
+    );
+  });
+
+  test('cuts short as the text preview does: past four levels, past fifty entries, on a cycle, past its budget', () => {
+    const cycle: Record<string, unknown> = {};
+
+    cycle['self'] = cycle;
+
+    expect(previewTreeOf({ a: { b: { c: { d: { e: 1 } } } } })).toMatchObject({
+      entries: [
+        [
+          'a',
+          {
+            entries: [
+              ['b', { entries: [['c', { entries: [['d', { reason: 'depth', type: 'cut' }]] }]] }],
+            ],
+          },
+        ],
+      ],
+    });
+    expect(
+      previewTreeOf(
+        Array.from({ length: 52 }, (_, index) => {
+          return index;
+        })
+      )
+    ).toMatchObject({ more: 2, type: 'array' });
+    expect(previewTreeOf(cycle)).toEqual({
+      entries: [['self', { reason: 'cycle', type: 'cut' }]],
+      type: 'object',
+    });
+    expect(previewTreeOf('y'.repeat(PREVIEW_CHARACTERS + 5))).toEqual({
+      more: 5,
+      text: 'y'.repeat(PREVIEW_CHARACTERS),
+      type: 'text',
+    });
+
+    const large = Array.from({ length: 50 }, () => {
+      return 'x'.repeat(100);
+    });
+
+    expect(previewTreeOf(large)).toMatchObject({ cut: true, type: 'array' });
+    expect(JSON.stringify(previewTreeOf(large)).length).toBeLessThan(PREVIEW_CHARACTERS * 2);
   });
 });

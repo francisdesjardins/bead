@@ -2,7 +2,8 @@
 
 // The hook a page's clients announce themselves to (decision 0015), defined in the page's own world
 // before its scripts run. It keeps each source, watches them while a panel is open, and posts what
-// it hears to the bridge on the window, as plain records, in batches.
+// it hears to the bridge on the window, as plain records, in batches. It is the browser's alike:
+// what reaches the extension's own world is the bridge's to carry.
 
 // dependencies
 
@@ -21,6 +22,7 @@ import {
   PROTOCOLS,
 } from './messages';
 import { callRecordOf, envelopeRecordOf } from './records';
+import { framesOf, type IStackFrame } from './stack';
 
 // interfaces
 
@@ -37,6 +39,9 @@ const BATCH_MILLISECONDS = 100;
 
 /** The records held at most between two batches; past them, a batch says how many it let go. */
 const MAXIMUM_HELD = 5_000;
+
+/** The frames a stack is read to, the hook's own among them, past the engine's default of 10. */
+const STACK_FRAMES = 40;
 
 // definition
 
@@ -90,6 +95,36 @@ const hold = (record: () => ActivityRecord): void => {
   batch ??= setTimeout(flush, BATCH_MILLISECONDS);
 };
 
+/**
+ * The stack of the turn it is taken in, read to {@link STACK_FRAMES} frames, the hook's own left
+ * out. It runs in the listener a call's `tx` step reaches, in the turn that made the call.
+ */
+const callerStackOf = (): IStackFrame[] => {
+  const { stackTraceLimit } = Error;
+
+  try {
+    Error.stackTraceLimit = STACK_FRAMES;
+
+    const frames = framesOf(new Error().stack);
+    // * its first frame is this one: where the hook's own script is, read only as a stack is taken
+    const own = frames[0]?.url;
+
+    return frames.filter(({ url }) => {
+      return url !== own;
+    });
+  } finally {
+    Error.stackTraceLimit = stackTraceLimit;
+  }
+};
+
+/**
+ * When the hook hears something, in milliseconds since the epoch, to a fraction: the page's time
+ * origin and its monotonic reading since.
+ */
+const nowOf = (): number => {
+  return performance.timeOrigin + performance.now();
+};
+
 const watch = (id: number, entry: IHeld): void => {
   // a protocol the extension does not know is named in the panel, and never watched
   if (entry.stop !== undefined || !PROTOCOLS.includes(entry.source.protocol)) {
@@ -100,12 +135,20 @@ const watch = (id: number, entry: IHeld): void => {
     entry.stop = entry.source.watch({
       call: (error, event) => {
         hold(() => {
-          return callRecordOf(id, [error, event]);
+          const record = callRecordOf(id, [error, event]);
+
+          // * a call made, as it goes: its stack is still the caller's, a capture a call while a
+          // panel watches, and none while none does
+          if (event.direction === 'tx' && event.type === 'request') {
+            record.stack = callerStackOf();
+          }
+
+          return record;
         });
       },
       envelope: (info) => {
         hold(() => {
-          return envelopeRecordOf({ at: Date.now(), source: id }, info);
+          return envelopeRecordOf({ at: nowOf(), source: id }, info);
         });
       },
     });

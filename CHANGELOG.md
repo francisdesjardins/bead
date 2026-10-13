@@ -77,6 +77,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tools/protobuf-conformance/runner.json`; Google.Protobuf's order of the unknown fields it writes
   back, and its leaving out a map's entry's key at its default, which protobuf-es writes, are
   platform rows of the support matrix.
+- The extension's hook, while a panel watches, tells the panel more of each call: a failure whole —
+  where it was raised, the relays it crossed, its destination, the call id its envelope named — the
+  call's options whole, `destinationId` and `closeOnTimeout` among them, each payload as a tree of
+  its preview's bounds beside its text, the stack that made each call made, and an envelope's time
+  as the page's time origin and its monotonic reading since. The hook's protocol stays 1, and a page
+  no panel inspects pays nothing.
 
 ### Changed
 
