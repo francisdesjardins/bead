@@ -52,7 +52,7 @@ export {
   SERVER_FAILURES,
 } from '../shared/constants';
 export { PACING_DEFAULTS } from './notification-pacing';
-export { requireSession, requireSessionOrCredential } from './admissions';
+export { requireCredential, requireSession, shareLegBSession } from './admissions';
 export { filterEnvelopeDebug, parseDebugFilter } from '../shared/debug-filter';
 export {
   createMetricsRegistry,

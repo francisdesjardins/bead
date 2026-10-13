@@ -26,6 +26,7 @@ import {
   FailureError,
   ProgrammerError,
   ProtocolCode,
+  shareLegBSession,
   type HTTPServer,
 } from '../http-server';
 import { createWSServer } from '../ws-server';
@@ -74,7 +75,8 @@ const digestOf = (payload: Uint8Array) => {
 /**
  * An HTTP server on a free port — a session opened by `openSession`, of `sessionInactivityTimeout`,
  * `read` behind it, `upload` answering its payload's digest, `slow` waiting on its signal, `news` a
- * subscription — and an HTTP client connected to it. `await using` takes them apart.
+ * subscription, its relay lending leg B's session to a requester in a session, as a hub's — and an
+ * HTTP client connected to it. `await using` takes them apart.
  */
 const connectHTTP = async ({
   isListening = true,
@@ -86,6 +88,7 @@ const connectHTTP = async ({
   sessionInactivityTimeout?: number;
 } = {}) => {
   const server: HTTPServer = createHTTPServer({
+    relay: { beforeRoute: shareLegBSession },
     transport: {
       createServer: (listener) => {
         return createServer(listener);

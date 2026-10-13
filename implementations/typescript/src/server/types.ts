@@ -71,12 +71,23 @@ export interface IServer<
     request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
-   * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call in leg A's
-   * connection's session, or one whose header presents a `JWT`, or an `ELSEWHERE` its transport
-   * carried, which the relay forwards for its destination to verify. It refuses any other, a call in
-   * none that presented none, with its `refusal`, SESSION_REQUIRED.
+   * A relay's `beforeRoute`, its server's by default (spec 14.3, step 1): a call whose header
+   * presents a `JWT`, or an `ELSEWHERE` its transport carried, which the relay forwards for its
+   * destination to verify, read from its credential scheme alone unless the relay verifies. It
+   * refuses any other, one that presents none or `OPAQUE`, in a session or in none, with its
+   * `refusal`, ACCESS_DENIED, its detail naming the default.
    */
-  requireSessionOrCredential: ((
+  requireCredential: ((
+    request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header'>
+  ) => boolean) & { readonly refusal: AdmissionFailure };
+  /**
+   * A relay's `beforeRoute` that lends leg B's session to every requester in a session at the
+   * relay, at every destination (spec 14.3, step 1, 14.7): a call in leg A's connection's session,
+   * or one presenting a credential `requireCredential` admits. It reads no destination; a
+   * `beforeRoute` that checks the destination against the session is the one to write. It refuses a
+   * call in none that presented none with its `refusal`, SESSION_REQUIRED.
+   */
+  shareLegBSession: ((
     request: Pick<IAdmissionRequest<TransportServerConnectionHandle>, 'header' | 'session'>
   ) => boolean) & { readonly refusal: AdmissionFailure };
   /**
@@ -159,8 +170,11 @@ export interface IServerOptions {
   pacing?: PacingLimitsOptions | undefined;
   /**
    * How the router relays a request that names a destination registered in it. Its `beforeRoute`
-   * is `requireSessionOrCredential` when not given: a relay is a door to what is behind it, which a
-   * credential it forwards opens for its destination to verify.
+   * is `requireCredential` when not given: a relay is a door to what is behind it, which a
+   * credential it forwards opens for its destination to verify, and leg A's session does not.
+   * `shareLegBSession` lends leg B's session to every requester in a session of leg A's, at every
+   * destination: a choice to write, as a `beforeRoute` that checks the destination against the
+   * requester's session is.
    */
   relay?: IRelayOptions | undefined;
 }

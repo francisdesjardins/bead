@@ -726,9 +726,10 @@ not run in — a `JWT` or an `ELSEWHERE` a relay forwards without verifying (sec
 `ACCESS_DENIED`, since `SESSION_REQUIRED` would have its requester withdraw a credential that may
 hold (section 9.2, step 5). A call that presented a `JWT` is not in its connection's session,
 whatever that session holds. `ACCESS_DENIED` says that the call is not allowed as it came: a
-session holds and is not allowed, or a credential came that the admission does not take. A
-procedure that ends its connection's session ends it before it answers, so its own answer — or the
-failure of section 13.6, should one go out first — announces the end.
+session holds and is not allowed, a credential came that the admission does not take, or the
+admission takes the call only with a credential — a server's relay by default (section 14.3, step
+1). A procedure that ends its connection's session ends it before it answers, so its own answer —
+or the failure of section 13.6, should one go out first — announces the end.
 
 13.6. A session that ends ends the subscriptions it bounds (section 11.3): a connection's session,
 those of its connection that no credential's session bounds; a credential's session, those its
@@ -944,11 +945,11 @@ transfer of its own when it needs one. Leg B's request names no destination, so 
 chain, and no loop can form. A relay forwards a bearer credential, and its destination verifies it:
 leg B's request presents what leg A's does, by its credential scheme, as section 14.3 lets it.
 
-| Leg A presents | The relay                                                                                                 | Leg B presents                                                         |
-| -------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| none, `OPAQUE` | resolves it to leg A's connection's session, which its admission checks                                   | none: it runs in leg B's session at the destination (section 14.7)     |
-| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies | the same bytes                                                         |
-| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries one        | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
+| Leg A presents | The relay                                                                                                                         | Leg B presents                                                         |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session (section 14.3, step 1) | none: it runs in leg B's session at the destination (section 14.7)     |
+| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies                         | the same bytes                                                         |
+| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries one                                | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
 
 A call that presents a credential never runs in leg B's session in place of its own. What leg A's
 transport carried beside a call that presents anything but `ELSEWHERE` stays at the relay.
@@ -977,13 +978,19 @@ resolving as section 9.2 says:
       deadline past the calls the relay lets wait for it, with `CAPACITY_EXCEEDED`, not reported;
       one that holds resolves to its credential's session;
    3. `beforeRoute`, synchronous, on the call's session. A relay with no `beforeRoute` admits
-      nobody: `ACCESS_DENIED`. A server's relay admits by default with `requireSessionOrCredential`:
-      a call in leg A's connection's session, or one whose header presents a `JWT`, or an
-      `ELSEWHERE` its transport carried, read from its credential scheme alone; any other, a call
-      in none that presented none, with `SESSION_REQUIRED`. `requireSession` in its place tests the
-      call's session (section 13.5), so it refuses every credential the relay forwards without
-      verifying, with `ACCESS_DENIED`, as section 9.2 answers an admission's refusal of a call that
-      presented a credential: the credential may hold, and this relay does not take it unverified.
+      nobody: `ACCESS_DENIED`. A server's relay admits by default with `requireCredential`: a call
+      whose header presents a `JWT`, or an `ELSEWHERE` its transport carried, read from its
+      credential scheme alone unless the relay verifies, which the relay forwards for its
+      destination to verify; any other — one that presents none or `OPAQUE`, in leg A's
+      connection's session or in none — with `ACCESS_DENIED`, its detail
+      `a relay admits by default only a credential it forwards`, since leg A's session opens
+      nothing at the destination (section 14.7). `shareLegBSession` in its place admits besides a
+      call in any session of leg A's connection's, whatever its destination, which then runs in leg
+      B's session there, and refuses a call in none that presented none with `SESSION_REQUIRED`.
+      `requireSession` tests the call's session (section 13.5), so it refuses every credential the
+      relay forwards without verifying, with `ACCESS_DENIED`, as section 9.2 answers an admission's
+      refusal of a call that presented a credential: the credential may hold, and this relay does
+      not take it unverified.
 
    A requester not admitted learns only whether the relay has any destination (section 9.2, step 3),
    when it presents none or `OPAQUE`, or presents anything to a relay that verifies: a `JWT`, and an
@@ -1033,12 +1040,17 @@ it, or `PROCEDURE_FAILED`.
 (section 7.5); its side is not known. The relay's own failures cross no relay, and name no address
 behind it: why leg B failed is the relay's to report, with leg A's connection.
 
-14.7. Every requester behind a relay that presents none or `OPAQUE` shares its leg B: one session
-at the destination, one space of call ids, its transfers' capacity. `beforeRoute`, which sees the
-procedure and the destination, is where each such requester's rights are checked. A requester that
-presents a `JWT` or an `ELSEWHERE` shares leg B's call ids and its transfers' capacity alike, and
-runs at the destination in the session its own credential resolves to there, which the destination
-verifies.
+14.7. A requester behind a relay that presents none or `OPAQUE`, and that the relay's
+`beforeRoute` admits, shares its leg B: one session at the destination, one space of call ids, its
+transfers' capacity. A server's relay admits none by default (section 14.3, step 1): sharing leg
+B's session is its application's choice, written as a `beforeRoute` of its own, which sees the
+procedure and the destination and is where each such requester's rights are checked — a
+requester's session names the destinations it may reach — or as `shareLegBSession`, which checks
+neither. Without such a check, a requester in any session of leg A's acts at every destination
+with leg B's rights, as a deputy that lends its own authority
+([CWE-441](https://cwe.mitre.org/data/definitions/441.html)). A requester that presents a `JWT`
+or an `ELSEWHERE` shares leg B's call ids and its transfers' capacity alike, and runs at the
+destination in the session its own credential resolves to there, which the destination verifies.
 
 ## 15. Transports
 

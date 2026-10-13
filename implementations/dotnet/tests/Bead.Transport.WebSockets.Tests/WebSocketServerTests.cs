@@ -284,22 +284,35 @@ public sealed class WebSocketServerTests
         return ends;
     }
 
-    // a relay's server — relaying as `relay` says, a session required by default — with a device
-    // behind it at destination 7, and a client connected to it; every router under `limits`. The
-    // TypeScript side's leg B is a pipe to a bare router; this side has no piped transport, so its
-    // device is a server of its own, reached by a client's router registered as the destination
+    // a relay's server — relaying as `relay` says, or by its ShareLegBSession, as a hub whose
+    // requesters log in at it does, a session required — with a device behind it at destination 7,
+    // and a client connected to it; every router under `limits`. The TypeScript side's leg B is a
+    // pipe to a bare router; this side has no piped transport, so its device is a server of its own,
+    // reached by a client's router registered as the destination
     private static async Task<Ends> ConnectRelayed(RouterLimits? limits, RelayOptions? relay)
     {
+        var hub = new StrongBox<WebSocketServer<string>>();
+        var sharing = new RelayOptions
+        {
+            BeforeRoute = new BeforeRequest(
+                (request) =>
+                {
+                    return hub.Value!.ShareLegBSession.Admits(request);
+                },
+                Failure.OfProtocol(ProtocolCode.SessionRequired)),
+        };
         var device = new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits } });
         var toDevice = new WebSocketClient(new WebSocketClientOptions { Limits = limits });
         var ends = new Ends(
-            new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits, Relay = relay } }),
+            new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Limits = limits, Relay = relay ?? sharing } }),
             new WebSocketClient(new WebSocketClientOptions { Limits = limits }))
         {
             Device = device,
             ToDevice = toDevice,
         };
         var server = ends.Server;
+
+        hub.Value = server;
 
         await Connect(toDevice, await PortOf(device));
         server.Router.RegisterDestination(toDevice.Router, new DestinationOptions { DestinationId = 7, Label = "the device" });
@@ -427,7 +440,7 @@ public sealed class WebSocketServerTests
     // definition
 
     [Fact]
-    public async Task Each_server_is_an_IBeadServer_with_RequireSessionOrCredential()
+    public async Task Each_server_is_an_IBeadServer_with_RequireCredential_and_ShareLegBSession()
     {
         await using var server = new WebSocketServer<string>();
 
@@ -436,8 +449,10 @@ public sealed class WebSocketServerTests
         Assert.Same(server.Transport, beadServer.Transport);
         Assert.Same(server.Router, beadServer.Router);
         Assert.Same(server.RequireSession, beadServer.RequireSession);
-        Assert.NotNull(server.RequireSessionOrCredential);
-        Assert.Same(server.RequireSessionOrCredential, beadServer.RequireSessionOrCredential);
+        Assert.NotNull(server.RequireCredential);
+        Assert.Same(server.RequireCredential, beadServer.RequireCredential);
+        Assert.NotNull(server.ShareLegBSession);
+        Assert.Same(server.ShareLegBSession, beadServer.ShareLegBSession);
     }
 
     [Fact]

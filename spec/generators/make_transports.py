@@ -637,16 +637,15 @@ cases = [
 ]
 
 
-def relayed_over_http():
-    """14 and 15.9: a relay over HTTP, whose destination is a connection of the peer's: what it sends
-    one that listens goes in a batch, which carries a credential in its block alone; one that does
-    not listen takes none of its requests; and a request past its outbox is lost with it."""
-    # the interop service's HS256 issuer, its key RFC 7515's A.1, a published test key, and its audience
-    issuer, audience = 'https://hs256.interop.bead.example', 'bead-interop'
+def interop_jwt():
+    """The interop service's HS256 issuer's access token for carol, of RFC 9068's profile, signed with
+    HMAC-SHA256 (RFC 7518 §3.2) by Python's own hmac, and its CREDENTIAL block: what a relay forwards
+    by default, to a destination registered with the interop's audience."""
+    # the issuer, its key RFC 7515's A.1, a published test key, and its audience
+    issuer, audience = 'https://hs256.interop.bead.example', INTEROP_AUDIENCE
     secret = 'AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow'
     # the wall clock's start, 2026-01-01T00:00:00Z, in seconds since the epoch
     wall = 1_767_225_600
-    destination = 12
 
     def base64url(data):
         return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
@@ -654,7 +653,6 @@ def relayed_over_http():
     def part(value):
         return base64url(json.dumps(value, separators=(',', ':')).encode('ascii'))
 
-    # an access token of RFC 9068's profile, signed with HMAC-SHA256 (RFC 7518 §3.2) by Python's own hmac
     claims = {'iss': issuer, 'sub': 'carol', 'aud': audience, 'exp': wall + 3600, 'iat': wall, 'jti': 'at-relay',
               'client_id': 'bead-client'}
     signing_input = part({'alg': 'HS256', 'typ': 'at+jwt'}) + '.' + part(claims)
@@ -663,26 +661,42 @@ def relayed_over_http():
 
     # its block: the scheme 2, its length, its characters a byte each, then zero bytes to a word
     data = token.encode('ascii')
-    jwt_block = f'00 02 {word(len(data), 2)}  {hexadecimal(data)}' + ''.join(' 00' for _ in range(-len(data) % 4))
-    elsewhere_block = '00 03 00 00'
+    return token, f'00 02 {word(len(data), 2)}  {hexadecimal(data)}' + ''.join(' 00' for _ in range(-len(data) % 4))
 
-    def relayed(call_id, block):
-        # a request that names the destination, then presents a credential, the last block
-        return request(call_id, 'echo', '"x"', flags=0x0A, words=4 + len(block.split()) // 4,
-                       tail=f'{word(destination, 4)}  {block}')
+
+INTEROP_AUDIENCE = 'bead-interop'
+RELAY_JWT, RELAY_JWT_BLOCK = interop_jwt()
+# the destination a relay's case registers
+DESTINATION = 12
+
+
+def relayed(call_id, block):
+    # a request that names the destination, then presents a credential, the last block
+    return request(call_id, 'echo', '"x"', flags=0x0A, words=4 + len(block.split()) // 4,
+                   tail=f'{word(DESTINATION, 4)}  {block}')
+
+
+# the request leg B sends the destination: the JWT leg A presented, its same bytes
+LEG_B = {'kind': REQUEST, 'callId': 2, 'flags': 0x08, 'serviceId': SERVICE_ID, 'procedureId': PROCEDURES['echo'],
+         'payload': text('"x"'), 'credential': {'scheme': 'JWT', 'token': RELAY_JWT}}
+
+
+def relayed_over_http():
+    """14 and 15.9: a relay over HTTP, whose destination is a connection of the peer's: what it sends
+    one that listens goes in a batch, which carries a credential in its block alone; one that does
+    not listen takes none of its requests; and a request past its outbox is lost with it. Leg A
+    presents a JWT, which a server's relay admits by default (14.3, step 1)."""
+    audience, destination = INTEROP_AUDIENCE, DESTINATION
+    jwt_block, elsewhere_block = RELAY_JWT_BLOCK, '00 03 00 00'
 
     def as_device(on, method, target='/bead', body=None, fields=None):
         return send(on, method, target, fields=[('bead-connection-token', '{device}'),
                                                 *([('content-type', BEAD)] if method == 'POST' else []), *pairs(fields)],
                     body=body)
 
-    # leg A's call in its connection's session, which names the destination and presents none
-    login = request(1, 'login', '{"name":"ada"}')
-    in_session = request(3, 'echo', '"x"', flags=0x02, words=4, tail=word(destination, 4))
-    registered = as_device('register', 'POST', body=request(1, 'register', '{"destination":%d}' % destination))
-
-    leg_b = {'kind': REQUEST, 'callId': 2, 'flags': 0x08, 'serviceId': SERVICE_ID, 'procedureId': PROCEDURES['echo'],
-             'payload': text('"x"'), 'credential': {'scheme': 'JWT', 'token': token}}
+    # the destination, registered with the audience leg A's JWT names
+    registered = as_device('register', 'POST',
+                           body=request(1, 'register', '{"destination":%d,"audience":"%s"}' % (destination, audience)))
 
     return [
         # the destination listens: the relay's request to it waits in its outbox for a listen, which
@@ -691,14 +705,13 @@ def relayed_over_http():
          ['14.2.2', '14.3.5', '15.9'], None, [
              connect('device', listen=True), expect('device', 201, fields={
                  'bead-connection-token': {'capture': 'device', 'shape': 'token'}, 'bead-listen': '?1'}),
-             as_device('register', 'POST', body=request(1, 'register', '{"destination":%d,"audience":"%s"}' % (destination, audience))),
-             answered('register', result(1, str(destination))),
+             registered, answered('register', result(1, str(destination))),
              *drawn(),
              post('elsewhere', relayed(1, elsewhere_block), fields={'authorization': BEARER}),
              answered('elsewhere', failure(1, DESTINATION_UNREACHABLE)),
              post('jwt', relayed(3, jwt_block)),
              as_device('listen', 'GET', fields=[('bead-after', '0'), ('bead-wait', '60000')]),
-             expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'}, batch=[leg_b]),
+             expect('listen', 200, fields={'content-type': BATCH, 'bead-sequence': '1'}, batch=[LEG_B]),
              as_device('answer', 'POST', body='A1 11 00 02  00 00 00 02 | ' + text('"x"')),
              expect('answer', 204, body=''),
              answered('jwt', result(3, '"x"'))]),
@@ -709,9 +722,8 @@ def relayed_over_http():
              connect('device'), expect('device', 201, fields={
                  'bead-connection-token': {'capture': 'device', 'shape': 'token'}, 'bead-listen': None}),
              registered, answered('register', result(1, str(destination))),
-             *drawn(), post('login', login), answered('login', result(1, '"ada"', OPENED)),
-             post('relayed', in_session),
-             answered('relayed', failure(3, DESTINATION_UNREACHABLE,
+             *drawn(), post('relayed', relayed(1, jwt_block)),
+             answered('relayed', failure(1, DESTINATION_UNREACHABLE,
                                          detail=f'destination {destination} is unreachable: its connection carries no request'))]),
         # 14.5.5 and 15.9: leg B's request past the outbox of a destination that listens is one its
         # transport had: the connection closes, and the request is lost with it
@@ -720,8 +732,8 @@ def relayed_over_http():
              connect('device', listen=True), expect('device', 201, fields={
                  'bead-connection-token': {'capture': 'device', 'shape': 'token'}, 'bead-listen': '?1'}),
              registered, answered('register', result(1, str(destination))),
-             *drawn(), post('login', login), answered('login', result(1, '"ada"', OPENED)),
-             post('relayed', in_session), answered('relayed', failure(3, DESTINATION_LOST)), {'report': 'exception'},
+             *drawn(), post('relayed', relayed(1, jwt_block)), answered('relayed', failure(1, DESTINATION_LOST)),
+             {'report': 'exception'},
              until('connections', 1),
              as_device('after', 'POST', body=request(3, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
     ]
@@ -1001,13 +1013,11 @@ websocket = [
     ('a relay\'s destination over WebSocket that closes as leg B goes is lost: leg A is answered DESTINATION_LOST, reported',
      ['14.5.5', '14.6', '15.3'], {}, [
          *upgrade('client'), *upgrade('device'),
-         message('client', binary=request(1, 'login', '{"name":"ada"}')), heard('client', envelope=result(1, '"ada"', OPENED)),
-         message('device', binary=request(1, 'register', '{"destination":12}')), heard('device', envelope=result(1, '12')),
-         message('client', binary=request(3, 'echo', '"x"', flags=0x02, words=4, tail=word(12, 4))),
-         heard('device', envelope={'kind': REQUEST, 'callId': 2, 'flags': 0, 'serviceId': SERVICE_ID,
-                                   'procedureId': PROCEDURES['echo'], 'payload': text('"x"')}),
+         message('device', binary=request(1, 'register', '{"destination":%d,"audience":"%s"}' % (DESTINATION, INTEROP_AUDIENCE))),
+         heard('device', envelope=result(1, str(DESTINATION))),
+         message('client', binary=relayed(1, RELAY_JWT_BLOCK)), heard('device', envelope=LEG_B),
          message('device', close=NORMAL), heard('device', close=NORMAL),
-         heard('client', envelope=failure(3, DESTINATION_LOST)), {'report': 'exception', 'on': 'client'}]),
+         heard('client', envelope=failure(1, DESTINATION_LOST)), {'report': 'exception', 'on': 'client'}]),
 ]
 
 # responses as a server may cut them, which every side's reader reads alike

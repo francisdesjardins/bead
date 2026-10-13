@@ -30,7 +30,7 @@ import { createRouterClient } from '../../client/router-client';
 import { readEnvelope, writeEnvelope } from '../../shared/envelope';
 import { createPipedTransports } from '../../shared/__tests__/fixtures';
 import { createRelay } from '../relay';
-import { createRouterServer, requireSessionOrCredential } from '../router-server';
+import { createRouterServer, shareLegBSession } from '../router-server';
 import type { IRelayOptions, RelayTarget } from '../types';
 
 // helpers
@@ -488,7 +488,7 @@ test.describe('createRelay, over HTTP', () => {
     // leg A: a client of the relay's, in process
     const pipe = createPipedTransports({ connectionHandle: first });
     using relaying = createRouterServer(pipe.server, {
-      relay: { beforeRoute: requireSessionOrCredential },
+      relay: { beforeRoute: shareLegBSession },
     });
     using legA = createRouterClient(pipe.client);
     const procedure = { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 1 };

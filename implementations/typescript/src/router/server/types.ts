@@ -662,7 +662,7 @@ export interface IRelayOptions {
    * Whether a request may be relayed, asked on its header — its destination included — and the
    * call's session, before its destination is looked up, so a requester presenting none or `OPAQUE`
    * that is not admitted learns only whether any is registered: only `true` admits. Without it, the
-   * relay admits nobody; a server's admits by `requireSessionOrCredential`. Synchronous, as every
+   * relay admits nobody; a server's admits by `requireCredential`. Synchronous, as every
    * admission.
    */
   beforeRoute?: IBeforeRequest<TransportServerConnectionHandle> | undefined;

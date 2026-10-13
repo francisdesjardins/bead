@@ -10,7 +10,7 @@
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket's or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.",
     "Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.",
-    "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server's relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.",
+    "limits, where given, are the server's limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server's relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.",
     "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's deadline at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -5749,6 +5749,9 @@
         "14.2",
         "14.5.1"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -5816,6 +5819,9 @@
         "14.5.2",
         "14.6"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -5887,6 +5893,9 @@
         "7.5",
         "14.6"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -5953,10 +5962,12 @@
       ]
     },
     {
-      "name": "a relay asks for a session by default, and its own failure crosses no relay",
+      "name": "a server's relay admits by default a credential it forwards alone: a call presenting none or OPAQUE is refused ACCESS_DENIED, its detail naming the default, in leg A's connection's session or in none, before its destination is looked up, and its own failure crosses no relay",
       "clauses": [
+        "13.5",
         "14.3.1",
-        "14.6"
+        "14.6",
+        "14.7"
       ],
       "steps": [
         {
@@ -5986,9 +5997,75 @@
             "kind": 18,
             "callId": 1,
             "failure": {
-              "code": 32,
+              "code": 33,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "a relay admits by default only a credential it forwards"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 05  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 33,
+              "scope": 0,
+              "relays": 0,
+              "detail": "a relay admits by default only a credential it forwards"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 09  00 00 00 07  00 01 00 01  00 00 00 0C  00 01 00 10  <ada> | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 7,
+            "failure": {
+              "code": 33,
+              "scope": 0,
+              "relays": 0,
+              "detail": "a relay admits by default only a credential it forwards"
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 0A 09  00 00 00 09  00 01 00 01  00 00 00 63  00 01 00 10  <ada> | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 33,
+              "scope": 0,
+              "relays": 0,
+              "detail": "a relay admits by default only a credential it forwards"
             }
           },
           "on": "client"
@@ -6000,6 +6077,9 @@
       "clauses": [
         "14.3.2"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6055,6 +6135,9 @@
       "clauses": [
         "14.3.3"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6110,6 +6193,9 @@
       "clauses": [
         "14.3.4"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6167,6 +6253,9 @@
         "14.3.4",
         "14.4"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6313,6 +6402,9 @@
       "clauses": [
         "14.1"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6381,6 +6473,9 @@
         "14.4",
         "14.5.6"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6450,6 +6545,9 @@
       "clauses": [
         "14.4"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6516,6 +6614,9 @@
         "14.5.5",
         "14.6"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6591,6 +6692,9 @@
         "14.4",
         "14.5.5"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6678,6 +6782,9 @@
         "14.3.1",
         "14.7"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -6689,20 +6796,6 @@
           "open": "plain",
           "carries": false,
           "secure": false
-        },
-        {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
-          "on": "client"
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 1,
-            "payload": "22 61 64 61 22",
-            "credential": "OPAQUE"
-          },
-          "token": "ada",
-          "on": "client"
         },
         {
           "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
@@ -6729,7 +6822,37 @@
           "on": "plain"
         },
         {
-          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "send": "A1 10 02 04  00 00 00 01  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 32,
+              "scope": 0,
+              "relays": 0
+            }
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "token": "ada",
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 05  00 01 00 01  00 00 00 0C | 22 78 22",
           "carried": "Bearer mF_9.B5f-4.1JqM",
           "on": "client"
         },
@@ -6751,13 +6874,13 @@
         {
           "expect": {
             "kind": 17,
-            "callId": 3,
+            "callId": 5,
             "payload": "22 78 22"
           },
           "on": "client"
         },
         {
-          "send": "A1 10 0A 09  00 00 00 05  00 01 00 01  00 00 00 0C  00 01 00 10  <ada> | 22 79 22",
+          "send": "A1 10 0A 09  00 00 00 07  00 01 00 01  00 00 00 0C  00 01 00 10  <ada> | 22 79 22",
           "on": "client"
         },
         {
@@ -6778,13 +6901,13 @@
         {
           "expect": {
             "kind": 17,
-            "callId": 5,
+            "callId": 7,
             "payload": "22 79 22"
           },
           "on": "client"
         },
         {
-          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0D | 22 7A 22",
+          "send": "A1 10 02 04  00 00 00 09  00 01 00 01  00 00 00 0D | 22 7A 22",
           "on": "client"
         },
         {
@@ -6805,7 +6928,7 @@
         {
           "expect": {
             "kind": 17,
-            "callId": 7,
+            "callId": 9,
             "payload": "22 7A 22"
           },
           "on": "client"
@@ -7389,6 +7512,9 @@
         "14.2.1",
         "14.3.5"
       ],
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
       "steps": [
         {
           "open": "client"
@@ -7644,6 +7770,9 @@
         "maximumEnvelopeBytes": 2048,
         "chunkBytes": 1024,
         "maximumTransfers": 0
+      },
+      "relay": {
+        "beforeRoute": "shareLegBSession"
       },
       "steps": [
         {

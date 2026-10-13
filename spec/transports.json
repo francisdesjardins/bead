@@ -5969,8 +5969,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 30\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 56\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D"
           },
           "on": "register"
         },
@@ -6009,30 +6009,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 26\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
-          },
-          "on": "login"
-        },
-        {
-          "expect": {
-            "status": 200,
-            "fields": {
-              "content-type": "application/prs.bead"
-            },
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 61 64 61 22",
-              "credential": "OPAQUE"
-            }
-          },
-          "on": "login"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 19\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 319\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 0A 4F  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 25  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 4E 73 61 57 56 75 64 43 4A 39 2E 4D 32 66 74 46 6D 2D 6B 50 70 70 53 56 70 49 30 44 2D 42 55 31 6B 46 4E 4E 32 4C 67 4F 6D 71 35 62 31 33 43 4A 63 75 42 4A 39 34 00 00 00 | 22 78 22"
           },
           "on": "relayed"
         },
@@ -6044,7 +6022,7 @@
             },
             "envelope": {
               "kind": 18,
-              "callId": 3,
+              "callId": 1,
               "failure": {
                 "code": 17,
                 "scope": 0,
@@ -6089,8 +6067,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 30\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 56\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D"
           },
           "on": "register"
         },
@@ -6129,30 +6107,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 26\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
-          },
-          "on": "login"
-        },
-        {
-          "expect": {
-            "status": 200,
-            "fields": {
-              "content-type": "application/prs.bead"
-            },
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 61 64 61 22",
-              "credential": "OPAQUE"
-            }
-          },
-          "on": "login"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 19\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 319\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 0A 4F  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 25  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 4E 73 61 57 56 75 64 43 4A 39 2E 4D 32 66 74 46 6D 2D 6B 50 70 70 53 56 70 49 30 44 2D 42 55 31 6B 46 4E 4E 32 4C 67 4F 6D 71 35 62 31 33 43 4A 63 75 42 4A 39 34 00 00 00 | 22 78 22"
           },
           "on": "relayed"
         },
@@ -6164,7 +6120,7 @@
             },
             "envelope": {
               "kind": 18,
-              "callId": 3,
+              "callId": 1,
               "failure": {
                 "code": 65,
                 "scope": 0,
@@ -9442,24 +9398,7 @@
         },
         {
           "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
-          },
-          "on": "client"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 61 64 61 22",
-              "credential": "OPAQUE"
-            }
-          },
-          "on": "client"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D"
           },
           "on": "device"
         },
@@ -9475,7 +9414,7 @@
         },
         {
           "send": {
-            "binary": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+            "binary": "A1 10 0A 4F  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 25  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 4E 73 61 57 56 75 64 43 4A 39 2E 4D 32 66 74 46 6D 2D 6B 50 70 70 53 56 70 49 30 44 2D 42 55 31 6B 46 4E 4E 32 4C 67 4F 6D 71 35 62 31 33 43 4A 63 75 42 4A 39 34 00 00 00 | 22 78 22"
           },
           "on": "client"
         },
@@ -9484,10 +9423,14 @@
             "envelope": {
               "kind": 16,
               "callId": 2,
-              "flags": 0,
+              "flags": 8,
               "serviceId": 1,
               "procedureId": 1,
-              "payload": "22 78 22"
+              "payload": "22 78 22",
+              "credential": {
+                "scheme": "JWT",
+                "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXkiLCJjbGllbnRfaWQiOiJiZWFkLWNsaWVudCJ9.M2ftFm-kPppSVpI0D-BU1kFNN2LgOmq5b13CJcuBJ94"
+              }
             }
           },
           "on": "device"
@@ -9508,7 +9451,7 @@
           "expect": {
             "envelope": {
               "kind": 18,
-              "callId": 3,
+              "callId": 1,
               "failure": {
                 "code": 65,
                 "scope": 0,
