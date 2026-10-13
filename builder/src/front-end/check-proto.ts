@@ -10,7 +10,7 @@
 // dependencies
 
 import type { DescFile, DescMessage } from '@bufbuild/protobuf';
-import type { DescriptorProto } from '@bufbuild/protobuf/wkt';
+import type { DescriptorProto, FieldDescriptorProto } from '@bufbuild/protobuf/wkt';
 
 import { diagnosticOf, type IDiagnostic } from '../diagnostics.ts';
 import type { RuleName } from '../rules.ts';
@@ -30,26 +30,79 @@ import {
 
 // constants
 
-// the fields of descriptor.proto a message's fields and nested messages are under, by their numbers
+// the fields of descriptor.proto a file's and a message's declarations are under, by their numbers
 const FILE_MESSAGE_TYPE = 4;
+const FILE_EXTENSION = 7;
 const MESSAGE_FIELD = 2;
 const MESSAGE_NESTED_TYPE = 3;
+const MESSAGE_EXTENSION = 6;
+
+// a map entry's value, its second field
+const MAP_VALUE = 2;
 
 // helpers
 
-// every field of `messages` and of the messages nested in them, with its source info path
+// a field of the set, as a finding names it: its type, its name, its source info path
+interface IField {
+  readonly typeName: string;
+  readonly name: string;
+  readonly path: number[];
+}
+
+// `fields`, each with its source info path under `at`: a map's by its own name, its type its
+// entry's value's, since the entry is protoc's, declared nowhere
+const declaredOf = (
+  fields: readonly FieldDescriptorProto[],
+  details: {
+    readonly at: readonly number[];
+    readonly entries: readonly DescriptorProto[];
+    readonly scope: string;
+  }
+): IField[] => {
+  return fields.map((field, number) => {
+    const entry = details.entries.find((nested) => {
+      return field.typeName === `${details.scope}.${nested.name}`;
+    });
+    const value = entry?.field.find((each) => {
+      return each.number === MAP_VALUE;
+    });
+
+    return {
+      typeName: value?.typeName ?? field.typeName,
+      name: field.name,
+      path: [...details.at, number],
+    };
+  });
+};
+
+// every field and every extension of `messages` and of the messages nested in them, a map entry's
+// read through its map, with its source info path
 const fieldsOf = (
   messages: readonly DescriptorProto[],
-  path: readonly number[]
-): { readonly typeName: string; readonly name: string; readonly path: number[] }[] => {
+  at: { readonly path: readonly number[]; readonly scope: string }
+): IField[] => {
+  const { path, scope } = at;
+
   return messages.flatMap((message, index) => {
-    const at = [...path, index];
+    // a map's entry, read through its map
+    if (message.options?.mapEntry === true) {
+      return [];
+    }
+
+    const place = [...path, index];
+    const name = `${scope}.${message.name}`;
+    const entries = message.nestedType.filter((nested) => {
+      return nested.options?.mapEntry === true;
+    });
 
     return [
-      ...message.field.map((field, number) => {
-        return { typeName: field.typeName, name: field.name, path: [...at, MESSAGE_FIELD, number] };
+      ...declaredOf(message.field, { at: [...place, MESSAGE_FIELD], entries, scope: name }),
+      ...declaredOf(message.extension, {
+        at: [...place, MESSAGE_EXTENSION],
+        entries: [],
+        scope: name,
       }),
-      ...fieldsOf(message.nestedType, [...at, MESSAGE_NESTED_TYPE]),
+      ...fieldsOf(message.nestedType, { path: [...place, MESSAGE_NESTED_TYPE], scope: name }),
     ];
   });
 };
@@ -101,8 +154,17 @@ export const checkProto = (input: IProtoInput): IDiagnostic[] => {
     const desc: DescFile = file.desc;
     const fileOptions = fileOptionsOf(desc);
     const namespace = csharpNamespaceOf(desc.proto.package, desc.proto.options?.csharpNamespace);
+    // the full name a top-level declaration's type is under, as a field's type names it
+    const packageScope = desc.proto.package === '' ? '' : `.${desc.proto.package}`;
 
-    for (const field of fieldsOf(desc.proto.messageType, [FILE_MESSAGE_TYPE])) {
+    for (const field of [
+      ...fieldsOf(desc.proto.messageType, { path: [FILE_MESSAGE_TYPE], scope: packageScope }),
+      ...declaredOf(desc.proto.extension, {
+        at: [FILE_EXTENSION],
+        entries: [],
+        scope: packageScope,
+      }),
+    ]) {
       const typeName = field.typeName.replace(/^\./u, '');
 
       if (PAYLOAD_TYPES[typeName] !== undefined) {

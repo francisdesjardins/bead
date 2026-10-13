@@ -446,3 +446,36 @@ test("prints each breaking finding's subject, in text, json and github", () => {
     /^::error file=builder\/test\/breaking\/buf\/current\/parcel\/v1\/parcel\.proto,line=22,col=7,title=PROCEDURE_SAME_NAME::.* \[service:1\/procedure:1\]$/u
   );
 });
+
+test('--against-ref is refused on Node, naming the pipe that does its work, exit 2', () => {
+  for (const args of [
+    ['breaking', INTEROP, '--against-ref', 'v0.3.0'],
+    ['breaking', INTEROP, '--against-ref=v0.3.0'],
+  ]) {
+    const run = beadc(args);
+
+    expect(run.status, args.join(' ')).toBe(2);
+    expect(run.stderr).toBe(
+      "beadc: --against-ref is the wrappers' own: on Node, pipe git archive <ref> into --against -\n"
+    );
+  }
+});
+
+test('a path the file system refuses is one line, exit 2; a folder the output names is made', () => {
+  const folder = test.info().outputPath('written');
+  const file = join(folder, 'file');
+
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(file, 'a file, where a folder is meant\n');
+
+  const refused = beadc(['blueprint', INTEROP, '-o', join(file, 'interop.json')]);
+
+  expect(refused.status).toBe(2);
+  expect(refused.stderr).toMatch(/^beadc: .+: E[A-Z]+ on \w+, which the file system refuses\n$/u);
+  expect(existsSync(`${join(file, 'interop.json')}.tmp`)).toBe(false);
+
+  const made = join(folder, 'made', 'interop.json');
+
+  expect(beadc(['blueprint', INTEROP, '-o', made]).status).toBe(0);
+  expect(readFileSync(made, 'utf8')).toBe(readFileSync(INTEROP, 'utf8').replaceAll('\r\n', '\n'));
+});

@@ -214,7 +214,7 @@ test('appends its .gitattributes and .gitignore lines once', () => {
   expect(readFileSync(join(again, '.gitignore'), 'utf8')).toBe('node_modules/\n.beadc/\n');
 });
 
-test("refuses a name that is no proto package's part, and a missing one", () => {
+test("refuses a name that is no proto package's part, in buf's lower snake case, and a missing one", () => {
   const folder = folderOf();
 
   for (const args of [
@@ -223,6 +223,9 @@ test("refuses a name that is no proto package's part, and a missing one", () => 
     ['init', '1hello'],
     ['init', 'hello-world'],
     ['init', 'hello.v1'],
+    ['init', 'hello__world'],
+    ['init', 'hello_'],
+    ['init', '_hello'],
     ['init', 'hello', '--language', 'rust'],
     ['check', '--language', 'typescript'],
   ]) {
@@ -233,6 +236,40 @@ test("refuses a name that is no proto package's part, and a missing one", () => 
   }
 
   expect(existsSync(join(folder, 'beadc.yaml'))).toBe(false);
+
+  // * a word of digits, or one a digit ends, is buf's lower snake case
+  for (const name of ['hello_2', 'ab_1c', 'a_b']) {
+    expect(
+      initProject(name, { folder: folderOf(name), version: beadcVersion() }).written,
+      name
+    ).toContain('beadc.yaml');
+  }
+});
+
+test("names the cause of a wrapper's other bytes where Windows PowerShell's > wrote it", () => {
+  const version = beadcVersion();
+  const text = wrapperText('beadc.sh', { version });
+
+  for (const [cause, bytes] of [
+    [
+      'a UTF-16 byte order mark',
+      Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(text, 'utf16le')]),
+    ],
+    [
+      'a UTF-8 byte order mark',
+      Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text)]),
+    ],
+    ['CRLF', Buffer.from(text.replaceAll('\n', '\r\n'))],
+  ] as const) {
+    const folder = folderOf(cause.replaceAll(' ', '-'));
+
+    writeFileSync(join(folder, 'beadc.sh'), bytes);
+    expect(() => {
+      initProject('hello', { folder, version });
+    }, cause).toThrow(
+      `init writes beadc.sh, which is there and differs from beadc ${version}'s, by ${cause}: Windows PowerShell's > wrote it; run the line in PowerShell 7.6 (pwsh): init writes over no file`
+    );
+  }
 });
 
 test('writes beadc.sh executable, both wrappers filled and in LF', () => {

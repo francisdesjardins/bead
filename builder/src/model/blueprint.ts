@@ -135,6 +135,12 @@ const COMPOSITE_KEYWORDS = new Set(['oneOf', 'anyOf', 'if', 'not']);
 const UNDER_A_BRANCH = /\/(?:oneOf|anyOf)\/\d+\//u;
 const ADMISSION = /^\/services\/\d+\/procedures\/\d+\/admission$/u;
 
+// what a list left empty means, at the places where a .proto leaves one so
+const EMPTY_LIST: readonly (readonly [RegExp, string])[] = [
+  [/^\/services$/u, 'no service declares (bead.service)'],
+  [/^\/services\/\d+\/procedures$/u, 'a Bead service declares no rpc'],
+];
+
 /** The rule each place of the format's schema gives its refusals (decision 0022's D19). */
 const RULE_OF_PLACE: readonly (readonly [RegExp, RuleName, string])[] = [
   [
@@ -368,12 +374,20 @@ const schemaFindingsOf = (
       const key = `${refusal.place} ${refusal.error.keyword}`;
 
       if (!findings.has(key)) {
+        const empty =
+          refusal.error.keyword === 'minItems'
+            ? EMPTY_LIST.find(([pattern]) => {
+                return pattern.test(refusal.place);
+              })
+            : undefined;
         const message =
-          refusal.error.keyword === 'additionalProperties'
-            ? 'a member the format does not know'
-            : refusal.error.keyword === 'required'
-              ? 'a member the format requires, missing'
-              : (refusal.error.message ?? 'refused');
+          empty !== undefined
+            ? empty[1]
+            : refusal.error.keyword === 'additionalProperties'
+              ? 'a member the format does not know'
+              : refusal.error.keyword === 'required'
+                ? 'a member the format requires, missing'
+                : (refusal.error.message ?? 'refused');
 
         findings.set(key, { place: refusal.place, message });
       }

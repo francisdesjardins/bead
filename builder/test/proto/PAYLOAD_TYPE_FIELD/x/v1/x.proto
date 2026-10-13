@@ -3,6 +3,7 @@ syntax = "proto3";
 package x.v1;
 
 import "bead/options.proto";
+import "google/protobuf/descriptor.proto";
 
 option (bead.file) = {
   admission: {
@@ -13,4 +14,21 @@ option (bead.file) = {
 // A field whose type is a payload type.
 message Holder {
   bead.Json value = 1;
+}
+
+// A map whose values are a payload type, named by its own name.
+message Mapped {
+  map<string, bead.Text> by_name = 1;
+}
+
+// An extension whose type is a payload type, at the file's level.
+extend google.protobuf.MessageOptions {
+  bead.Json payload_option = 50001;
+}
+
+// An extension whose type is a payload type, nested in a message.
+message Extended {
+  extend google.protobuf.FieldOptions {
+    bead.Raw raw_option = 50002;
+  }
 }
