@@ -6,14 +6,14 @@
 
 // dependencies
 
-import { chromeOf, type IPort } from './chrome';
+import { chromeOf, type IPort } from './api';
 import {
   CHANNEL,
   isWindowMessage,
   type IWindowMessage,
   type PanelMessage,
   PORTS,
-} from './messages';
+} from '../messages';
 
 // constants
 

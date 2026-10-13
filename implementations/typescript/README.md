@@ -1377,29 +1377,64 @@ first.
 `yarn devtools:build` builds it, unpacked, into `devtools/dist/`, which Chrome loads from
 `chrome://extensions`, its developer mode on, by "Load unpacked". It adds a Bead panel to DevTools:
 
-- **Calls** and **Envelopes**: each step of each call the page's clients make or answer, and each
-  envelope, newest first, as their `debug` events tell them — a credential by its scheme alone, a
-  payload by a preview of 2,000 characters at most — filtered by client and by the package's own
-  filter, as `bead:debug` reads one (`d(rx), -token, e(request)`); a call selected shows what went
-  across.
-- **Metrics**: what each client's registry counts, a line a procedure, read by
-  `devtools/exposition.ts`, the demo's reader too, and its exposition as a scrape reads it; a client
-  given no registry says so.
+- **Calls**: a row a call the page's clients make or answer, newest first, as their `debug` events
+  tell them, its steps and its envelopes met by its call id on its connection — its status by an
+  icon and a colour, its procedure, its type, when it started, how long it took, how it ended in
+  words (`ACCESS_DENIED, beyond 1 relay`, `procedure code 7`, `cancelled`), a command the server
+  made read the right way round, and its bar on a waterfall. A row unfolds into its envelopes, in
+  words (`CREDIT · up to 2.5 MiB`, `CHUNK · at 1 MiB · more`); a subscription keeps its last 50
+  notifications and counts the others. Its **Envelopes** mode lists every envelope on its own. A
+  call selected shows its **Overview**, its failure whole — where it was raised, the relays it
+  crossed, its destination; its **Payload**, as a tree where it reads as one; its **Exchange**, its
+  envelopes as beads on its thread, a third lane for a destination behind a relay, a transfer's bytes
+  against its credit; its **Diff**, a notification against the one before it, an answer against its
+  procedure's last; and its **Trace**, the stack that made it, each frame opened in Sources.
+- **State**: what a client's connection held at the moment a cursor stands on, rebuilt from the
+  panel's records — its session, the calls in flight, the subscriptions and their credit, the
+  transfers and how far they went. It replays nothing, and sends nothing to the page.
+- **Timeline**: every call shown on one axis of time, a notification a ring, a chunk, a credit or a
+  cancel a tick; dragging across it bounds the Calls list to that span.
+- **Metrics**: what each client's registry counts, a row a procedure, read by
+  `devtools/exposition.ts`, the demo's reader too: its calls, those that failed or are in flight, a
+  median and a p95, its calls a second over the last minute, and its exposition as a scrape reads
+  it; a procedure's name shows its calls alone, and a client given no registry says so.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
-  panel saw, read with the package's codec: each `POST`'s envelope, and the batch its answer or a
-  listen brings back.
+  panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
+  procedure named where a client of the page told its name; an exchange copies as the skeleton of
+  an entry of `spec/conversations.json`.
+
+The bar filters by client and by the package's own filter, as `bead:debug` reads one
+(`d(rx), -token, e(request)`), the last filter that held kept while one is refused, with its
+reason; Requests, Commands and Notifications write their selector into it, and Failed shows the
+calls that failed. It pauses the panel's recording (`Ctrl+E`), clears it (`Ctrl+L`), keeps it
+across a reload with Preserve log, and exports its records as JSON, `bead-devtools-log` at version
+1, which Import reads back, pausing the recording so the page's records do not mix with the file's.
+The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
+`←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
+snippet that makes it again by the page's own service manager, and hides or shows its procedure
+alone.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
-nothing until it reloads; and the hook watches only while a panel is open, so the panel shows what
-came after it opened. A server in a Web Worker of the page shows through its client, whose messages
-the Network panel does not show. The parts: `hook.ts`, in the page's world at `document_start`;
-`bridge.ts`, beside it in the extension's world, which alone may open a runtime port;
-`background.ts`, which pairs each tab's page with the panel open on it; `devtools.ts` and
-`panel.ts`; and what they say to each other, in `messages.ts`, JSON alone.
+nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —
+from the first time the Bead tab is shown until DevTools closes — so the panel shows what came after
+it opened, and a page nobody inspects pays nothing. While it watches, the hook takes, for each call
+made, the stack that made it, and keeps an envelope's time to a fraction of a millisecond. A server
+in a Web Worker of the page shows through its client, whose messages the Network panel does not show.
+
+The panel, the hook and what they read are every browser's alike; each browser has its own glue.
+Shared: `hook.ts`, in the page's world at `document_start`; `panel.ts` and `panel.html`, with the
+model they draw from in `model/` and their views in `views/`, which ask of the browser only what
+`host.ts` names; `records.ts`, `preview.ts` and `stack.ts`, which make each event plain before it
+leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each other, in
+`messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
+extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
+page with the panel open on it; `devtools.ts`, which adds the panel; and `panel.ts`, which makes
+the panel's host of Chrome's API.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
-unit project: its pure modules in Node; the extension loaded in Chromium against the demo's static
+unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's
+procedures, `__tests__/traffic.ts`; the extension loaded in Chromium against the demo's static
 build, the page's calls followed to the panel and the watch stopped as the panel closes —
-`hook.test.ts`, which holds the hook, the bridge and the background, since they run only together; and the
-panel as a page on a fake DevTools API, for what only DevTools gives it. `yarn devtools:build` and
-`yarn playground:build:file` make what they load.
+`hook.test.ts`, which holds the hook, the bridge and the background, since they run only together;
+and the panel as a page on a fake DevTools API, for what only DevTools gives it.
+`yarn devtools:build` and `yarn playground:build:file` make what they load.

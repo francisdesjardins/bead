@@ -112,13 +112,24 @@ test.describe('the hook, the bridge and the background', () => {
     }
 
     await expect(panel.locator('#source option')).toHaveText(['All clients', 'Client 1']);
-    await expect(panel.locator('#calls tr', { hasText: 'whoami' })).toHaveCount(2);
-    await expect(panel.locator('#calls tr', { hasText: 'SESSION_REQUIRED' })).toHaveCount(1);
+    // a call a row, its steps and its envelopes together
+    await expect(panel.locator('#calls tr.call', { hasText: 'whoami' })).toHaveCount(1);
+    await expect(panel.locator('#calls tr.call', { hasText: 'SESSION_REQUIRED' })).toHaveCount(1);
 
-    await panel.locator('#calls tr', { hasText: 'whoami' }).first().click();
-    await expect(panel.locator('#detail')).toContainText('Received');
+    await panel.locator('#calls tr.call', { hasText: 'whoami' }).click();
+    await panel.click('[data-detail="payload"]');
+    await expect(panel.locator('#detail')).toContainText('Answer');
 
-    await panel.click('[data-tab="envelopes"]');
+    // the stack that made a call reaches the page's own script, the hook's frames left out
+    await panel.locator('#calls tr.call', { hasText: 'SESSION_REQUIRED' }).click();
+    await panel.click('[data-detail="trace"]');
+    await expect(panel.locator('#detail .frames').first()).toContainText(new URL(served.url).host);
+    expect(await panel.locator('#detail').textContent()).not.toContain('hook.js');
+
+    await panel.click('[data-detail="exchange"]');
+    await expect(panel.locator('#detail .thread circle').first()).toBeVisible();
+
+    await panel.click('[data-mode="envelopes"]');
     await expect(
       panel.locator('#envelopes tr', { hasText: 'credential JWT' }).first()
     ).toBeVisible();
@@ -126,12 +137,13 @@ test.describe('the hook, the bridge and the background', () => {
     expect(await panel.locator('#envelopes').textContent()).not.toContain('eyJ');
 
     await panel.click('[data-tab="metrics"]');
-    await expect(panel.locator('#metrics li', { hasText: 'whoami' })).toContainText('1 made');
+    await expect(panel.locator('#metrics tr[data-procedure="whoami"]')).toContainText('made');
 
     await panel.fill('#filter', '-stats, -metrics, d(rx)');
     await panel.click('[data-tab="calls"]');
-    await expect(panel.locator('#calls tr', { hasText: 'stats' })).toHaveCount(0);
-    await expect(panel.locator('#calls tr[data-direction="tx"]')).toHaveCount(0);
+    await panel.click('[data-mode="calls"]');
+    await expect(panel.locator('#calls tr.call', { hasText: 'stats' })).toHaveCount(0);
+    await expect(panel.locator('#calls tr.call', { hasText: 'whoami' })).toHaveCount(1);
     await context.close();
     await served.close();
   });

@@ -55,7 +55,8 @@ the client is built all the same. Disposing the client withdraws its source.
 **What the source hands over is what a `debug` listener receives**, the envelope's header with its
 credential reduced to its scheme, the call's event as its service manager builds it. The extension
 turns each into a plain record before it leaves the page: a call's per-request credential reduced to
-its scheme, its payloads to a preview of bounded size, no signal and no function.
+its scheme, its payloads to a preview of bounded size, as text and as a tree, the stack that made a
+call to its frames, no signal and no function.
 
 **The extension is Chrome's first, in `implementations/typescript/devtools/`**, built by the
 package's toolchain into `devtools/dist/`, an unpacked Manifest V3 extension: the hook, in the
@@ -65,7 +66,10 @@ announced, its calls and its envelopes, filtered by the package's own filter, an
 counts, read by the extension's own reader, `devtools/exposition.ts`, which the demo's page uses
 too. Its words are English. For a page with no hook, its Wire view reads the HTTP transport's
 exchanges from the Network panel's entries, decoding what their bodies carry with the package's
-codec.
+codec. What every browser shares — the hook, the panel with its model and its views, the readers,
+the messages — asks of the browser only what the panel's host names; Chrome's glue is in
+`devtools/chrome/`, its manifest, its bridge, its background, its DevTools page and the host made of
+its API, and another browser's extension brings its own glue beside it.
 
 **It is tested twice, in a project of its own**: the extension loaded in Chromium against the demo's
 static build, the page's events followed through the hook, the bridge and the background to the

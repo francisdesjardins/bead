@@ -1,8 +1,9 @@
 // ── DevTools extension, built ─────────────────────────────────────────────────
 
 // The extension as Chrome loads it unpacked, into `devtools/dist/`: each script bundled with what it
-// takes of the package, its pages, and its manifest at the package's version. Node runs it as it is,
-// its types stripped, as it runs the demo's builds.
+// takes of the package, its pages, and its manifest at the package's version. The hook and the panel
+// are every browser's; the rest, Chrome's own glue, is in `chrome/`. Node runs it as it is, its
+// types stripped, as it runs the demo's builds.
 
 // dependencies
 
@@ -15,8 +16,23 @@ import { fileURLToPath } from 'node:url';
 const DEVTOOLS = new URL('./', import.meta.url);
 const OUT = new URL('dist/', DEVTOOLS);
 
-/** The scripts, each a script of its own: none is a module, as a content script is none. */
-const SCRIPTS = Object.freeze(['background', 'bridge', 'devtools', 'hook', 'panel']);
+/**
+ * The scripts, each a script of its own, by the name the manifest and the pages load it by: none is a
+ * module, as a content script is none.
+ */
+const SCRIPTS: Readonly<Record<string, string>> = Object.freeze({
+  background: 'chrome/background.ts',
+  bridge: 'chrome/bridge.ts',
+  devtools: 'chrome/devtools.ts',
+  hook: 'hook.ts',
+  panel: 'chrome/panel.ts',
+});
+
+/** The pages, each where the build leaves it. */
+const PAGES: Readonly<Record<string, string>> = Object.freeze({
+  'devtools.html': 'chrome/devtools.html',
+  'panel.html': 'panel.html',
+});
 
 /** What the manifest holds in place of the package's version. */
 const VERSION = '%VERSION%';
@@ -35,8 +51,8 @@ await mkdir(OUT, { recursive: true });
 
 await build({
   bundle: true,
-  entryPoints: SCRIPTS.map((name) => {
-    return pathOf(`${name}.ts`);
+  entryPoints: Object.entries(SCRIPTS).map(([name, path]) => {
+    return { in: pathOf(path), out: name };
   }),
   format: 'iife',
   outdir: fileURLToPath(OUT),
@@ -47,16 +63,16 @@ await build({
 const { version } = JSON.parse(await readFile(pathOf('../package.json'), 'utf8')) as {
   version: string;
 };
-const manifest = await readFile(pathOf('manifest.json'), 'utf8');
+const manifest = await readFile(pathOf('chrome/manifest.json'), 'utf8');
 
-// a manifest that no longer leaves its version to this build would ship another one's
+// a manifest that no longer leaves its version to this build would hold another one's
 if (!manifest.includes(VERSION)) {
-  throw new Error(`devtools/manifest.json no longer carries ${VERSION}`);
+  throw new Error(`devtools/chrome/manifest.json no longer carries ${VERSION}`);
 }
 
 await writeFile(pathOf('manifest.json', OUT), manifest.replace(VERSION, version));
 await Promise.all(
-  ['devtools.html', 'panel.html'].map((page) => {
-    return copyFile(pathOf(page), pathOf(page, OUT));
+  Object.entries(PAGES).map(([page, path]) => {
+    return copyFile(pathOf(path), pathOf(page, OUT));
   })
 );
