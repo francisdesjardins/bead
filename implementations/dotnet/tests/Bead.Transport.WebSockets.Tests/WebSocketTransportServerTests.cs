@@ -1991,6 +1991,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     public async Task Raises_an_error_with_the_handle_then_that_connection_s_close_on_a_protocol_error()
     {
         var events = new ConcurrentQueue<(string Name, string ConnectionHandle)>();
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Exception? error = null;
 
         _server.Error += (reason, connectionHandle) =>
@@ -2001,6 +2002,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         _server.Close += (wasClean, connectionHandle) =>
         {
             events.Enqueue((wasClean ? "clean close" : "close", connectionHandle));
+            closed.TrySetResult();
         };
 
         var (client, connectionHandle) = await Connect();
@@ -2010,6 +2012,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             // a text frame that is not UTF-8
             await client.SendAsync(new byte[] { 0xFF, 0xFE }, WebSocketMessageType.Text, true, Cancelled);
             await Next(_closes);
+            // ! the fixture's close listener runs before this one: wait for this one's, not the fixture's
+            await closed.Task.WaitAsync(Patience, Cancelled);
 
             Assert.Equal([("error", connectionHandle), ("close", connectionHandle)], events);
             Assert.IsType<WebSocketException>(error);
