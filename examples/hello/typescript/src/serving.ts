@@ -21,6 +21,16 @@ export const serve = async (port: number): Promise<number> => {
   server.router.on('error', (error, connectionHandle) => {
     process.stderr.write(`${connectionHandle ?? 'no connection'}: ${error.message}\n`);
   });
+  // what a socket or a listener of the transport's events threw, and each request it refused of
+  // its own, which no router forwards
+  server.transport.on('error', (error, connectionHandle) => {
+    process.stderr.write(
+      `${connectionHandle === '' ? 'no connection' : connectionHandle}: ${error.message}\n`
+    );
+  });
+  server.transport.on('refusal', ({ reason, status }) => {
+    process.stderr.write(`refused ${String(status)} ${reason}\n`);
+  });
   offerHello(server);
 
   const address = await server.transport.start({

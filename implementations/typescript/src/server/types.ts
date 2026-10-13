@@ -15,7 +15,10 @@ import type {
   IServiceManagerOptions,
   RouterLimitsOptions,
 } from '../router/shared/types';
-import type { TransportServerConnectionHandle } from '../transport/server/types';
+import type {
+  ITransportServerRefusal,
+  TransportServerConnectionHandle,
+} from '../transport/server/types';
 import type { IClock } from '../transport/shared/clock';
 import type { EmitterListener, IGauges, ITransportMessage } from '../transport/shared/types';
 import type { IMetricsRegistry } from '../router/shared/metrics-registry';
@@ -166,7 +169,9 @@ export interface IServerOptions {
  * The part of a transport server a server uses, besides what its router does — met by this
  * package's. It asks only for connections named by a handle, and to be told when one opens, speaks or
  * closes, and, over HTTP, when a listen is held and when it ends; a transport over a broker meets it
- * once its handles have a shape of their own.
+ * once its handles have a shape of their own. It carries its `error` and its `refusal` as each of
+ * this package's does, which the server hears nothing of: an application hears them through
+ * `server.transport`, whichever transport it built (decision 0023).
  */
 export interface IServerTransportLike extends IRouterServerTransportLike {
   close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
@@ -188,6 +193,12 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
     >
   ): unknown;
   off(
+    event: 'error',
+    listener: EmitterListener<
+      [error: Error, connectionHandle: TransportServerConnectionHandle | '']
+    >
+  ): unknown;
+  off(
     event: 'listen',
     listener: EmitterListener<[isHeld: boolean, connectionHandle: TransportServerConnectionHandle]>
   ): unknown;
@@ -197,6 +208,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
       [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
+  off(event: 'refusal', listener: EmitterListener<[refusal: ITransportServerRefusal]>): unknown;
   on(
     event: 'close',
     listener: EmitterListener<
@@ -207,6 +219,16 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
     event: 'connection',
     listener: EmitterListener<
       [socket: unknown, request: unknown, connectionHandle: TransportServerConnectionHandle]
+    >
+  ): unknown;
+  /**
+   * What went wrong on a connection, or what a listener of its events threw; an empty handle is the
+   * transport's own, or a `refusal` listener's.
+   */
+  on(
+    event: 'error',
+    listener: EmitterListener<
+      [error: Error, connectionHandle: TransportServerConnectionHandle | '']
     >
   ): unknown;
   /** A listen held on a connection, `isHeld`, and its end; one that has no listen never says it. */
@@ -220,5 +242,7 @@ export interface IServerTransportLike extends IRouterServerTransportLike {
       [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]
     >
   ): unknown;
+  /** Each refusal it judges of its own, once written (spec 15.1); a worker's never refuses. */
+  on(event: 'refusal', listener: EmitterListener<[refusal: ITransportServerRefusal]>): unknown;
   stop(): Promise<void>;
 }

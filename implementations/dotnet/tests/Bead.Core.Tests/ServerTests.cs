@@ -701,6 +701,40 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Hears_its_transport_s_error_and_refusal_through_the_server_s_transport()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+
+        var thrown = new InvalidOperationException("a listener that throws");
+        var refusal = new TransportServerRefusal("127.0.0.1", "rebind.example:8080", null, 50_000, "host-refused", 403);
+        var heard = new List<string>();
+
+        // the server gives its transport as IServerTransport, which carries both, whichever
+        // transport it was built on: no listener on the concrete transport is needed
+        Server.Transport.Error += (reason, connectionHandle) =>
+        {
+            heard.Add($"error {reason.Message} on {connectionHandle}");
+        };
+        Server.Transport.Refusal += (told) =>
+        {
+            heard.Add($"refusal {told.Status} {told.Reason} of {told.Authority}");
+        };
+
+        _transport.Report(thrown, Handle);
+        _transport.Refuse(refusal);
+        // a refusal's listener's throw, reported with the empty handle
+        _transport.Report(thrown, string.Empty);
+
+        Assert.Equal(
+            [
+                $"error a listener that throws on {Handle}",
+                "refusal 403 host-refused of rebind.example:8080",
+                "error a listener that throws on ",
+            ],
+            heard);
+    }
+
+    [Fact]
     public async Task A_command_whose_timeout_passes_is_cancelled_before_its_connection_is_closed()
     {
         Start(new ServerOptions { CloseOnCommandTimeout = true });
@@ -1033,6 +1067,10 @@ public sealed class ServerTests : IAsyncLifetime
 
         public event Action<bool, string>? Listen;
 
+        public event Action<TransportServerRefusal>? Refusal;
+
+        public event Action<Exception, string>? Error;
+
         public List<ReadOnlyMemory<byte>> Sent { get; } = [];
 
         public List<string> Closed { get; } = [];
@@ -1077,6 +1115,18 @@ public sealed class ServerTests : IAsyncLifetime
         public void Listening(bool isHeld)
         {
             Listen?.Invoke(isHeld, Handle);
+        }
+
+        // what a listener of its events threw, as a transport reports it
+        public void Report(Exception reason, string connectionHandle)
+        {
+            Error?.Invoke(reason, connectionHandle);
+        }
+
+        // a request it refused of its own, as a transport tells it
+        public void Refuse(TransportServerRefusal refusal)
+        {
+            Refusal?.Invoke(refusal);
         }
 
         public void Deliver(byte[] bytes)
