@@ -10,7 +10,12 @@ import { EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf } from '../../router/shared/envelope';
 import { createPipedTransports, digestOf, patternOf } from '../../router/shared/__tests__/fixtures';
 import { createRouterClient } from '../../router/client/router-client';
-import type { IProcedure, RouterLimitsOptions } from '../../router/shared/types';
+import type {
+  IAdmissionRequest,
+  ICallSession,
+  IProcedure,
+  RouterLimitsOptions,
+} from '../../router/shared/types';
 import { createFakeWebSocketServer } from '../../transport/server/__tests__/fake-websocket-server';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { allClosed, host, IMPLEMENTATIONS } from '../../transport/shared/__tests__/fixtures';
@@ -20,6 +25,8 @@ import {
   FailureError,
   type IRelayOptions,
   ProtocolCode,
+  requireCredential,
+  shareLegBSession,
   TimeoutError,
 } from '../ws-server';
 import { expectAtRest } from './fixtures';
@@ -447,7 +454,8 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
   };
 
   /**
-   * A relay's WebSocket server — relaying as `relay` says, a session required by default — with a
+   * A relay's WebSocket server — relaying as `relay` says, leg B's session lent to a requester in
+   * a session by default, as a hub's — with a
    * device's router behind it at destination 7, on a pipe, and a WebSocket client connected to it;
    * every router under `limits`. `await using` takes them apart.
    */
@@ -455,7 +463,11 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
     limits,
     relay,
   }: { limits?: RouterLimitsOptions; relay?: IRelayOptions } = {}) => {
-    const server = createWSServer({ limits, relay, transport: { WebSocketServer } });
+    const server = createWSServer({
+      limits,
+      relay: relay ?? { beforeRoute: shareLegBSession },
+      transport: { WebSocketServer },
+    });
     const { port } = await server.transport.start({ address: host, findOpenPort: true });
     const pipe = createPipedTransports({ connectionHandle: device });
     const toDevice = createRouterClient(pipe.client, { limits });
@@ -562,6 +574,59 @@ test.describe('a WebSocket relay, its leg B on a pipe to a device', () => {
     await expect(echoing('hi')({ destinationId: 8 })).rejects.toMatchObject({
       code: ProtocolCode.ACCESS_DENIED,
     });
+  });
+
+  // spec 14.7
+  test('a beforeRoute that reads the destination admits a requester in a session only to the destinations its session names', async () => {
+    const signIn: IProcedure = { ...openSession, procedureId: 20, procedureName: 'signIn' };
+    // the destinations a requester's session names, as its application stored them at its sign-in
+    const devicesOf = (session: ICallSession): readonly number[] => {
+      return Array.isArray(session.data) ? (session.data as number[]) : [];
+    };
+    // a requester reaches a destination its session names, or forwards a credential its
+    // destination verifies
+    const isAdmitted = (request: IAdmissionRequest<TransportServerConnectionHandle>): boolean => {
+      const { header, session } = request;
+
+      return (
+        requireCredential(request) ||
+        (session !== undefined &&
+          header.destinationId !== undefined &&
+          devicesOf(session).includes(header.destinationId))
+      );
+    };
+
+    await using relayed = await connectRelayed({ relay: { beforeRoute: isAdmitted } });
+    const { client, deviceServices, server } = relayed;
+    const heard: string[] = [];
+
+    server.services.getRequestResolver(signIn, { serializer: text })((request, response) => {
+      server.sessions.set({
+        ...server.sessions.create(request.connectionHandle),
+        connectionInactivityTimeout: Infinity,
+        data: [7],
+        sessionInactivityTimeout: Infinity,
+      });
+
+      return response('');
+    });
+    deviceServices.getRequestResolver(echo, { serializer: text })((request, response) => {
+      heard.push(request.payload);
+
+      return response(request.payload.toUpperCase());
+    });
+
+    const echoing = client.services.getRequest(echo, { serializer: text });
+    // a composition by || answers ACCESS_DENIED without the default's detail
+    const denied = { code: ProtocolCode.ACCESS_DENIED, detail: '', relays: 0 };
+
+    // in no session, nothing goes through
+    await expect(echoing('before')({ destinationId: 7 })).rejects.toMatchObject(denied);
+    await client.services.getRequest(signIn, { serializer: text })('ada')();
+    // the destination its session names, and no other, registered or not
+    await expect(echoing('named')({ destinationId: 7 })).resolves.toBe('NAMED');
+    await expect(echoing('other')({ destinationId: 8 })).rejects.toMatchObject(denied);
+    expect(heard).toEqual(['named']);
   });
 
   test('relay 100 KiB each way as transfers on each leg, put together at the relay', async () => {

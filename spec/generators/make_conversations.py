@@ -172,6 +172,11 @@ FAILS_ON_PURPOSE, ADMITS_NOBODY = detail_of('fail', 'answers'), detail_of('denie
 ENDS_NO_CONNECTIONS, REGISTERED = detail_of('logout', 'admits'), detail_of('register', 'answers')
 assert detail_of('ticks', 'answers') == FAILS_ON_PURPOSE
 
+# what a server's relay's default admission answers a call it refuses, ACCESS_DENIED's detail, and
+# what CREDENTIAL_UNSUPPORTED's names before it, as interop-service.json's relay states them (14.3, step 1)
+CREDENTIAL_ALONE, NAMED_SCHEMES = re.findall(r'detail "([^"]*)"', SERVICE['relay']['admits'])
+assert NAMED_SCHEMES == SCHEMES_TAKEN
+
 # what SESSION_REQUIRED's detail says of a credential that does not resolve (9.2, step 5)
 NO_CREDENTIAL, DOES_NOT_HOLD = 'no credential came', 'the credential does not hold'
 
@@ -1062,6 +1067,14 @@ def relayed(call_id, procedure, value, destination=DEVICE, flags=0x02):
     return json_request(call_id, procedure, value, flags=flags, words=4, tail=word(destination, 4))
 
 
+def relayed_presenting(call_id, procedure, value, block, destination=DEVICE):
+    # a request that names a destination, then presents a credential: its DESTINATION block, then its
+    # CREDENTIAL block, the last; a token named between angle brackets stands for its 16 bytes
+    length = sum(16 if piece.startswith('<') else 1 for piece in block.split())
+    return json_request(call_id, procedure, value, flags=0x0A, words=4 + length // 4,
+                        tail=f'{word(destination, 4)}  {block}')
+
+
 def registered(call_id=1, destination=DEVICE):
     return [on(json_request(call_id, 'register', '{"destination":%d}' % destination), 'device'),
             on(result(call_id, str(destination)), 'device')]
@@ -1075,34 +1088,57 @@ def leg_b(call_id, procedure, value):
     return on(command(call_id, procedure, value), 'device')
 
 
+# the relay's options a conversation sets, by its name
+RELAY_OPTIONS = {}
+
+
+def with_relay(options, conversation):
+    # a conversation whose server's relay takes these options
+    RELAY_OPTIONS[conversation[0]] = options
+    return conversation
+
+
+def sharing_leg_b(conversation):
+    # a conversation whose requester presents none through the relay, in a session of leg A's: its
+    # relay admits by shareLegBSession, since what it plays is the relay's, not its admission's
+    return with_relay({'beforeRoute': 'shareLegBSession'}, conversation)
+
+
 conversations += [
-    ('a destination registered on the wire takes a request relayed, and its result crosses back',
+    sharing_leg_b(('a destination registered on the wire takes a request relayed, and its result crosses back',
      ['14.1', '14.2', '14.5.1'], None, [
          opened('client'), opened('device'), *logged_in(), *registered(),
          on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
-         on(answer(2, '"x"'), 'device'), on(result(3, '"x"'), 'client')]),
-    ('a failure of the destination\'s crosses one relay more', ['14.5.2', '14.6'], None, [
+         on(answer(2, '"x"'), 'device'), on(result(3, '"x"'), 'client')])),
+    sharing_leg_b(('a failure of the destination\'s crosses one relay more', ['14.5.2', '14.6'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(relayed(3, 'fail', 'null'), 'client'), leg_b(2, 'fail', 'null'),
-        on(refusal(2, ON_PURPOSE, APPLICATION), 'device'), on(failure(3, ON_PURPOSE, APPLICATION, relays=1), 'client')]),
-    ('a failure that crossed 255 relays crosses at 255', ['7.5', '14.6'], None, [
+        on(refusal(2, ON_PURPOSE, APPLICATION), 'device'), on(failure(3, ON_PURPOSE, APPLICATION, relays=1), 'client')])),
+    sharing_leg_b(('a failure that crossed 255 relays crosses at 255', ['7.5', '14.6'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(relayed(3, 'fail', 'null'), 'client'), leg_b(2, 'fail', 'null'),
         on({'send': 'A1 12 00 02  00 00 00 02 | 00 07 FF 01'}, 'device'),
-        on(failure(3, ON_PURPOSE, APPLICATION, relays=255), 'client')]),
-    ('a relay asks for a session by default, and its own failure crosses no relay', ['14.3.1', '14.6'], None, [
-        opened('client'), opened('device'), *registered(),
-        on(relayed(1, 'echo', '"x"'), 'client'), on(failure(1, SESSION_REQUIRED), 'client')]),
-    ('a destination not registered, to a requester admitted, is answered DESTINATION_UNKNOWN', ['14.3.2'], None, [
+        on(failure(3, ON_PURPOSE, APPLICATION, relays=255), 'client')])),
+    ('a server\'s relay admits by default a credential it forwards alone: a call presenting none or OPAQUE is refused ACCESS_DENIED, its detail naming the default, in leg A\'s connection\'s session or in none, before its destination is looked up, and its own failure crosses no relay',
+     ['13.5', '14.3.1', '14.6', '14.7'], None, [
+         opened('client'), opened('device'), *registered(),
+         on(relayed(1, 'echo', '"x"'), 'client'), on(failure(1, ACCESS_DENIED, detail=CREDENTIAL_ALONE), 'client'),
+         on(login(3, 'ada'), 'client'), on(named(result(3, '"ada"', OPENED), 'ada'), 'client'),
+         on(relayed(5, 'echo', '"x"'), 'client'), on(failure(5, ACCESS_DENIED, detail=CREDENTIAL_ALONE), 'client'),
+         on(relayed_presenting(7, 'echo', '"x"', opaque('<ada>')), 'client'),
+         on(failure(7, ACCESS_DENIED, detail=CREDENTIAL_ALONE), 'client'),
+         on(relayed_presenting(9, 'echo', '"x"', opaque('<ada>'), destination=99), 'client'),
+         on(failure(9, ACCESS_DENIED, detail=CREDENTIAL_ALONE), 'client')]),
+    sharing_leg_b(('a destination not registered, to a requester admitted, is answered DESTINATION_UNKNOWN', ['14.3.2'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
-        on(relayed(3, 'echo', '"x"', destination=99), 'client'), on(failure(3, DESTINATION_UNKNOWN), 'client')]),
-    ('a request that opens a subscription through a relay is answered SUBSCRIPTION_UNSUPPORTED', ['14.3.3'], None, [
+        on(relayed(3, 'echo', '"x"', destination=99), 'client'), on(failure(3, DESTINATION_UNKNOWN), 'client')])),
+    sharing_leg_b(('a request that opens a subscription through a relay is answered SUBSCRIPTION_UNSUPPORTED', ['14.3.3'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
-        on(relayed(3, 'ticks', 'null', flags=0x12), 'client'), on(failure(3, SUBSCRIPTION_UNSUPPORTED), 'client')]),
-    ('a destination whose connection carries nothing back is answered DESTINATION_UNREACHABLE', ['14.3.4'], None, [
+        on(relayed(3, 'ticks', 'null', flags=0x12), 'client'), on(failure(3, SUBSCRIPTION_UNSUPPORTED), 'client')])),
+    sharing_leg_b(('a destination whose connection carries nothing back is answered DESTINATION_UNREACHABLE', ['14.3.4'], None, [
         opened('client'), opened('device', two_way=False), *logged_in(), *registered(),
-        on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client')]),
-    ('a destination dies with its connection, whoever opens it next, until it is registered anew',
+        on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client')])),
+    sharing_leg_b(('a destination dies with its connection, whoever opens it next, until it is registered anew',
      ['14.3.4', '14.4'], None, [
          opened('client'), opened('device'), *logged_in(), *registered(), closed('device'),
          on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client'),
@@ -1110,35 +1146,32 @@ conversations += [
          on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device'), on(failure(1, REGISTERED_ALREADY, APPLICATION, detail=REGISTERED), 'device'),
          on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
          *registered(5), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
-         on(answer(2, '"z"'), 'device'), on(result(7, '"z"'), 'client')]),
-    ('a destination taken out is answered DESTINATION_UNKNOWN', ['14.1'], None, [
+         on(answer(2, '"z"'), 'device'), on(result(7, '"z"'), 'client')])),
+    sharing_leg_b(('a destination taken out is answered DESTINATION_UNKNOWN', ['14.1'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
-        on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNKNOWN), 'client')]),
-    ('a cancel on leg A cancels leg B, and leg A is answered nothing', ['14.4', '14.5.6'], None, [
+        on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNKNOWN), 'client')])),
+    sharing_leg_b(('a cancel on leg A cancels leg B, and leg A is answered nothing', ['14.4', '14.5.6'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
-        on(cancel(3), 'client'), on(cancelled(2), 'device'), on(answer(2, '"late"'), 'device')]),
-    ('leg A\'s connection gone cancels leg B', ['14.4'], None, [
+        on(cancel(3), 'client'), on(cancelled(2), 'device'), on(answer(2, '"late"'), 'device')])),
+    sharing_leg_b(('leg A\'s connection gone cancels leg B', ['14.4'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
-        closed('client'), on(cancelled(2), 'device')]),
-    ('leg B\'s connection gone once it had the request is answered DESTINATION_LOST, and reported with leg A\'s connection',
+        closed('client'), on(cancelled(2), 'device')])),
+    sharing_leg_b(('leg B\'s connection gone once it had the request is answered DESTINATION_LOST, and reported with leg A\'s connection',
      ['14.5.5', '14.6'], None, [
          opened('client'), opened('device'), *logged_in(), *registered(),
          on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
-         closed('device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
-    ('leg B past its destination\'s timeout is cancelled, and leg A answered DESTINATION_LOST', ['14.4', '14.5.5'], None, [
+         closed('device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')])),
+    sharing_leg_b(('leg B past its destination\'s timeout is cancelled, and leg A answered DESTINATION_LOST', ['14.4', '14.5.5'], None, [
         opened('client'), opened('device'), *logged_in(),
         on(json_request(1, 'register', '{"destination":%d,"timeout":2000}' % DEVICE), 'device'),
         on(result(1, str(DEVICE)), 'device'),
         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
         armed(2_000), advance(2_000),
-        on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')]),
+        on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')])),
 ]
-
-# the relay's options a conversation sets, by its name
-RELAY_OPTIONS = {}
 
 
 def credentials_through_a_relay():
@@ -1158,11 +1191,8 @@ def credentials_through_a_relay():
     as_elsewhere = {'scheme': 'ELSEWHERE'}
 
     def to(call_id, value, block, destination=DEVICE, carried=None, procedure='echo'):
-        # a request that names a destination, then presents a credential: its DESTINATION block, then
-        # its CREDENTIAL block, the last; a token named between angle brackets stands for its 16 bytes
-        length = sum(16 if piece.startswith('<') else 1 for piece in block.split())
-        step = json_request(call_id, procedure, value, flags=0x0A, words=4 + length // 4,
-                            tail=f'{word(destination, 4)}  {block}')
+        # a request that names a destination, then presents a credential, on the client's connection
+        step = relayed_presenting(call_id, procedure, value, block, destination)
         return on({**step, **({'carried': carried} if carried else {})}, 'client')
 
     def leg_b_presenting(call_id, value, credential=None, carried=None, connection='device', procedure='echo'):
@@ -1191,11 +1221,6 @@ def credentials_through_a_relay():
     def refused_with(call_id, code, detail=None):
         return on(failure(call_id, code, detail=detail), 'client')
 
-    def with_relay(options, conversation):
-        # a conversation whose server's relay takes these options
-        RELAY_OPTIONS[conversation[0]] = options
-        return conversation
-
     # the HS256 issuer's tokens for carol: one that holds, and one an hour expired
     token = hs256(access(sub='carol', jti='at-relay-0001'))
     expired = hs256(access(sub='carol', exp=START - HOUR, iat=START - 2 * HOUR, jti='at-relay-0002'))
@@ -1215,15 +1240,16 @@ def credentials_through_a_relay():
 
     relayed_conversations = [
         # 14.2's table, row by row
-        ('a call presenting none or OPAQUE crosses a relay to leg B presenting none, over any leg B, what its transport carried staying at the relay',
+        sharing_leg_b(('a call presenting none or OPAQUE crosses a relay to leg B presenting none, over any leg B, what its transport carried staying at the relay',
          ['14.2.1', '14.3.1', '14.7'], None, [
              opened('client'), opened('device'), opened_as('plain', carries=False, secure=False),
-             *logged_in_as_ada(), *registered_as(DEVICE), *registered_as(13, connection='plain'),
-             on({**relayed(3, 'echo', '"x"'), 'carried': bearer}, 'client'),
-             *crosses(3, 2, '"x"', leg_b_presenting(2, '"x"')),
-             to(5, '"y"', opaque('<ada>')), *crosses(5, 4, '"y"', leg_b_presenting(4, '"y"')),
-             on(relayed(7, 'echo', '"z"', destination=13), 'client'),
-             *crosses(7, 6, '"z"', leg_b_presenting(6, '"z"', connection='plain'), connection='plain')]),
+             *registered_as(DEVICE), *registered_as(13, connection='plain'),
+             on(relayed(1, 'echo', '"x"'), 'client'), refused_with(1, SESSION_REQUIRED), *logged_in_as_ada(3),
+             on({**relayed(5, 'echo', '"x"'), 'carried': bearer}, 'client'),
+             *crosses(5, 2, '"x"', leg_b_presenting(2, '"x"')),
+             to(7, '"y"', opaque('<ada>')), *crosses(7, 4, '"y"', leg_b_presenting(4, '"y"')),
+             on(relayed(9, 'echo', '"z"', destination=13), 'client'),
+             *crosses(9, 6, '"z"', leg_b_presenting(6, '"z"', connection='plain'), connection='plain')])),
         ('an OPAQUE no session holds is answered SESSION_REQUIRED at a relay\'s first step, before its destination is looked up',
          ['14.3.1'], None, [
              opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE),
@@ -1268,12 +1294,12 @@ def credentials_through_a_relay():
              to(1, '"x"', elsewhere, carried=bearer), refused_with(1, DESTINATION_UNREACHABLE),
              to(3, '"x"', elsewhere, destination=13, carried=bearer), refused_with(3, DESTINATION_UNREACHABLE),
              to(5, '"y"', jwt(token)), *crosses(5, 2, '"y"', leg_b_presenting(2, '"y"', as_jwt(token)))]),
-        ('a JWT or an ELSEWHERE to a leg B in the clear off the machine is answered DESTINATION_UNREACHABLE, nothing tried, where a call presenting none crosses',
+        sharing_leg_b(('a JWT or an ELSEWHERE to a leg B in the clear off the machine is answered DESTINATION_UNREACHABLE, nothing tried, where a call presenting none crosses',
          ['14.2.1', '14.3.5'], None, [
              opened('client'), opened_as('device', secure=False), *logged_in_as_ada(), *registered_as(DEVICE, audience),
              to(3, '"x"', jwt(token)), refused_with(3, DESTINATION_UNREACHABLE),
              to(5, '"x"', elsewhere, carried=bearer), refused_with(5, DESTINATION_UNREACHABLE),
-             on(relayed(7, 'echo', '"y"'), 'client'), *crosses(7, 2, '"y"', leg_b_presenting(2, '"y"'))]),
+             on(relayed(7, 'echo', '"y"'), 'client'), *crosses(7, 2, '"y"', leg_b_presenting(2, '"y"'))])),
         # 14.3, step 1: what the relay neither resolves nor forwards, before its destination is looked up
         ('a credential scheme to come is answered CREDENTIAL_UNSUPPORTED at a relay\'s first step, before its admission and its destination, its detail naming the schemes it takes',
          ['14.3.1'], None, [
@@ -1288,7 +1314,7 @@ def credentials_through_a_relay():
         # 14.3, step 6: leg B's header, with the token's block, leaves an envelope of 1,024 bytes `fits`
         # bytes of payload, and 4 more without it; leg A's request comes whole, past chunkBytes and
         # within maximumEnvelopeBytes, since the server takes no transfer
-        ('leg B\'s header counts its credential, call by call, against the smaller of the two legs\' limits, once its route holds',
+        sharing_leg_b(('leg B\'s header counts its credential, call by call, against the smaller of the two legs\' limits, once its route holds',
          ['14.3.5', '14.3.6', '14.5.3'], {'maximumEnvelopeBytes': 2048, 'chunkBytes': 1024, 'maximumTransfers': 0}, [
              opened('client'), opened('device'), opened('other'), *logged_in_as_ada(),
              *registered_as(DEVICE, audience), *registered_as(13, other, connection='other'),
@@ -1297,7 +1323,7 @@ def credentials_through_a_relay():
              to(5, json_string(fits + 1), jwt(token)), refused_with(5, PAYLOAD_TOO_LARGE),
              on(relayed(7, 'echo', json_string(fits + 1)), 'client'),
              *crosses(7, 4, json_string(fits + 1), leg_b_presenting(4, json_string(fits + 1)), answer_value='"ok"'),
-             to(9, json_string(fits + 1), jwt(token), destination=13), refused_with(9, DESTINATION_UNREACHABLE)]),
+             to(9, json_string(fits + 1), jwt(token), destination=13), refused_with(9, DESTINATION_UNREACHABLE)])),
         # 14.3: a relay that verifies, at its first step, against its destinations' audiences
         with_relay({'verifies': True}, ('a relay that verifies answers a JWT that does not hold SESSION_REQUIRED at its first step, before its destination is looked up, and forwards one that holds',
          ['14.3.1'], None, [
@@ -1371,7 +1397,7 @@ document = {
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket\'s or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',
         'Before each send, after close, and at the end, nothing more was sent or reported: what a conversation does not expect, a server does not do.',
-        'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireSessionOrCredential by default, or requireSession.',
+        'limits, where given, are the server\'s limits, by the names section 12.2 gives them, in milliseconds for a time; any other is its default. pacing, where given, bounds the queues of its paced subscriptions. relay, where given, sets the options of the server\'s relay: verifies true has it verify what it forwards (decision 0010); beforeRoute names its admission, requireCredential by default, shareLegBSession or requireSession.',
         'The server is given the interop service\'s credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server\'s clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer\'s deadline at once; and credentials.elsewhere, its verifier, which settles on the server\'s clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters\' bytes, as any header byte is.',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

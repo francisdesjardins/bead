@@ -153,7 +153,7 @@ moves no end, and is dropped.
 
 **A credential that does not hold is refused, whatever the procedure requires**, with
 `SESSION_REQUIRED`, as a bearer token found invalid is answered 401 (RFC 6750 §3.1); `ACCESS_DENIED`
-says that a session holds and is not allowed. A call never runs outside the session it presented.
+says that the call is not allowed as it came (spec 13.5). A call never runs outside the session it presented.
 The client's side keeps that from refusing the calls that renew a credential:
 
 - a client presents `OPAQUE` only on a call that asks for it, never by default: it binds that call
@@ -161,8 +161,11 @@ The client's side keeps that from refusing the calls that renew a credential:
   under a new token, is refused rather than run in whatever session the connection holds;
 - a credential a client presents by default, `JWT` or `ELSEWHERE`, is withdrawn once a call that
   presented it is refused `SESSION_REQUIRED`, while it is still, by value, the credential that call
-  presented, and the client tells its application, so the call that renews it goes out without it; a
-  call may present none, whatever the default; a failure that ends a subscription its server had
+  presented, and the client fails before it goes every call that would present it,
+  `SESSION_REQUIRED`, until its application gives a default again or none, and tells it: a call
+  never falls to another session or to none in silence, as OWASP's "fail securely" and gRPC's call
+  credentials have it; the call that renews it presents its own, or none, and so does a call that
+  needs no identity; a call may present none, whatever the default; a failure that ends a subscription its server had
   answered withdraws nothing, over HTTP even when it overtakes that answer in a listen's batch,
   which marks it, `mayOvertake`;
 - a client fails a call before it goes, and a server a command alike, with
@@ -317,15 +320,23 @@ parser reads it, the one by which Secure Contexts judges an origin, on every sid
 
 | Leg A presents | The relay                                                                                                   | Leg B presents                                         |
 | -------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| none, `OPAQUE` | resolves it to leg A's connection's session, which its admission checks                                     | none: leg B's session at the destination (14.7)        |
+| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session  | none: leg B's session at the destination (14.7)        |
 | `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it `verifies` | the same bytes                                         |
 | `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B that carries one                     | `ELSEWHERE`, its credential moved to leg B's transport |
 
 A destination is registered with the audience it verifies, as a resource is named for a token (RFC
-8707). A relay's default admission, `requireSessionOrCredential`, `RequireSessionOrCredential`,
-admits a call in leg A's connection's session, or one whose header presents a `JWT`, or an
-`ELSEWHERE` its transport carried, read from the header's scheme; a `beforeRoute` given as
-`requireSession` refuses every credential the relay forwards without verifying, `ACCESS_DENIED`.
+8707). A server's relay admits by default only a credential it forwards, `requireCredential`,
+`RequireCredential`: a call whose header presents a `JWT`, or an `ELSEWHERE` its transport carried,
+read from the header's scheme; one that presents none or `OPAQUE`, in leg A's connection's session
+or in none, is refused `ACCESS_DENIED`, its detail `a relay admits by default only a credential it
+forwards`, since leg A's session opens nothing at the destination, and a relay that ran it in leg
+B's session would lend its own authority to whoever holds a session at the relay, the confused
+deputy (Hardy, 1988; CWE-441), as impersonation is a grant and never a default (RFC 8693 §1.1). A
+relay whose requesters log in at it writes a `beforeRoute` that checks the destination against the
+requester's session; `shareLegBSession`, `ShareLegBSession`, second, lends leg B's session to every
+session of leg A's, at every destination, reading none, and refuses a call in none that presented
+none `SESSION_REQUIRED`. A `beforeRoute` given as `requireSession` refuses every credential the
+relay forwards without verifying, `ACCESS_DENIED`.
 With `verifies`, the relay verifies what it forwards besides, with its side's `credentials`, at step
 1 of section 14.3, before `beforeRoute`: a `JWT` against the set of audiences its registrations
 hold. A credential that does not hold, or a `JWT` that names none of those audiences, is refused
@@ -364,8 +375,11 @@ bytes, nor the transport's field; only its scheme, `credentialScheme`, `Credenti
   that presents none or `OPAQUE`. `sessionTokenOf`, `SessionTokenOf`, stays beside it, asked per
   answer and never waiting, for the announcement of section 13.3;
 - `requireSession`, `RequireSession`, tests the call's session;
-- `requireSessionOrCredential`, `RequireSessionOrCredential`, a relay's default admission: a call in
-  leg A's connection's session, or one presenting a credential the relay may forward;
+- `requireCredential`, `RequireCredential`, a server's relay's default admission: a call presenting
+  a credential the relay may forward, and no other, `ACCESS_DENIED` with its detail;
+- `shareLegBSession`, `ShareLegBSession`, an admission a relay is given, named for what it lends:
+  a call in any session of leg A's connection's, at every destination, runs in leg B's session, as
+  does one presenting a credential the relay may forward;
 - `endSession(id)`, `EndSession(id)`, ends a credential's session by its identifier, that record,
   and the subscriptions it bounds; `endSessionsOf(issuer)`, `EndSessionsOf(issuer)`, every
   credential's session of an issuer, on every connection that keeps one;
@@ -375,7 +389,8 @@ bytes, nor the transport's field; only its scheme, `credentialScheme`, `Credenti
   options for that call alone: a call may present none whatever the default, and `OPAQUE` stands for
   the session the client learned;
 - `credentialWithdrawn`, `CredentialWithdrawn`, the client's event that tells its application a
-  default credential was withdrawn;
+  default credential was withdrawn; `isCredentialWithdrawn`, `IsCredentialWithdrawn`, whether it
+  stands withdrawn, the calls that would present it failing before they go;
 - the credential a transport carries travels with its envelope, as one argument: on the TypeScript
   side, the message event's first argument and `send`'s are `{ data, credential }`; on the C# side,
   `TransportMessage` has its `Credential`; each keeps its other parameter.
@@ -477,7 +492,7 @@ verifier refuses one ([0006](0006-a-rule-has-its-gate.md)).
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-eight rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
+nine rounds, a later one answering an earlier one's answers, the seventh and the eighth also rounds
 of [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s change; the round on a
 forwarded credential's turn and on a credential that leaves a transfer no room is kept in
 [0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges, and the round on the
@@ -495,7 +510,7 @@ text of 0.2.0. The decision's objections, each with the answer that holds:
 | `SESSION_REQUIRED` answers three failures that need three remedies                                                                                           | Accepted: `CREDENTIAL_UNSUPPORTED` for a scheme the side takes none of, as code 36 of the admission block since the side knows what it takes only there, not 5 of the envelope's. Refused: that refusing at admission leaks the routing table, which a request without a credential learns as well.                                                                                                                                                                                                                                                       |
 | A `JWT` forwarded unchanged, in the clear, to a destination registered by a boolean, is replayable wherever its audience reaches                             | Accepted: a bearer credential crosses only TLS off the machine, held by its sender; a destination registers its audience, and a `JWT` goes to its audience alone; sender-bound tokens are a decision of their own. Refused: a credential the registration mints for leg B, which leg B's own session already is.                                                                                                                                                                                                                                          |
 | A subscription bounded by its token's lifetime breaks at every renewal and misses a session ended early                                                      | Accepted: it is bounded by its credential's session, which a renewal under the same identifier extends and the side may end.                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| Refusing a credential that does not hold refuses the call that renews it, and an `OPAQUE` presented by default fails every call in flight across a rotation  | Accepted: `OPAQUE` is presented per call only, and a default credential is withdrawn once refused, the application told.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Refusing a credential that does not hold refuses the call that renews it, and an `OPAQUE` presented by default fails every call in flight across a rotation  | Accepted: `OPAQUE` is presented per call only, and a default credential is withdrawn once refused, the application told, and calls that would present it fail until it is given again.                                                                                                                                                                                                                                                                                                                                                                    |
 | The conformance files cannot play a transport's credential, a relay's table or a lifetime                                                                    | Accepted: a step says what the transport carried, another advances the server's clock, `JWT` verdicts are vectors, and two vectors of header length are added; the relays play in the conversations and `Authorization` in the transports' file.                                                                                                                                                                                                                                                                                                          |
 | A header of 1,020 bytes passes the limits: the writer's code, 12.2's minimum and the relay's fixed header                                                    | Accepted: `PAYLOAD_TOO_LARGE` at the writer, limits of 1,024 bytes at least with a `JWT`, an opening of one byte at least, and leg B's header counted call by call.                                                                                                                                                                                                                                                                                                                                                                                       |
 | `SESSION` flags what is often no session, `ENDED` is no scheme, and a bare scheme is a URI's                                                                 | Accepted: the flag is `CREDENTIAL`, its first field the credential scheme, 0 is `NONE`, 2 is `JWT`, and section 13.1 names the two sessions.                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -635,3 +650,24 @@ objections, each with the answer that holds:
 | A version listed in one field and a key with a space inside, which the C# side takes, diverge as well                                                                                                                                                                                                  | Accepted: both join the cases and the twin tests. A version listed in one field line is a version but 13, answered 426 `version-refused` naming 13, as `013` is; two field lines are malformed, 400, by RFC 6455 §11.3.5; a key with a space inside is malformed.                                                                                                                                                                                                                    |
 | 426 is not the only answer for a version: RFC 6455 §4.4 answers 400, as `ws`, gorilla/websocket and python-websockets do, and a 426 for the version carries two meanings and two markers                                                                                                               | Accepted in part: both statuses are RFC 6455's, §4.2.2 naming 426 for this very case and §4.4 showing 400. Refused: answering the version 400. No standard asks it, the 426 is what 15.2 states and both sides answer, and RFC 9110 §15.5.22 asks of it only the `Upgrade` it carries; a 426 marked `version-refused` and one marked `upgrade-required` are told apart by their mark, as 403's two are.                                                                              |
 | `ws` takes a server of the caller's, and Node routes an upgrade it declines to `request`, which gives one writer                                                                                                                                                                                       | Accepted: the TypeScript transport builds its `node:http` server, hands it to `ws` as `server`, and judges each request through `shouldUpgradeCallback`, every refusal written by one `ServerResponse` but `CONNECT`'s; the TypeScript side asks Node 24.9 or later, the release that brought it. `ws` forwards its server's `listening` and `error`, so the scripted error after listening keeps its test.                                                                          |
+
+### On the footguns before 0.4.0
+
+The change that closes five defaults which granted more than their names said: a server's relay's
+admission, `origins: ['null']`, the proxy a server believed, `hosts: ['*']`'s own origin, and a
+withdrawn default credential. The round met one dissenter, whose probes were rerun against the code
+they cite; every claim held, and its nine objections were all accepted. Its rows are kept by the
+record whose Scope holds each change: the client's address in
+[0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md), a server's hosts
+and origins in
+[0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md), and here a
+credential, through a relay and at the client. The user decided what no standard settles: a hop
+bound for proxies of unknown address later, `trustedProxies` on the HTTP server alone for now, and
+no refusal of `hosts: ['*']` at start.
+
+| Objection                                                                                                                                                                                                                                                         | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The opt-in keeps a name that reads as a guard while it lends leg B's session to every session of leg A's at every destination; the new default refuses the ordinary hub with a bare `ACCESS_DENIED`, and the docs paste back the very admission being closed (T2) | Accepted: `requireSessionOrCredential` is `shareLegBSession`, `ShareLegBSession`, on both sides, in this record's names, the conversations' enum and both players, its doc saying it reads no destination. The default's `ACCESS_DENIED` carries a static detail, `a relay admits by default only a credential it forwards`, played by the rewritten default conversation. The CHANGELOG and both READMEs lead with a `beforeRoute` that checks the destination against the session, a test's on each side, and name the share-all admission second, with what it lends. `requireCredential` keeps its name, its doc saying a relay reads the scheme alone unless it verifies. |
+| `ACCESS_DENIED` for a call in no session presenting none falls outside 13.5's own definition; RFC 9110 splits 401 from 403 the same way (T7)                                                                                                                      | Accepted: one static refusal stays, as a relay with no `beforeRoute` already answers `ACCESS_DENIED`, and two refusals per admission would need a type neither side carries; 13.5's definition adds "or the admission takes the call only with a credential", and unit 13.5 is acknowledged.                                                                                                                                                                                                                                                                                                                                                                                   |
+| Fail-closed breaks the demo's own public reads, which poll every second with the default, and the documented renewal, which goes out without a credential; no gate sees either (T3)                                                                               | Accepted: the demo's pollers present none, as its token's call does; the spec and both READMEs state the pattern a fail-closed default needs — a call that needs no identity presents none, and so does the call that renews — their examples rewritten to it; the CHANGELOG marks it breaking under `### Changed`. No test loads the demo page, which is said plainly; the pollers are checked by hand.                                                                                                                                                                                                                                                                       |
+| The inventory misses record 0018, which lists the admissions this changes, and the SemVer citation is wrong (T9)                                                                                                                                                  | Accepted: 0018 is revised in place, its interface listing and the transport servers' members; the reason a break goes in a minor is cited as npm's caret range and NuGet's floating minor, SemVer 2.0.0 §4 owing no stability under 0.y.z.                                                                                                                                                                                                                                                                                                                                                                                                                                     |

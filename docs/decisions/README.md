@@ -94,6 +94,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 | [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)         | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII             | accepted |
 | [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)               | An HTTP server answers CORS to the origins it names, and to no other                                                                    | accepted |
 | [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                                | accepted |
+| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)                 | A server believes `X-Forwarded-For` from the proxies it names alone                                                                     | accepted |
 
 ### Time
 
@@ -128,7 +129,7 @@ lands leaves this list, and its gates leave that one for 0006's table.
 
 ## Writing one
 
-The next decision is 0030. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0031. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

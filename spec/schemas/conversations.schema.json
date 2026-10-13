@@ -558,8 +558,8 @@
           "const": true
         },
         "beforeRoute": {
-          "description": "The relay's admission, by the name both sides give it: requireSessionOrCredential, its default, or requireSession.",
-          "enum": ["requireSessionOrCredential", "requireSession"]
+          "description": "The relay's admission, by the name both sides give it: requireCredential, its default, shareLegBSession or requireSession.",
+          "enum": ["requireCredential", "shareLegBSession", "requireSession"]
         }
       }
     },

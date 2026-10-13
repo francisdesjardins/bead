@@ -123,6 +123,20 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(client.isOpen()).toBe(true);
       });
 
+      // spec 15.2
+      test('writes no Origin on its upgrade', async () => {
+        const upgraded = new Promise<string | undefined>((resolve) => {
+          server.once('connection', (_socket, request) => {
+            resolve(request.headers.origin);
+          });
+        });
+
+        await client.connect({ host, port });
+
+        // a page's browser writes its own, which the server judges; the client, none
+        expect(await upgraded).toBeUndefined();
+      });
+
       test('rejects with a ConnectError on a port no URL can hold', async () => {
         await expect(client.connect({ host, port: 100_000 })).rejects.toBeInstanceOf(ConnectError);
         expect(client.isClosed()).toBe(true);

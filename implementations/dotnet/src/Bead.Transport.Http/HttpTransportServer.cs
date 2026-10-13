@@ -37,9 +37,11 @@ public sealed record HttpTransportServerOptions
     /// host in punycode: none besides when none or empty. A request names its host by its
     /// authority: an absolute-form target's, else its <c>Host</c>, which carries HTTP/2's
     /// <c>:authority</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one and none,
-    /// and so takes a page that rebinds its name to the server's address again: the server judges
-    /// its own origin by the request's authority, so this is what refuses one. An entry with a
-    /// port, an empty one, one that is no host, and <c>*</c> beside another are an
+    /// and makes none of their origins its own: the server's own origin is its request's authority
+    /// only when its host is taken by name, one every server takes or one listed here, so under
+    /// <c>*</c> a page that rebinds its name to the server's address is refused 403,
+    /// <c>origin-refused</c>, and a page of the application's own is taken only when
+    /// <see cref="Origins"/> names it. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another are an
     /// <see cref="ArgumentException"/> as the transport is built. A server reached by a name, a
     /// public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in a
     /// cluster, names it here, or refuses it 403, <c>host-refused</c>, which the transport tells
@@ -53,12 +55,6 @@ public sealed record HttpTransportServerOptions
     /// for none; zero is refused.
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// Whether a proxy on this machine is trusted: the last address it forwards in
-    /// <c>x-forwarded-for</c> is then the client's, which the bound per address counts.
-    /// </summary>
-    public bool IsProxyTrusted { get; init; }
 
     /// <summary>The largest body: a router's largest envelope by default; past it, 413.</summary>
     public int MaximumBodyBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
@@ -84,19 +80,39 @@ public sealed record HttpTransportServerOptions
 
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly:
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
+    /// by name, never by <c>*</c>, each compared exactly:
     /// none by default. It serves a proxy that rewrites the host, and a page of another origin, to
     /// which the server answers CORS (spec 15.12): its preflight 204, and on every answer once its
     /// origin is judged <c>Access-Control-Allow-Origin</c> and every field exposed, never
-    /// <c>Access-Control-Allow-Credentials</c>. <c>null</c> among them takes, and lets read every
-    /// answer, every page that sends it. Each is <c>null</c> or an origin as RFC 6454 §6.2
-    /// serializes it; <c>*</c>, which no origin is, and any other entry are an
-    /// <see cref="ArgumentException"/> as the transport is built.
+    /// <c>Access-Control-Allow-Credentials</c>. Each is an origin as RFC 6454 §6.2 serializes it;
+    /// <c>*</c>, which no origin is, <c>null</c>, which a browser sends for every page with no origin
+    /// of its own, a sandboxed frame of any site among them, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built: a page that sends <c>null</c> is
+    /// served from an origin, which is named here.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 
     /// <summary>The path the transport answers on.</summary>
     public string Pathname { get; init; } = HttpTransport.Pathname;
+
+    /// <summary>
+    /// The proxies it believes <c>X-Forwarded-For</c> from (spec 15.12): none by default, the
+    /// loopback among them. Each is an IP address written bare, as a server listens on one, or a
+    /// network, that address, <c>/</c> and its prefix's length (RFC 4632 §3.1, RFC 4291 §2.3), from
+    /// 1, its bits past the prefix zero: <c>10.0.0.0/8</c>, or a compose network's, for a proxy in a
+    /// container or an ingress; <c>127.0.0.1</c> for one on this machine. A name, a network of prefix
+    /// 0, which would trust what every client writes, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built. While the address reached is one
+    /// they hold, the next entry of the field from the right is the client's, when it is an address,
+    /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
+    /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. A proxy
+    /// left out is a client as any other: every client behind it is its address, which the bound per
+    /// address counts, a told <c>busy</c> names, and the gauge <c>largestAddressConnections</c> shows
+    /// near its ceiling. A bound by address counts as one the users behind one NAT, and as many the
+    /// addresses of one IPv6 network.
+    /// </summary>
+    public IReadOnlyList<string>? TrustedProxies { get; init; }
 
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
@@ -182,9 +198,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // and a client that does not read holds the stop back no longer than this
     private static readonly TimeSpan EndsGrace = TimeSpan.FromSeconds(1);
 
-    // the addresses of this machine, from which a proxy in front of the transport comes
-    private static readonly HashSet<string> Loopback = ["127.0.0.1", "::1"];
-
     private static readonly End Nothing = new(StatusCodes.Status204NoContent);
     private static readonly End Malformed = new(StatusCodes.Status400BadRequest, HttpRefusals.Malformed);
     private static readonly End Unknown = new(StatusCodes.Status404NotFound, HttpRefusals.ConnectionUnknown);
@@ -192,6 +205,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     private readonly HttpTransportServerOptions _options;
     private readonly TimeProvider _clock;
+
+    // the networks of the proxies it believes X-Forwarded-For from
+    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
 
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
@@ -218,7 +234,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// A transport server, not yet listening, its durations held. A bound not above 0, or a timeout
     /// that is not from 1 to <see cref="Clocks.LongestTimer"/> milliseconds — infinite aside, but for
     /// the longest wait — is an <see cref="ArgumentOutOfRangeException"/> naming it; an entry of its
-    /// hosts or origins neither takes, an <see cref="ArgumentException"/> naming it.
+    /// hosts, origins or trusted proxies none takes, an <see cref="ArgumentException"/> naming it.
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
@@ -226,6 +242,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
+        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(HttpTransportServerOptions.TrustedProxies));
         AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
 
         var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
@@ -343,8 +360,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     /// <summary>
-    /// What it keeps of its connections, at the ceilings it has: the connections, the addresses, the
-    /// bytes of body being read, the call ids buried, the listens held, what the outboxes hold and the
+    /// What it keeps of its connections, at the ceilings it has: the connections, the addresses and
+    /// the connections the busiest one holds, which its health warns on before a proxy it was not
+    /// told of is refused <c>busy</c>, the bytes of body being read, the call ids buried, the listens held, what the outboxes hold and the
     /// fullest one, and the requests waiting. Kestrel shows no HTTP/2 session, which the TypeScript
     /// side counts.
     /// </summary>
@@ -364,6 +382,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                         return (long)connection.Buried.Count;
                     }),
                     ["connections"] = _drawn.Count,
+                    ["largestAddressConnections"] = _perAddress.Values.DefaultIfEmpty().Max(),
                     ["largestOutboxBytes"] = connections.Select((connection) =>
                     {
                         return connection.OutboxBytes;
@@ -391,6 +410,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 {
                     ["bodyBytes"] = _options.BodyBytesBudget,
                     ["connections"] = _options.MaximumConnections,
+                    ["largestAddressConnections"] = _options.MaximumConnectionsPerAddress,
                     ["largestOutboxBytes"] = _options.MaximumOutboxBytes,
                 },
             };
@@ -877,8 +897,8 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
     }
 
-    // the client's address: the socket's, or, behind a proxy on this machine the transport trusts,
-    // the last one it forwarded — an address, or nothing of it is taken
+    // the client's address, in its one form: the socket's, walked past each proxy it trusts through
+    // X-Forwarded-For, its lines joined by commas, from the right
     private string? AddressOf(HttpContext context)
     {
         if (context.Connection.RemoteIpAddress is not { } remote)
@@ -886,21 +906,21 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return null;
         }
 
-        var address = (remote.IsIPv4MappedToIPv6 ? remote.MapToIPv4() : remote).ToString();
-        var forwarded = context.Request.Headers["x-forwarded-for"].ToString().Split(',')[^1].Trim();
+        var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        // an address written as one, as isIP reads it: an IPv4 one in its four numbers alone
-        var isAddress = IPAddress.TryParse(forwarded, out var parsed)
-            && (parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 || parsed.ToString() == forwarded);
-
-        return _options.IsProxyTrusted && Loopback.Contains(address) && isAddress ? forwarded : address;
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
     }
 
-    // an exchange from the server's own origin, its request's authority under http or https, or one
-    // it was told; one with no Origin comes from anywhere, and any client that sends one is judged by it
+    // an exchange from the server's own origin, its request's authority under http or https when its
+    // host is taken by name, or one it was told; one with no Origin comes from anywhere, and any
+    // client that sends one is judged by it
     private bool IsAllowedOrigin((HttpRequest Request, string? Authority) exchange)
     {
-        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (exchange.Authority, _options.Origins));
+        // ! the own origin by a host taken by name alone: under *, a page that rebinds its name is
+        // its own origin by the very Host * did not check
+        var own = HostsAndOrigins.OwnAuthorityOf(exchange.Authority, _options.Hosts);
+
+        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (own, _options.Origins));
     }
 
     // an exchange: what it is, as its method, its path, its host, its origin and its token say

@@ -10,7 +10,7 @@ public sealed class HostsAndOriginsTests
 
     private static readonly string[] Hosts = ["bead.test", "xn--bad-bma.test"];
 
-    private static readonly string[] Origins = ["https://bead.example", "null"];
+    private static readonly string[] Origins = ["https://bead.example"];
 
     // hosts listed, taken by the host alone, the request's port aside, a default one among them
     private static readonly string[] ListedHosts = ["bead.test", "Bead.Test", "BEAD.TEST:8443", "bead.test:80", "bead.test:443", "XN--BAD-BMA.test:8080"];
@@ -20,6 +20,7 @@ public sealed class HostsAndOriginsTests
     private static readonly string[] OtherOrigins =
     [
         "*",
+        "null",
         "http://*.bead.test",
         "http://bead.test/",
         "http://bead.test/path",
@@ -350,13 +351,13 @@ public sealed class HostsAndOriginsTests
         });
     }
 
+    // spec 15.12
     [Fact]
-    public void Refuses_an_origins_entry_that_is_a_star_or_neither_null_nor_an_origin_as_RFC_6454_serializes_it()
+    public void Refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_RFC_6454_serializes_it()
     {
         HostsAndOrigins.AssertOrigins(null, "Origins");
         HostsAndOrigins.AssertOrigins(
             [
-                "null",
                 "http://bead.test",
                 "https://bead.test",
                 "http://bead.test:8080",
@@ -388,6 +389,12 @@ public sealed class HostsAndOriginsTests
         Assert.Contains("no wildcard of origins", Assert.Throws<ArgumentException>(() =>
         {
             HostsAndOrigins.AssertOrigins(["*"], "Origins");
+        }).Message, StringComparison.Ordinal);
+
+        // null names every page with no origin of its own, and the message the better path
+        Assert.EndsWith("serve the page from an origin, and name that one (Parameter 'Origins')", Assert.Throws<ArgumentException>(() =>
+        {
+            HostsAndOrigins.AssertOrigins(["https://bead.example", "null"], "Origins");
         }).Message, StringComparison.Ordinal);
     }
 
@@ -488,7 +495,7 @@ public sealed class HostsAndOriginsTests
         // no page, or one among those given, exactly
         Assert.True(HostsAndOrigins.IsTakenOrigin(null, ("bead.test", Origins)));
         Assert.True(HostsAndOrigins.IsTakenOrigin("https://bead.example", ("bead.test", Origins)));
-        Assert.True(HostsAndOrigins.IsTakenOrigin("null", ("bead.test", Origins)));
+        Assert.False(HostsAndOrigins.IsTakenOrigin("null", ("bead.test", Origins)));
         Assert.False(HostsAndOrigins.IsTakenOrigin("https://Bead.Example", ("bead.test", Origins)));
 
         Assert.All(Own, (own) =>
@@ -501,11 +508,40 @@ public sealed class HostsAndOriginsTests
         });
     }
 
+    // spec 15.12
     [Fact]
-    public void IsListedOrigin_takes_an_Origin_that_origins_names_exactly_null_among_them_the_server_s_own_only_when_named_and_never_none()
+    public void OwnAuthorityOf_gives_the_authority_of_a_host_taken_by_name_every_server_s_or_one_listed_and_none_of_one_only_a_star_takes()
+    {
+        string?[] authorities = ["localhost:8080", "127.0.0.1:8080", "[::1]:8080", "Bead.Test:8443", "rebind.example:8080", "", null];
+
+        // by name, every server's or one listed, whether * is there or not
+        Assert.Equal(
+            ["localhost:8080", "127.0.0.1:8080", "[::1]:8080", "Bead.Test:8443", null, null, null],
+            authorities.Select((authority) =>
+            {
+                return HostsAndOrigins.OwnAuthorityOf(authority, ["bead.test"]);
+            }));
+
+        // * takes every host, and vouches for none of them: the rebound page names its own Host
+        Assert.Equal(
+            ["localhost:8080", "127.0.0.1:8080", "[::1]:8080", null, null, null, null],
+            authorities.Select((authority) =>
+            {
+                return HostsAndOrigins.OwnAuthorityOf(authority, ["*"]);
+            }));
+        Assert.Null(HostsAndOrigins.OwnAuthorityOf("bead.test", null));
+
+        // and so the rebound page is none of the server's own under *, though * took its host
+        Assert.True(HostsAndOrigins.IsTakenHost("rebind.example:8080", ["*"]));
+        Assert.False(HostsAndOrigins.IsTakenOrigin("http://rebind.example:8080", (HostsAndOrigins.OwnAuthorityOf("rebind.example:8080", ["*"]), [])));
+    }
+
+    // spec 15.12
+    [Fact]
+    public void IsListedOrigin_takes_an_Origin_that_origins_names_exactly_the_server_s_own_only_when_named_and_never_none()
     {
         Assert.True(HostsAndOrigins.IsListedOrigin("https://bead.example", Origins));
-        Assert.True(HostsAndOrigins.IsListedOrigin("null", Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin("null", Origins));
         Assert.False(HostsAndOrigins.IsListedOrigin("https://Bead.Example", Origins));
         Assert.False(HostsAndOrigins.IsListedOrigin("https://bead.example:443", Origins));
         Assert.False(HostsAndOrigins.IsListedOrigin("Null", Origins));

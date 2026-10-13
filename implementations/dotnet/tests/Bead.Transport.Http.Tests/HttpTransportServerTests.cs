@@ -1958,14 +1958,21 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }
 
         // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-        // and a Host of punycode that decodes to none, taken where every host is
+        // and a Host of punycode that decodes to none, taken where every host is; under *, no page is
+        // the server's own by a host * alone takes (spec 15.12)
         var page = ("xn--bad-bma.test:8080", "http://xn--bad-bma.test:8080");
 
         await Start(new HttpTransportServerOptions { Hosts = ["*"] });
 
         Assert.Equal(
-            [(201, null), (201, null), (201, null), (201, null)],
-            [await StatusOf(page), await StatusOf(("xn--a", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
+            [(403, HttpRefusals.Origin), (403, HttpRefusals.Origin), (201, null), (201, null), (201, null)],
+            [
+                await StatusOf(page),
+                await StatusOf(("xn--a", "http://xn--a")),
+                await StatusOf(("xn--a", null)),
+                await StatusOf(("xn--a.test", null)),
+                await StatusOf(("xn---bad-cpa.test", null)),
+            ]);
 
         // hosts name an IDN host as the field carries it, in punycode
         await Start(new HttpTransportServerOptions { Hosts = ["xn--bad-bma.test"] });
@@ -1975,8 +1982,9 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             [await StatusOf(page), await StatusOf(("XN--BAD-BMA.test:8080", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
     }
 
+    // spec 15.12
     [Fact]
-    public void Refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star()
+    public void Refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
     {
         var port = Assert.Throws<ArgumentException>(() =>
         {
@@ -1986,23 +1994,45 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         {
             return new HttpTransportServer(new HttpTransportServerOptions { Origins = ["*"] });
         });
+        var opaque = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["*"], Origins = ["https://bead.test", "null"] });
+        });
 
-        Assert.Equal(("Hosts", "Origins"), (port.ParamName, star.ParamName));
+        Assert.Equal(("Hosts", "Origins", "Origins"), (port.ParamName, star.ParamName, opaque.ParamName));
         Assert.Contains("\"bead.test:8080\"", port.Message, StringComparison.Ordinal);
         Assert.Contains("no wildcard of origins", star.Message, StringComparison.Ordinal);
+        Assert.Contains("a sandboxed frame of any site", opaque.Message, StringComparison.Ordinal);
+        Assert.Null(Record.Exception(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["*"], Origins = ["https://bead.test"] });
+        }));
     }
 
     [Fact]
     public async Task Names_a_client_that_comes_over_IPv4_to_a_dual_stack_listener_by_its_IPv4_address()
     {
-        await Start();
+        await Start(new HttpTransportServerOptions { TrustedProxies = ["127.0.0.1"] });
         await _server.Stop().WaitAsync(Patience, Cancelled);
         _port = (await _server.Start(new HttpTransportStartOptions { Address = "::", FindOpenPort = true }, Cancelled)).Port;
 
         var drawn = await Connect();
 
+        // the socket's address, IPv4 mapped into IPv6, read as the loopback the proxy it names comes
+        // from
+        using var forwarded = await Fetch(With(PostOf(null, null), ("x-forwarded-for", "203.0.113.9")));
+
+        Assert.Equal(201, (int)forwarded.StatusCode);
         Assert.Equal("type=HTTP;ip=127.0.0.1;ordinal=1", drawn.ConnectionHandle);
-        Assert.Equal(Host, Assert.Single(_server.Clients).Address);
+        Assert.Equal(
+            [(Host, drawn.ConnectionHandle), ("203.0.113.9", "type=HTTP;ip=203.0.113.9;ordinal=2")],
+            _server.Clients.OrderBy((client) =>
+            {
+                return client.ConnectionHandle;
+            }, StringComparer.Ordinal).Select((client) =>
+            {
+                return (client.Address, client.ConnectionHandle);
+            }));
     }
 
     [Fact]
@@ -2423,10 +2453,11 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             secured);
     }
 
+    // spec 15.12
     [Fact]
-    public async Task Takes_a_proxy_s_last_forwarded_address_when_told_to_and_bounds_the_connections_of_each_address()
+    public async Task Takes_a_client_s_address_from_X_Forwarded_For_only_from_a_proxy_it_names_and_bounds_the_connections_of_each_address()
     {
-        await Start(new HttpTransportServerOptions { IsProxyTrusted = true, MaximumConnectionsPerAddress = 1 });
+        await Start(new HttpTransportServerOptions { MaximumConnectionsPerAddress = 1, TrustedProxies = ["127.0.0.1"] });
 
         async Task<(int Status, string ConnectionHandle)> DrawOf(string forwarded, IPAddress from)
         {
@@ -2440,13 +2471,50 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal((201, "type=HTTP;ip=198.51.100.7;ordinal=1"), await DrawOf("203.0.113.9, 198.51.100.7", IPAddress.Loopback));
         // one address, one connection
         Assert.Equal(503, (await DrawOf("198.51.100.7", IPAddress.Loopback)).Status);
-        // what is no address is not taken, nor what a peer not on this machine forwards — one of
-        // another address than the loopback's own here
+        // what is no address is not taken, nor what a peer it does not name forwards — one of
+        // another address of the loopback's here
         Assert.Equal((201, "type=HTTP;ip=127.0.0.1;ordinal=2"), await DrawOf("evil;ordinal=1", IPAddress.Loopback));
         // nor what only a lenient parse reads as one, as isIP is strict: the loopback's own, which
         // holds its one connection already
         Assert.Equal(503, (await DrawOf("1", IPAddress.Loopback)).Status);
         Assert.Equal((201, "type=HTTP;ip=127.0.0.2;ordinal=3"), await DrawOf("192.0.2.1", Elsewhere));
+    }
+
+    // spec 15.12
+    [Fact]
+    public async Task Gauges_the_connections_its_busiest_address_holds_against_maximumConnectionsPerAddress_which_its_health_warns_on_at_80_percent()
+    {
+        await Start(new HttpTransportServerOptions { MaximumConnectionsPerAddress = 5 });
+
+        var none = new LayerGauges([], new Dictionary<string, long>(), new Dictionary<string, long>(), 0);
+
+        // the transport's one check of its busiest address, as its server's health gives it
+        HealthCheck CheckOf()
+        {
+            var gauges = _server.Gauges();
+            var health = Health.Of(new ServerGauges(none, none, none, LayerGauges.Of(gauges, gauges.ConnectionHandles)));
+
+            return Assert.Single(health.Checks["transport:largestAddressConnections"]);
+        }
+
+        Assert.Equal((0L, 5L), (_server.Gauges().Counts["largestAddressConnections"], _server.Gauges().Ceilings["largestAddressConnections"]));
+
+        // a proxy no trustedProxies entry holds, the loopback here: every client behind it is its
+        // address
+        await Connect();
+        await Connect();
+        await Connect();
+        await ConnectFrom(Elsewhere, false);
+        Assert.Equal(new HealthCheck(3, HealthStatus.Pass, "3 of 5"), CheckOf());
+
+        // the busiest address at 80% of its ceiling warns, before its first 503
+        await Connect();
+        Assert.Equal(new HealthCheck(4, HealthStatus.Warn, "4 of 5"), CheckOf());
+        await Connect();
+        Assert.Equal((503, HttpRefusals.Busy), await RefusalOf(PostOf(null, null)));
+        Assert.Equal(new HealthCheck(5, HealthStatus.Warn, "5 of 5"), CheckOf());
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        Assert.Equal(0, _server.Gauges().Counts["largestAddressConnections"]);
     }
 
     [Fact]
@@ -3825,7 +3893,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Empty(gauges.Anomalies);
         Assert.Equal(
-            new Dictionary<string, long> { ["bodyBytes"] = 268_435_456, ["connections"] = 10_000, ["largestOutboxBytes"] = 64 },
+            new Dictionary<string, long> { ["bodyBytes"] = 268_435_456, ["connections"] = 10_000, ["largestAddressConnections"] = 64, ["largestOutboxBytes"] = 64 },
             gauges.Ceilings);
         Assert.Equal(
             new HashSet<string> { listening.ConnectionHandle, queued.ConnectionHandle, other.ConnectionHandle, smaller.ConnectionHandle },
@@ -3838,6 +3906,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
                 ["bodyBytes"] = 4,
                 ["buriedCallIds"] = 1,
                 ["connections"] = 4,
+                ["largestAddressConnections"] = 3,
                 ["largestOutboxBytes"] = 20,
                 ["listens"] = 1,
                 ["outboxBytes"] = 28,
@@ -3858,8 +3927,8 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         var counts = _server.Gauges().Counts;
 
         Assert.Equal(
-            (0L, 0L, 0L, 0L, 0L, 0L),
-            (counts["addresses"], counts["bodyBytes"], counts["connections"], counts["listens"], counts["outboxBytes"], counts["waitingExchanges"]));
+            (0L, 0L, 0L, 0L, 0L, 0L, 0L),
+            (counts["addresses"], counts["bodyBytes"], counts["connections"], counts["largestAddressConnections"], counts["listens"], counts["outboxBytes"], counts["waitingExchanges"]));
     }
 
     [Fact]

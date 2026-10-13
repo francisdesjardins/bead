@@ -11,8 +11,9 @@ import {
 } from '../router/server/constants';
 import {
   createRouterServer,
+  requireCredential,
   requireSession,
-  requireSessionOrCredential,
+  shareLegBSession,
 } from '../router/server/router-server';
 import { createSessionManager } from '../router/server/session-manager';
 import type { ISession } from '../router/server/types';
@@ -47,9 +48,10 @@ export {
   METRICS_REGISTRY_DEFAULTS,
   PACING_DEFAULTS,
   ProtocolCode,
+  requireCredential,
   requireSession,
-  requireSessionOrCredential,
   SERVER_FAILURES,
+  shareLegBSession,
 } from '../router/server/router-server';
 export { LONGEST_TIMER, PLATFORM_CLOCK } from '../transport/shared/clock';
 export type { IClock, TimeoutId } from '../transport/shared/clock';
@@ -323,11 +325,11 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
       metricsRegistry: options?.metricsRegistry,
       pacing: options?.pacing,
       credentials: options?.credentials,
-      // a server's relay admits a call in leg A's connection's session, or one presenting a
-      // credential it forwards, by default
+      // a server's relay admits by default a credential it forwards, for its destination to
+      // verify, and no session of leg A's
       relay: {
         ...options?.relay,
-        beforeRoute: options?.relay?.beforeRoute ?? requireSessionOrCredential,
+        beforeRoute: options?.relay?.beforeRoute ?? requireCredential,
       },
       // the connection's session, its data a copy the call keeps, whatever befalls the session
       sessionOf: ({ connectionHandle, header }) => {
@@ -452,8 +454,9 @@ export const createServer = <Transport extends IServerTransportLike, Data = unkn
     health: () => {
       return healthOf(gauges());
     },
+    requireCredential,
     requireSession,
-    requireSessionOrCredential,
+    shareLegBSession,
     [Symbol.asyncDispose]: async () => {
       release();
       sessions.off(CREATED_EVENT, onSessionCreated);

@@ -74,11 +74,59 @@ share.
   core.
 - **The relay** is `Relay`, its registrations under a lock, since they are registered from any
   thread and read on the router's scheduler; a destination is a `ConnectionTarget` or an
-  `IRouterTarget`, which a client's router meets.
+  `IRouterTarget`, which a client's router meets. A server's relay admits by default only a
+  credential it forwards, `RequireCredential`: a call presenting a `JWT` or an `ELSEWHERE`, by its
+  scheme alone unless the relay verifies, for its destination to verify; any other, one that
+  presents none or `OPAQUE`, in leg A's connection's session or in none, is refused
+  `ACCESS_DENIED`, its detail `a relay admits by default only a credential it forwards`, since leg
+  A's session opens nothing at the destination (spec 14.3, 14.7). A relay whose requesters log in at
+  it gives a `BeforeRoute` of its own, which checks the destination against the requester's session:
+
+  ```csharp
+  // a requester reaches a destination its session names, or forwards a credential its
+  // destination verifies
+  var isAdmitted = new BeforeRequest((request) =>
+  {
+      var forwards = request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
+
+      return forwards || (request.Session?.Data is Account account && account.Reaches(request.Header.DestinationId));
+  });
+
+  await using var server = new WebSocketServer<Account>(new WebSocketServerOptions
+  {
+      Server = new ServerOptions { Relay = new RelayOptions { BeforeRoute = isAdmitted } },
+  });
+  ```
+
+  Its refusal is `ACCESS_DENIED`, without the default's detail. `ShareLegBSession`, in its place,
+  lends leg B's session to every requester in a session at the relay, at every destination: it
+  reads none, so a requester in any session acts at every destination with leg B's rights, as a
+  deputy that lends its own authority (CWE-441).
+- **The client's router** presents its `Credential` on every call that gives none of its own. A
+  default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
+  the refusal crossed: `CredentialWithdrawn` tells the application its scheme alone, never its
+  bytes, and from then on, until the application gives it a default again — a credential, or
+  `null`, which says "anonymous" in writing — every call that would present it fails before it
+  goes, `SESSION_REQUIRED`, nothing sent and nothing withdrawn, so no call falls to its connection's
+  session, or to none, in silence; `IsCredentialWithdrawn` says so (spec 13.4). A call that gives
+  its own credential, `Credential.None` among them, goes: a call that needs no identity presents
+  none, and so does the call that renews.
+
+  ```csharp
+  // the call that renews presents none: until a default is given again, a call that would
+  // present it fails
+  client.Router.CredentialWithdrawn += async (_) =>
+  {
+      var renewed = await SignIn(new RequestOptions { Credential = Credential.None });
+
+      client.Router.Credential = Credential.Jwt(renewed);
+  };
+  ```
 - **HTTP's transport** sets the shared behaviour where Kestrel's defaults would differ: no body
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
-  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `x-forwarded-for`
-  is read by one rule of its own. `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
+  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`
+  is read by one rule of its own, `TrustedProxies`, as the section below says. `BeadHttpClient` is
+  its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
 - **The transports** hold the same ready states on both sides, and the client reconnects alike, its
@@ -140,14 +188,23 @@ one and none are refused 403 `host-refused`, whatever the request, a page that r
 the server's address among them. So a server reached by a name names it in `Hosts`: a public one,
 one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service reached
 by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy that
-writes its upstream's address, as nginx does by default, none is needed. `["*"]` takes every host,
-and so reopens what the check closes: a page that rebinds its name to the server's address is then
-its own origin.
+writes its upstream's address, as nginx does by default, none is needed. `["*"]` takes every host
+and makes none of their origins the server's own: a page that rebinds its name to the server's
+address passes the host's test, and is refused by the origin's, 403 `origin-refused`, so a page is
+then taken only when `Origins` names it, and an application under `*` that serves its own page
+names that page's host in `Hosts` or its origin in `Origins`. A client that is no browser and
+writes its target as its `Origin` — Python's `websocket-client` does by default — is refused
+alike under `*` by a name `Hosts` does not list: list that name, or have the client write no
+`Origin`, as a Bead client writes none (spec 15.2, 15.5).
 
 `Origins` names the origins a request may come from besides the server's own, `http://` or
-`https://` followed by the request's authority, none by default, each compared exactly, `null` among
-them taking every page that sends it and, over HTTP, letting each read every answer. A request with
-no `Origin` comes from no page, and is taken.
+`https://` followed by the request's authority when its host is one the server takes by name — one
+every server takes, or one `Hosts` lists — never by `*`, none by default, each compared exactly. A
+request with no `Origin` comes from no page, and is taken. `null` is refused as the transport is
+built: a browser sends it for every page with no origin of its own — a sandboxed frame of any
+site, a `file:` or a `data:` page, one whose origin it withholds — so naming it would let any site
+drive the server and read every answer; serve the page from an origin, a local development
+server's or the Bead server's own, and name that one.
 
 Over HTTP, the server answers CORS to the origins `Origins` names and to no other (spec 15.12):
 their preflight is answered, allowing `Authorization`, the fields it asks for and any other
@@ -170,10 +227,28 @@ answers no CORS, which no browser asks of an upgrade.
 
 A server is refused as it is built, an `ArgumentException` naming the option and the entry, a
 `Hosts` entry with a port, an empty one, one that is no host, or `*` beside another; and an
-`Origins` entry that is `*`, since no origin wildcard exists, or neither `null` nor an origin as a
+`Origins` entry that is `*`, since no origin wildcard exists, `null`, or anything but an origin as a
 browser serializes it (RFC 6454 §6.2): a scheme in lower case, a host, a port with no leading
 zero, nothing after; for `http`, `https`, `ws` and `wss`, the host in lower case and no default
 port.
+
+Behind a proxy, an HTTP server believes `X-Forwarded-For` from the proxies `TrustedProxies` names
+alone, each an IP address or a network, `10.0.0.0/8` say, or the compose network's: while the
+address reached is one they hold, the field's next entry from the right is the client's, so what a
+client wrote to the left of the first address none of them holds is never read (spec 15.12). An
+entry is read in RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or
+`[2001:db8::1]:443`, its port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC
+5952 writes it, hexadecimal throughout, by the transport's own reading rather than
+`IPAddress.TryParse`'s; any other, `unknown` or a zone among them, ends the walk at the proxy that
+wrote it. None trusts no proxy, the loopback among them; a name, a network whose bits past its
+prefix are set, and a network of prefix 0, which would trust what every client writes, are an
+`ArgumentException` as the transport is built. `Forwarded` is never read, and a WebSocket server
+reads no `X-Forwarded-For`. A proxy not listed is a client as any other: every client behind it is
+its address, which `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
+proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A
+deployment whose proxies' addresses it cannot name, a platform's router or a cloud load balancer on
+public addresses, counts one address per proxy for now. A bound by address counts as one the users
+behind one NAT, and as many the addresses of one IPv6 network.
 
 A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which `curl -i` and a
 browser's network panel show. Each refusal the server judges of its own it tells, the event

@@ -177,11 +177,19 @@ internal sealed class InterceptedServer(Server<string> server) : IBeadServer<str
         }
     }
 
-    public BeforeRequest RequireSessionOrCredential
+    public BeforeRequest RequireCredential
     {
         get
         {
-            return server.RequireSessionOrCredential;
+            return server.RequireCredential;
+        }
+    }
+
+    public BeforeRequest ShareLegBSession
+    {
+        get
+        {
+            return server.ShareLegBSession;
         }
     }
 

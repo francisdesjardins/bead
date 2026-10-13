@@ -142,8 +142,9 @@ public sealed partial class RouterClientTests
         }
     }
 
+    // spec 13.4
     [Fact]
-    public async Task Withdraws_its_default_once_a_call_that_presented_it_is_refused_SESSION_REQUIRED_the_next_call_presents_none_and_CredentialWithdrawn_fires_once_its_scheme_alone()
+    public async Task Withdraws_its_default_once_a_call_that_presented_it_is_refused_SESSION_REQUIRED_the_next_call_that_would_present_it_fails_before_it_goes_SESSION_REQUIRED_nothing_sent_and_CredentialWithdrawn_fires_once_its_scheme_alone()
     {
         using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt });
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -169,12 +170,83 @@ public sealed partial class RouterClientTests
         });
         Assert.False(refused.MayOvertake);
 
+        // ! fails closed: never in the connection's session, nor in none, in silence
+        var next = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return CallOf(router).WaitAsync(Patience, Cancelled);
+        });
+
+        await scripted.Settle();
+
+        Assert.Equal(
+            (FailureOrigin.Local, FailureScope.Protocol, (ushort)ProtocolCode.SessionRequired, "the default credential was withdrawn"),
+            (next.Origin, next.Scope, next.Code, next.Failure.Detail));
+        Assert.Equal([CredentialScheme.Jwt], withdrawn);
+        Assert.Null(router.Credential);
+        Assert.True(router.IsCredentialWithdrawn);
+        Assert.Equal(2, PresentedOf(transport).Count);
+    }
+
+    // spec 13.4
+    [Fact]
+    public async Task After_a_withdrawal_a_call_that_gives_its_own_credential_or_NONE_goes_and_a_default_given_again_or_none_given_ends_the_withdrawal()
+    {
+        using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var withdrawn = new List<CredentialScheme>();
+
+        router.CredentialWithdrawn += withdrawn.Add;
+        Assert.False(router.IsCredentialWithdrawn);
+
+        var first = CallOf(router);
+
+        await scripted.Settle();
+        transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
+        await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return first.WaitAsync(Patience, Cancelled);
+        });
+        Assert.True(router.IsCredentialWithdrawn);
+
+        // a call's own credential, NONE among them, goes: the call that renews it presents none
+        _ = CallOf(router, Credential.None);
+        _ = CallOf(router, Credential.Jwt("d.e.f"));
+        await scripted.Settle();
+        Assert.True(router.IsCredentialWithdrawn);
+
+        // a default given again ends it, and so does none given: going on without one is written
+        router.Credential = Credential.Jwt("g.h.i");
+        Assert.False(router.IsCredentialWithdrawn);
         _ = CallOf(router);
         await scripted.Settle();
 
-        Assert.Equal([CredentialScheme.Jwt], withdrawn);
-        Assert.Null(router.Credential);
-        Assert.Equal((5u, (Credential?)null, (string?)null), PresentedOf(transport)[2]);
+        var again = CallOf(router);
+
+        await scripted.Settle();
+        transport.Deliver(FailureOf(9, ProtocolCode.SessionRequired));
+        await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return again.WaitAsync(Patience, Cancelled);
+        });
+        Assert.True(router.IsCredentialWithdrawn);
+        router.Credential = null;
+        Assert.False(router.IsCredentialWithdrawn);
+        _ = CallOf(router);
+        await scripted.Settle();
+
+        // NONE written as the header's absence of one
+        List<(uint CallId, Credential? Credential, string? Carried)> presented =
+        [
+            (1, DefaultJwt, null),
+            (3, null, null),
+            (5, Credential.Jwt("d.e.f"), null),
+            (7, Credential.Jwt("g.h.i"), null),
+            (9, Credential.Jwt("g.h.i"), null),
+            (11, null, null),
+        ];
+
+        Assert.Equal([CredentialScheme.Jwt, CredentialScheme.Jwt], withdrawn);
+        Assert.Equal(presented, PresentedOf(transport));
     }
 
     [Fact]
@@ -199,6 +271,16 @@ public sealed partial class RouterClientTests
         Assert.Equal(FailureOrigin.Relayed, refused.Origin);
         Assert.Equal([CredentialScheme.Elsewhere], withdrawn);
         Assert.Null(router.Credential);
+
+        // the next call that would present it fails alike, before it goes
+        var next = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return CallOf(router).WaitAsync(Patience, Cancelled);
+        });
+
+        await scripted.Settle();
+        Assert.Equal((FailureOrigin.Local, (ushort)ProtocolCode.SessionRequired), (next.Origin, next.Code));
+        Assert.Single(transport.Envelopes);
     }
 
     [Fact]

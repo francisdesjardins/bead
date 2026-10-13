@@ -31,6 +31,8 @@ import {
   createServer,
   DisconnectError,
   ProtocolCode,
+  requireCredential,
+  shareLegBSession,
   TimeoutError,
   type IServer,
   type IServerOptions,
@@ -241,9 +243,14 @@ test.describe('createServer', () => {
     );
 
     expect(built).toEqual([['sessions'], ['router', true], ['services', true]]);
-    // the router is built with the server's limits, and relays to a session alone unless told
+    // the router is built with the server's limits, and relays a credential it forwards alone
+    // unless told; the admissions a relay is given are the server's members
     expect(routerOptions?.limits).toEqual({ maximumPayloadBytes: 8 });
-    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireSessionOrCredential });
+    expect(routerOptions?.relay).toEqual({ beforeRoute: server.requireCredential });
+    expect([server.requireCredential, server.shareLegBSession]).toEqual([
+      requireCredential,
+      shareLegBSession,
+    ]);
     expect(server.router).toBe(builtRouter);
     expect(server.sessions).toBe(sessions);
     expect(server.transport).toBe(transport);
@@ -1045,7 +1052,8 @@ test.describe('createServer', () => {
     expect(inner.getAll()).toEqual([]);
   });
 
-  test('relays as its options say, its own admission and timeout kept, requireSessionOrCredential where it gives none', async () => {
+  // spec 14.3.1
+  test('relays as its options say, its own admission and timeout kept, requireCredential where it gives none', async () => {
     const beforeRoute = () => {
       return true;
     };
@@ -1069,7 +1077,7 @@ test.describe('createServer', () => {
 
     expect(relays).toEqual([
       { beforeRoute, timeout: 250 },
-      { beforeRoute: timed.requireSessionOrCredential, timeout: 250 },
+      { beforeRoute: timed.requireCredential, timeout: 250 },
     ]);
     expect(server.router.destinations()).toEqual([]);
   });

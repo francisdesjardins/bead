@@ -9,7 +9,7 @@
     "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
-    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and isProxyTrusted; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
+    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, and origins, for either transport, and trustedProxies, the HTTP server's; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -2042,8 +2042,9 @@
       ]
     },
     {
-      "name": "hosts * takes every host, an empty one and none among them",
+      "name": "hosts * takes every host, an empty one and none among them, and makes none of their origins its own: a page that rebinds its name is refused 403 origin-refused, marked",
       "clauses": [
+        "15.6.5",
         "15.12"
       ],
       "transport": "http",
@@ -2061,9 +2062,33 @@
         },
         {
           "expect": {
-            "status": 201
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "rebind.example:8080",
+              "origin": "http://rebind.example:8080",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example:8080\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "plain"
         },
         {
           "send": {
@@ -2544,8 +2569,9 @@
       ]
     },
     {
-      "name": "a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken, under hosts *",
+      "name": "a Host of invalid punycode is taken under hosts *, and its Origin is none of the server's own",
       "clauses": [
+        "15.6.5",
         "15.12"
       ],
       "transport": "http",
@@ -2557,37 +2583,25 @@
       "steps": [
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: xn--bad-bma.test\r\ncontent-type: application/prs.bead\r\norigin: http://xn--bad-bma.test\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "idn"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "idn"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: xn--bad-bma.test:8443\r\ncontent-type: application/prs.bead\r\norigin: https://xn--bad-bma.test:8443\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "port"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "port"
-        },
-        {
-          "send": {
             "head": "POST /bead HTTP/1.1\r\nhost: xn--a\r\ncontent-type: application/prs.bead\r\norigin: http://xn--a\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "invalid"
         },
         {
           "expect": {
-            "status": 201
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "xn--a",
+              "origin": "http://xn--a",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "invalid"
         },
@@ -2641,6 +2655,18 @@
             "status": 201
           },
           "on": "idn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: xn--bad-bma.test:8443\r\ncontent-type: application/prs.bead\r\norigin: https://xn--bad-bma.test:8443\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "port"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "port"
         },
         {
           "send": {
@@ -2831,32 +2857,6 @@
             "status": 201
           },
           "on": "own"
-        }
-      ]
-    },
-    {
-      "name": "an Origin of null is taken when origins names it",
-      "clauses": [
-        "15.12"
-      ],
-      "transport": "http",
-      "options": {
-        "origins": [
-          "null"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: null\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "connect"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "connect"
         }
       ]
     },
@@ -3424,64 +3424,6 @@
       ]
     },
     {
-      "name": "an Origin of null that origins names is answered as any origin it names: its preflight 204, its exchanges naming null",
-      "clauses": [
-        "15.6.3",
-        "15.12"
-      ],
-      "transport": "http",
-      "options": {
-        "origins": [
-          "null"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "OPTIONS /bead HTTP/1.1\r\nhost: {host}\r\norigin: null\r\naccess-control-request-method: POST\r\nconnection: close\r\n\r\n"
-          },
-          "on": "preflight"
-        },
-        {
-          "expect": {
-            "status": 204,
-            "fields": {
-              "access-control-allow-origin": "null",
-              "access-control-expose-headers": "*",
-              "vary": "Origin",
-              "access-control-allow-credentials": null,
-              "access-control-allow-methods": "GET, POST, DELETE",
-              "access-control-max-age": "7200",
-              "cache-control": "no-store",
-              "x-content-type-options": "nosniff",
-              "bead-refusal": null,
-              "access-control-allow-headers": "authorization, *"
-            },
-            "body": ""
-          },
-          "on": "preflight"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: null\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "connect"
-        },
-        {
-          "expect": {
-            "status": 201,
-            "fields": {
-              "access-control-allow-origin": "null",
-              "access-control-expose-headers": "*",
-              "vary": "Origin",
-              "access-control-allow-credentials": null
-            }
-          },
-          "on": "connect"
-        }
-      ]
-    },
-    {
       "name": "past the connections a server holds, a connect is refused 503, with Retry-After",
       "clauses": [
         "15.6.13",
@@ -3541,7 +3483,7 @@
       ]
     },
     {
-      "name": "past the connections one address holds, behind a proxy trusted, a connect is refused 503",
+      "name": "past the connections one address holds, behind a proxy it names, a connect is refused 503",
       "clauses": [
         "15.6.13",
         "15.12",
@@ -3550,7 +3492,9 @@
       "transport": "http",
       "options": {
         "maximumConnectionsPerAddress": 1,
-        "isProxyTrusted": true
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
       },
       "steps": [
         {
@@ -3603,6 +3547,374 @@
             "status": 201
           },
           "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "192.0.2.0/24"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "behind proxies it names, the client is the rightmost X-Forwarded-For entry none of them holds, what a client wrote to its left never read",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.0/8",
+          "10.0.0.0/8"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7, 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 203.0.113.9, 198.51.100.7, 10.0.0.6\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "198.51.100.7",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.8\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For entry that is no address ends the walk at the proxy that wrote it",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.1",
+          "10.0.0.0/8"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: evil, 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "10.0.0.5",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "a refusal behind a proxy it names tells the client's address, and its port the proxy's connection's",
+      "clauses": [
+        "15.6.5",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 203.0.113.9\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "203.0.113.9",
+              "port": "{port}"
+            }
+          },
+          "on": "rebound"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For entry is read in RFC 7239's node forms, its port dropped, and held in one form, an IPv4-mapped one as IPv4 and IPv6 as RFC 5952 writes it; a zone, a name or unknown ends the walk at the proxy",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.7:51234\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "ported"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "ported"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: ::ffff:192.0.2.7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "mapped"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.7",
+              "port": "{port}"
+            }
+          },
+          "on": "mapped"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: [2001:DB8::1]:443\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "bracketed"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "bracketed"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 2001:db8:0:0:0:0:0:1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "expanded"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "2001:db8::1",
+              "port": "{port}"
+            }
+          },
+          "on": "expanded"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: [2001:db8::3]\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "portless"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "portless"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 2001:db8::2%eth0\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "zoned"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "zoned"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: unknown\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "unknown"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "unknown"
         }
       ]
     },
@@ -6027,8 +6339,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 30\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 56\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D"
           },
           "on": "register"
         },
@@ -6067,30 +6379,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 26\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
-          },
-          "on": "login"
-        },
-        {
-          "expect": {
-            "status": 200,
-            "fields": {
-              "content-type": "application/prs.bead"
-            },
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 61 64 61 22",
-              "credential": "OPAQUE"
-            }
-          },
-          "on": "login"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 19\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 319\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 0A 4F  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 25  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 4E 73 61 57 56 75 64 43 4A 39 2E 4D 32 66 74 46 6D 2D 6B 50 70 70 53 56 70 49 30 44 2D 42 55 31 6B 46 4E 4E 32 4C 67 4F 6D 71 35 62 31 33 43 4A 63 75 42 4A 39 34 00 00 00 | 22 78 22"
           },
           "on": "relayed"
         },
@@ -6102,7 +6392,7 @@
             },
             "envelope": {
               "kind": 18,
-              "callId": 3,
+              "callId": 1,
               "failure": {
                 "code": 17,
                 "scope": 0,
@@ -6147,8 +6437,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 30\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {device}\r\ncontent-type: application/prs.bead\r\ncontent-length: 56\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D"
           },
           "on": "register"
         },
@@ -6187,30 +6477,8 @@
         },
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 26\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
-          },
-          "on": "login"
-        },
-        {
-          "expect": {
-            "status": 200,
-            "fields": {
-              "content-type": "application/prs.bead"
-            },
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 61 64 61 22",
-              "credential": "OPAQUE"
-            }
-          },
-          "on": "login"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 19\r\nconnection: close\r\n\r\n",
-            "body": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 319\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 0A 4F  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 25  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 4E 73 61 57 56 75 64 43 4A 39 2E 4D 32 66 74 46 6D 2D 6B 50 70 70 53 56 70 49 30 44 2D 42 55 31 6B 46 4E 4E 32 4C 67 4F 6D 71 35 62 31 33 43 4A 63 75 42 4A 39 34 00 00 00 | 22 78 22"
           },
           "on": "relayed"
         },
@@ -6222,7 +6490,7 @@
             },
             "envelope": {
               "kind": 18,
-              "callId": 3,
+              "callId": 1,
               "failure": {
                 "code": 65,
                 "scope": 0,
@@ -7194,17 +7462,94 @@
       ]
     },
     {
-      "name": "an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken, under hosts *",
+      "name": "an upgrade naming a Host of invalid punycode is taken under hosts *, and its Origin is none of the server's own",
       "clauses": [
         "15.2",
         "15.2.2",
         "15.2.7",
+        "15.6.5",
         "15.12"
       ],
       "transport": "websocket",
       "options": {
         "hosts": [
           "*"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: xn--a\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://xn--a\r\n\r\n"
+          },
+          "on": "invalid"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "xn--a",
+              "origin": "http://xn--a",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "invalid"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: xn--a.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "dotted"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "dotted"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: xn---bad-cpa.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "hyphen"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "hyphen"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked",
+      "clauses": [
+        "15.2",
+        "15.2.2",
+        "15.2.7",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "xn--bad-bma.test"
         ]
       },
       "steps": [
@@ -7255,103 +7600,6 @@
             }
           },
           "on": "port"
-        },
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn--a\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://xn--a\r\n\r\n"
-          },
-          "on": "invalid"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "invalid"
-        },
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn--a.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
-          },
-          "on": "dotted"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "dotted"
-        },
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn---bad-cpa.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
-          },
-          "on": "hyphen"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "hyphen"
-        }
-      ]
-    },
-    {
-      "name": "an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked",
-      "clauses": [
-        "15.2",
-        "15.2.2",
-        "15.6.5",
-        "15.12"
-      ],
-      "transport": "websocket",
-      "options": {
-        "hosts": [
-          "xn--bad-bma.test"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn--bad-bma.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://xn--bad-bma.test\r\n\r\n"
-          },
-          "on": "idn"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "idn"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
-          },
-          "on": "idn"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 78 22"
-            }
-          },
-          "on": "idn"
         },
         {
           "send": {
@@ -7731,11 +7979,13 @@
       ]
     },
     {
-      "name": "a WebSocket server whose hosts is * takes an upgrade naming any host, and judges one naming none by its version",
+      "name": "a WebSocket server whose hosts is * takes an upgrade naming any host that carries no Origin, refuses one whose Origin is its authority's 403 origin-refused, and judges one naming none by its version",
       "clauses": [
         "15.2",
         "15.2.2",
         "15.2.5",
+        "15.2.7",
+        "15.6.5",
         "15.6.11",
         "15.12"
       ],
@@ -7754,13 +8004,39 @@
         },
         {
           "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "rebind.example:8080",
+              "origin": "http://rebind.example:8080",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example:8080\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
             "status": 101,
             "fields": {
               "upgrade": "websocket",
               "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
             }
           },
-          "on": "rebound"
+          "on": "plain"
         },
         {
           "send": {
@@ -8022,54 +8298,6 @@
             }
           },
           "on": "own"
-        }
-      ]
-    },
-    {
-      "name": "an upgrade with an Origin of null is taken when origins names it",
-      "clauses": [
-        "15.2",
-        "15.2.7",
-        "15.12"
-      ],
-      "transport": "websocket",
-      "options": {
-        "origins": [
-          "null"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: null\r\n\r\n"
-          },
-          "on": "socket"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "socket"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
-          },
-          "on": "socket"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 78 22"
-            }
-          },
-          "on": "socket"
         }
       ]
     },
@@ -9540,24 +9768,7 @@
         },
         {
           "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D"
-          },
-          "on": "client"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 61 64 61 22",
-              "credential": "OPAQUE"
-            }
-          },
-          "on": "client"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D"
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 2C 22 61 75 64 69 65 6E 63 65 22 3A 22 62 65 61 64 2D 69 6E 74 65 72 6F 70 22 7D"
           },
           "on": "device"
         },
@@ -9573,7 +9784,7 @@
         },
         {
           "send": {
-            "binary": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22"
+            "binary": "A1 10 0A 4F  00 00 00 01  00 01 00 01  00 00 00 0C  00 02 01 25  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 4E 73 61 57 56 75 64 43 4A 39 2E 4D 32 66 74 46 6D 2D 6B 50 70 70 53 56 70 49 30 44 2D 42 55 31 6B 46 4E 4E 32 4C 67 4F 6D 71 35 62 31 33 43 4A 63 75 42 4A 39 34 00 00 00 | 22 78 22"
           },
           "on": "client"
         },
@@ -9582,10 +9793,14 @@
             "envelope": {
               "kind": 16,
               "callId": 2,
-              "flags": 0,
+              "flags": 8,
               "serviceId": 1,
               "procedureId": 1,
-              "payload": "22 78 22"
+              "payload": "22 78 22",
+              "credential": {
+                "scheme": "JWT",
+                "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXkiLCJjbGllbnRfaWQiOiJiZWFkLWNsaWVudCJ9.M2ftFm-kPppSVpI0D-BU1kFNN2LgOmq5b13CJcuBJ94"
+              }
             }
           },
           "on": "device"
@@ -9606,7 +9821,7 @@
           "expect": {
             "envelope": {
               "kind": 18,
-              "callId": 3,
+              "callId": 1,
               "failure": {
                 "code": 65,
                 "scope": 0,

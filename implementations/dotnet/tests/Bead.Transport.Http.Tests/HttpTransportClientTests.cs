@@ -2,6 +2,8 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Threading.Channels;
 using Bead.Tests;
 using Microsoft.Extensions.Time.Testing;
@@ -682,6 +684,129 @@ public sealed class HttpTransportClientTests
     }
 
     /// <summary>
+    /// A relay of the tests' own between a client and a server on this machine, each connection
+    /// passed on as it came, which keeps what the client wrote: the fields the server received.
+    /// </summary>
+    private sealed class Tap : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _stop = new();
+        private readonly List<TcpClient> _sockets = [];
+        private readonly List<Task> _pumps = [];
+        private readonly StringBuilder _written = new();
+        private readonly int _target;
+        private readonly Task _accepting;
+
+        public Tap(int target)
+        {
+            _target = target;
+            _listener.Start();
+            _accepting = Accept();
+        }
+
+        public int Port
+        {
+            get
+            {
+                return ((IPEndPoint)_listener.LocalEndpoint).Port;
+            }
+        }
+
+        // what the client wrote, every connection's in the order it came, each octet a character
+        public string Written
+        {
+            get
+            {
+                lock (_written)
+                {
+                    return _written.ToString();
+                }
+            }
+        }
+
+        private async Task Accept()
+        {
+            try
+            {
+                while (true)
+                {
+                    var client = await _listener.AcceptTcpClientAsync(_stop.Token);
+                    var server = new TcpClient();
+
+                    lock (_sockets)
+                    {
+                        _sockets.Add(client);
+                        _sockets.Add(server);
+                    }
+
+                    await server.ConnectAsync(IPAddress.Loopback, _target, _stop.Token);
+
+                    lock (_sockets)
+                    {
+                        _pumps.Add(Pump((client.GetStream(), server.GetStream()), true));
+                        _pumps.Add(Pump((server.GetStream(), client.GetStream()), false));
+                    }
+                }
+            }
+            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException)
+            {
+                return;
+            }
+        }
+
+        // what one end writes, passed on to the other, kept when it is the client's
+        private async Task Pump((NetworkStream From, NetworkStream To) ends, bool isKept)
+        {
+            var buffer = new byte[8_192];
+
+            try
+            {
+                int count;
+
+                while ((count = await ends.From.ReadAsync(buffer, _stop.Token)) > 0)
+                {
+                    if (isKept)
+                    {
+                        lock (_written)
+                        {
+                            _written.Append(Encoding.Latin1.GetString(buffer, 0, count));
+                        }
+                    }
+
+                    await ends.To.WriteAsync(buffer.AsMemory(0, count), _stop.Token);
+                }
+
+                ends.To.Socket.Shutdown(SocketShutdown.Send);
+            }
+            catch (Exception ended) when (ended is IOException or OperationCanceledException or ObjectDisposedException or SocketException)
+            {
+                return;
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _stop.CancelAsync();
+            _listener.Stop();
+
+            Task[] pumps;
+
+            lock (_sockets)
+            {
+                foreach (var socket in _sockets)
+                {
+                    socket.Dispose();
+                }
+
+                pumps = [.. _pumps];
+            }
+
+            await Task.WhenAll([.. pumps, _accepting]);
+            _stop.Dispose();
+        }
+    }
+
+    /// <summary>
     /// The test's clock, whose timers end a millisecond before their due time, as a timer can against
     /// a clock read on a loaded machine; one never due stays so.
     /// </summary>
@@ -824,6 +949,48 @@ public sealed class HttpTransportClientTests
         })).Message);
         Assert.Equal(ReadyState.Open, client.ReadyState);
         await client.CloseConnection().WaitAsync(Patience, Cancelled);
+    }
+
+    // spec 15.5
+    [Fact]
+    public async Task Writes_no_Origin_on_a_connect_a_POST_a_listen_or_a_DELETE()
+    {
+        await using var started = await Started.Start();
+        await using var tap = new Tap(started.Port);
+        await using var client = new HttpTransportClient();
+
+        await client.Connect(new HttpConnectOptions { Host = Host, Port = tap.Port }, Cancelled);
+        await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+
+        // the listen it holds, once the connect said it listens
+        await Eventually(() =>
+        {
+            return tap.Written.Contains("GET /", StringComparison.Ordinal);
+        });
+        await client.CloseConnection().WaitAsync(Patience, Cancelled);
+        await Eventually(() =>
+        {
+            return tap.Written.Contains("DELETE /", StringComparison.Ordinal);
+        });
+
+        var lines = tap.Written.Split("\r\n");
+        var methods = lines.Where((line) =>
+        {
+            return line.EndsWith(" HTTP/1.1", StringComparison.Ordinal);
+        }).Select((line) =>
+        {
+            // a request line, behind the body of the request before it on its connection
+            var method = line[..line.IndexOf(' ', StringComparison.Ordinal)];
+
+            return string.Concat(method.Reverse().TakeWhile(char.IsAsciiLetterUpper).Reverse());
+        }).ToHashSet();
+
+        // a page's browser writes its own, which the server judges; the client, none
+        Assert.Equal(new HashSet<string> { "DELETE", "GET", "POST" }, methods);
+        Assert.DoesNotContain(lines, (line) =>
+        {
+            return line.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     [Fact]

@@ -157,7 +157,7 @@ public sealed class TransportsTests
                 "inactivityTimeout" => options with { InactivityTimeout = TimeOf(value) },
                 "hosts" => options with { Hosts = TextsOf(value) },
                 "origins" => options with { Origins = TextsOf(value) },
-                "isProxyTrusted" => options with { IsProxyTrusted = value.GetBoolean() },
+                "trustedProxies" => options with { TrustedProxies = TextsOf(value) },
 
                 // the server layer's, which ConnectionInactivityTimeoutOf reads
                 "connectionInactivityTimeout" => options,

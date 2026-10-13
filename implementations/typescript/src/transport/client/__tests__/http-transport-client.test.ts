@@ -239,6 +239,52 @@ test.describe('createHTTPTransportClient', () => {
     await client.disconnect();
   });
 
+  // spec 15.5
+  test('writes no Origin on a connect, a POST, a listen or a DELETE', async () => {
+    const seen: [string | undefined, string | undefined][] = [];
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        return createServer((request, response) => {
+          seen.push([request.method, request.headers.origin]);
+          listener(request, response);
+        });
+      },
+    });
+    const { port } = await server.start({ address: host, findOpenPort: true });
+
+    try {
+      const client = createHTTPTransportClient();
+
+      await client.connect({ host, port });
+      await client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+      // the listen it holds, once the connect said it listens
+      await expect
+        .poll(() => {
+          return seen.some(([method]) => {
+            return method === 'GET';
+          });
+        })
+        .toBe(true);
+      await client.disconnect();
+
+      // a page's browser writes its own, which the server judges; the client, none
+      expect(
+        new Set(
+          seen.map(([method]) => {
+            return method;
+          })
+        )
+      ).toEqual(new Set(['DELETE', 'GET', 'POST']));
+      expect(
+        seen.filter(([, origin]) => {
+          return origin !== undefined;
+        })
+      ).toEqual([]);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('writes Authorization only with a credential, and refuses one no field carries before it goes, its connection kept', async () => {
     const { client, fake } = await connectFake();
     const carrying = client.send({

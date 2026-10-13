@@ -378,6 +378,30 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Single(_server.ConnectionHandles);
     }
 
+    // spec 15.2
+    [Fact]
+    public async Task Writes_no_Origin_on_its_upgrade()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+        }
+
+        var lines = Encoding.ASCII.GetString(head).Split("\r\n");
+
+        // a page's browser writes its own, which the server judges; the client, none
+        Assert.StartsWith("GET ", lines[0], StringComparison.Ordinal);
+        Assert.DoesNotContain(lines, (line) =>
+        {
+            return line.StartsWith("Origin:", StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     [Fact]
     public async Task Refuses_a_connect_while_its_close_is_under_way_and_connects_again_once_closed()
     {

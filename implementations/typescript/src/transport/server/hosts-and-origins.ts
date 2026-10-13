@@ -30,7 +30,10 @@ export const HOST_REFUSAL = 'host-refused';
 /** The refusal of a request whose `Origin` is neither the server's own nor among those it takes. */
 export const ORIGIN_REFUSAL = 'origin-refused';
 
-/** The `hosts` entry that takes every host, an empty one and none, alone in its list (spec 15.12). */
+/**
+ * The `hosts` entry that takes every host, an empty one and none, alone in its list, and makes none
+ * of their origins its own (spec 15.12).
+ */
 export const EVERY_HOST = '*';
 
 // a `name` of spec 15.12's grammar, an IPv4 address and the empty name among them: RFC 3986's
@@ -43,9 +46,6 @@ const IP_LITERAL = /^\[(?<literal>[^\]]*)\]$/u;
 // RFC 3986's `IPv4address`: four `dec-octet`, none with a leading zero
 const DEC_OCTET = '(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]\\d|\\d)';
 const IPV4_ADDRESS = new RegExp(`^${DEC_OCTET}(?:\\.${DEC_OCTET}){3}$`, 'u');
-
-// an IPv4 address an IPv6 socket carries mapped, as Node writes it (RFC 4291 §2.5.5.2)
-const IPV4_MAPPED = /^::ffff:(?<ipv4>\d{1,3}(?:\.\d{1,3}){3})$/iu;
 
 // a port of one digit at least
 const PORT = /^\d+$/u;
@@ -133,14 +133,6 @@ const isTakenByEveryServer = (host: string): boolean => {
 };
 
 // definition
-
-/**
- * A client's address as its socket gives it (spec 15.12), an IPv4 address an IPv6 socket carries
- * mapped, `::ffff:a.b.c.d`, read as that IPv4 address (RFC 4291 §2.5.5.2).
- */
-export const clientAddressOf = (socketAddress: string): string => {
-  return IPV4_MAPPED.exec(socketAddress)?.groups?.['ipv4'] ?? socketAddress;
-};
 
 /**
  * Whether `value` is RFC 3986's `IPv4address`, four `dec-octet` with no leading zero: by the
@@ -361,12 +353,30 @@ export const isTakenHost = (
 };
 
 /**
+ * The authority a server's own origin is made of (spec 15.12): the request's, when its host is one
+ * the server takes by name — one every server takes, or one `hosts` lists — and none when only
+ * {@link EVERY_HOST} takes it, which vouches for no name: a page that rebinds its name to the
+ * server's address names its own `Host`, and is no origin of the server's by it.
+ */
+export const ownAuthorityOf = (
+  authority: string | undefined,
+  hosts: readonly string[] | undefined
+): string | undefined => {
+  const named = (hosts ?? []).filter((host) => {
+    return host !== EVERY_HOST;
+  });
+
+  return isTakenHost(authority, named) ? authority : undefined;
+};
+
+/**
  * Whether a request from `origin` is taken: one without an `Origin` comes from no page, and from
  * anywhere; one among `origins`, exactly; or the server's own, `http://` or `https://` followed by
- * the request's authority, compared ASCII case-insensitively. The field is read as the serialized
- * origin it carries (RFC 6454 §6.2; Fetch, "serializing a request origin"), never parsed as a URL:
- * a browser writes it and the `Host` from one URL alike. Any other is none of its own, `null` and
- * every other scheme among them, as is any `Origin` of a request without a host.
+ * the authority it is given, {@link ownAuthorityOf}'s, compared ASCII case-insensitively. The field
+ * is read as the serialized origin it carries (RFC 6454 §6.2; Fetch, "serializing a request
+ * origin"), never parsed as a URL: a browser writes it and the `Host` from one URL alike. Any other
+ * is none of its own, `null` and every other scheme among them, as is any `Origin` of a request
+ * without an authority of its own.
  */
 export const isTakenOrigin = (
   origin: string | undefined,
@@ -388,8 +398,8 @@ export const isTakenOrigin = (
 
 /**
  * Whether `origin` is among `origins`, exactly, as {@link isTakenOrigin} compares them: the pages the
- * server answers CORS to (spec 15.12), `null` among them when named. None is never listed, and the
- * server's own is listed only when named.
+ * server answers CORS to (spec 15.12). None is never listed, and the server's own is listed only
+ * when named.
  */
 export const isListedOrigin = (origin: string | undefined, origins: readonly string[]): boolean => {
   return origin !== undefined && origins.includes(origin);
@@ -399,8 +409,8 @@ export const isListedOrigin = (origin: string | undefined, origins: readonly str
  * Refuses, with a {@link ProgrammerError} naming the entry, a `hosts` that holds an entry with a
  * port, an empty one, one that is no host of spec 15.12's grammar — a Unicode IDN among them, which
  * the field never carries — or {@link EVERY_HOST} beside another. `[]` and none take the hosts every
- * server takes alone; `['*']` takes every host, and reopens what the check closes: a page that
- * rebinds its name to the server's address.
+ * server takes alone; `['*']` takes every host and makes none of their origins its own: a page that
+ * rebinds its name to the server's address passes the host's test, and the origin's refuses it.
  */
 export const assertHosts = (hosts: readonly string[] | undefined): void => {
   for (const entry of hosts ?? []) {
@@ -425,13 +435,14 @@ export const assertHosts = (hosts: readonly string[] | undefined): void => {
 };
 
 /**
- * Refuses, with a {@link ProgrammerError} naming the entry, an `origins` entry that is neither `null`
- * nor an origin as RFC 6454 §6.2 serializes it — a scheme in lower case, `://`, a host of spec
- * 15.12's grammar, a port of 0 to 65535 with no leading zero, nothing after; for `http`, `https`,
- * `ws` and `wss`, the host in lower case and no port where it is the scheme's default, another
- * scheme's taken as written — since a browser writes `Origin` so, and an entry is compared exactly. `*` is none: no
- * origin wildcard exists, and taking every page is `hosts: ['*']` with no origin named, a decision
- * of its own. `[]` and none take a page of the server's own alone.
+ * Refuses, with a {@link ProgrammerError} naming the entry, an `origins` entry that is not an origin
+ * as RFC 6454 §6.2 serializes it — a scheme in lower case, `://`, a host of spec 15.12's grammar, a
+ * port of 0 to 65535 with no leading zero, nothing after; for `http`, `https`, `ws` and `wss`, the
+ * host in lower case and no port where it is the scheme's default, another scheme's taken as
+ * written — since a browser writes `Origin` so, and an entry is compared exactly. `*` is none: no
+ * origin wildcard exists. Nor is `null`, which a browser sends for every page with no origin of its
+ * own, a sandboxed frame of any site among them: naming it would take them all (RFC 6454 §6.2). `[]`
+ * and none take a page of the server's own alone.
  */
 export const assertOrigins = (origins: readonly string[] | undefined): void => {
   for (const entry of origins ?? []) {
@@ -441,18 +452,23 @@ export const assertOrigins = (origins: readonly string[] | undefined): void => {
       );
     }
 
+    if (entry === 'null') {
+      throw new ProgrammerError(
+        'origins does not take null: a browser sends it for every page with no origin of its own, a sandboxed frame of any site among them; serve the page from an origin, and name that one'
+      );
+    }
+
     const { host = '', port, scheme = '' } = SERIALIZED_ORIGIN.exec(entry)?.groups ?? {};
 
     if (
-      entry !== 'null' &&
-      (host === '' ||
-        !isHost(host) ||
-        (DEFAULT_PORTS[scheme] !== undefined &&
-          (host !== asciiLowerCase(host) || DEFAULT_PORTS[scheme] === port)) ||
-        Number(port ?? 0) > 65_535)
+      host === '' ||
+      !isHost(host) ||
+      (DEFAULT_PORTS[scheme] !== undefined &&
+        (host !== asciiLowerCase(host) || DEFAULT_PORTS[scheme] === port)) ||
+      Number(port ?? 0) > 65_535
     ) {
       throw new ProgrammerError(
-        `an origins entry is null or an origin as a browser serializes it, scheme://host[:port] in lower case, no default port, nothing after: not ${entry}`
+        `an origins entry is an origin as a browser serializes it, scheme://host[:port] in lower case, no default port, nothing after: not ${entry}`
       );
     }
   }

@@ -184,15 +184,26 @@ default alone, a list from a configuration that came empty meaning no more than 
 `hosts: ['*']` takes every host, an empty one and none, the opt-out the user chose for keeping the
 option's type on both sides, `readonly string[]` and `IReadOnlyList<string>`, and
 `spec/transports.json`'s schema. `*` is no host under 15.12's grammar, so the entry means nothing
-else. It reopens rebinding: both sides' doc comments and READMEs say so, as Vite's danger callout
-does.
+else. It takes a page that rebinds its name at the host's test, and makes no origin its own by a
+host it did not name, so the origin's test refuses that page, 403 `origin-refused`, told with its
+origin: every request a page makes without a token carries an `Origin`
+([Fetch §3.1](https://fetch.spec.whatwg.org/#origin-header)). A server's own origin is its request's
+authority only when that authority's host is taken by name, one every server takes or one `hosts`
+lists (spec 15.12): a name the server checked, never the one a rebound page's browser resolved (RFC
+6454 §5), as the `Host` test that defends against rebinding asks (Jackson et al., "Protecting
+Browsers from DNS Rebinding Attacks", 2007). Refusing `*` at start on a loopback or private address
+is not taken: it decides nothing for `0.0.0.0` and `::`, and behind the own-origin rule a rebound
+page reaches no exchange.
 
 **A server is refused as it is built a misconfigured list**, as Bead refuses a timeout of 0
 (`ProgrammerError` on the TypeScript side, `ArgumentException` on the C# side, naming the entry): a
 `hosts` entry with a port, an empty one, one that is no host (a Unicode IDN among them, which the
 field never carries), or `*` beside another; an `origins` entry that is `*`, its message saying that
 no origin wildcard exists and that taking every page is `hosts: ['*']`'s and an origin check's
-absence, or that is neither `null` nor an origin as
+absence; one that is `null`, its message saying that a browser sends it for every page with no
+origin of its own, a sandboxed frame of any site among them, and to serve the page from an origin
+and name that one (RFC 6454 §6.2; OWASP's HTML5 Security Cheat Sheet, CWE-942); or one that is not
+an origin as
 [RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it: its scheme and
 host in lower case, the host ASCII and of 15.12's grammar, no port where it is the scheme's default
 (`http` and `ws` 80, `https` and `wss` 443), nothing after. A scheme of another kind, an
@@ -255,7 +266,11 @@ more.
 **A request that names no host is refused but under `*`**: an `HTTP/1.0` request without `Host`, and
 an HTTP/2 one with neither `:authority` nor `host`. No browser sends one.
 
-**`*` reopens rebinding**, and the residual of a `.localhost` name a user agent sends on to a
+**`*` leaves rebinding to the origin's test**: an application under `*` that serves its own page
+names that page's host in `hosts` or its origin in `origins`. A client that is no browser and writes
+its target as its `Origin` — Python's `websocket-client` does by default — is refused under `*` by a
+name `hosts` does not list: list that name, or have the client write no `Origin`, as a Bead client
+writes none (spec 15.2, 15.5). The residual of a `.localhost` name a user agent sends on to a
 resolver that does not keep it local stays, stated in 15.12.
 
 **A container, or any server another machine reaches, says `0.0.0.0` or `::`**, and names its hosts:
@@ -280,7 +295,8 @@ close it.
 seconds a connect by `localhost`; every Bead client and every browser races.
 
 **The gate.** The cases of `spec/transports.json` that cite 15.12, played by both sides: the hosts
-every server takes, a list adding to them, `[]`, `*`, an absolute-form target, over HTTP and at a
+every server takes, a list adding to them, `[]`, `*` and the origins it makes none of its own, an
+absolute-form target, over HTTP and at a
 WebSocket's address, and the forms a host is not, answered 400 as HTTP answers them. A build
 refusal and HTTP/2 are no step: twin tests hold them, by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)), each side's `hosts and origins` tests for the
@@ -297,11 +313,13 @@ race, `HappyEyeballsTests`.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-two rounds: the one below, which
-[0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md) shares, and the one
-on the address a server listens on, which
+three rounds: the first below, which
+[0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md) shares; the one on
+the address a server listens on, which
 [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) keeps, On
-a refusal told and the default listening address. This round's objections, each with the answer that
+a refusal told and the default listening address; and the one on the footguns before 0.4.0, whose
+row on a server's hosts and origins is kept below, the round told in
+[0010](0010-a-request-presents-a-credential-of-a-scheme.md). Each objection, with the answer that
 holds:
 
 ### On a server's hosts and a connection's handle
@@ -315,3 +333,9 @@ holds:
 | The build check stops at `hosts`: `origins: ['*']`, the reader's next guess after `hosts: ['*']`, matches nothing, as does an entry with a trailing slash, upper case or a default port, and `hosts: []` refuses everything                                                                                                                                                   | Accepted: an `origins` entry is `null` or an origin as RFC 6454 §6.2 serializes it, refused as built otherwise, `*` with a message that no origin wildcard exists. `hosts: []`, with a list adding to the default, means the default alone, and 15.12 says so. Twins on both sides                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | The drawn form `type=WS;ip=…;ordinal=n` drops the port, the one part that ties a connection to the network: the handle is the trace's only connection field, and the C# `Connection` event carries the handle alone; the TypeScript template type publishes a form 15.1 says nothing reads; 53 opaque C# fixtures need not change                                             | In part: the port stays, `type=WS;ip=…;port=…;ordinal=n`, unique by its ordinal, which settles the handle as the draw does, and traceable by its port; it costs no side a public event's change, where the C# event carrying the client record would. The TypeScript type stays a template literal, and 15.1 says a handle's form is its implementation's, compared whole by an application, so the spec and the type agree. The C# fixtures move with the TypeScript ones, in one mechanical commit: twin tests read one form, and a fixture in a form no transport writes would read as one it does                                                                                                                                                                                                                                                                                                                                    |
 | 15.12's ground for `.localhost` is not the one that holds: no registry granting a name stops nothing; resolution does (RFC 6761 §6.3 items 3 to 5); refusing `localhost.` is 0010's choice, not safety; "the hosts no page can rebind its name to" would take an empty host and none, which the same sentence refuses                                                         | Accepted: measured on Windows, `.localhost` names and `localhost.` resolve to the loopback. 15.12 and this record cite §6.3's resolution clauses and state the residual, a user agent that sends a localhost name to a resolver that does not keep it local; `localhost.` is refused for the field compared as it comes. The default is written as its list, the rebinding argument kept as its reason. No behaviour changes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+### On the footguns before 0.4.0
+
+| Objection                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Under `*`, the own-origin rule refuses a non-browser client that writes its target as its `Origin` by a name `hosts` does not list — Python's `websocket-client` does by default — while the spec never says what a Bead client writes, so a third language would break under `*` alone (T6) | Accepted: the own-origin rule stays; 15.2 and 15.5 state that a client writes no `Origin`, a page's browser writing its own, which both sides already do and a twin per client transport holds; units 15.2 and 15.5 are acknowledged. The cost under `*` is named in the Consequences and both READMEs: list the name in `hosts`, or have the client write no `Origin`. |

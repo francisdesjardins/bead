@@ -103,7 +103,8 @@ const overHTTP = createHTTPServer({
     createServer: (listener) => {
       return createServer(listener);
     },
-    isProxyTrusted: true,
+    // the public port's relay, in this process, on the loopback
+    trustedProxies: ['127.0.0.1'],
   },
 });
 

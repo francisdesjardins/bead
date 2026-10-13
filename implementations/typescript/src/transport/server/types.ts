@@ -53,8 +53,9 @@ export interface ITransportServerClient {
  */
 export interface ITransportServerRefusal {
   /**
-   * The client's address, as `clients` reports one (spec 15.12): behind a proxy the transport
-   * trusts, the last it forwarded; `undefined` for a socket already gone.
+   * The client's address, as `clients` reports one (spec 15.12): over HTTP, the `X-Forwarded-For`
+   * entry reached past the proxies its `trustedProxies` names, else the socket's, in its one form;
+   * `undefined` for a socket already gone.
    */
   address: string | undefined;
   /**
@@ -64,7 +65,7 @@ export interface ITransportServerRefusal {
   authority: string | undefined;
   /** Its `Origin` as it came, its field lines joined by `, `; `undefined` when it sends none. */
   origin: string | undefined;
-  /** The client's port, as `clients` reports one: behind a proxy, its connection's. */
+  /** The client's port, as `clients` reports one: behind a proxy it trusts, the nearest one's. */
   port: number;
   /** The mark it was refused with, its `bead-refusal`: `host-refused`, `busy`… */
   reason: string;
@@ -419,9 +420,10 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * this server's address cannot pass: a server a browser, a proxy that keeps `Host`, or a service
    * reaches by a name names it here. Each entry is a host without its port, compared by the
    * request's host on any port, ASCII case-insensitively, an IDN host in punycode. `[]`, or none, is
-   * those every server takes alone; `['*']` takes every host, and so reopens the rebinding the
-   * check closes. An entry with a port, an empty one, one that is no host, or `*` beside another is
-   * a {@link ProgrammerError} as the server is built. A refusal is told on the wire, to a client
+   * those every server takes alone; `['*']` takes every host and makes none of their origins its
+   * own, so a page that rebinds its name passes this check and is refused by `origins`'. An entry
+   * with a port, an empty one, one that is no host, or `*` beside another is a
+   * {@link ProgrammerError} as the server is built. A refusal is told on the wire, to a client
    * over `ws`, and by the server's `refusal`; a page's WebSocket reads nothing of it but its close.
    * A `Host` missing, repeated or no host is answered 400 before it, as HTTP answers it (RFC 9112
    * §3.2).
@@ -435,13 +437,13 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
   maxPayload?: number | undefined;
   /**
    * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
-   * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly,
-   * checked on the upgrade, after its version and its form; any other is refused 403, since no
-   * same-origin policy guards an upgrade. `null` among them takes every upgrade that sends it; one
-   * with no `Origin` comes from anywhere. A WebSocket answers no CORS, which no browser asks of an
-   * upgrade. None, when not given. Each entry is `null` or an origin as a browser serializes it (RFC
-   * 6454 §6.2): `*`, which no origin is, and any other are a {@link ProgrammerError} as the server
-   * is built.
+   * `http://` or `https://` followed by its authority, in any ASCII case, when its host is one the
+   * server takes by name, never by `*` — each compared exactly, checked on the upgrade, after its
+   * version and its form; any other is refused 403, since no same-origin policy guards an upgrade.
+   * One with no `Origin` comes from anywhere. A WebSocket answers no CORS, which no browser asks of
+   * an upgrade. None, when not given. Each entry is an origin as a browser serializes it (RFC 6454
+   * §6.2): `*`, which no origin is, `null`, which every page with no origin of its own sends, and
+   * any other are a {@link ProgrammerError} as the server is built.
    */
   origins?: readonly string[] | undefined;
   /**
@@ -570,9 +572,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * cannot pass: a server a browser, a proxy that keeps `Host`, or a service reaches by a name names
    * it here. Each entry is a host without its port, compared by the request's host on any port,
    * ASCII case-insensitively, an IDN host in punycode. `[]`, or none, is those every server takes
-   * alone; `['*']` takes every host, and so reopens the rebinding the check closes. An entry with a
-   * port, an empty one, one that is no host, or `*` beside another is a {@link ProgrammerError} as
-   * the server is built. A refusal is told on the wire, to an HTTP client, and by the server's
+   * alone; `['*']` takes every host and makes none of their origins its own, so a page that rebinds
+   * its name passes this check and is refused by `origins`'. An entry with a port, an empty one, one
+   * that is no host, or `*` beside another is a {@link ProgrammerError} as the server is built. A refusal is told on the wire, to an HTTP client, and by the server's
    * `refusal`. An HTTP/1.1 request without a `Host`, with two, or with an authority that is no host is answered
    * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset.
    */
@@ -585,12 +587,6 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * session's own timers still count what the client says. Defaults to {@link INACTIVITY_TIMEOUT}.
    */
   inactivityTimeout?: number | undefined;
-  /**
-   * Whether the address in `x-forwarded-for` — its last one — is taken for the client's, when the
-   * request comes from this machine: a proxy in front of the transport. The socket's address, when
-   * not.
-   */
-  isProxyTrusted?: boolean | undefined;
   /** The largest body, in bytes: an envelope's limit. Defaults to {@link MAXIMUM_BODY_BYTES}. */
   maximumBodyBytes?: number | undefined;
   /**
@@ -622,15 +618,15 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumWaitingExchanges?: number | undefined;
   /**
    * The origins an exchange that sends an `Origin` may come from, besides the server's own —
-   * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly;
-   * any other is refused 403. `null` among them takes every exchange that sends it, and lets every
-   * page that sends it read every answer; one with no `Origin` comes from anywhere. It serves a proxy
-   * that rewrites the host, and a page of another origin, to which the server answers CORS (spec
-   * 15.12): its preflight 204, and on every answer once its origin is judged
-   * `Access-Control-Allow-Origin` and every field exposed, never `Access-Control-Allow-Credentials`.
-   * None, when not given. Each entry is `null` or an origin as a browser serializes it (RFC 6454
-   * §6.2): `*`, which no origin is, and any other are a {@link ProgrammerError} as the server is
-   * built.
+   * `http://` or `https://` followed by its authority, in any ASCII case, when its host is one the
+   * server takes by name, never by `*` — each compared exactly; any other is refused 403. One with
+   * no `Origin` comes from anywhere. It serves a proxy that rewrites the host, a page under
+   * `hosts: ['*']`, and a page of another origin, to which the server answers CORS (spec 15.12): its
+   * preflight 204, and on every answer once its origin is judged `Access-Control-Allow-Origin` and
+   * every field exposed, never `Access-Control-Allow-Credentials`. None, when not given. Each entry
+   * is an origin as a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, `null`, which
+   * every page with no origin of its own sends — a sandboxed frame of any site among them — and any
+   * other are a {@link ProgrammerError} as the server is built.
    */
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */
@@ -643,6 +639,19 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * loopback address.
    */
   secure?: boolean | undefined;
+  /**
+   * The proxies whose `X-Forwarded-For` the transport believes (spec 15.12): each an IP address in
+   * the form a server listens on, or a network, that address, `/` and its prefix's length (RFC 4632
+   * §3.1, RFC 4291 §2.3), from 1, its bits past the prefix zero. While the address reached is one
+   * they hold, the field's next entry from the right is the client's, when it is an address — bare,
+   * or as RFC 7239 §6 writes a node, its port dropped — held in one form, IPv4-mapped as IPv4 and
+   * IPv6 as RFC 5952 writes it. A proxy not listed is a client as any other, every client behind it
+   * its address: a told `busy` naming it, or a `largestAddressConnections` near its ceiling, is a
+   * proxy to list. None, when not given, the loopback among them. A name, and a network of prefix 0,
+   * which would trust what every client writes, are a {@link ProgrammerError} as the server is
+   * built, as is any other entry. `Forwarded` is never read.
+   */
+  trustedProxies?: readonly string[] | undefined;
 }
 
 // types

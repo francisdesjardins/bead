@@ -101,6 +101,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its preview's bounds beside its text, the stack that made each call made, and an envelope's time
   as the page's time origin and its monotonic reading since. The hook's protocol stays 1, and a page
   no panel inspects pays nothing.
+- `requireCredential`, `RequireCredential`, a server's relay's admission by default (spec 14.3).
+- `largestAddressConnections` among an HTTP server transport's gauges, under
+  `maximumConnectionsPerAddress`, on both sides: the health check warns at 80% of it, so a proxy
+  left off `trustedProxies` shows on `/health` before the first 503 (decision 0030).
+- `isCredentialWithdrawn`, `IsCredentialWithdrawn`, on a client's router: whether its default
+  credential stands withdrawn (spec 13.4).
+- `spec/transports.json` plays the client's address behind the proxies a server names: the walk
+  past two networks, a field from a socket no entry holds, an entry that is no address, a refusal
+  told behind a proxy, and an entry's node forms held in one form (spec 15.12).
 
 ### Changed
 
@@ -119,8 +128,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   request's port aside, so `bead.test` takes `bead.test:8443` and `bead.test:80`; `[]` takes those
   every server takes; `['*']` takes every host. An entry with a port, an empty one, one that is no
   host, or `*` beside another is refused as the transport is built (decision 0024).
-- `origins`, `Origins`, is checked as the transport is built: each entry is `null` or an origin as
-  RFC 6454 serializes it, and `*`, which matched nothing, is refused.
+- `origins`, `Origins`, is checked as the transport is built: each entry is an origin as RFC 6454
+  serializes it; `*` and `null` are refused.
 - A request names its host by its absolute-form target, then over HTTP/2 by its `:authority`, then by
   its `Host` (RFC 9112 §3.2.2, RFC 9113 §8.3.1), on both sides: the TypeScript side answered an
   absolute-form target 404 and read `host` before `:authority`; the C# side answered 400 a `Host`
@@ -181,11 +190,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   any other `OPTIONS` is still refused 405.
 - On the TypeScript side, `IHTTPResponseLike` requires `setHeader`, which Node's responses have.
 - `spec.md` 15.12 states the CORS answer, 15.6 a preflight in its order, its 204 and `vary: Origin`,
-  and 15.12's fields rule HTTP's own 400 with none of the path's fields. `transports.json` adds five
-  cases over HTTP, a listed origin's preflight and answers, a preflight judged before its origin, an
-  `OPTIONS` that is no preflight, and `null`; its steps of HTTP's own 400 hold it to none of the
-  path's fields, over HTTP and at a WebSocket's address, and an upgrade from a taken origin to none
-  of CORS's.
+  and 15.12's fields rule HTTP's own 400 with none of the path's fields. `transports.json` adds four
+  cases over HTTP, a listed origin's preflight and answers, a preflight judged before its origin,
+  and an `OPTIONS` that is no preflight; its steps of HTTP's own 400 hold it to none of the path's
+  fields, over HTTP and at a WebSocket's address, and an upgrade from a taken origin to none of
+  CORS's.
 - A listen over HTTP carries its cursor and its wait in the fields `bead-after` and `bead-wait`, at
   the connection's one URL, on both sides; a listen without `bead-after` is refused 400
   `malformed`, and no exchange's query is read. A page of another origin preflights its
@@ -254,12 +263,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wire's and the registry's readers, the messages — apart from Chrome's glue, in
   `implementations/typescript/devtools/chrome/`: its manifest, its bridge, its background, its
   DevTools page, and the panel's host made of Chrome's API.
+- `requireSessionOrCredential`, `RequireSessionOrCredential`, is `shareLegBSession`,
+  `ShareLegBSession`, named for what it lends: leg B's session, to every session of leg A's, at
+  every destination. `spec/conversations.json`'s relay conversations that log in at the relay and present
+  none through it name it, and its schema's `beforeRoute` is `requireCredential`, `shareLegBSession`
+  or `requireSession`; the transports' relay cases present a `JWT`.
+- **Breaking:** a call that needs no identity, and the call that renews a withdrawn default, present
+  none, `{ scheme: NONE }`, `Credential.None`: once the default is withdrawn, one that gives no
+  credential of its own fails before it goes, where it went out without one.
+- `spec.md` 15.2 and 15.5 state that a client writes no `Origin`, a page's browser writing its own,
+  as both sides' clients already do; a client of another library that writes its target as its
+  `Origin` is refused under `hosts: ['*']` by a name `hosts` does not list (decision 0024).
 
 ### Removed
 
 - `spec/uncited.txt`, `spec/debugging-uncited.txt` and `--write-uncited`, which the ledgers replace.
 - `GENERATED_CODE_SUPPORTS_VERSION_2` and `GeneratedCode.SupportsVersion2`: the runtime no longer
   serves code generated before 0.4.0, which reads a `proto` payload unchecked (decision 0028).
+- `isProxyTrusted`, `IsProxyTrusted`, which `trustedProxies` replaces; the loopback is trusted only
+  when listed.
 
 ### Fixed
 
@@ -324,9 +346,30 @@ archive` writing a submodule as an empty folder.
 - A WebSocket server no longer takes two sockets from one address and port, to two of its addresses,
   as one connection: each is its own, in its own session, and a stop closes both, 1001.
 - No HTTP answer carries `Access-Control-Allow-Credentials`, so no cookie goes across origins, and a
-  page of an origin no `origins` names reads nothing. Naming `null` in `origins` now lets every page
-  that sends it read an HTTP server's answers too. A page of the public network reaching a server on
-  the loopback or a private address needs, besides, the permission its browser asks of its user.
+  page of an origin no `origins` names reads nothing. A page of the public network reaching a server
+  on the loopback or a private address needs, besides, the permission its browser asks of its user.
+- A server's relay admits by default only a credential it forwards, `requireCredential`,
+  `RequireCredential`: a call presenting none or `OPAQUE` is refused `ACCESS_DENIED`, its detail
+  naming the default, where any requester in a session at the relay ran at the destination in leg
+  B's session. A relay whose requesters log in at it gives a `beforeRoute` that checks the
+  destination against the requester's session (spec 14.3, 14.7; decision 0019).
+- `origins`, `Origins`, refuses `null` as the transport is built, as it refuses `*`: a browser sends
+  it for every page that has no origin of its own, a sandboxed frame of any site among them, which
+  naming it let drive the server and read every answer (spec 15.12; decisions 0024, 0027).
+- An HTTP server believes `X-Forwarded-For` from the proxies it is told of alone, `trustedProxies`,
+  `TrustedProxies`, each an address or a network (RFC 4632, RFC 4291), refused as built otherwise, a
+  network of prefix 0 among them, the field walked from the right past each of them, each entry read
+  in RFC 7239's node forms and held in one form; a proxy off the loopback, a container's or an
+  ingress, was ignored under `isProxyTrusted`, every client behind it one address, refused 503 past
+  64 (spec 15.12; decision 0030).
+- Under `hosts: ['*']`, a server's own origin is no longer its request's authority: a page that
+  rebinds its name to the server's address, which `*` takes, was its own origin by that same `Host`,
+  and is now refused 403 `origin-refused`; a page of the application's own under `*` names its host
+  in `hosts` or its origin in `origins` (spec 15.2, 15.12; decision 0024).
+- A client whose default credential was withdrawn fails before it goes each call that would present
+  it, `SESSION_REQUIRED`, until its application gives one again, or none, where it presented none
+  and ran in its connection's session, or in none, in silence; a call that gives its own credential,
+  or none, goes (spec 13.4; decision 0010).
 
 ## [0.3.0] - 2026-10-12
 

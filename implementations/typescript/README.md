@@ -236,9 +236,13 @@ anew, rather than run in another; one that asks before any session fails before 
 presenting none runs in whatever session its connection holds.
 
 A default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
-the refusal crossed: the router presents none by default from then on, and emits
-`credentialWithdrawn` with the credential's scheme alone, never its bytes, so the application renews
-it, and the call that renews it goes out without it. A refusal withdraws only the credential its
+the refusal crossed: the router emits `credentialWithdrawn` with the credential's scheme alone,
+never its bytes, so the application renews it, and from then on, until the application gives it a
+default again — a credential, or `undefined`, which says "anonymous" in writing — every call that
+would present it fails before it goes, `SESSION_REQUIRED`, nothing sent and nothing withdrawn, so
+no call falls to its connection's session, or to none, in silence; `isCredentialWithdrawn` says
+so. A call that gives its own credential, `{ scheme: CredentialScheme.NONE }` among them, goes: a
+call that needs no identity presents none, and so does the call that renews. A refusal withdraws only the credential its
 call presented, never a default given anew since, and a failure that ends a subscription its server
 had answered withdraws nothing, over HTTP even when it overtakes that answer in a listen's batch,
 which the failure says, `mayOvertake`. A call whose credential its transport cannot carry fails
@@ -249,8 +253,9 @@ bearer credential crosses only TLS off the machine (RFC 6750 §5.3).
 ```ts
 const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
 
+// the call that renews presents none: until a default is given again, a call that would present it fails
 client.router.on('credentialWithdrawn', () => {
-  void signIn().then((renewed) => {
+  void signIn({ credential: { scheme: CredentialScheme.NONE } }).then((renewed) => {
     client.router.credential = { scheme: CredentialScheme.JWT, token: renewed };
   });
 });
@@ -681,7 +686,7 @@ bearer credential, which the relay forwards and its destination verifies:
 
 | Leg A presents | The relay                                                                                                        | Leg B presents                                                                                      |
 | -------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| none, `OPAQUE` | resolves it to leg A's connection's session, which its admission checks                                          | none: it runs in leg B's session at the target                                                      |
+| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session       | none: it runs in leg B's session at the target                                                      |
 | `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless the relay verifies | the same bytes                                                                                      |
 | `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries a credential      | `ELSEWHERE`, what leg A's transport carried moved to leg B's as it came: over HTTP, `Authorization` |
 
@@ -691,10 +696,13 @@ resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `OPAQUE` that 
 carried, go on unresolved, unless the relay's `verifies` has it verify them besides, with its
 router's `credentials` — a `JWT` against the audiences its destinations were registered with — so
 that one that does not hold is refused `SESSION_REQUIRED` there. Then `beforeRoute`, on its header
-and the call's session: a server's `requireSessionOrCredential` by default, which admits a call in
-leg A's connection's session, or one presenting a `JWT` or an `ELSEWHERE`, by its scheme alone;
-`requireSession` in its place refuses, `ACCESS_DENIED`, every credential the relay forwards without
-verifying, and a router's relay admits nobody without one. Then its destination is looked up. Then
+and the call's session: a server's `requireCredential` by default, which admits a call presenting a
+`JWT` or an `ELSEWHERE`, by its scheme alone unless the relay verifies, and refuses any other — one
+that presents none or `OPAQUE`, in leg A's connection's session or in none — `ACCESS_DENIED`, its
+detail `a relay admits by default only a credential it forwards`, since leg A's session opens
+nothing at the destination; `requireSession` in its place refuses, `ACCESS_DENIED`, every
+credential the relay forwards without verifying, and a router's relay admits nobody without one.
+Then its destination is looked up. Then
 its credential is held to what leg B carries: a `JWT` whose `aud` does not name its destination's
 audience, a destination registered with none, an `ELSEWHERE` over a leg B that carries no
 credential, a `JWT` or an `ELSEWHERE` over a leg B that leaves the machine in the clear, each
@@ -718,10 +726,33 @@ requester's own timeout governs, end to end, by its cancel.
 The relay's own failures name no address behind it: why leg B failed goes to the router's `error`
 event, with leg A's connection.
 
-A failure through a relay counts the relays it crossed, and its side is not known. Every requester
-behind a relay that presents none or `OPAQUE` shares its leg B: one session at the target, one space
-of call ids, and the target's transfer places — so `beforeRoute`, which sees the procedure and the
-destination, is where each such requester's rights are checked. One that presents a `JWT` or an
+A failure through a relay counts the relays it crossed, and its side is not known. A requester
+behind a relay that presents none or `OPAQUE`, and that its `beforeRoute` admits, shares its leg B:
+one session at the target, one space of call ids, and the target's transfer places. A server's
+relay admits none by default: sharing leg B's session is the application's choice, written as a
+`beforeRoute` of its own, which sees the procedure and the destination and is where each such
+requester's rights are checked — its session names the destinations it may reach:
+
+```ts
+// a requester reaches a destination its session names, or forwards a credential its destination verifies
+const isAdmitted = (request: IAdmissionRequest<TransportServerConnectionHandle>): boolean => {
+  const { header, session } = request;
+
+  return (
+    requireCredential(request) ||
+    (session !== undefined &&
+      header.destinationId !== undefined &&
+      devicesOf(session).includes(header.destinationId))
+  );
+};
+
+const server = createWSServer({ relay: { beforeRoute: isAdmitted } });
+```
+
+A composition by `||` answers `ACCESS_DENIED` without the default's detail. `shareLegBSession`, in
+its place, lends leg B's session to every requester in a session at the relay, at every
+destination: it reads none, so a requester in any session acts at every destination with leg B's
+rights, as a deputy that lends its own authority (CWE-441). One that presents a `JWT` or an
 `ELSEWHERE` shares leg B's call ids and transfer places alike, and runs at the target in the session
 its own credential resolves to there, never in leg B's. An answer names its call alone: a
 destination, which means something to its relay only, is malformed on a RESULT or a FAILURE. A relay
@@ -829,11 +860,15 @@ name to the server's address among them. So a server reached by a name names it 
 one, one behind a proxy that keeps the `Host`, as Caddy and Traefik do by default, and a service
 reached by its in-cluster name, a docker-compose service's or a Kubernetes Service's; behind a proxy
 that writes its upstream's address, as nginx does by default, none is needed. `hosts: ['*']` takes
-every host, and so reopens what the check closes: a page that rebinds its name to the server's
-address is then its own origin. An entry with a port, an empty one, one that is no host, or `*`
-beside another throws a `ProgrammerError` as the transport is built; so does an `origins` entry that
-is `*`, since no origin wildcard exists, or that is neither `null` nor an origin as a browser
-serializes it. A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which
+every host and makes none of their origins the server's own: a page that rebinds its name to the
+server's address passes the host's test, and is refused by the origin's, 403 `origin-refused`, so a
+page is then taken only when `origins` names it, and an application under `*` that serves its own
+page names that page's host in `hosts` or its origin in `origins`. A client that is no browser and
+writes its target as its `Origin` — Python's `websocket-client` does by default — is refused alike
+under `*` by a name `hosts` does not list: list that name, or have the client write no `Origin`, as
+a Bead client writes none. An entry with a port, an empty one, one that is no host, or `*` beside
+another throws a `ProgrammerError` as the transport is built; so does an `origins` entry that is
+`*`, since no origin wildcard exists, `null`, or anything but an origin as a browser serializes it. A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which
 `curl -i` and a browser's network panel show; by the HTTP client, "the server drew no connection:
 403 host-refused", and the WebSocket client over `ws`, "the server refused the upgrade: 403
 host-refused", each in its `ConnectError`; and by the
@@ -845,12 +880,13 @@ compared exactly; a WebSocket server takes both alike,
 `hosts` on any request at its address, `origins` on an upgrade, after its version and its form. Any
 client that sends an `Origin` is judged by it, a browser's page or not: it gets in by sending none,
 by sending the server's own, or by being named in `origins`. The server's own is `http://` or
-`https://` followed by the request's authority, compared in any ASCII case, the field read as the
+`https://` followed by the request's authority, when its host is one the server takes by name —
+one every server takes, or one `hosts` lists — never by `*`, compared in any ASCII case, the field read as the
 serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a browser writes both from one
 URL alike, and a client that writes a default port, a path or another form on one side alone is
 refused. Any other `Origin` is none of its own, whatever host it names: `null`, an extension's, a
 `blob:` URL's, any scheme but `http` and `https`. So `hosts` is what refuses a page that rebinds its
-name to the server's address, never the origin's test. Over HTTP, the server answers CORS to the
+name to the server's address, and under `*` the origin's test. Over HTTP, the server answers CORS to the
 origins `origins` names and to no other (spec 15.12): their preflight is answered, allowing
 `Authorization`, the fields it asks for and any other field — `access-control-allow-headers`
 naming `authorization`, then its `Access-Control-Request-Headers` as they came, then `*`, so a
@@ -866,12 +902,28 @@ permission, which the browser asks (Local Network Access), in a secure context a
 reaching `http://` on a private address by a hostname passes the browser's mixed-content block only
 with `targetAddressSpace: 'local'`, which a `fetch` given to the client adds. The server writes
 nothing for either. Over WebSocket no CORS stands in the way, so a listed origin's page is served
-outright, a page of another port of the same machine — a development server — among them. Naming
-`null` takes every request that sends it, from any site, and, over HTTP, lets each read every
-answer: a sandboxed frame's, a `file:` or a `data:` page's, and one whose origin a browser
-withholds, after a cross-origin redirect or under a referrer policy. `isProxyTrusted` takes the
-address a proxy on the same machine forwards in `x-forwarded-for` for the client's, which the bound
-per address counts.
+outright, a page of another port of the same machine — a development server — among them. `null` is
+refused as the transport is built: a browser sends it for every page with no origin of its own — a
+sandboxed frame of any site, a `file:` or a `data:` page, one whose origin it withholds — so naming
+it would let any site drive the server and read every answer; serve the page from an origin, a local
+development server's or the Bead server's own, and name that one.
+
+Behind a proxy, an HTTP server believes `X-Forwarded-For` from the proxies `trustedProxies` names
+alone, each an IP address or a network, `10.0.0.0/8` say, or the compose network's: while the
+address reached is one they hold, the field's next entry from the right is the client's, so what a
+client wrote to the left of the first address none of them holds is never read. An entry is read in
+RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or `[2001:db8::1]:443`, its
+port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; any other,
+`unknown` or a zone among them, ends the walk at the proxy that wrote it. None trusts no proxy, the
+loopback among them; a name, a network whose bits past its prefix are set, and a network of prefix
+0, which would trust what every client writes, throw a `ProgrammerError` as the transport is built.
+`Forwarded` is never read, and a WebSocket server reads no `X-Forwarded-For`. A proxy not listed is
+a client as any other: every client behind it is its address, which `maximumConnectionsPerAddress`
+counts, so a told `busy` whose `address` is your proxy's, or a `largestAddressConnections` near its
+ceiling on `/health`, is a proxy to list. A deployment whose proxies' addresses it cannot name, a
+platform's router or a cloud load balancer on public addresses, counts one address per proxy for
+now. A bound by address counts as one the users behind one NAT, and as many the addresses of one
+IPv6 network.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,
@@ -941,7 +993,8 @@ no counterpart to mirror.
 ### What a server holds
 
 `server.gauges()` counts what each layer holds right now: the server's connections, the transport's
-— and over HTTP its exchanges waiting, its listens held, its outboxes and the bodies being read —
+— and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read and
+the connections its busiest address holds, `largestAddressConnections` —
 the router's calls waited on and answered, the call ids it reserved, its transfers and the bytes
 they hold, its subscriptions in flight, waiting or notified, those paced whose credit is spent and
 what they queue — all together, and the fullest queue, at its bounds — its destinations, and the
@@ -1361,7 +1414,8 @@ credential's session. What a procedure admits reads that session, never the payl
 session, by `requireSession`; a write needs a token whose `scope` holds `write`, by a
 `beforeRequest` that reads `session.data`. A token that does not hold — its signature no longer
 matching, its time past — is refused `SESSION_REQUIRED`, which withdraws it: `credentialWithdrawn`
-tells the page, which asks to log in again. Each log-in is a session of its own, its token's `sid`:
+tells the page, which asks to log in again, and until then a call that would present it fails
+before it goes; the page's public reads, its stats and its metrics, present none. Each log-in is a session of its own, its token's `sid`:
 `whoami` answers the call's session, its claims and its end, and `logout` ends that session alone,
 by `endSession`, whoever else logged in under the same name. The key is drawn at each start, or
 given by `DEMO_KEY`, in base64url, 32 bytes at least; a key published with its RFC is refused before
