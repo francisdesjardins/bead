@@ -425,6 +425,21 @@ tests).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
 the one check a branch requires, waits on GitHub Pro or a public repository.
 
+## How Bead is made
+
+The ideas, the protocol's design and the TypeScript side are mine. TypeScript is where my expertise
+has been these last years; the other languages are less familiar to me, and I am not an expert in
+every RFC the spec cites. Much of the rest is written by AI agents working under this repository's
+rules: the other implementations, the generator, and many of the spec's readings of RFCs and other
+standards.
+
+Those rules keep every language to one behaviour. They hold each one to the same conformance files,
+to the interop between sides, and to a strict linter and analyzer set, and they put every change
+that reaches across the languages through an adversarial review before it lands. What these gates
+hold is held. Where a side departs from TypeScript's idioms, or where the spec reads a standard, it
+has been checked by tests and by those reviews, not by a specialist. Corrections from people who
+know better are welcome.
+
 ## Contributing
 
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
