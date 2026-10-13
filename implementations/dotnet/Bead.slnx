@@ -5,6 +5,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Bead.Core/Bead.Core.csproj" />
+    <Project Path="src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <Project Path="src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <Project Path="src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
   </Folder>
@@ -13,6 +14,7 @@
     <Project Path="tests/Bead.Goldens/Bead.Goldens.csproj" />
     <Project Path="tests/Bead.Goldens.Tests/Bead.Goldens.Tests.csproj" />
     <Project Path="tests/Bead.Interop.Tests/Bead.Interop.Tests.csproj" />
+    <Project Path="tests/Bead.Protobuf.Tests/Bead.Protobuf.Tests.csproj" />
     <Project Path="tests/Bead.Transport.Http.Tests/Bead.Transport.Http.Tests.csproj" />
     <Project Path="tests/Bead.Transport.WebSockets.Tests/Bead.Transport.WebSockets.Tests.csproj" />
   </Folder>

@@ -330,6 +330,11 @@ __metadata:
     oxlint-tsgolint: "npm:7.0.2003"
     typescript-7: "npm:typescript@7.0.2"
     ws: "npm:^8.22.0"
+  peerDependencies:
+    "@bufbuild/protobuf": ^2.13.0
+  peerDependenciesMeta:
+    "@bufbuild/protobuf":
+      optional: true
   languageName: unknown
   linkType: soft
 
