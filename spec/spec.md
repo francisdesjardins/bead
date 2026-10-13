@@ -1,8 +1,11 @@
 # Bead
 
-What every implementation of Bead does, stated once. The key words MUST, MUST NOT, SHOULD and MAY
-are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
-[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when in capitals.
+What every implementation of Bead does, stated once. The key words "MUST", "MUST NOT", "REQUIRED",
+"SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+"OPTIONAL" in this document are to be interpreted as described in
+[BCP 14](https://www.rfc-editor.org/info/bcp14) [[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)]
+[[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)] when, and only when, they appear in all
+capitals, as shown here.
 
 Each file of entries is named, on a line of its own, by a section whose clauses it plays, a group
 of [`vectors.json`](vectors.json) by its name, and each entry cites the units it checks:
@@ -34,12 +37,16 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   section 15;
 - [0021](../docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md): a broker,
   section 15;
+- [0022](../docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
+  the blueprint, the interop's files and their schema, sections 16 and 17;
 - [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
   a transport's listener that throws, and its stop, section 15;
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md):
   a server's hosts, and a request's authority, section 15;
 - [0025](../docs/decisions/0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md): a
   connection's handle, section 15;
+- [0026](../docs/decisions/0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md):
+  a refusal a server tells, the fields it takes, and what a client names of one, section 15;
 - [0027](../docs/decisions/0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md):
   CORS over HTTP, to the origins a server names, section 15;
 - [0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md):
@@ -48,8 +55,10 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   listen's cursor and wait in fields, section 15.9.
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
-`specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
-written; one point is open, section 8.3.**
+`specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
+[`interop-blueprint.json`](interop-blueprint.json), and what its service does,
+[`interop-service.json`](interop-service.json), are files of this version, which the conversations
+play. **Status: every section is written; one point is open, section 8.3.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
@@ -78,9 +87,10 @@ limit, a session's or a transport's bound, a delay — is held as a whole number
 1 to 2³¹ − 1, as every platform's timers hold one alike, a fraction rounded to the nearest, a half
 up. A side MUST refuse one that, as given, is under a millisecond or past 2³¹ − 1, a delay's 0
 aside, and a value that is no number: NaN, or a string or a boolean, as a limit read from JSON may
-be. A timeout or a bound is never 0, and may be without end but where its place says it may not;
-one not given is its default. A delay — a wait before an act: a pause, a reconnection's wait, the
-`wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at once.
+be. A timeout or a bound is never 0, and may be without end but where its place says it is never
+without end; one not given is its default. A delay — a wait before an act: a pause, a reconnection's
+wait, the `wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at
+once.
 
 ## 2. The prefix
 
@@ -604,7 +614,8 @@ and by the side that answers with a failure on its call id:
   the requester receiving a result's ends the call with it, and cancels it;
 - `TRANSFER_STALLED`: the side receiving a request's payload, or sending a result's, answers with
   it once nothing came — no chunk, no credit — for `transferInactivityTimeout`; the requester ends
-  its call as timed out after as long, and cancels it.
+  its call as timed out after as long, and cancels it; the side sending a result's transfer reports
+  its stall as well.
 
 12.8. While a payload or its result goes as a transfer, the transfer's inactivity governs the call:
 each chunk placed and each credit that grants sets it going again. The call's own timeout counts
@@ -1044,30 +1055,34 @@ names each connection it holds by a handle, which its router, its sessions and i
 connection by, and what it reports (`debugging.md` 4.1, 5.1). It draws the handle as it takes the
 connection, never from the peer's address alone, which another connection may share
 ([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice:
-no two connections it holds are one, and its bounds, its gauges and its stop reach each. A handle
-is no secret, and carries none (section 15.4); its form is its implementation's, written for a
-reader of a trace, and an application compares a handle whole. A transport reads nothing of an
-envelope but what this section says; what it refuses of its own is no envelope, and the router never
-sees it. A side calls each listener of its transport's events — a connection opened, an envelope, a
-listen, a close, a refusal — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3):
-what one throws is reported, as section 9.0 reports an error, by its transport with the connection
-it was told of; the listeners after it are called all the same, and the transport goes on as if it
-returned. A listener's throw refuses no connection, fails no exchange and closes nothing. A server's
-transport tells each refusal it judges of its own: a request it refuses as it arrives, in section
-15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never tells the 404
-that ends an exchange or a listen it had taken as their connection closes (section 15.7), which its
-close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its status, its
-reason, the request's authority and its `Origin`, each as it came, the field's lines joined by ", "
+no two connections it holds are one, and its bounds, its gauges and its stop reach each. A server's
+transport stops when its application stops it: from then on it takes nothing new (sections 15.2,
+15.7) and it closes each connection it holds (sections 15.3, 15.7). A handle is no secret, and
+carries none (section 15.4); its form is its implementation's, written for a reader of a trace, and
+an application compares a handle whole. A transport reads nothing of an envelope but what this
+section says; what it refuses of its own is no envelope, and the router never sees it. A side calls
+each listener of its transport's events — a connection opened, an envelope, a listen, a close, a
+refusal — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one throws is
+reported, as section 9.0 reports an error, by its transport with the connection it was told of; the
+listeners after it are called all the same, and the transport goes on as if it returned. A side
+awaits nothing a listener returns: what it settles to later is its platform's, as is what a listener
+of the transport's own `error` throws. A listener's throw refuses no connection, fails no exchange
+and closes nothing. A server's transport tells each refusal it judges of its own: a request it
+refuses as it arrives, in section 15.6's order, or whose body it refuses as it comes, marked in
+`bead-refusal`. It never tells the 404 that ends an exchange or a listen it had taken as their
+connection closes (section 15.7), which its close tells, nor what HTTP refuses of its own, unmarked.
+A refusal told carries its status, its reason, the request's authority and its `Origin`, each as it
+came, the field's lines joined by ", "
 ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
 address and port (section 15.12); nothing else of the request, so neither its target, nor its
 connection's token, nor a credential. It names no connection: a refusal is a request's, and a
 listener's throw is reported with none. A connection that closes ends what was under way on it
-(sections 9.4, 12.10, 13.7). A transport may carry a credential beside an envelope, both ways: it
-hands the router what it carried with an envelope it took, and carries what the router gives it with
-one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2, step
-5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header says,
-whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's `POST`
-(section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
+(sections 9.4, 9.10, 12.10, 13.7). A transport may carry a credential beside an envelope, both ways:
+it hands the router what it carried with an envelope it took, and carries what the router gives it
+with one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2,
+step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header
+says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's
+`POST` (section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
 credential beside an envelope it sends, and whether it is secure — under TLS, on the loopback, or
 never leaving the machine — so that a side fails before it goes a call whose credential it cannot
 carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
@@ -1125,8 +1140,8 @@ connection; a 426 names `upgrade` in its `Connection`.
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
 side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
 connection that left a ping unanswered, so a peer gone without a word ends in a close. A side that
-closes says 1000; a server that stops, 1001, to each connection it holds, one that registers as its
-stop begins among them. A close with 1000 is the clean one.
+closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
+handshake completes as its stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1140,7 +1155,10 @@ the same header, and a `DELETE /bead` ends the connection. The router, the sessi
 see a connection, as over a socket. The connection's token names the connection and nothing else —
 no session, no credential, which a call presents in its own header or its `POST`'s
 `Authorization` (section 15.5) — and is written nowhere but in its header: no handle, no event, no
-report carries it.
+report carries it. Off the machine, the token crosses what its exchanges cross. Under TLS it is kept
+as they are. In the clear, an on-path observer reads it as it reads the exchanges and the session
+token they carry (section 13.3), as over a WebSocket in the clear. TLS off the machine is the
+deployment's, and every bearer credential crosses only TLS off the machine (section 13.4).
 
 15.5. Each `POST /bead` carries one envelope, of type `application/prs.bead`. The transport reads its
 layout, kind and call id, in the prefix every layout keeps (section 2), and nothing else:
@@ -1226,7 +1244,8 @@ it would take is refused 503, `busy`, its `Retry-After` 1
 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
 [§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), and an exchange it would look up
 by a well-formed token is answered the 404 marked `connection-unknown`, nothing of it handed on, in
-section 15.6's order.
+section 15.6's order. A client MAY wait longer than its reconnection's delay (section 15.10), as a
+`Retry-After` asks ([RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)).
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,
@@ -1300,7 +1319,7 @@ alike (section 15.10):
 | `connectionInactivityTimeout`  | 30 s                         | the server's own connection timeout (section 13.7)                                |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
-`maximumWait` may not.
+`maximumWait` is never without end.
 
 Past the first four it answers 429 or 503, as section 15.6's table says.
 
@@ -1319,16 +1338,18 @@ name      = *( unreserved / "!" / "$" / "&" / "'" / "(" / ")" )
 port      = 1*DIGIT
 ```
 
-`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's. An authority that is not of it is no
-host, a userinfo and a colon with no port among them. A target in absolute-form is read when it is
-`http://` or `https://`, its scheme in lower case as HTTP servers read it, then an authority that is
-not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server
-answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host`
-field line, a target in absolute-form it does not read, or an authority that is no host, before it
-reads anything else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no
-refusal of the transport's own, unmarked. The `Host` beside a target in absolute-form is judged as
-one field line alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of
-a request whose authority is no host, `PROTOCOL_ERROR`, no response written
+`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's, and `DIGIT` is RFC 5234's core rule
+([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)). An authority that is not of
+it is no host, a userinfo and a colon with no port among them. A target in absolute-form is read
+when it is `http://` or `https://`, its scheme in lower case as HTTP servers read it, then an
+authority that is not empty
+([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server answers 400, as
+HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host` field line, a
+target in absolute-form it does not read, or an authority that is no host, before it reads anything
+else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
+transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
+alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
+authority is no host, `PROTOCOL_ERROR`, no response written
 ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
 a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over
 HTTP/1.1, with none of the fields every response on the path carries, as an HTTP server writes its
@@ -1451,6 +1472,9 @@ lower          = %x61-7A
 upper          = %x41-5A
 ```
 
+`DIGIT` is RFC 5234's core rule
+([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)).
+
 16.5. A name is read whole, character by character. A character outside these rules is in no name,
 whatever a case mapping or a normalization makes of it: U+212A, the Kelvin sign, is no `K`. A line
 terminator after a name leaves it no name, though a regular expression's `$` may let one by. So
@@ -1558,7 +1582,7 @@ literal. A reader MUST refuse:
    parser bound it. A reader MUST refuse it before it builds anything deeper.
 
 17.6. A reader reads a number as the IEEE 754 double nearest it, a tie to the even, as ECMAScript's
-`JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 may not stay exact,
+`JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 might not stay exact,
 and a number whose magnitude is 2⁻¹⁰⁷⁵ or less, half the smallest positive double, 2⁻¹⁰⁷⁴,
 reads as 0. A value that needs more travels as a string, as RFC 7493 §2.2 recommends. A reader
 takes a noncharacter, which RFC 7493 §2.1 refuses and Unicode's Corrigendum #9 lets be

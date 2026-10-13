@@ -1,8 +1,11 @@
 # Bead: debugging
 
-What a side of Bead traces, filters and counts beside the wire, stated once. The key words MUST,
-MUST NOT, SHOULD and MAY are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
-[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when in capitals.
+What a side of Bead traces, filters and counts beside the wire, stated once. The key words "MUST",
+"MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",
+"NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in
+[BCP 14](https://www.rfc-editor.org/info/bcp14) [[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)]
+[[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)] when, and only when, they appear in all
+capitals, as shown here.
 
 This document is the companion of [`spec.md`](spec.md), which states the wire: what it states never
 goes on the wire. Sections 6 to 12 each name the conformance file that checks them; sections 1 to 5
@@ -16,10 +19,10 @@ hold what of them a test can. The why of each rule is in the decisions:
   names it reads (1.2, 6.10, 7.3, 8.3).
 
 **Version: 0.1.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
-its schema in [`schemas/`](schemas/). It moves as `spec.md` moves
+its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
-when an implementation must change to keep passing, the patch when a conforming one passes
-unchanged. **Status: every section is written.**
+when an implementation that conforms to its last version must change to conform to this one, the
+patch when one that conforms passes unchanged. **Status: every section is written.**
 
 ## 1. Conformance
 
@@ -35,8 +38,8 @@ built without the metrics plays `spec/debug-filters.json` alone, one built witho
 `spec/metrics.json` alone.
 
 1.3. This document names the wire's kinds and codes as `spec.md` states them, its kinds by section
-3.1 and its codes by section 8. A code that section 8 gains adds a value to `code` (section 8.4),
-and moves the minor of both documents.
+3.1 and its codes by section 8. A code that `spec.md` section 8 gains adds a value to `code`
+(section 8.4 of this document), and moves the minor of both documents.
 
 ## 2. Beside the wire
 
@@ -167,6 +170,10 @@ first      = %x00-08 / %x0E-1F / %x21-27 / %x2A-2B / %x2E-10FFFF
 character  = first / "-"
 ```
 
+`SP`, `HTAB`, `LF` and `CR` are RFC 5234's core rules
+([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)), and its terminals Unicode
+scalar values, never a surrogate.
+
 6.2. A separator is a comma or one of the six characters C's `isspace` reads as white space in the C
 locale: space, tab, line feed, vertical tab, form feed and carriage return. Nothing outside ASCII
 parts two words.
@@ -290,8 +297,12 @@ _Metrics: `spec/metrics.json`._
 ([Release Candidate](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-metrics/)), named as a
 Prometheus name is written, `bead` in place of `rpc`; their started counters follow gRPC's
 [A66](https://github.com/grpc/proposal/blob/master/A66-otel-stats.md), and their notifications part
-by role, as OpenTelemetry's messaging conventions do. Each has its type, the unit it counts, its
-labels and its help:
+by role, as OpenTelemetry's messaging conventions do. They part from the RPC conventions in three
+places: their buckets are A66's (section 11.3), their histograms carry no `error.type`, which `code`
+carries on the counters alone (section 8.4), and no family carries `rpc.system.name`. Their
+`_handled_total` families take the shape of grpc-ecosystem's
+[`go-grpc-middleware`](https://github.com/grpc-ecosystem/go-grpc-middleware). Each has its type, the
+unit it counts, its labels and its help:
 
 | Family                              | Type      | Unit          | Labels                                            | Help                                                                                 |
 | ----------------------------------- | --------- | ------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -436,17 +447,18 @@ one on a call id reserved dropped in silence (`spec.md` 11.7): neither is counte
 10.3. `bead_subscriptions_dropped_total` counts at each end of a subscription, never from a service
 manager's `dropped` event:
 
-| End                    | A subscription dropped                                        | `code`                                           |
-| ---------------------- | ------------------------------------------------------------- | ------------------------------------------------ |
-| the side that notifies | its queue past its bounds once it was answered (11.10)        | `CAPACITY_EXCEEDED`                              |
-| the side that notifies | its session ended (13.6)                                      | `SESSION_REQUIRED`                               |
-| the side that hears    | a failure on its call id once it was answered (11.7, item 2)  | the failure's: its name, `application`, `_OTHER` |
-| either                 | its connection closes, or the side is disposed (11.7, item 3) |                                                  |
-| the side that notifies | a failure its application ends it with (11.7, item 2)         | the failure's: its name, `application`, `_OTHER` |
+| End                    | A subscription dropped                                                  | `code`                                           |
+| ---------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ |
+| the side that notifies | its queue past its bounds once it was answered (`spec.md` 11.10)        | `CAPACITY_EXCEEDED`                              |
+| the side that notifies | its session ended (`spec.md` 13.6)                                      | `SESSION_REQUIRED`                               |
+| the side that hears    | a failure on its call id once it was answered (`spec.md` 11.7, item 2)  | the failure's: its name, `application`, `_OTHER` |
+| either                 | its connection closes, or the side is disposed (`spec.md` 11.7, item 3) |                                                  |
+| the side that notifies | a failure its application ends it with (`spec.md` 11.7, item 2)         | the failure's: its name, `application`, `_OTHER` |
 
 10.4. A client's cancel (`spec.md` 11.7, item 1) drops nothing, at either end. A notification a
-later one of the same key replaces in its queue (11.9), or one its subscription's end leaves queued,
-is neither sent nor failed: that is its pacing, or that end, which the dropped subscriptions count.
+later one of the same key replaces in its queue (`spec.md` 11.9), or one its subscription's end
+leaves queued, is neither sent nor failed: that is its pacing, or that end, which the dropped
+subscriptions count.
 
 ## 11. Durations
 

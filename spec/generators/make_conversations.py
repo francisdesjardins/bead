@@ -1362,7 +1362,7 @@ for name, _, _, *rest in conversations:
 document = {
     '$schema': 'schemas/conversations.schema.json',
     '$comment': [
-        "Bead's conversations: what a server of the interop service (interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
+        "Bead's conversations: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does with what its clients send, played by every implementation's tests against its own server.",
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
         'carried, beside a send, is the credential the client\'s transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization\'s value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination\'s connection, what leg B\'s transport carried beside it. Absent, it carried none.',
         'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
