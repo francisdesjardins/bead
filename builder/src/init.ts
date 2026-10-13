@@ -108,6 +108,8 @@ const configOf = (name: string, languages: readonly Language[]): string => {
         ? ['  - language: typescript', `    out: ${OUT[language]}`, '    importExtension: ts']
         : ['  - language: csharp', `    out: ${OUT[language]}`];
     }),
+    "# the output folders are beadc's own: generate takes out what it no longer writes there",
+    'clean: true',
     '',
   ].join('\n');
 };

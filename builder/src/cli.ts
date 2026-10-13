@@ -285,6 +285,11 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
 
   if (!call.check) {
     writePlan(plan, config);
+
+    for (const { path, source } of plan.stale) {
+      print(`beadc: generate takes out ${displayOf(path)}: ${source} no longer gives it`);
+    }
+
     return Exit.DONE;
   }
 

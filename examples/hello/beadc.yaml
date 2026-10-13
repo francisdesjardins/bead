@@ -19,3 +19,5 @@ outputs:
   - language: csharp
     out: dotnet/gen/external
     messages: external
+# the output folders are beadc's own: generate takes out what it no longer writes there
+clean: true
