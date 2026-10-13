@@ -124,9 +124,9 @@ share.
   ```
 - **HTTP's transport** sets the shared behaviour where Kestrel's defaults would differ: no body
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
-  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`
-  is read by one rule of its own, `TrustedProxies`, as the section below says. `BeadHttpClient` is
-  its client, as .NET's own is `HttpClient`.
+  503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`,
+  on both transports, is read by one rule of its own, `TrustedProxies`, as the section below says.
+  `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
 - **The transports** hold the same ready states on both sides, and the client reconnects alike, its

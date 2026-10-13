@@ -60,16 +60,19 @@ envelopes.
 
 ## Where Bead goes
 
+A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
+own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
+
+- **Next**: a penetration test of Bead's servers, before 0.5.0.
 - **0.5.0**: a topic-based publish/subscribe broker as one more transport, one core and one
   adapter a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
-- **A 0.4.x**: a hop bound for proxies whose address a deployment cannot name
-  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
-- **After 0.4.0**: a penetration test of Bead's servers.
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
   latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names.
+  [the index](docs/decisions/README.md#where-bead-goes) names; and a hop bound for proxies whose
+  address a deployment cannot name
+  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -429,7 +432,7 @@ with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
 `beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
 Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
-`examples/hello`, against the last release that carries one, from 0.3.0, on Linux; its types, the
+`examples/hello`, against the last release, which carries both, on Linux; its types, the
 goldens' among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on
 Node 26, amd64 and arm64, each natively: beadc's image built, its test stage run on the image
 itself, each wrapper run against it with `BEADC_IMAGE_REQUIRED=1`, over the repository and
