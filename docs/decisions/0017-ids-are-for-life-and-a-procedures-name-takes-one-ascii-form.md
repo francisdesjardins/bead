@@ -65,7 +65,7 @@ white space part words, `-` leaves out, `*` stands for any run and a parenthesis
 where an ASCII letter matches in either case (debugging 6.1, 6.4); a TypeScript key and a C# member;
 and the Common Language Specification, for a consumer that marks its assembly CLS-compliant, under
 which two identifiers that differ only in case are one (ECMA-335, Partition I, §8.5.1, CLS rule 4).
-No assembly here is so marked (`git grep -i CLSCompliant` finds nothing), so the CLS binds a
+No assembly here is so marked, no project and no source naming `CLSCompliant`, so the CLS binds a
 consumer's code, never Bead's. The builder generates one file for each `.proto` file, so a file
 system that ignores case never meets two names.
 
@@ -325,10 +325,6 @@ decision, not this one.
 **Service 0's one id.** The protocol's procedures share service 0 and its revision, allocated by
 procedure id in section 16's table; the day the first is defined, 4.10 and both writers change, and
 a peer built before answers it `SERVICE_UNKNOWN`, as it answers any service it lacks.
-
-**Versions move as [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md) says**, in
-the release that carries section 16 with section 17
-([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)).
 
 ## The Tenth Man
 

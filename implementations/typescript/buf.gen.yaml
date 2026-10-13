@@ -1,5 +1,5 @@
 # The code protoc-gen-es writes for spec/codecs.proto's Probe, which the proto rows of
-# spec/codecs.json are played through (decision 0018): run by buf, both from npm, as a consumer's
+# spec/codecs.json are played through (decision 0031): run by buf, both from npm, as a consumer's
 # generated code is. `yarn protobuf:generate` writes it; `yarn check` writes it again apart and
 # fails on a difference. The plugin runs under the Node that runs buf, so no PATH is read.
 version: v2

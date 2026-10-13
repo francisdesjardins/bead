@@ -50,7 +50,7 @@ const SERVER_MEMBERS: readonly (readonly [string, string])[] = [
   ['proceduresWithoutResolver', 'The procedures a client calls that no resolver answers yet.'],
 ];
 
-// the decoder's nesting limit, the TypeScript side's own (decision 0018)
+// the decoder's nesting limit, the TypeScript side's own (decision 0031)
 const RECURSION_LIMIT = 101;
 
 // helpers

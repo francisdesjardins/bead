@@ -156,10 +156,10 @@ refused: on Node from a clone, keep the project on the clone's drive; the image 
 
 ## The image and its wrappers
 
-beadc ships as an image, `ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and
-linux/arm64, built by [`Dockerfile`](Dockerfile) from the repository's root, since beadc's tests
-read `spec/` and the files of each side they hold the generated code to; the context's ignore file,
-[`Dockerfile.dockerignore`](Dockerfile.dockerignore), is beside it:
+beadc builds into an image, which its wrappers run by the name
+`ghcr.io/francisdesjardins/beadc:<version>`, for linux/amd64 and linux/arm64, by [`Dockerfile`](Dockerfile) from the repository's root,
+since beadc's tests read `spec/` and the files of each side they hold the generated code to; the
+context's ignore file, [`Dockerfile.dockerignore`](Dockerfile.dockerignore), is beside it:
 
 ```sh
 docker build -f builder/Dockerfile --target test .   # beadc's tests, on the image itself, protoc required
@@ -177,7 +177,8 @@ build. It has no SDK; its own user, 65532, is not root.
 
 A project runs it through two wrappers, `beadc.sh` for bash 3.2 or later and `beadc.ps1` for
 PowerShell 7.6 or later, which `beadc wrapper` prints and `beadc init` writes, filled with beadc's
-version; a project commits both. The first run asks nothing but the engine:
+version; a project commits both. The first run asks nothing but the engine, which finds the image
+where it is built or pulled:
 
 ```sh
 docker run --rm ghcr.io/francisdesjardins/beadc:<version> wrapper beadc.sh > beadc.sh
@@ -250,7 +251,8 @@ in [`wrappers/`](wrappers/), their image's tag a token that `wrapper` and `init`
 [`proto/bead/options.proto`](proto/bead/options.proto) is the builder's contract: package `bead`,
 C# namespace `Bead.Protobuf`, one extension on each of `FileOptions`, `ServiceOptions` and
 `MethodOptions`, at **58500**, of the range `descriptor.proto` leaves to one organization or to
-experimental options, until the first publication takes a number of protobuf's global registry
+experimental options, while the options are unpublished; from their first publication, they take a
+number of protobuf's global registry
 ([decision 0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 `OPTIONS_NUMBER` in `src/version.ts` holds the three to it.
 
@@ -411,9 +413,10 @@ the target imports them from `messagesOut`.
 character and two paragraphs, and the messages fixture's `messages_bead.ts`, `messages_pb.ts` and
 `bead/options_pb.ts`, the fixture a root of its own, [`test/messages/`](test/messages/), each
 importing the runtime by the package's name. A test writes them again and compares them byte for
-byte, their header's versions written as today's first, since a release moves the versions and
-never a golden; `BEADC_WRITE_GOLDEN=1 yarn test` writes them. `yarn type-check` compiles them as a
-consumer does, under their own [`tsconfig.json`](test/golden/typescript/tsconfig.json): the
+byte, their header's versions written as the current ones first, since a release moves the
+versions and never a golden; `BEADC_WRITE_GOLDEN=1 yarn test` writes them. `yarn type-check`
+compiles them as a consumer does, under their own
+[`tsconfig.json`](test/golden/typescript/tsconfig.json): the
 TypeScript side's strictness and its `Bundler` resolution, the runtime's name mapped to its source;
 then under [`tsconfig.floor.json`](test/golden/typescript/tsconfig.floor.json), against the
 header's floor, `@bufbuild/protobuf` 2.13.0, installed beside the pin as `@bufbuild/protobuf-floor`,
@@ -520,9 +523,9 @@ build compiles them, Grpc.Tools among them.
 `Bead/Comments/V1/CommentsBead.cs` and the messages fixture's `Bead/Messages/V1/MessagesBead.cs`,
 with protoc's `Bead/Messages/V1/Messages.cs` and `Bead/Protobuf/Options.cs`; the messages fixture
 holds a nested message, a `oneof`, a `map` and an `optional` field. A test writes them again and
-compares them byte for byte, their header's versions written as today's first; beadc's own files
-need no protoc, their messages' line being the pin's, and protoc's are compared where the pinned
-protoc runs. The C# side's solution builds them as a consumer does, in
+compares them byte for byte, their header's versions written as the current ones first; beadc's
+own files need no protoc, their messages' line being the pin's, and protoc's are compared where the
+pinned protoc runs. The C# side's solution builds them as a consumer does, in
 [`implementations/dotnet/tests/Bead.Goldens`](../implementations/dotnet/tests/Bead.Goldens/Bead.Goldens.csproj),
 under that side's analyzers and every warning an error; their code style is that side's
 `.editorconfig`, of which the goldens' own is a copy, since an `.editorconfig` reaches only the files
@@ -562,7 +565,7 @@ refusal at a place no rule names is `BLUEPRINT_SCHEMA`. The findings on identiti
 | `OPTIONS_COPY`           | proto     | error    | a `bead/options.proto` among the project's roots, read before buf compiles                                                                                           | beadc compiles its own                                                                                                                                                |
 | `BLUEPRINT_JSON`         | blueprint | error    | a text not UTF-8, at its byte; a member twice, a surrogate alone, a number with a fraction or an exponent, at its JSON Pointer                                       | I-JSON (RFC 7493 §2.1, §2.3); a reader's value changes                                                                                                                |
 | `FORMAT_UNKNOWN`         | blueprint | error    | a `format` but `bead-blueprint/1`                                                                                                                                    | a reader refuses a major it does not know                                                                                                                             |
-| `FEATURE_UNKNOWN`        | blueprint | error    | a `requires` naming a feature this beadc does not know (none yet)                                                                                                    | never ignored in silence, as JOSE's `crit` (RFC 7515 §4.1.11)                                                                                                         |
+| `FEATURE_UNKNOWN`        | blueprint | error    | a `requires` naming a feature this beadc does not know (none is defined)                                                                                             | never ignored in silence, as JOSE's `crit` (RFC 7515 §4.1.11)                                                                                                         |
 | `BLUEPRINT_SCHEMA`       | blueprint | error    | a refusal of the format's schema at a place no rule names: a member unknown, a type, a member missing                                                                | the format is its schema                                                                                                                                              |
 | `SERVICE_ID_RANGE`       | blueprint | error    | a service id missing, 0, or past 65,535                                                                                                                              | u16 (spec 16.2); 0 is the protocol's (16.3)                                                                                                                           |
 | `SERVICE_REVISION_RANGE` | blueprint | error    | a revision missing, 0, or past 2,147,483,647                                                                                                                         | 0 means unknown to a relay (16.9)                                                                                                                                     |
@@ -789,13 +792,12 @@ types, lint, format and generated code no platform moves. On every leg, the wrap
 `beadc.sh` and `beadc.ps1` to one contract against a stand-in engine, a native `docker.exe` on
 Windows, `BEADC_WRAPPERS_REQUIRED=1` turning a test that would skip without bash, pwsh 7.6 or, on
 Windows, the right to make a symbolic link into one that fails. On Linux, last, `beadc breaking`
-holds the interop's blueprint and `examples/hello` to the last `v*` tag that carries a blueprint,
-`git archive` piped into `--against -`, by version order: before 0.3.0, the first such release, the
-step says it holds nothing and passes; from 0.3.0, a last release without one fails it. The last
-release is the newest `vX.Y.Z`, as `tools/release.mjs` reads one, whose commit is not HEAD's, read
-by the tag's commit, never by ancestry, which the shallow fetch does not hold: on a release's own
-commit, `main`'s, the release before it, so a waiver the release carried still waives its change
-there. The step runs under `--fail-on-warning`, so a waiver that waived nothing fails it. A waiver
+holds the interop's blueprint and `examples/hello` to the last release, `git archive` piped into
+`--against -`, 0.3.0 or any release after it: a last release that carries no blueprint fails the
+step, so it never passes by comparing nothing. The last release is the newest `vX.Y.Z`, as
+`tools/release.mjs` reads one, whose commit is not HEAD's, read by the tag's commit, never by
+ancestry, which the shallow fetch does not hold: on a release's own commit, `main`'s, the release
+before it, so a waiver the release carried still waives its change there. The step runs under `--fail-on-warning`, so a waiver that waived nothing fails it. A waiver
 stands on its line, scoped to its subject, for the cycle of the change it was written for:
 `tools/release.mjs tag`, which ends on `develop` at its back-merge, writes the CI file without the
 waivers the tagged commit carries, and prints the commit before the one push, which carries

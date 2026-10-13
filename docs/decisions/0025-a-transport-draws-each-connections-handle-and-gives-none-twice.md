@@ -81,10 +81,10 @@ mapped before a trusted proxy's is read.
 
 ## Consequences
 
-**The WebSocket handle gains its ordinal**: on the TypeScript side `generateHandle` takes
-`{ ip, ordinal, port, type }` and writes every form, `generateDrawnHandle` goes, and the socket form
-of `TransportServerConnectionHandle` ends in its ordinal, a public change before 1.0.0. Both sides'
-test literals of a socket's handle carry the ordinal, so twin tests read one form.
+**The WebSocket handle carries its ordinal**: on the TypeScript side `generateHandle` takes
+`{ ip, ordinal, port, type }` and writes every form, and the socket form of
+`TransportServerConnectionHandle` ends in its ordinal. Both sides' test literals of a socket's
+handle carry the ordinal, so twin tests read one form.
 
 **No conformance case holds it.** No step of `spec/transports.json` names the address or the port a
 socket opens from or connects to, and one that did would bind to a platform's socket options: Node

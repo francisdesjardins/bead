@@ -47,8 +47,8 @@ timers: `node:http`'s, `undici`'s, `ws`'s, Kestrel's, `SocketsHttpHandler`'s.
 reservation, is compared on the monotonic reading. An instant from outside, a token's `exp` or
 `nbf`, is compared against the wall clock, with its leeway; a credential's session is a timer armed
 for its credential's end less the wall clock's reading as its credential resolves, at each step's
-due, and again when a renewal moves it. Section 15.10's "never on a reading of its clock" reads "of
-its wall clock".
+due, and again when a renewal moves it. Section 15.10 times a client's inactivity "on a timer of
+the client's, never on a reading of its wall clock".
 
 **A stack has one clock, set where it starts and read upward.** The transports, the session manager
 and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side — and
@@ -133,8 +133,8 @@ own lockfile ([0005](0005-a-toolchain-per-language.md)), never installed on the 
 real clock, and a case that waits on one is marked, played in real time, and bounded generously.
 
 **The WebSocket's close stays where it is.** The TypeScript side's client waits the 30 seconds of
-`ws`, the C# side's 5, each on the real clock: aligning them is the client part's decision, and
-until then a row of the support matrix.
+`ws`, the C# side's 5, each on the real clock: a row of the support matrix, which the client part's
+decision closes.
 
 ## The Tenth Man
 

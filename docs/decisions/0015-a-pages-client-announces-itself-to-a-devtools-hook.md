@@ -71,10 +71,11 @@ the messages — asks of the browser only what the panel's host names; Chrome's 
 `devtools/chrome/`, its manifest, its bridge, its background, its DevTools page and the host made of
 its API, and another browser's extension brings its own glue beside it.
 
-**It is tested twice, in a project of its own**: the extension loaded in Chromium against the demo's
-static build, the page's events followed through the hook, the bridge and the background to the
-panel; and the panel as a page on a fake DevTools API, for what only DevTools gives it. The
-package's unit project keeps its claim that nothing under test needs a page.
+**It is tested apart from the package, in two projects of its own**: its pure modules in Node, the
+panel's model among them; and, in Chromium, the extension loaded against the demo's static build,
+the page's events followed through the hook, the bridge and the background to the panel, and the
+panel as a page on a fake DevTools API, for what only DevTools gives it. The package's unit project
+keeps its claim that nothing under test needs a page.
 
 **It changes nothing the languages share**: no wire, no conformance file, no behaviour a peer sees.
 A browser page is the TypeScript side's platform, and the support matrix says so; no Tenth Man
@@ -88,8 +89,8 @@ A browser page is the TypeScript side's platform, and the support matrix says so
 - The hook's shape is a contract with code Bead does not ship with the page. A change to it is a new
   `protocol`, which the extension reads before it watches; the extension answers the protocols it
   knows and names the others.
-- `world: "MAIN"` needs Chrome 111 and Firefox 128; Firefox and Safari come later, Safari with
-  Xcode.
+- `world: "MAIN"` needs Chrome 111 and Firefox 128. Firefox's extension, its glue beside the
+  shared core, is where Bead goes; Safari's asks Xcode.
 - A DevTools panel cannot be driven by Playwright: what the panel does with DevTools' own APIs is
   tested on a fake of them, and the rest end to end.
 - The support matrix holds a row, "A page's DevTools hook", platform: a .NET client runs in no page
