@@ -104,6 +104,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A decision record's number names its decision for good and is never given to another: records
+  are still regrouped, moved in the index and renamed between releases, but none is renumbered,
+  and one merged into another keeps a short file naming its successor (`docs/decisions/README.md`,
+  the `bead-release-documents` workflow).
 - A WebSocket server names each connection `type=WS;ip=…;port=…;ordinal=…`, by its peer's port and
   the rank it was taken at, so no two connections share a handle. On the TypeScript side,
   `generateHandle` takes `{ ip, ordinal, port, type }`, `port` optional, one

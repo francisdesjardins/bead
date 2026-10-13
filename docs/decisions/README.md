@@ -4,18 +4,23 @@ Why Bead is shaped the way it is. One file per decision, each one readable on it
 
 A record states a decision that holds: what forced it, what it is, and what it costs. The spec says
 what an implementation does, and the code how; a record says why, so that a reason outlives the
-person who held it. Code, configuration and other records cite a record by its number, which names
-one decision within a release: **between two releases, records are regrouped, moved, renamed and
-renumbered where that reads clearer**, every citation moving with them, and the release's CHANGELOG
-section maps each old number to its new one, for a reader of an earlier release.
+person who held it. Code, configuration and other records cite a record by its number, and **a
+number, once given, names its decision for good: it is never given to another**, as an RFC's or a
+PEP's is not, since commits, tags and released CHANGELOG sections cite it where nothing can rewrite
+them. Between two releases, records are regrouped, moved in the index, normalized and renamed where
+that reads clearer, every citation moving with them; a record is never renumbered, and the index,
+not the numbers, gives the order to read them in. A record merged into another keeps its file, a
+short one whose Status says `merged into` its successor and links it, so that whoever comes by the
+old number finds where its decision went; the release's CHANGELOG section names each merge. Gaps in
+the numbering stay.
 
 **A decision is changed, not appended to.** A record is rewritten in place while its decision holds,
 so it reads as it stands: what changed, and when, is the CHANGELOG's and the commits'. A record that
 only grows, a date at a time, makes its reader replay every step to learn where things stand. A part
-that becomes a decision of its own takes the next number, and the record it leaves names it in its
-Scope, where a reader who comes by the old number looks. A decision that reverses keeps its number;
-its Status names what replaced it, and its successor is written beside it. A file's name stays
-unless it misleads.
+that becomes a decision of its own takes the next number never given, and the record it leaves
+names it in its Scope, where a reader who comes by the old number looks. A decision that reverses
+keeps its number; its Status names what replaced it, and its successor is written beside it. A
+file's name stays unless it misleads.
 
 **At each release, the records are brought to it.** A record is in the present, with its view on
 what is ahead: what it said was coming, and that the release carries, is stated as what holds; what
