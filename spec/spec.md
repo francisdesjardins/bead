@@ -1163,7 +1163,7 @@ exchange lost.
 | ------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                  |
 | 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                           |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                              |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin the server lists (section 15.12)                                                 |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed (section 15.2) |
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                        |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                              |
@@ -1175,22 +1175,25 @@ exchange lost.
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                |
 | 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                         |
 
-Every response on the path carries `cache-control: no-store` and `x-content-type-options: nosniff`,
-and so does every refusal of a WebSocket server's own.
+Every response on the path carries `cache-control: no-store`, `x-content-type-options: nosniff`
+and `vary: Origin`, since which one a request gets turns on its `Origin`
+([RFC 9110 §12.5.5](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.5)), but what HTTP refuses
+of its own (section 15.12), which carries none of them; every refusal of a WebSocket server's own
+carries the first two.
 
 A server judges a request at its path in this order, and answers the first that applies. What HTTP
 refuses of its own, its HTTP server answers, unmarked (section 15.12); then a host the server does
-not take, 403; a path not its own, 404; an origin it does not take, 403; a method but `GET`, `POST`
-or `DELETE`, 405. A `POST` that presents no token connects: no type, or another than
-`application/prs.bead`, or a body encoded, 415; the connect's own 400; then, once its stop began,
-or past `maximumConnections` or `maximumConnectionsPerAddress`, 503. Any other request is judged
-by its token: none, or one of another form, 400; once the server's stop began, the 404 marked
-`connection-unknown`, the token not looked up; a token it does not hold, the same 404. A `DELETE`
-then ends its connection. A listen is refused 409 when its client did not say it listens, then
-400 for a body or its counts (section 15.9). A `POST` is refused 415 for its type or its
-encoding, then 400 for two `Authorization` fields, 413 for a length it declares past
-`maximumBodyBytes`, and 429 past what its connection has under way, each before its body is read;
-what its body brings is judged as it comes (section 15.5).
+not take, 403; a path not its own, 404; an origin it does not take, 403; a preflight from an origin
+it lists, answered 204 (section 15.12); a method but `GET`, `POST` or `DELETE`, 405. A `POST` that
+presents no token connects: no type, or another than `application/prs.bead`, or a body encoded,
+415; the connect's own 400; then, once its stop began, or past `maximumConnections` or
+`maximumConnectionsPerAddress`, 503. Any other request is judged by its token: none, or one of
+another form, 400; once the server's stop began, the 404 marked `connection-unknown`, the token not
+looked up; a token it does not hold, the same 404. A `DELETE` then ends its connection. A listen is
+refused 409 when its client did not say it listens, then 400 for a body or its counts (section
+15.9). A `POST` is refused 415 for its type or its encoding, then 400 for two `Authorization`
+fields, 413 for a length it declares past `maximumBodyBytes`, and 429 past what its connection has
+under way, each before its body is read; what its body brings is judged as it comes (section 15.5).
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
@@ -1301,11 +1304,13 @@ alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the strea
 authority is no host, `PROTOCOL_ERROR`, no response written
 ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
 a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over
-HTTP/1.1 and its stream reset over HTTP/2, before anything else of the request is judged:
-[RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5) calls the first invalid, and
-keeps the second, historical ISO-8859-1 content, out of every field defined since; an origin is
-ASCII ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), and so is every field
-Bead reads. An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a
+HTTP/1.1, with none of the fields every response on the path carries, as an HTTP server writes its
+own before the transport reads the request, and its stream reset over HTTP/2, before anything else
+of the request is judged: [RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)
+calls the first invalid, and keeps the second, historical ISO-8859-1 content, out of every field
+defined since; an origin is ASCII
+([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), and so is every field Bead
+reads. An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a
 request may name besides those every server takes, `hosts`, and the origins an exchange may come
 from besides its own, `origins`, none when not given. Its own is its request's authority under
 `http` or `https`: an `Origin` that is `http://` or `https://` followed by that authority, compared
@@ -1317,6 +1322,29 @@ names: `null`, which a browser sends for an opaque origin — a sandboxed frame'
 policy; and any other scheme, an extension's or a `blob:` URL's among them. A server takes `null`,
 as any other, only when `origins` names it, and then from every page that sends it. A request
 without an `Origin` comes from no page, and is taken.
+
+An HTTP server answers the CORS protocol
+([Fetch Standard §3.3](https://fetch.spec.whatwg.org/#http-cors-protocol)) to the origins `origins`
+names, and to no other. Once a request's origin is taken (section 15.6's order), every response it
+writes to a request whose `Origin` `origins` names, whatever its status, carries
+`access-control-allow-origin`, that `Origin` as it came, `null` among them, and
+`access-control-expose-headers: *`; a refusal judged before the origin carries neither, since a
+browser reads no answer to a preflight that is not ok
+([Fetch §4.8](https://fetch.spec.whatwg.org/#cors-preflight-fetch)). None carries
+`access-control-allow-credentials`: Bead's credential is no cookie but the request's own (section
+15.5), so every request to it is one without credentials, for which the Fetch Standard reads `*`
+as a wildcard ([§3.3.4](https://fetch.spec.whatwg.org/#http-new-header-syntax)). A preflight is an
+`OPTIONS` that carries `Access-Control-Request-Method`: from an origin `origins` names, it is
+answered 204, its body empty, with `access-control-allow-methods: GET, POST, DELETE`,
+`access-control-allow-headers: authorization, *`, `authorization` named since no wildcard covers
+it, and `access-control-max-age: 7200`, whatever it asks for: the browser judges its request
+against them. A preflight is no refusal, draws no connection, and is told by none; any other
+`OPTIONS` is a method the server does not take (section 15.6). A page of the server's own origin,
+its scheme the server's, needs none; a page of its authority under the other scheme is another
+origin to its browser, which the test above takes as the server's own, and is answered CORS only
+when `origins` names it. Whether a page reaches a server on the loopback or a private address is
+its browser's to judge, by its local network permission, never a field the server writes. A
+WebSocket server answers no CORS: no same-origin policy guards an upgrade (section 15.2).
 
 A request's host is its authority's `host`, its port aside, since a browser leaves a scheme's
 default port out ([RFC 9110 §4.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.3)), in the

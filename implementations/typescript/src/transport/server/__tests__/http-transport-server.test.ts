@@ -53,6 +53,61 @@ const PROTOCOL_ERROR = http2Constants.NGHTTP2_PROTOCOL_ERROR;
 /** A bearer credential, RFC 6750's own example, its auth-scheme included. */
 const BEARER = 'Bearer mF_9.B5f-4.1JqM';
 
+/** A page of another origin, which a server answers CORS to when `origins` names it. */
+const PAGE = 'https://page.test';
+
+/** The fields every response on the path carries but HTTP's own 400, and the one CORS names. */
+const PATH_FIELDS = [
+  'access-control-allow-origin',
+  'cache-control',
+  'vary',
+  'x-content-type-options',
+] as const;
+
+/** What a preflight from {@link PAGE} is answered, whatever it asks for, beside its 204. */
+const PREFLIGHT_ANSWER = Object.freeze({
+  'access-control-allow-credentials': null,
+  'access-control-allow-headers': 'authorization, *',
+  'access-control-allow-methods': 'GET, POST, DELETE',
+  'access-control-allow-origin': PAGE,
+  'access-control-expose-headers': '*',
+  'access-control-max-age': '7200',
+  'bead-refusal': null,
+  'cache-control': 'no-store',
+  vary: 'Origin',
+  'x-content-type-options': 'nosniff',
+});
+
+/** What every answer to {@link PAGE} carries of CORS once its origin is judged, but a preflight's. */
+const NAMED_ANSWER = Object.freeze({
+  'access-control-allow-credentials': null,
+  'access-control-allow-methods': null,
+  'access-control-allow-origin': PAGE,
+  'access-control-expose-headers': '*',
+  vary: 'Origin',
+});
+
+/** What an answer that names no origin carries of CORS. */
+const UNNAMED_ANSWER = Object.freeze({
+  'access-control-allow-credentials': null,
+  'access-control-allow-methods': null,
+  'access-control-allow-origin': null,
+  'access-control-expose-headers': null,
+  vary: 'Origin',
+});
+
+/** The fields `expected` names, as `headers` carries them: each one's value, or null when absent. */
+const fieldsOf = (
+  headers: { get(name: string): string | null | undefined },
+  expected: Readonly<Record<string, string | null>>
+) => {
+  return Object.fromEntries(
+    Object.keys(expected).map((name) => {
+      return [name, headers.get(name) ?? null];
+    })
+  );
+};
+
 /** An envelope as the transport reads it: its layout, its kind, its call id, and `extra` bytes. */
 const envelopeOf = (
   kind: number,
@@ -1426,6 +1481,62 @@ const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) =
 };
 
 test.describe('createHTTPTransportServer, over TLS', () => {
+  // spec 15.12
+  test('answers a preflight over HTTP/2 as over HTTP/1.1', async () => {
+    await using started = await startSecure({ origins: [PAGE] });
+    const { port, server, session } = started;
+    const refusals: unknown[] = [];
+    const asked = {
+      'access-control-request-headers': 'authorization,content-type',
+      'access-control-request-method': 'POST',
+      origin: PAGE,
+    };
+
+    server.on('refusal', (refusal) => {
+      refusals.push(refusal);
+    });
+
+    // its status, and the fields it carries
+    type Answer = [number | undefined, IncomingHttpHeaders];
+
+    // over HTTP/2
+    const overHTTP2 = await new Promise<Answer>((resolve, reject) => {
+      const stream = session.request({ ':method': 'OPTIONS', ':path': '/bead', ...asked });
+
+      stream.once('response', (headers) => {
+        resolve([headers[':status'], headers]);
+      });
+      stream.on('data', () => {});
+      stream.on('error', reject);
+      stream.end();
+    });
+    // over HTTP/1.1, on the same port
+    const overHTTP1 = await new Promise<Answer>((resolve, reject) => {
+      const request = requestHTTPS(
+        { ca: TLS_FIXTURE.cert, headers: asked, host, method: 'OPTIONS', path: '/bead', port },
+        (response) => {
+          response.resume();
+          resolve([response.statusCode, response.headers]);
+        }
+      );
+
+      request.on('error', reject);
+      request.end();
+    });
+
+    for (const [status, headers] of [overHTTP2, overHTTP1]) {
+      const fields = {
+        get: (name: string) => {
+          return headers[name] as string | undefined;
+        },
+      };
+
+      expect([status, fieldsOf(fields, PREFLIGHT_ANSWER)]).toEqual([204, PREFLIGHT_ANSWER]);
+    }
+
+    expect(refusals).toEqual([]);
+  });
+
   test('names its host over HTTP/2 by its :authority, a host beside it ignored, for the host and the own origin', async () => {
     await using started = await startSecure({ hosts: ['bead.test'] });
     const { session } = started;
@@ -2977,7 +3088,10 @@ test.describe('createHTTPTransportServer, listening', () => {
   });
 });
 
-/** What a request written raw as `head` is answered: its status and its mark, and the port it came from. */
+/**
+ * What a request written raw as `head` is answered: its status and its mark, the fields its head
+ * carries by their names in lower case, and the port it came from.
+ */
 const rawAnswerOf = async (port: number, head: string) => {
   const socket = connectTcp(port, host);
   let text = '';
@@ -3002,11 +3116,20 @@ const rawAnswerOf = async (port: number, head: string) => {
     .toBe(true);
   socket.destroy();
 
+  const lines = text.split('\r\n\r\n')[0]?.split('\r\n').slice(1) ?? [];
+
   return {
     answer: [
       Number(text.split(' ')[1]),
       new RegExp(`${REFUSAL_HEADER}: (.*)\r\n`, 'iu').exec(text)?.[1] ?? null,
     ],
+    fields: new Map(
+      lines.map((line) => {
+        const colon = line.indexOf(':');
+
+        return [line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim()];
+      })
+    ),
     localPort,
   };
 };
@@ -3029,6 +3152,236 @@ const refusalsOf = (server: HTTPTransportServer) => {
 
   return refusals;
 };
+
+/** A preflight from `origin` (Fetch §3.3.2): an `OPTIONS` naming the method it asks for, and its fields. */
+const preflight = (
+  url: string,
+  { fields, method, origin = PAGE }: { fields?: string; method: string; origin?: string }
+) => {
+  return fetch(url, {
+    headers: {
+      'access-control-request-method': method,
+      origin,
+      ...(fields === undefined ? {} : { 'access-control-request-headers': fields }),
+    },
+    method: 'OPTIONS',
+  });
+};
+
+test.describe('createHTTPTransportServer, CORS', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  // spec 15.6, 15.12
+  test('answers a preflight from an origin it names 204, naming it, the methods, Authorization and any other field, for 7200 seconds, and tells no refusal', async () => {
+    await using started = await startTransport({ origins: [PAGE, 'null'] });
+    const { events, server, url } = started;
+    const refusals = refusalsOf(server);
+    // what a page asks before a connect, before a listen at its own URL, and of a method the
+    // server does not take, which its browser refuses against the answer
+    const answers = [
+      await preflight(url, { fields: 'bead-listen,content-type,traceparent', method: 'POST' }),
+      await preflight(`${url}?after=0&wait=0`, {
+        fields: 'bead-connection-token',
+        method: 'GET',
+      }),
+      await preflight(url, { method: 'PUT' }),
+    ];
+
+    for (const answer of answers) {
+      expect([
+        answer.status,
+        fieldsOf(answer.headers, PREFLIGHT_ANSWER),
+        await bytesOf(answer),
+      ]).toEqual([204, PREFLIGHT_ANSWER, []]);
+    }
+
+    // null, when named, as any origin named
+    const opaque = await preflight(url, { method: 'POST', origin: 'null' });
+
+    expect([opaque.status, fieldsOf(opaque.headers, PREFLIGHT_ANSWER)]).toEqual([
+      204,
+      { ...PREFLIGHT_ANSWER, 'access-control-allow-origin': 'null' },
+    ]);
+    // no refusal, and no connection drawn
+    expect(refusals).toEqual([]);
+    expect([namesOf(events, 'connection'), server.clients]).toEqual([[], []]);
+  });
+
+  // spec 15.4, 15.9, 15.12
+  test('names an origin it names on every answer it writes to it once that origin is judged, a batch and a refusal among them, and exposes every field', async () => {
+    await using started = await startTransport({ origins: [PAGE, 'null'] });
+    const { events, server, url } = started;
+    const headers = { origin: PAGE };
+    const named: unknown[] = [];
+    const name = async (answered: Response | Promise<Response>) => {
+      const response = await answered;
+
+      named.push([response.status, fieldsOf(response.headers, NAMED_ANSWER)]);
+
+      return response;
+    };
+
+    // a connect that listens, its token read
+    const drawn = await name(post(url, { headers: { ...headers, [LISTEN_HEADER]: '?1' } }));
+    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const connectionHandle = server.clients.at(-1)
+      ?.connectionHandle as TransportServerConnectionHandle;
+
+    // a request with its Authorization, its head going as it is handed on, then answered
+    const request = post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken,
+      headers: { ...headers, authorization: BEARER },
+    });
+    const head = await name(request);
+
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
+    await head.arrayBuffer();
+
+    // one answered as it is handed on, in one go
+    server.on('message', ({ data }) => {
+      if ((data as Uint8Array)[7] === 3) {
+        void server.send(
+          { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }) },
+          connectionHandle
+        );
+      }
+    });
+    await name(
+      post(url, {
+        body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
+        connectionToken,
+        headers,
+      })
+    );
+
+    // a batch
+    await server.send(
+      { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }) },
+      connectionHandle
+    );
+    await name(
+      fetch(`${url}?after=0&wait=0`, {
+        headers: { ...headers, [CONNECTION_TOKEN_HEADER]: connectionToken },
+      })
+    );
+
+    // refusals once the origin is judged: an OPTIONS that is no preflight, a body of another type,
+    // a token that is none
+    const bare = await name(fetch(url, { headers, method: 'OPTIONS' }));
+    await name(
+      post(url, { connectionToken, headers: { ...headers, 'content-type': 'text/plain' } })
+    );
+    await name(post(url, { connectionToken: 'not-a-token', headers }));
+
+    // a DELETE, and an exchange after it
+    await name(
+      fetch(url, {
+        headers: { ...headers, [CONNECTION_TOKEN_HEADER]: connectionToken },
+        method: 'DELETE',
+      })
+    );
+    await name(post(url, { connectionToken, headers }));
+
+    expect(named).toEqual(
+      [201, 200, 200, 200, 405, 415, 400, 204, 404].map((status) => {
+        return [status, NAMED_ANSWER];
+      })
+    );
+    expect(bare.headers.get('allow')).toBe('GET, POST, DELETE');
+    expect(namesOf(events, 'message')).toHaveLength(2);
+
+    // null, when named, as any origin named
+    const opaque = await post(url, { headers: { origin: 'null' } });
+
+    expect([opaque.status, fieldsOf(opaque.headers, NAMED_ANSWER)]).toEqual([
+      201,
+      { ...NAMED_ANSWER, 'access-control-allow-origin': 'null' },
+    ]);
+  });
+
+  // spec 15.6, 15.12
+  test('names no origin to its own, to a request with none, to one it does not take, nor before the origin is judged, and varies every answer by Origin but HTTP’s own 400', async () => {
+    await using started = await startTransport({ origins: [PAGE] });
+    const { server, url } = started;
+    const refusals = refusalsOf(server);
+    const port = Number(new URL(url).port);
+    const authority = `${host}:${String(port)}`;
+    const answerOf = async (head: string) => {
+      const { answer, fields } = await rawAnswerOf(port, head);
+
+      return [
+        ...answer,
+        fieldsOf(
+          {
+            get: (field) => {
+              return fields.get(field);
+            },
+          },
+          UNNAMED_ANSWER
+        ),
+      ];
+    };
+    const unnamed = (status: number, reason: string | null) => {
+      return [status, reason, UNNAMED_ANSWER];
+    };
+
+    expect([
+      // its own origin, and none
+      await answerOf(rawConnectOf(authority, `Origin: http://${authority}\r\n`)),
+      await answerOf(rawConnectOf(authority)),
+      // a preflight from its own origin, and from none: no CORS request, so a method it does not take
+      await answerOf(
+        `OPTIONS /bead HTTP/1.1\r\nHost: ${authority}\r\nOrigin: http://${authority}\r\n` +
+          'Access-Control-Request-Method: POST\r\n\r\n'
+      ),
+      await answerOf(
+        `OPTIONS /bead HTTP/1.1\r\nHost: ${authority}\r\nAccess-Control-Request-Method: POST\r\n\r\n`
+      ),
+      // an origin it does not take
+      await answerOf(rawConnectOf(authority, 'Origin: https://elsewhere.test\r\n')),
+      // a page it names, before its origin is judged: by a host it does not take, at another path
+      await answerOf(
+        `OPTIONS /bead HTTP/1.1\r\nHost: rebind.example\r\nOrigin: ${PAGE}\r\n` +
+          'Access-Control-Request-Method: POST\r\n\r\n'
+      ),
+      await answerOf(
+        `OPTIONS /elsewhere HTTP/1.1\r\nHost: ${authority}\r\nOrigin: ${PAGE}\r\n` +
+          'Access-Control-Request-Method: POST\r\n\r\n'
+      ),
+    ]).toEqual([
+      unnamed(201, null),
+      unnamed(201, null),
+      unnamed(405, REFUSALS.METHOD),
+      unnamed(405, REFUSALS.METHOD),
+      unnamed(403, REFUSALS.ORIGIN),
+      unnamed(403, REFUSALS.HOST),
+      unnamed(404, REFUSALS.PATH),
+    ]);
+    expect(
+      refusals.map(({ reason }) => {
+        return reason;
+      })
+    ).toEqual([REFUSALS.METHOD, REFUSALS.METHOD, REFUSALS.ORIGIN, REFUSALS.HOST, REFUSALS.PATH]);
+
+    // HTTP's own 400, from a page it names: two hosts, and a field of an octet past ASCII
+    for (const fields of [`Host: ${authority}\r\n`, 'X-Other: café\r\n']) {
+      const { answer, fields: carried } = await rawAnswerOf(
+        port,
+        rawConnectOf(authority, `Origin: ${PAGE}\r\n${fields}`)
+      );
+
+      expect([
+        ...answer,
+        ...PATH_FIELDS.filter((field) => {
+          return carried.has(field);
+        }),
+      ]).toEqual([400, null]);
+    }
+  });
+});
 
 test.describe('createHTTPTransportServer, the refusals it tells', () => {
   test.afterAll(async () => {
@@ -3230,8 +3583,8 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     expect(refusals).toEqual([]);
   });
 
-  test('answers 400 unmarked a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
-    await using started = await startTransport();
+  test('answers 400 unmarked, with none of the path’s fields, a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
+    await using started = await startTransport({ origins: ['http://a.example'] });
     const refusals = refusalsOf(started.server);
     const port = Number(new URL(started.url).port);
     const authority = `${host}:${String(port)}`;
@@ -3246,8 +3599,19 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     ];
     const answers: unknown[] = [];
 
+    // each from a page the server names besides, which none of them names
     for (const field of fields) {
-      answers.push((await rawAnswerOf(port, rawConnectOf(authority, field))).answer);
+      const { answer, fields: carried } = await rawAnswerOf(
+        port,
+        rawConnectOf(authority, `Origin: http://a.example\r\n${field}`)
+      );
+
+      answers.push([
+        ...answer,
+        ...PATH_FIELDS.filter((name) => {
+          return carried.has(name);
+        }),
+      ]);
     }
 
     expect(answers).toEqual(

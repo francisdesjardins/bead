@@ -438,9 +438,10 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly,
    * checked on the upgrade, after its version and its form; any other is refused 403, since no
    * same-origin policy guards an upgrade. `null` among them takes every upgrade that sends it; one
-   * with no `Origin` comes from anywhere. None, when not given. Each entry is `null` or an origin as
-   * a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, and any other are a
-   * {@link ProgrammerError} as the server is built.
+   * with no `Origin` comes from anywhere. A WebSocket answers no CORS, which no browser asks of an
+   * upgrade. None, when not given. Each entry is `null` or an origin as a browser serializes it (RFC
+   * 6454 §6.2): `*`, which no origin is, and any other are a {@link ProgrammerError} as the server
+   * is built.
    */
   origins?: readonly string[] | undefined;
   /**
@@ -514,6 +515,8 @@ export interface IHTTPResponseLike {
   on(event: 'close' | 'finish', listener: () => void): unknown;
   /** HTTP/2's stream, which a malformed request's reset closes with its error code. */
   readonly stream?: { close(code?: number): void } | undefined;
+  /** Sets a field the head carries, which `writeHead` merges with its own. */
+  setHeader(name: string, value: string): unknown;
   write(chunk: Uint8Array): unknown;
   writeHead(statusCode: number, headers?: Record<string, string>): unknown;
 }
@@ -620,11 +623,14 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The origins an exchange that sends an `Origin` may come from, besides the server's own —
    * `http://` or `https://` followed by its authority, in any ASCII case — each compared exactly;
-   * any other is refused 403. `null` among them takes every exchange that sends it; one with no
-   * `Origin` comes from anywhere. It serves a proxy that rewrites the host: a page of another origin
-   * also needs CORS, which the transport does not answer yet. None, when not given. Each entry is
-   * `null` or an origin as a browser serializes it (RFC 6454 §6.2): `*`, which no origin is, and any
-   * other are a {@link ProgrammerError} as the server is built.
+   * any other is refused 403. `null` among them takes every exchange that sends it, and lets every
+   * page that sends it read every answer; one with no `Origin` comes from anywhere. It serves a proxy
+   * that rewrites the host, and a page of another origin, to which the server answers CORS (spec
+   * 15.12): its preflight 204, and on every answer once its origin is judged
+   * `Access-Control-Allow-Origin` and every field exposed, never `Access-Control-Allow-Credentials`.
+   * None, when not given. Each entry is `null` or an origin as a browser serializes it (RFC 6454
+   * §6.2): `*`, which no origin is, and any other are a {@link ProgrammerError} as the server is
+   * built.
    */
   origins?: readonly string[] | undefined;
   /** The path the transport answers on; anything else is 404. Defaults to {@link PATHNAME}. */

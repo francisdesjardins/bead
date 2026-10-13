@@ -422,6 +422,19 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
+    /// Whether <paramref name="origin"/> is among the pages an HTTP server answers CORS to (spec
+    /// 15.12): an <c>Origin</c> among <paramref name="origins"/>, exactly, as
+    /// <see cref="IsTakenOrigin"/> compares them, <c>null</c> among them; none is never listed, and
+    /// the server's own origin only when named.
+    /// </summary>
+    public static bool IsListedOrigin(string? origin, IReadOnlyList<string> origins)
+    {
+        ArgumentNullException.ThrowIfNull(origins);
+
+        return origin is not null && origins.Contains(origin, StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// A server's hosts, as it is built: none, or entries each a host without its port, or
     /// <c>*</c> alone. An entry with a port, an empty one, one that is no host by 15.12's grammar — a
     /// Unicode name among them, which the field never carries — and <c>*</c> beside another are an

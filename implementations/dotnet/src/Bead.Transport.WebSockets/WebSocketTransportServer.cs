@@ -77,9 +77,10 @@ public sealed record WebSocketTransportServerOptions
     /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly,
     /// checked once its version and its form are a handshake's: none by default. <c>null</c> among
     /// them takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of
-    /// an origin named here is served outright. Each is <c>null</c> or an origin as RFC 6454 §6.2
-    /// serializes it; <c>*</c>, which no origin is, and any other entry are an
-    /// <see cref="ArgumentException"/> as the transport is built.
+    /// an origin named here is served outright. A WebSocket answers no CORS, which no browser asks
+    /// of an upgrade. Each is <c>null</c> or an origin as RFC 6454 §6.2 serializes it; <c>*</c>,
+    /// which no origin is, and any other entry are an <see cref="ArgumentException"/> as the
+    /// transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 }

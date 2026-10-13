@@ -25,6 +25,8 @@ PROCEDURE_FAILED, DESTINATION_LOST = 64, 65
 BEAD = 'application/prs.bead'
 BATCH = 'application/prs.bead-batch'
 SLOW = '{"milliseconds":3600000}'
+# a page of another origin, which a server answers CORS to when origins names it (spec 15.12)
+PAGE = 'https://page.test'
 
 
 def hexadecimal(data):
@@ -116,8 +118,9 @@ def post(on, body, *, fields=None):
     return send(on, 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD), *pairs(fields)], body=body)
 
 
-def listen(on, after, wait):
-    return send(on, 'GET', f'/bead?after={after}&wait={wait}', fields={'bead-connection-token': '{token}'})
+def listen(on, after, wait, *, fields=None):
+    return send(on, 'GET', f'/bead?after={after}&wait={wait}',
+                fields={'bead-connection-token': '{token}', **(fields or {})})
 
 
 def expect(on, status, *, fields=None, **body):
@@ -135,13 +138,16 @@ def refused(on, status, refusal, fields=None):
 
 
 def unmarked(on):
-    """HTTP's own 400, which its server writes as it does: no mark, its body empty."""
-    return expect(on, 400, fields={'bead-refusal': None}, body='')
+    """HTTP's own 400, which its server writes as it does: no mark, its body empty, and none of the
+    fields every response on the path carries."""
+    return expect(on, 400, fields={'bead-refusal': None, 'cache-control': None,
+                                   'x-content-type-options': None, 'vary': None,
+                                   'access-control-allow-origin': None}, body='')
 
 
-def drawn(on='connect', *, listening=False):
+def drawn(on='connect', *, listening=False, fields=None):
     """A connection drawn, its token captured."""
-    return [connect(on, listen=listening), expect(on, 201, fields={
+    return [connect(on, listen=listening, fields=fields), expect(on, 201, fields={
         'bead-connection-token': {'capture': 'token', 'shape': 'token'},
         'bead-listen': '?1' if listening else None})]
 
@@ -164,6 +170,27 @@ def answered(on, envelope):
 
 
 ECHO = request(1, 'echo', '"x"')
+# what every answer to an origin the server names carries once that origin is judged, and what one
+# to any other carries of it (spec 15.6, 15.12)
+CORS = {'access-control-allow-origin': PAGE, 'access-control-expose-headers': '*', 'vary': 'Origin',
+        'access-control-allow-credentials': None}
+NO_CORS = {'access-control-allow-origin': None, 'access-control-expose-headers': None, 'vary': 'Origin'}
+# a preflight's answer, whatever it asks for: its fields fixed, the browser judging its request
+# against them (Fetch §4.8)
+PREFLIGHT = {**CORS,
+             'access-control-allow-methods': 'GET, POST, DELETE',
+             'access-control-allow-headers': 'authorization, *',
+             'access-control-max-age': '7200', 'cache-control': 'no-store',
+             'x-content-type-options': 'nosniff', 'bead-refusal': None}
+
+
+def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{host}'):
+    """A CORS-preflight request (Fetch §3.3.2): an OPTIONS naming the method it asks for and the
+    fields it would write."""
+    return send(on, 'OPTIONS', target, host=host,
+                fields={'origin': origin, 'access-control-request-method': method, **(fields or {})})
+
+
 # a bearer credential, RFC 6750's own example, its auth-scheme included
 BEARER = 'Bearer mF_9.B5f-4.1JqM'
 # what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 5)
@@ -395,6 +422,65 @@ cases = [
          connect('own', fields={'origin': 'https://{host}'}), expect('own', 201)]),
     ('an Origin of null is taken when origins names it', ['15.12'], {'origins': ['null']}, [
         connect(fields={'origin': 'null'}), expect('connect', 201)]),
+    # 15.12: CORS, to the origins a server names (Fetch §3.3), and to no other
+    ('a preflight from an origin the server names is answered 204, naming that origin, the methods, Authorization and any other field, for 7200 seconds, whatever it asks for',
+     ['15.6', '15.6.3', '15.12'], {'origins': [PAGE]}, [
+         preflight('connect', 'POST', fields={'access-control-request-headers': 'bead-listen,content-type,traceparent'}),
+         expect('connect', 204, fields=PREFLIGHT, body=''),
+         preflight('listen', 'GET', fields={'access-control-request-headers': 'bead-connection-token'},
+                   target='/bead?after=0&wait=0'),
+         expect('listen', 204, fields=PREFLIGHT, body=''),
+         preflight('put', 'PUT'), expect('put', 204, fields=PREFLIGHT, body='')]),
+    # the 415 is sent whole, since post writes Bead's type before the fields it is given; whoami takes
+    # the call id 5, the subscription keeping 1
+    ('every answer to an origin the server names carries that origin and exposes every field: a connect, a request with its Authorization, a batch, a refusal and a DELETE',
+     ['15.4', '15.5', '15.9', '15.12'], {'origins': [PAGE]}, [
+         connect('connect', listen=True, fields={'origin': PAGE}),
+         expect('connect', 201, fields={**CORS, 'bead-connection-token': {'capture': 'token', 'shape': 'token'},
+                                        'bead-listen': '?1'}),
+         post('ada', elsewhere(5), fields={'authorization': 'Interop sub=ada', 'origin': PAGE}),
+         expect('ada', 200, fields={**CORS, 'content-type': BEAD}, envelope=result(5, '"ada"')),
+         post('subscribe', SUBSCRIBE, fields={'origin': PAGE}), answered('subscribe', result(1, 'null')),
+         post('tick', tick(3, 1), fields={'origin': PAGE}), answered('tick', result(3, 'null')),
+         listen('listen', 0, 0, fields={'origin': PAGE}),
+         expect('listen', 200, fields={**CORS, 'content-type': BATCH, 'bead-sequence': '1'},
+                batch=[notification(1, '1')]),
+         send('plain', 'POST', fields={'bead-connection-token': '{token}', 'content-type': 'text/plain', 'origin': PAGE},
+              body=ECHO),
+         expect('plain', 415, fields={**CORS, 'bead-refusal': 'type-refused'}, body=''),
+         send('delete', 'DELETE', fields={'bead-connection-token': '{token}', 'origin': PAGE}),
+         expect('delete', 204, fields=CORS, body=''),
+         post('after', ECHO, fields={'origin': PAGE}),
+         expect('after', 404, fields={**CORS, 'bead-refusal': 'connection-unknown'}, body='')]),
+    ('a preflight is judged as every request before its origin is answered: by a host the server does not take 403, at another path 404, from an origin it does not take 403, each marked and naming no origin',
+     ['15.6', '15.6.5', '15.6.6', '15.12'], {'origins': [PAGE]}, [
+         preflight('rebound', 'POST', host='rebind.example'),
+         expect('rebound', 403, fields={**NO_CORS, 'bead-refusal': 'host-refused',
+                                        'access-control-allow-methods': None}, body=''),
+         preflight('elsewhere', 'POST', target='/elsewhere'),
+         expect('elsewhere', 404, fields={**NO_CORS, 'bead-refusal': 'path-unknown',
+                                          'access-control-allow-methods': None}, body=''),
+         preflight('stranger', 'POST', origin='https://elsewhere.test'),
+         expect('stranger', 403, fields={**NO_CORS, 'bead-refusal': 'origin-refused',
+                                         'access-control-allow-methods': None}, body='')]),
+    ('an OPTIONS that is no preflight, or one from the server\'s own origin or from none, is refused 405 as any method but GET, POST or DELETE, its Allow naming them; an exchange from its own origin or from none names no origin',
+     ['15.6', '15.6.7', '15.12'], {'origins': [PAGE]}, [
+         send('bare', 'OPTIONS', fields={'origin': PAGE}),
+         expect('bare', 405, fields={**CORS, 'bead-refusal': 'method-refused', 'allow': 'GET, POST, DELETE',
+                                     'access-control-allow-methods': None}, body=''),
+         send('own', 'OPTIONS', fields={'origin': 'http://{host}', 'access-control-request-method': 'POST'}),
+         expect('own', 405, fields={**NO_CORS, 'bead-refusal': 'method-refused', 'allow': 'GET, POST, DELETE'},
+                body=''),
+         send('none', 'OPTIONS', fields={'access-control-request-method': 'POST'}),
+         expect('none', 405, fields={**NO_CORS, 'bead-refusal': 'method-refused'}, body=''),
+         connect('ownconnect', fields={'origin': 'http://{host}'}), expect('ownconnect', 201, fields=NO_CORS),
+         connect('noorigin'), expect('noorigin', 201, fields=NO_CORS)]),
+    ('an Origin of null that origins names is answered as any origin it names: its preflight 204, its exchanges naming null',
+     ['15.6.3', '15.12'], {'origins': ['null']}, [
+         preflight('preflight', 'POST', origin='null'),
+         expect('preflight', 204, fields={**PREFLIGHT, 'access-control-allow-origin': 'null'}, body=''),
+         connect('connect', fields={'origin': 'null'}),
+         expect('connect', 201, fields={**CORS, 'access-control-allow-origin': 'null'})]),
     # 15.12: the bounds, past which the server answers 429 or 503
     ('past the connections a server holds, a connect is refused 503, with Retry-After',
      ['15.6.13', '15.12.1'], {'maximumConnections': 1}, [
@@ -729,9 +815,12 @@ websocket = [
          refused('elsewhere', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('own', {'origin': 'http://{host}'}), message('own', binary=ECHO), heard('own', envelope=result(1, '"x"')),
          *upgrade('none'), message('none', binary=ECHO), heard('none', envelope=result(1, '"x"'))]),
+    # a WebSocket answers no CORS, which no browser asks of an upgrade (spec 15.12)
     ('an upgrade from an origin the server takes is served', ['15.12'], {'options': {'origins': ['https://bead.test']}}, [
-        *upgrade(fields={'origin': 'https://bead.test'}), message('socket', binary=ECHO),
-        heard('socket', envelope=result(1, '"x"'))]),
+        handshake('socket', {'origin': 'https://bead.test'}),
+        expect('socket', 101, fields={'upgrade': 'websocket', 'sec-websocket-accept': ACCEPT,
+                                      'access-control-allow-origin': None, 'vary': None}),
+        message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
     ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.12'], {'options': {'hosts': ['bead.test']}}, [
         *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
         heard('socket', envelope=result(1, '"x"'))]),

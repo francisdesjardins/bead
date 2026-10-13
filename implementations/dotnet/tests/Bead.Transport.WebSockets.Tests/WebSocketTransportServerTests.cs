@@ -33,6 +33,10 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     // the addresses a server is secure on, the loopback's, and those it is not, the wildcards
     private static readonly string[] OnTheLoopbackOrNot = ["::1", "127.0.0.1", "127.0.0.2", "0.0.0.0", "::"];
 
+    // the fields a response on an HTTP server's path carries, a refusal of the transport's own the
+    // first two of them, and HTTP's own 400 none (spec 15.6)
+    private static readonly string[] PathFields = ["cache-control", "x-content-type-options", "vary"];
+
     // RFC 6455 §1.3's key, 16 bytes in base64
     private const string Key = "dGhlIHNhbXBsZSBub25jZQ==";
 
@@ -587,15 +591,15 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Answers_400_unmarked_a_field_holding_a_control_character_other_than_HTAB_or_an_octet_past_ASCII_and_tells_nothing()
+    public async Task Answers_400_unmarked_with_none_of_the_path_s_fields_a_field_holding_a_control_character_other_than_HTAB_or_an_octet_past_ASCII_and_tells_nothing()
     {
         await Start(new WebSocketTransportServerOptions());
 
         var own = $"127.0.0.1:{_port}";
-        var answers = new List<(string Field, (int, string?) Answer)>();
+        var answers = new List<(string Field, (int, string?, string) Answer)>();
 
         // each an upgrade but for one field: the octets as given, each character one octet, or, for
-        // the UTF-8 one, its two
+        // the UTF-8 one, its two; its status, its mark, and the fields of the path it carries
         foreach (var field in new[]
         {
             "Origin: http://a.example\u001b[2J",
@@ -606,14 +610,15 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             $"X-Other: {Encoding.Latin1.GetString(Encoding.UTF8.GetBytes("caf\u00e9"))}",
         })
         {
-            var (status, reason, _) = await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n{field}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+            var (status, fields, _) = await AnswerOf(Encoding.Latin1.GetBytes($"GET / HTTP/1.1\r\nHost: {own}\r\n{field}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n"));
+            var stamped = string.Join(" ", PathFields.Where(fields.ContainsKey));
 
-            answers.Add((field, (status, reason)));
+            answers.Add((field, (status, fields.GetValueOrDefault("bead-refusal"), stamped)));
         }
 
         Assert.All(answers, (answer) =>
         {
-            Assert.Equal((answer.Field, (400, (string?)null)), answer);
+            Assert.Equal((answer.Field, (400, (string?)null, "")), answer);
         });
 
         // a tab is taken: the origin is refused as it is, and told

@@ -33,6 +33,7 @@ import {
   hasVisibleFields,
   HOST_REFUSAL,
   isAuthority,
+  isListedOrigin,
   isTakenHost,
   isTakenOrigin,
   type IAuthority,
@@ -247,10 +248,25 @@ const LENGTH_BYTES = 4;
 // what a listen that brings nothing back ends with
 const NOTHING: IEnd = Object.freeze({ status: 204 });
 
-// what every response on the path carries: never stored, never sniffed
+// what every response on the path carries: never stored, never sniffed, and which one a request
+// gets turns on its Origin; HTTP's own 400 carries none of these
 const RESPONSE_HEADERS = Object.freeze({
   'cache-control': 'no-store',
+  vary: 'Origin',
   'x-content-type-options': 'nosniff',
+});
+
+// a preflight's answer from an origin `origins` names (spec 15.12), whatever it asks for: the
+// browser judges its request against it. `*` is a wildcard for a request without credentials, which
+// every one is, since none is allowed (Fetch §3.3.4); `authorization` named, which no wildcard
+// covers (Fetch §4.8)
+const PREFLIGHT: IEnd = Object.freeze({
+  headers: Object.freeze({
+    'access-control-allow-headers': 'authorization, *',
+    'access-control-allow-methods': 'GET, POST, DELETE',
+    'access-control-max-age': '7200',
+  }),
+  status: 204,
 });
 
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
@@ -443,7 +459,8 @@ const reset = (response: IHTTPResponseLike): void => {
 };
 
 // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
-// unmarked; over HTTP/2, a malformed request, its stream reset
+// unmarked, with none of the path's fields, as Node's parser writes its own; over HTTP/2, a
+// malformed request, its stream reset
 const refuseMalformed = ({ request, response }: IExchangeIn): void => {
   if (request.httpVersionMajor !== 1) {
     return (reset(response), undefined);
@@ -481,7 +498,9 @@ const sendHead = (response: IHTTPResponseLike): void => {
  * exchange's is read, and a `POST` with two is refused 400. An answer, and what a listen brings
  * back, carry none. A cancel ends the exchange of its call; one that comes before its request
  * buries that call id for {@link BURIAL_MILLISECONDS}. Each refusal of the transport's own is marked
- * in `bead-refusal`. An exchange lost — its response closed before the transport ended it — closes
+ * in `bead-refusal`. To a page of an origin `origins` names, it answers CORS (spec 15.12): its
+ * preflight 204, and every answer once its origin is judged naming it and exposing every field, no
+ * credential allowed. An exchange lost — its response closed before the transport ended it — closes
  * the connection, as a socket that drops does; so do a request unanswered past `exchangeTimeout` and
  * a connection idle past `inactivityTimeout`.
  *
@@ -1170,8 +1189,30 @@ export const createHTTPTransportServer = (
 
         // an exchange from the server's own origin, or one it was told; one with no `Origin` comes
         // from anywhere, and any client that sends one is judged by it
-        if (!isTakenOrigin(headerOf(request, 'origin'), { host: authority, origins })) {
+        const origin = headerOf(request, 'origin');
+
+        if (!isTakenOrigin(origin, { host: authority, origins })) {
           return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
+        }
+
+        // the origin the server answers CORS to, as it came: one `origins` names
+        const listed = isListedOrigin(origin, origins) ? origin : undefined;
+
+        // * every answer a page `origins` names can read carries it, a refusal's too, which its
+        // client reads; a refusal judged before the origin answers a preflight no browser reads. The
+        // writers' `writeHead` merges it
+        if (listed !== undefined) {
+          response.setHeader('access-control-allow-origin', listed);
+          response.setHeader('access-control-expose-headers', '*');
+        }
+
+        // a preflight is no refusal: `endWith`, never `finish`, so nothing tells it
+        if (
+          listed !== undefined &&
+          request.method === 'OPTIONS' &&
+          headerOf(request, 'access-control-request-method') !== undefined
+        ) {
+          return (endWith(response, PREFLIGHT), undefined);
         }
 
         if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {
