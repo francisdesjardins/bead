@@ -332,18 +332,25 @@ const seenOf = (
   };
 };
 
-/** What the server sent on a WebSocket, in the terms `expectation` names it by. */
+/**
+ * What the server sent on a WebSocket, in the terms `expectation` names it by: a pong, which no
+ * case expects, as itself, so that it fails the step it comes in.
+ */
 const heardOf = (
   heard: Heard,
   expectation: IHeardExpectation
-): IHeardExpectation | { text: string } => {
+): IHeardExpectation | { pong: true } | { text: string } => {
   if ('binary' in heard) {
     return expectation.envelope === undefined
       ? { binary: hexadecimalOf(heard.binary) }
       : { envelope: envelopeOf(heard.binary, expectation.envelope) };
   }
 
-  return 'ping' in heard ? { ping: true } : heard;
+  if ('ping' in heard) {
+    return { ping: true };
+  }
+
+  return 'pong' in heard ? { pong: true } : heard;
 };
 
 /** Settles as `promise` does, or rejects once `milliseconds` are over. */

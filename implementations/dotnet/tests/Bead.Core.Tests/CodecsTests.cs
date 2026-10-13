@@ -24,6 +24,10 @@ public sealed class CodecsTests
     // the language a differs names to excuse this side
     private const string Language = "C#";
 
+    // the encodings this side reads and writes, each through a codec of its own: an entry of any other
+    // fails its test
+    private static readonly string[] Encodings = ["json", "proto", "raw", "text"];
+
     private static readonly JsonElement Root = Load();
 
     // * the codec generated code makes of a proto binding: Google.Protobuf's reader and writer, Bead's
@@ -223,7 +227,8 @@ public sealed class CodecsTests
             "json" => Payloads.WriteJson(ElementOf(value)),
             "text" => Payloads.WriteText(TextOf(value)),
             "proto" => ProbeCodec.Encode(ProbeOf(value.GetProperty("probe"))),
-            _ => Payloads.WriteRaw(BytesOf(value.GetProperty("bytes"))),
+            "raw" => Payloads.WriteRaw(BytesOf(value.GetProperty("bytes"))),
+            var encoding => throw new InvalidOperationException($"no codec of this side writes the encoding {encoding}"),
         };
     }
 
@@ -301,10 +306,12 @@ public sealed class CodecsTests
                     (read.GetProperty("text").GetString(), read.GetProperty("number").GetUInt32(), read.GetProperty("nested").GetInt32()),
                     (CodeUnitsOf(probe.Text), probe.Number, NestedOf(probe)));
                 break;
-            default:
+            case "raw":
                 Assert.False(isRefused);
                 Assert.Equal(BytesOf(entry.GetProperty("written")), Payloads.WriteRaw(Payloads.ReadRaw(bytes)).ToArray());
                 break;
+            case var encoding:
+                throw new InvalidOperationException($"no codec of this side reads the encoding {encoding}");
         }
     }
 
@@ -325,6 +332,17 @@ public sealed class CodecsTests
         }
 
         Assert.Equal(BytesOf(entry.GetProperty("written")), WrittenOf(entry).ToArray());
+    }
+
+    [Fact]
+    public void Plays_every_encoding_of_the_file_through_a_codec_of_its_own_and_no_other()
+    {
+        var encodings = Root.GetProperty("payloads").EnumerateArray().Concat(Root.GetProperty("values").EnumerateArray()).Select((entry) =>
+        {
+            return entry.GetProperty("encoding").GetString()!;
+        });
+
+        Assert.Equal(Encodings, encodings.Distinct().Order(StringComparer.Ordinal));
     }
 
     [Fact]

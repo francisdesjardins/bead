@@ -99,6 +99,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   failed, 9.6 by the entries of the gate, 12.6 by the transfers placed out of order or delivered
   whole, 13.9.4, 14.5.3 and 17.2 by the entries that play them; `metrics.json` cites the rows of the
   companion's 7.2, 7.6, 8.1 and 11.3 its expositions write.
+- The runners play `stop`, pongs, reserved opcodes and an uncaptured `{name}` alike, and the C#
+  codecs runner refuses an encoding it does not name.
 
 ### Removed
 
