@@ -24,15 +24,18 @@
   "findings": [
     {
       "rule": "FAILURE_SAME_NAME",
-      "pointer": "/services/0/failures/0/failureName"
+      "pointer": "/services/0/failures/0/failureName",
+      "subject": "service:1/failure:7"
     },
     {
       "rule": "PROCEDURE_FAILURE_NO_DELETE",
-      "pointer": "/services/0/procedures/1/failures"
+      "pointer": "/services/0/procedures/1/failures",
+      "subject": "service:1/procedure:2/failure:7"
     },
     {
       "rule": "PROCEDURE_FAILURE_NO_DELETE",
-      "pointer": "/services/0/procedures/9/failures"
+      "pointer": "/services/0/procedures/9/failures",
+      "subject": "service:1/procedure:10/failure:7"
     }
   ]
 }

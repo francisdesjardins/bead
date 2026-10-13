@@ -10,7 +10,8 @@
   "findings": [
     {
       "rule": "RESERVED_NO_DELETE",
-      "pointer": "/reservedServices/names"
+      "pointer": "/reservedServices/names",
+      "subject": "name:Retired"
     }
   ]
 }

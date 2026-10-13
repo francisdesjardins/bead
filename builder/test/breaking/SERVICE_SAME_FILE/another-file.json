@@ -53,7 +53,8 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_FILE",
-      "pointer": "/services/0/proto/file"
+      "pointer": "/services/0/proto/file",
+      "subject": "service:1"
     }
   ]
 }

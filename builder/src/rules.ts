@@ -139,8 +139,11 @@ export const RULES = Object.freeze({
   },
   NAME_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
   SERVICE_REVISION: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.API },
-  // and a comparison not run
+  // and what the run says of itself: a comparison not run, an earlier that contradicts itself, a
+  // waiver that waived nothing
   PROTO_SKIPPED: { level: Level.BREAKING, severity: Severity.WARNING },
+  AGAINST_BLUEPRINT: { level: Level.BREAKING, severity: Severity.WARNING },
+  WAIVER_UNUSED: { level: Level.BREAKING, severity: Severity.WARNING },
 } as const satisfies Readonly<Record<string, IRule>>);
 
 /** A rule's name. */

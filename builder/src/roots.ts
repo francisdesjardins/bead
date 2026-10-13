@@ -6,7 +6,7 @@
 
 // dependencies
 
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
 import { diagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
@@ -23,11 +23,35 @@ export const displayOf = (path: string): string => {
   return relative(process.cwd(), path).split(sep).join('/');
 };
 
-/** Refuses a root that is no folder, with an {@link InputError}. */
-export const assertRoots = (roots: readonly string[]): void => {
+// whether `folder` holds a `.proto` file, at any depth
+const holdsProto = (folder: string): boolean => {
+  return readdirSync(folder, { recursive: true, encoding: 'utf8' }).some((name) => {
+    return name.endsWith('.proto');
+  });
+};
+
+/**
+ * Refuses a root that is no folder, with an {@link InputError}. An earlier's, read from `from`, its
+ * folder, is named as its `beadc.yaml` names it, and refused too when it holds no `.proto`: git
+ * archive writes a submodule as an empty folder, and leaves a link and what export-ignore names out.
+ */
+export const assertRoots = (
+  roots: readonly string[],
+  options: { readonly from?: string } = {}
+): void => {
+  const { from } = options;
+
   for (const root of roots) {
-    if (!existsSync(root) || !statSync(root).isDirectory()) {
+    const folder = existsSync(root) && statSync(root).isDirectory();
+
+    if (from === undefined && !folder) {
       throw new InputError(`${root}: no folder of .proto files`);
+    }
+
+    if (from !== undefined && !(folder && holdsProto(root))) {
+      throw new InputError(
+        `${relative(from, root).split(sep).join('/')}: no folder of .proto files; git archive writes a submodule as an empty folder, and leaves a link and what export-ignore names out`
+      );
     }
   }
 };

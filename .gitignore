@@ -27,6 +27,9 @@ __pycache__/
 Thumbs.db
 *.log
 
+# beadc's own folder beside a beadc.yaml, the root's among them: what it extracts or writes for a run
+.beadc/
+
 # What this clone keeps for itself and never commits: the working notes and plans of its sessions
 .claude/local/
 

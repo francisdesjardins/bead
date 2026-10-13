@@ -269,14 +269,25 @@ jobs:
         run: node builder/src/cli.ts generate --check
       # ! beadc breaking, against the last release that carries a blueprint, the interop's and
       # examples/hello's: 0.3.0 is the first, and a later tag without one fails, so the step never
-      # passes by comparing nothing once a release carries it
+      # passes by comparing nothing once a release carries it. The last release is the newest
+      # vX.Y.Z, as tools/release.mjs reads one, whose commit is not HEAD's: on a release's own
+      # commit, the one before it, so a waiver the release carried still waives its change. Read by
+      # the tag's commit, never by ancestry, which the shallow fetch does not hold. Every warning
+      # fails, WAIVER_UNUSED's among them: a waiver that waived nothing is taken out
       - if: runner.os == 'Linux'
         name: The interop's blueprint and examples/hello, against the last release
         working-directory: .
         shell: bash
         run: |
           git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
-          tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          head="$(git rev-parse HEAD)"
+          tag=""
+          for each in $(git tag --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V -r); do
+            if [ "$(git rev-parse "$each^{commit}")" != "$head" ]; then
+              tag="$each"
+              break
+            fi
+          done
           if [ -z "$tag" ] || ! git cat-file -e "$tag:spec/interop-blueprint.json" 2> /dev/null; then
             if [ "$(printf '%s\n' v0.3.0 "$tag" | sort -V | head -n 1)" = v0.3.0 ]; then
               echo "::error title=beadc breaking::$tag carries no spec/interop-blueprint.json"
@@ -285,9 +296,9 @@ jobs:
             echo "::notice title=beadc breaking::${tag:-no v* tag} carries no blueprint: nothing to hold against before 0.3.0"
             exit 0
           fi
-          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github
+          git archive --format=tar "$tag" | node builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
           cd examples/hello
-          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github
+          git archive --format=tar "$tag" | node ../../builder/src/cli.ts breaking --against - --error-format github --fail-on-warning
 
   # ── Examples ─────────────────────────────────────────────────────────────────
   # Each project of examples/, written as a consumer writes one, its runtimes from their source: a

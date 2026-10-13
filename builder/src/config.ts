@@ -9,7 +9,8 @@
 
 // dependencies
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import nodePath, { type PlatformPath } from 'node:path';
 
 import { parse } from 'yaml';
@@ -77,6 +78,9 @@ interface IDocument {
 
 /** The file beadc reads its project from. */
 export const CONFIG_FILE = 'beadc.yaml';
+
+/** The folder beadc keeps its own files in, beside `beadc.yaml`, which `init`'s `.gitignore` ignores. */
+export const BEADC_FOLDER = '.beadc';
 
 const KEYS = new Set(['version', 'source', 'blueprint', 'outputs']);
 const SOURCE_KEYS = new Set(['proto', 'blueprint']);
@@ -399,6 +403,26 @@ export const againstOfText = (
   options: { readonly folder: string; readonly path?: PlatformPath }
 ): IAgainstConfig => {
   return { folder: options.folder, ...sourceOf(documentOf(text, options)) };
+};
+
+/**
+ * A temporary folder of beadc's, made: under `options.folder`'s `.beadc/` where a `beadc.yaml` was
+ * read, on the project's drive, which buf's build of one module over its roots and beadc's options
+ * needs; under the system's temporary folder otherwise. The caller takes it out.
+ */
+export const temporaryFolderOf = (
+  prefix: string,
+  options: { readonly folder?: string } = {}
+): string => {
+  if (options.folder === undefined) {
+    return mkdtempSync(nodePath.join(tmpdir(), `beadc-${prefix}`));
+  }
+
+  const own = nodePath.join(options.folder, BEADC_FOLDER);
+
+  mkdirSync(own, { recursive: true });
+
+  return mkdtempSync(nodePath.join(own, prefix));
 };
 
 /** The `beadc.yaml` nearest `from`, upward, or none. */

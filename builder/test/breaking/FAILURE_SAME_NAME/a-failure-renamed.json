@@ -24,7 +24,8 @@
   "findings": [
     {
       "rule": "FAILURE_SAME_NAME",
-      "pointer": "/services/0/failures/0/failureName"
+      "pointer": "/services/0/failures/0/failureName",
+      "subject": "service:1/failure:7"
     }
   ]
 }

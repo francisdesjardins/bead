@@ -2,10 +2,11 @@
 
 // A tar as `git archive --format=tar` writes it, read into a folder: POSIX.1-2001's pax interchange
 // format, 512-byte ustar headers, a global header `g` skipped, an extended header `x` giving the next
-// entry's `path`, then folders and regular files. A link is not written, as `export-ignore` drops a
-// file; a path absolute or holding `..`, an entry of a type `git archive` never writes, a header
-// whose checksum is off and an archive cut short are refused, exit 2: a `git archive` that failed
-// mid-stream leaves one. No dependency: the format is a page of POSIX's.
+// entry's `path` and its `size`, which override the ustar header's as GNU tar and bsdtar read them,
+// then folders and regular files. A link is not written, as `export-ignore` drops a file; a path
+// absolute, holding `..` or a NUL, or empty, a path an earlier entry holds, an entry of a type `git
+// archive` never writes, a header whose checksum is off and an archive cut short are refused, exit 2:
+// a `git archive` that failed mid-stream leaves one. No dependency: the format is a page of POSIX's.
 
 // dependencies
 
@@ -104,7 +105,7 @@ const recordsOf = (data: Uint8Array): Map<string, string> => {
   return records;
 };
 
-// a path of the archive, refused when it would leave the folder
+// a path of the archive, refused when it would leave the folder, or names nothing a folder holds
 const safePathOf = (path: string): string[] => {
   const segments = path.split(/[/\\]/u).filter((segment) => {
     return segment !== '' && segment !== '.';
@@ -116,7 +117,33 @@ const safePathOf = (path: string): string[] => {
     );
   }
 
+  if (segments.length === 0 || path.includes('\0')) {
+    throw new InputError(
+      `the archive holds ${JSON.stringify(path)}, a path that names no file: no tar git archive writes`
+    );
+  }
+
   return segments;
+};
+
+// an entry's size: its pax header's `size`, which overrides the ustar header's, or the ustar header's
+const sizeOf = (
+  header: Uint8Array,
+  details: { readonly records: ReadonlyMap<string, string> | undefined; readonly at: number }
+): number => {
+  const given = details.records?.get('size');
+
+  if (given === undefined) {
+    return octalOf(header, { field: SIZE, at: details.at });
+  }
+
+  if (!/^[0-9]+$/u.test(given)) {
+    throw new InputError(
+      `the archive's pax header before byte ${String(details.at)} holds a size that is no whole number`
+    );
+  }
+
+  return Number.parseInt(given, 10);
 };
 
 const isZero = (block: Uint8Array): boolean => {
@@ -135,6 +162,19 @@ const isZero = (block: Uint8Array): boolean => {
  */
 export const extractArchive = (bytes: Uint8Array, options: { readonly into: string }): string[] => {
   const written: string[] = [];
+  // each path an entry gave, so that none gives it twice
+  const held = new Set<string>();
+  const hold = (segments: readonly string[]): void => {
+    const path = segments.join('/');
+
+    if (held.has(path)) {
+      throw new InputError(
+        `the archive holds ${path} twice, an entry over an earlier one: no tar git archive writes`
+      );
+    }
+
+    held.add(path);
+  };
   let at = 0;
   let next: Map<string, string> | undefined;
 
@@ -164,7 +204,7 @@ export const extractArchive = (bytes: Uint8Array, options: { readonly into: stri
       throw new InputError(`the archive's header at byte ${String(at)} is no ustar header`);
     }
 
-    const size = octalOf(header, { field: SIZE, at });
+    const size = sizeOf(header, { records: next, at });
     const start = at + BLOCK;
     const end = start + size;
 
@@ -190,13 +230,18 @@ export const extractArchive = (bytes: Uint8Array, options: { readonly into: stri
         continue;
       }
       case EntryType.FOLDER: {
-        mkdirSync(join(options.into, ...safePathOf(name)), { recursive: true });
+        const segments = safePathOf(name);
+
+        hold(segments);
+        mkdirSync(join(options.into, ...segments), { recursive: true });
         break;
       }
       case EntryType.FILE:
       case EntryType.OLD_FILE: {
         const segments = safePathOf(name);
         const path = join(options.into, ...segments);
+
+        hold(segments);
 
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, data);

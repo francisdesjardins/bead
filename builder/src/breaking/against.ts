@@ -5,23 +5,32 @@
 // by the rules a later beadc added: a blueprint up to its schema; a folder's committed blueprint
 // first, the release's own, for Bead's rules; its `.proto` compiled into buf's image for buf's rules,
 // `checkProto` not run, a refusal skipping buf's half beside a committed blueprint and exit 2
-// without one; its `beadc.yaml` for its source and its blueprint alone. A `.binpb` is refused: a
-// release's `.proto` is its tag's (decision 0022).
+// without one; its `beadc.yaml` for its source and its blueprint alone. A committed blueprint its
+// `.proto` contradicts, or one named and missing, is AGAINST_BLUEPRINT's warning. A `.binpb` is
+// refused: a release's `.proto` is its tag's (decision 0022). An archive is extracted under the
+// project's `.beadc/` where a `beadc.yaml` is read, on the drive buf builds from.
 
 // dependencies
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
 import { compile } from '../compile.ts';
-import { againstOfText, CONFIG_FILE, type IAgainstConfig, type Source } from '../config.ts';
-import { InputError } from '../diagnostics.ts';
+import {
+  againstOfText,
+  CONFIG_FILE,
+  type IAgainstConfig,
+  type Source,
+  temporaryFolderOf,
+} from '../config.ts';
+import { diagnosticOf, type IDiagnostic, InputError } from '../diagnostics.ts';
 import { blueprintOf } from '../front-end/blueprint-of.ts';
 import { readSet } from '../front-end/input.ts';
-import { type IBlueprint, readBlueprint } from '../model/blueprint.ts';
+import { type IBlueprint, type PlaceOf, readBlueprint } from '../model/blueprint.ts';
 import { assertRoots, displayOf } from '../roots.ts';
+import { Category } from '../rules.ts';
 import { extractArchive } from './archive.ts';
+import { compareBlueprints } from './compare.ts';
 
 // types
 
@@ -36,6 +45,10 @@ export interface IEarlier {
   readonly image?: Uint8Array;
   /** Why its `.proto` went uncompiled beside a committed blueprint: buf's first message. */
   readonly skipped?: string;
+  /** Its `.proto` roots, for a folder on disk: where a file the current lost is found. */
+  readonly roots?: readonly string[];
+  /** What reading it found of itself: AGAINST_BLUEPRINT's warnings. */
+  readonly diagnostics?: readonly IDiagnostic[];
 }
 
 /** What {@link againstOf} reads the earlier by: the current input's source and `beadc.yaml`. */
@@ -88,12 +101,15 @@ const readEarlierBlueprint = (path: string, file: string): IBlueprint => {
 
 // the earlier's `.proto` roots, compiled into buf's image and read as a set: its blueprint, the
 // front end's derivation alone, and its image
-const compileEarlier = (roots: readonly string[]): { blueprint: IBlueprint; image: Uint8Array } => {
-  assertRoots(roots);
+const compileEarlier = (
+  roots: readonly string[],
+  folder: string
+): { blueprint: IBlueprint; placeOf: PlaceOf; image: Uint8Array } => {
+  assertRoots(roots, { from: folder });
 
   const image = compile(roots, { image: true });
 
-  return { blueprint: blueprintOf(readSet(image, { roots })).blueprint, image };
+  return { ...blueprintOf(readSet(image, { roots })), image };
 };
 
 // the earlier's source in `folder`: its own `beadc.yaml`'s, or the current one's, its paths taken
@@ -172,11 +188,12 @@ export const againstOfFolder = (
   }
 
   const held = committed !== undefined && existsSync(committed) ? committed : undefined;
-  let compiled: { blueprint: IBlueprint; image: Uint8Array } | undefined;
+  const diagnostics: IDiagnostic[] = [];
+  let compiled: { blueprint: IBlueprint; placeOf: PlaceOf; image: Uint8Array } | undefined;
   let refusal: string | undefined;
 
   try {
-    compiled = compileEarlier(source.proto);
+    compiled = compileEarlier(source.proto, folder);
   } catch (error) {
     // ! an option renamed since, or a derivation changed, costs the comparison of the messages,
     // never the gate, where the release committed its blueprint
@@ -196,12 +213,40 @@ export const againstOfFolder = (
     throw new InputError(`the earlier, ${name}: its .proto gave no blueprint`);
   }
 
+  // * the release's blueprint and its .proto, read by this beadc, compared by id: what Bead's rules
+  // read and what buf's read are one contract, or the run says which finding parts them
+  if (committed !== undefined && held === undefined) {
+    diagnostics.push(
+      diagnosticOf('AGAINST_BLUEPRINT', {
+        message: `the earlier's ${CONFIG_FILE} names its blueprint, ${shown(committed)}, which is not there: Bead's rules read its .proto`,
+        place: { file: name },
+      })
+    );
+  } else if (held !== undefined && compiled !== undefined) {
+    const [first] = compareBlueprints(compiled.blueprint, {
+      earlier: blueprint,
+      category: Category.API,
+      placeOf: compiled.placeOf,
+    });
+
+    if (first !== undefined) {
+      diagnostics.push(
+        diagnosticOf('AGAINST_BLUEPRINT', {
+          message: `the earlier's committed blueprint, ${shown(held)}, and its .proto disagree, ${first.rule} first: ${first.message}; Bead's rules read the blueprint, buf's the .proto`,
+          place: { file: name },
+        })
+      );
+    }
+  }
+
   return {
     file: name,
     blueprint,
     fromProto: true,
+    roots: source.proto,
     ...(compiled === undefined ? {} : { image: compiled.image }),
     ...(refusal === undefined ? {} : { skipped: refusal }),
+    ...(diagnostics.length === 0 ? {} : { diagnostics }),
   };
 };
 
@@ -216,11 +261,25 @@ export const againstOf = (path: string, options: IAgainstOptions): IEarlier => {
       throw new InputError('--against - reads a tar on standard input, and none came');
     }
 
-    const folder = mkdtempSync(join(tmpdir(), 'beadc-against-'));
+    const folder = temporaryFolderOf(
+      'against-',
+      options.config === undefined ? {} : { folder: options.config.folder }
+    );
 
     try {
       extractArchive(options.archive, { into: folder });
-      return againstOfFolder(folder, { ...options, name: STANDARD_INPUT });
+
+      const earlier = againstOfFolder(folder, { ...options, name: STANDARD_INPUT });
+
+      // ! the folder goes once read: none of its roots is kept
+      return {
+        file: earlier.file,
+        blueprint: earlier.blueprint,
+        fromProto: earlier.fromProto,
+        ...(earlier.image === undefined ? {} : { image: earlier.image }),
+        ...(earlier.skipped === undefined ? {} : { skipped: earlier.skipped }),
+        ...(earlier.diagnostics === undefined ? {} : { diagnostics: earlier.diagnostics }),
+      };
     } finally {
       rmSync(folder, { recursive: true, force: true });
     }

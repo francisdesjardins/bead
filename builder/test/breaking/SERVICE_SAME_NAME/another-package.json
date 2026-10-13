@@ -53,7 +53,8 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_NAME",
-      "pointer": "/services/0/proto/fullName"
+      "pointer": "/services/0/proto/fullName",
+      "subject": "service:1"
     }
   ]
 }

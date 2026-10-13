@@ -160,15 +160,19 @@ const sourceOf = (content: string): string | undefined => {
     });
 };
 
-// one output's files, under its folder
-const outputFilesOf = (output: Output, input: ITargetInput): readonly IGeneratedFile[] => {
+// one output's files, under its folder, a temporary folder made under the project's `folder`
+const outputFilesOf = (
+  output: Output,
+  details: { readonly input: ITargetInput; readonly folder: string }
+): readonly IGeneratedFile[] => {
+  const { input, folder } = details;
   const messages = input.set !== undefined && output.messages === Messages.GENERATE;
 
   if (output.language === 'csharp') {
     return [
       ...(input.set === undefined || !messages
         ? []
-        : generateCSharpMessages(input.set, { blueprint: input.blueprint })),
+        : generateCSharpMessages(input.set, { blueprint: input.blueprint, folder })),
       ...csharpTarget.generate(input, {
         ...(output.namespace === undefined ? {} : { namespace: output.namespace }),
         messages: output.messages,
@@ -316,7 +320,7 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
 
   for (const output of config.outputs ?? []) {
     const messages = input.set !== undefined && output.messages === Messages.GENERATE;
-    const written = outputFilesOf(output, input).map((file) => {
+    const written = outputFilesOf(output, { input, folder: config.folder }).map((file) => {
       const path = join(output.out, ...file.name.split('/'));
       const source = sourceOf(file.content);
 

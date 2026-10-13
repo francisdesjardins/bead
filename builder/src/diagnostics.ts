@@ -3,10 +3,13 @@
 // A finding of beadc's, and how it prints: one line a finding, `file:line:column: severity RULE:
 // message` at a .proto's place, or at a blueprint's JSON Pointer (RFC 6901) as a URI fragment names
 // one, `file#/services/0/serviceId`; in text, in JSON a line each, or as GitHub's workflow commands.
-// A breaking finding at a .proto's place carries its pointer besides, which its line ends with. A
+// A breaking finding at a .proto's place carries its pointer besides, which its line ends with, and
+// a finding of Bead's breaking rules its subject, its entity by ids, last: what a waiver names. A
 // finding of buf's breaking rules is named `buf:` and buf's rule.
 
 // dependencies
+
+import { relative, resolve, sep } from 'node:path';
 
 import { RULES, type RuleName, Severity } from './rules.ts';
 
@@ -27,6 +30,11 @@ export interface IDiagnostic {
   readonly column?: number;
   /** Its place in a blueprint, an RFC 6901 JSON Pointer; `""` is the whole. */
   readonly pointer?: string;
+  /**
+   * What a breaking finding is about, by ids no shift moves: AIP-122's hierarchy of kinds and ids,
+   * each step `kind:id`, as `service:1/procedure:4`. What `--except <RULE>@<subject>` names.
+   */
+  readonly subject?: string;
 }
 
 /** Where a finding is: a file, and its line and column or its pointer. */
@@ -102,6 +110,18 @@ export const escapeData = (text: string): string => {
   return text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
 };
 
+/**
+ * A file as GitHub's annotation names it: from the workspace, `GITHUB_WORKSPACE`, where a workflow
+ * runs, whatever folder beadc ran in; as it was given elsewhere.
+ */
+export const githubFileOf = (file: string): string => {
+  const workspace = process.env['GITHUB_WORKSPACE'];
+
+  return workspace === undefined || workspace === ''
+    ? file
+    : relative(workspace, resolve(file)).split(sep).join('/');
+};
+
 /** A workflow command's property, its `file` or its `title`, escaped as GitHub's runner reads it. */
 export const escapeProperty = (text: string): string => {
   return escapeData(text).replaceAll(':', '%3A').replaceAll(',', '%2C');
@@ -110,6 +130,11 @@ export const escapeProperty = (text: string): string => {
 // whether a finding's place is its pointer, a blueprint's, rather than a .proto's line
 const isAtPointer = (diagnostic: IDiagnostic): boolean => {
   return diagnostic.pointer !== undefined && !PROTO_FILE.test(diagnostic.file);
+};
+
+// a breaking finding's subject, as its line ends: what a waiver names
+const subjectOf = (diagnostic: IDiagnostic): string => {
+  return diagnostic.subject === undefined ? '' : ` [${diagnostic.subject}]`;
 };
 
 // where a finding is, as its text line opens
@@ -134,7 +159,7 @@ export const formatDiagnostic = (diagnostic: IDiagnostic, format: ErrorFormat): 
           ? ''
           : ` (at ${diagnostic.pointer})`;
 
-      return `${whereOf(diagnostic)}: ${diagnostic.severity} ${diagnostic.rule}: ${diagnostic.message}${at}`;
+      return `${whereOf(diagnostic)}: ${diagnostic.severity} ${diagnostic.rule}: ${diagnostic.message}${at}${subjectOf(diagnostic)}`;
     }
     case ErrorFormat.JSON: {
       return JSON.stringify({
@@ -145,18 +170,19 @@ export const formatDiagnostic = (diagnostic: IDiagnostic, format: ErrorFormat): 
         severity: diagnostic.severity,
         rule: diagnostic.rule,
         message: diagnostic.message,
+        ...(diagnostic.subject === undefined ? {} : { subject: diagnostic.subject }),
       });
     }
     case ErrorFormat.GITHUB: {
       const properties = [
-        `file=${escapeProperty(diagnostic.file)}`,
+        `file=${escapeProperty(githubFileOf(diagnostic.file))}`,
         ...(diagnostic.line === undefined ? [] : [`line=${String(diagnostic.line)}`]),
         ...(diagnostic.column === undefined ? [] : [`col=${String(diagnostic.column)}`]),
         `title=${escapeProperty(diagnostic.rule)}`,
       ];
       const at = diagnostic.pointer === undefined ? '' : ` (at ${diagnostic.pointer})`;
 
-      return `::${diagnostic.severity} ${properties.join(',')}::${escapeData(`${diagnostic.message}${at}`)}`;
+      return `::${diagnostic.severity} ${properties.join(',')}::${escapeData(`${diagnostic.message}${at}${subjectOf(diagnostic)}`)}`;
     }
   }
 };

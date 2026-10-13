@@ -19,7 +19,8 @@
   "findings": [
     {
       "rule": "SERVICE_SAME_NAME",
-      "pointer": "/services/0/serviceName"
+      "pointer": "/services/0/serviceName",
+      "subject": "service:1"
     }
   ]
 }

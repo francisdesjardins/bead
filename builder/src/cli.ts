@@ -32,6 +32,7 @@ import {
   escapeData,
   escapeProperty,
   formatDiagnostic,
+  githubFileOf,
   hasError,
   type IDiagnostic,
   InputError,
@@ -85,8 +86,8 @@ const USAGE = [
   '  version                       beadc, its tools, the format, the spec and the options',
   'flags: --error-format text|json|github, --fail-on-warning, --except <RULE> (a warning),',
   '       --descriptor-set-out <file> (blueprint, from a .proto),',
-  '       --category WIRE|API (breaking, API by default), --except <RULE>[@<pointer>] or',
-  '       buf:<RULE>[@<path>] (breaking, any finding)',
+  '       --category WIRE|API (breaking, API by default), --except <RULE>[@<subject>] or',
+  '       buf:<RULE>[@<path>] (breaking, any finding: a subject as its line prints it)',
   '       --language typescript|csharp (init, repeated; both when none is named)',
 ].join('\n');
 
@@ -185,7 +186,7 @@ const printDifference = (
       const line = difference.line === undefined ? '' : `,line=${String(difference.line)}`;
 
       print(
-        `::error file=${escapeProperty(file)}${line},title=${escapeProperty(title)}::${escapeData(message)}`
+        `::error file=${escapeProperty(githubFileOf(file))}${line},title=${escapeProperty(title)}::${escapeData(message)}`
       );
       break;
     }
