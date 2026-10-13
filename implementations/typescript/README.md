@@ -912,24 +912,27 @@ sandboxed frame of any site, a `file:` or a `data:` page, one whose origin it wi
 it would let any site drive the server and read every answer; serve the page from an origin, a local
 development server's or the Bead server's own, and name that one.
 
-Behind a proxy, an HTTP server believes `X-Forwarded-For` from the proxies `trustedProxies` names
-alone, each an IP address or a network, `10.0.0.0/8` say, or the compose network's: while the
-address reached is one they hold, the field's next entry from the right is the client's, so what a
-client wrote to the left of the first address none of them holds is never read. An entry is read in
-RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or `[2001:db8::1]:443`, its
-port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; any other,
-`unknown` or a zone among them, ends the walk at the proxy that wrote it. None trusts no proxy, the
-loopback among them; a name, a network whose bits past its prefix are set, and a network of prefix
-0, which would trust what every client writes, throw a `ProgrammerError` as the transport is built.
-`Forwarded` is never read, and a WebSocket server reads no `X-Forwarded-For`, the same list on it
-being ahead. A proxy not listed is a client as any other: every client behind it is its address,
-which `maximumConnectionsPerAddress` counts, so a told `busy` whose `address` is your proxy's, or a
-`largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A deployment whose
-proxies' addresses it cannot name, a platform's router or a cloud load balancer on public addresses,
-counts one address per proxy, a hop bound for such proxies being ahead
+Behind a proxy, a server, over HTTP or over WebSocket alike, believes `X-Forwarded-For` — at a
+WebSocket's address, its upgrade's — from the proxies `trustedProxies` names alone, each an IP
+address or a network, `10.0.0.0/8` say, or the compose network's: while the address reached is one
+they hold, the field's next entry from the right is the client's, so what a client wrote to the left
+of the first address none of them holds is never read. An entry is read in RFC 7239's node forms,
+`192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or `[2001:db8::1]:443`, its port dropped, and held in
+one form, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; any other, `unknown` or a zone among
+them, ends the walk at the proxy that wrote it. None trusts no proxy, the loopback among them; a
+name, a network whose bits past its prefix are set, and a network of prefix 0, which would trust
+what every client writes, throw a `ProgrammerError` as the transport is built. `Forwarded` is never
+read. The address reached is what a connection's handle and `clients` name and what a refusal tells;
+its port stays the socket's. A proxy not listed is a client as any other: every client behind it is
+its address. Over HTTP, `maximumConnectionsPerAddress` counts it, so a told `busy` whose `address`
+is your proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list;
+a WebSocket server bounds no address, so there it costs nothing but the address its handles and
+refusals name. A deployment whose proxies' addresses it cannot name, a platform's router or a cloud
+load balancer on public addresses, counts one address per proxy, a hop bound for such proxies
+being ahead
 ([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
-A bound by address counts as one the users behind one NAT, and as many the addresses of one
-IPv6 network.
+A bound by address counts as one the users behind one NAT, and as many the addresses of one IPv6
+network.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,

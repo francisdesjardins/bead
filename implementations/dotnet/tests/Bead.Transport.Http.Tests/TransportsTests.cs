@@ -197,6 +197,7 @@ public sealed class TransportsTests
                 "heartbeat" => options with { Heartbeat = TimeOf(option.Value) },
                 "hosts" => options with { Hosts = TextsOf(option.Value) },
                 "origins" => options with { Origins = TextsOf(option.Value) },
+                "trustedProxies" => options with { TrustedProxies = TextsOf(option.Value) },
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }

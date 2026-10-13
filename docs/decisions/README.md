@@ -75,8 +75,8 @@ not hold:
   and polls deadlines on a 1 kHz loop
   ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
-Ahead besides, each by a decision of its own that meets the Tenth Man: `trustedProxies` on the
-WebSocket server, a hop bound for proxies whose address a deployment cannot name, and the rest
+Ahead besides, each by a decision of its own that meets the Tenth Man: a hop bound for proxies
+whose address a deployment cannot name, and the rest
 [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md) names; and a
 bound of the protocol's on the calls a peer holds open over a transport that keeps its connection,
 a WebSocket or a Web Worker (spec 8.3).

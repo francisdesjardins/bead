@@ -1,12 +1,12 @@
 # 0030 — A server believes `X-Forwarded-For` from the proxies it names alone
 
 - **Status**: accepted
-- **Scope**: the protocol, and every implementation's HTTP server transport: in
+- **Scope**: the protocol, and every implementation's HTTP and WebSocket server transports: in
   [`spec/spec.md`](../../spec/spec.md), 15.12's client address — `trustedProxies`, an entry of
-  `X-Forwarded-For` and its one form — which `maximumConnectionsPerAddress`, a connection's handle
-  and every refusal told read. The bound itself is 15.12's table; the refusal told,
-  [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s; the
-  listening address and the form of an IP literal,
+  `X-Forwarded-For` and its one form — which an HTTP server's `maximumConnectionsPerAddress`, a
+  connection's handle and every refusal told read. The bound itself is 15.12's table; the refusal
+  told, [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s;
+  the listening address and the form of an IP literal,
   [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s.
 
 ## Context
@@ -62,7 +62,8 @@ The options weighed:
 
 ## Decision
 
-**`trustedProxies`, `TrustedProxies`, names the proxies an HTTP server believes** (spec 15.12):
+**`trustedProxies`, `TrustedProxies`, names the proxies a server believes**, over HTTP and over
+WebSocket alike (spec 15.12):
 addresses and networks in one list, as nginx, Express, Caddy and Traefik take them; each an IP
 address in the form a server listens on
 ([0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)), or that
@@ -95,8 +96,11 @@ a proxy. ASP.NET Core's `ForwardedHeadersMiddleware` reads an entry as an endpoi
 before checking its known proxies; this is the same reading, stated.
 
 **`X-Forwarded-For` alone is read**; `Forwarded` is not, and 15.12 says so. **A WebSocket server
-reads neither**: it bounds no address, so a proxy in front costs it only the address its handles
-and refusals name.
+takes the same list, refuses the same entries as it is built, and walks the field of the request
+that asks its upgrade**, by the module the HTTP transport walks it with, on each side. It bounds no
+address, so what the walk moves is the address its handles and its refusals name: behind a proxy
+it names, the client's, where the proxy's would be. One option on both transports, as `hosts` and
+`origins` are, so a deployment that puts both behind one proxy names it alike to each.
 
 **No event; a gauge.** Each side's HTTP transport gauges `largestAddressConnections`, the
 connections its busiest address holds, under its ceiling `maximumConnectionsPerAddress`, as
@@ -120,26 +124,29 @@ says; an IPv6 host holds a /64 or more ([RFC 6177](https://www.rfc-editor.org/rf
 15.12 names both.
 
 **Ahead, each by a decision of its own**: `Forwarded`, once a proxy that writes it alone is met; a
-hop bound for proxies of unknown address; the same list on the WebSocket server, reusing the walk,
-for the address its handles and refusals name; IPv6 keyed by a prefix; a per-address value fit for
-a NAT.
+hop bound for proxies of unknown address; IPv6 keyed by a prefix; a per-address value fit for a
+NAT.
 
-**The gate.** `spec/transports.json`, played by both sides over HTTP: the bound behind a proxy
+**The gate.** `spec/transports.json`, played by both sides. Over HTTP: the bound behind a proxy
 named; a field from a socket no entry holds, not read; the walk past two networks, what a client
 wrote to the left never read; an entry that is no address ending the walk at its proxy; a refusal
 behind a proxy telling the client's address and the proxy's port; an entry's node forms and its one
-form. The generator reads an entry by the same grammar, with Python's `ipaddress` for the networks.
-Twins by the same sentence ([0004](0004-one-behaviour-in-every-language.md)) hold what no step
-reaches: the build refusals, the walk and the grammar function by function, the dual-stack socket,
-and the gauge with the health it warns on. `docs/support.md` names them.
+form. Over WebSocket: an upgrade's refusals behind proxies named, telling the client the walk
+reaches, in the node forms and the one form, and the proxy's port; a field from a socket no entry
+holds, not read. The generator reads an entry by the same grammar, with Python's `ipaddress` for
+the networks. Twins by the same sentence ([0004](0004-one-behaviour-in-every-language.md)) hold
+what no step reaches: the build refusals, on each server transport, the walk and the grammar
+function by function, the dual-stack socket, a WebSocket connection's handle named by its client's
+address, and the gauge with the health it warns on. `docs/support.md` names them.
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 the round on the footguns before 0.4.0, told in
 [0010](0010-a-request-presents-a-credential-of-a-scheme.md); its rows on the client's address are
-kept here, each with the answer that holds. `trustedProxies` stands on the HTTP server alone, the
-hop bound and the WebSocket server's list ahead, each by a decision of its own.
+kept here, each with the answer that holds. `trustedProxies` stands on both server transports,
+the WebSocket server's list a choice the round put to the user; the hop bound is ahead, by a
+decision of its own.
 
 ### On the footguns before 0.4.0
 

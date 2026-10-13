@@ -25,7 +25,7 @@ import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
 import { assertHosts, assertListeningAddress, assertOrigins } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
-import { clientAddressOf } from './trusted-proxies';
+import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
   IIncomingMessageLike,
   IServerSocketLike,
@@ -98,6 +98,21 @@ const closeOpened = (
   http.close();
 };
 
+// an upgrade's `X-Forwarded-For`, every line of it read where it stands and joined by `, ` (RFC
+// 9110 §5.3); none when it carries none
+const forwardedOf = (request: IIncomingMessageLike): string | undefined => {
+  const lines: string[] = [];
+  const { rawHeaders } = request;
+
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    if (rawHeaders[index]?.toLowerCase() === 'x-forwarded-for') {
+      lines.push(rawHeaders[index + 1] ?? '');
+    }
+  }
+
+  return lines.length === 0 ? undefined : lines.join(', ');
+};
+
 // definition
 
 /**
@@ -116,8 +131,11 @@ const closeOpened = (
  * or no host, or to an absolute-form target that names none; 403 to a host it does not take; 405 to
  * a method but `GET` or `HEAD`; 426 to a request that asks no WebSocket, and to a version but 13;
  * 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`; each refusal
- * as {@link refusalOfHandshake} writes it. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
- * closes a connection that sends a larger one with 1009.
+ * as {@link refusalOfHandshake} writes it. A connection, and a refusal, name the client's address:
+ * behind the proxies `trustedProxies` names, the upgrade's `X-Forwarded-For` entry reached past
+ * them, as the HTTP transport reads it (spec 15.12), else its socket's. Each message is an envelope
+ * at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that sends a
+ * larger one with 1009.
  *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
@@ -135,12 +153,14 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     maxPayload = MAXIMUM_MESSAGE_BYTES,
     origins = [],
     secure,
+    trustedProxies,
     WebSocketServer,
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
   assertHosts(hosts);
   assertOrigins(origins);
+  const proxies = trustedProxiesOf(trustedProxies);
   const judged = { hosts, origins };
 
   const decoder = new TextDecoder();
@@ -181,6 +201,19 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         });
       };
 
+      // the client's address: the socket's, in the one form, or, behind proxies the transport
+      // trusts, the rightmost `X-Forwarded-For` entry of its upgrade none of them holds (spec 15.12)
+      const addressOf = (request: IIncomingMessageLike): string | undefined => {
+        const { remoteAddress } = request.socket;
+
+        return remoteAddress === undefined
+          ? undefined
+          : clientAddressOf(remoteAddress, {
+              forwarded: forwardedOf(request),
+              trustedProxies: proxies,
+            });
+      };
+
       const dateOf = (): string => {
         return new Date(server.clock.Date.now()).toUTCString();
       };
@@ -193,12 +226,12 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         { refusal: given, write }: { refusal: IHandshakeRefusal; write: () => void }
       ): void => {
         const { refusal: reason, status } = given;
-        const { remoteAddress, remotePort } = request.socket;
+        const { remotePort } = request.socket;
         const refusal =
           reason === undefined || !isHeard(REFUSAL_EVENT)
             ? undefined
             : {
-                address: remoteAddress === undefined ? undefined : clientAddressOf(remoteAddress),
+                address: addressOf(request),
                 ...toldOfHandshake(request),
                 port: remotePort ?? 0,
                 reason,
@@ -298,14 +331,14 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
       const onConnection = (socket: IServerSocketLike, request: IIncomingMessageLike): void => {
         // read now: a socket already gone reports neither
-        const { remoteAddress, remotePort } = request.socket;
+        const address = addressOf(request);
+        const { remotePort } = request.socket;
 
         // a socket gone has no peer to name, and its close is on its way
-        if (remoteAddress === undefined || remotePort === undefined) {
+        if (address === undefined || remotePort === undefined) {
           return (socket.terminate(), undefined);
         }
 
-        const address = clientAddressOf(remoteAddress);
         // drawn as it is taken, never from the peer's address alone, which another socket may share
         const connectionHandle = generateHandle({
           ip: address,
