@@ -8,16 +8,21 @@
 
 import { CLIENT_FAILURES, LIMIT_DEFAULTS } from '../src/router/client/router-client';
 import { readEnvelope } from '../src/router/shared/envelope';
+import { readHeader } from '../src/router/shared/header';
 import { BEAD_MEDIA_TYPE } from '../src/transport/shared/constants';
 import { plainHeaderOf } from './records';
 
 // interfaces
 
-/** An envelope read off the wire: its header made plain, and what follows it. */
+/** An envelope read off the wire: its header made plain, what follows it, and its bytes. */
 export interface IWireEnvelope {
-  /** A failure's code, scope and detail. */
-  failure?: { code: number; detail: string; scope: number } | undefined;
+  /** Its bytes, its header's and what follows. */
+  bytes: Uint8Array;
+  /** A failure's code, scope, detail, and the relays it crossed. */
+  failure?: { code: number; detail: string; relays: number; scope: number } | undefined;
   header: Record<string, boolean | number | string>;
+  /** The bytes its header takes, before its payload or its failure's record. */
+  headerBytes: number;
   /** The bytes of its payload, or of its chunk. */
   payloadBytes?: number | undefined;
 }
@@ -43,19 +48,22 @@ const envelopeOf = (bytes: Uint8Array): IWireEnvelope => {
   });
 
   if (envelope === undefined) {
-    return { header: { advisory: true } };
+    return { bytes, header: { advisory: true }, headerBytes: bytes.length };
   }
 
   return {
+    bytes,
     failure:
       'failure' in envelope
         ? {
             code: envelope.failure.code,
             detail: envelope.failure.detail,
+            relays: envelope.failure.relays,
             scope: envelope.failure.scope,
           }
         : undefined,
     header: plainHeaderOf(envelope.header),
+    headerBytes: readHeader(bytes, CLIENT_FAILURES)?.headerBytes ?? bytes.length,
     payloadBytes: 'payload' in envelope ? envelope.payload.length : undefined,
   };
 };

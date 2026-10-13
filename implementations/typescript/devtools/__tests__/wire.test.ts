@@ -83,6 +83,7 @@ test.describe('readBody', () => {
     expect(reading).toEqual({
       envelopes: [
         {
+          bytes: REQUEST,
           failure: undefined,
           header: expect.objectContaining({
             callId: 1,
@@ -90,24 +91,34 @@ test.describe('readBody', () => {
             kind: EnvelopeKind.REQUEST,
             procedureId: 3,
           }) as unknown,
+          headerBytes: REQUEST.length - 5,
           payloadBytes: 5,
         },
       ],
     });
-    expect(JSON.stringify(reading)).not.toContain('secret');
+    expect(JSON.stringify({ ...reading.envelopes[0], bytes: undefined })).not.toContain('secret');
   });
 
-  test('reads a batch, each envelope after its length, a failure by its code, scope and detail', () => {
+  test('reads a batch, each envelope after its length, a failure by its code, scope, detail and relays', () => {
     expect(readBody(batchOf(RESULT, FAILURE), 'batch')).toEqual({
       envelopes: [
-        { failure: undefined, header: { callId: 1, kind: EnvelopeKind.RESULT }, payloadBytes: 2 },
         {
+          bytes: RESULT,
+          failure: undefined,
+          header: { callId: 1, kind: EnvelopeKind.RESULT },
+          headerBytes: RESULT.length - 2,
+          payloadBytes: 2,
+        },
+        {
+          bytes: FAILURE,
           failure: {
             code: ProtocolCode.ACCESS_DENIED,
             detail: 'not you',
+            relays: 0,
             scope: FailureScope.PROTOCOL,
           },
           header: expect.objectContaining({ callId: 3, kind: EnvelopeKind.FAILURE }) as unknown,
+          headerBytes: 8,
           payloadBytes: undefined,
         },
       ],
