@@ -52,7 +52,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md):
   a `proto` payload's records, read against its message before its library, section 17.9;
 - [0029](../docs/decisions/0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md): a
-  listen's cursor and wait in fields, section 15.9.
+  listen's cursor and wait in fields, section 15.9;
+- [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md):
+  a client's address behind the proxies an HTTP server names, section 15.12.
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,

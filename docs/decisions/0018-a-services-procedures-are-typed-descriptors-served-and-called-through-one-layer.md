@@ -57,8 +57,8 @@ layer yet, and eight things it needs are missing or differ between the sides:
 - **The C# servers and clients share members but no type.** `Server<TData>`,
   `WebSocketServer<TData>` and `HttpServer<TData>` each hold a router, services, sessions and
   `RequireSession`, so the interop hands a tuple of the three where it needs a server. The two
-  transport servers lack `RequireSessionOrCredential`, which `Server<TData>` has, and the TypeScript
-  side's `IServer` has.
+  transport servers lack the relay's admissions, `RequireCredential` and `ShareLegBSession`, which
+  `Server<TData>` has, and the TypeScript side's `IServer` has.
 - **The C# router's `notify` takes another shape than the TypeScript one's.** The TypeScript
   `IRouterLike.notify` takes `Uint8Array` or `Error`, the reason a value did not write in its
   payload's place; the C# `NotifyRequest`, a positional record of three members, carries it beside
@@ -386,12 +386,12 @@ _Conformance:_ none; a window asked for goes on the wire as PACED. _Matrix:_ non
 
 - **A server's interface and `IClient`, implemented by composition (0007). Chosen.** The server's
   holds what the TypeScript side's `IServer` holds: its transport, router, services and sessions,
-  `RequireSession` and `RequireSessionOrCredential`, its gauges and its health, and its disposal.
-  The two transport servers gain `RequireSessionOrCredential`, and give their transport to the
-  interface as an `IServerTransport` by an explicit implementation. `IClient` holds what every client
-  shares: its router, its services, `Disconnect`, `Reconnect` and its disposal; `Connect` stays each
-  client's own, since each takes its transport's options record, where the TypeScript side's
-  `IClient` reads them from its transport's type.
+  `RequireSession`, `RequireCredential` and `ShareLegBSession`, its gauges and its health, and its
+  disposal. The two transport servers gain `RequireCredential` and `ShareLegBSession`, and give
+  their transport to the interface as an `IServerTransport` by an explicit implementation.
+  `IClient` holds what every client shares: its router, its services, `Disconnect`, `Reconnect` and
+  its disposal; `Connect` stays each client's own, since each takes its transport's options
+  record, where the TypeScript side's `IClient` reads them from its transport's type.
 
   Its name. `IServer<TData>` maps name for name onto the TypeScript side's `IServer`, but ASP.NET
   Core's `Microsoft.AspNetCore.Hosting.Server.IServer` is imported and called in the very projects
@@ -1218,7 +1218,8 @@ public interface IBeadServer<TData> : IAsyncDisposable
     ServiceManager Services { get; }
     SessionManager<TData> Sessions { get; }
     BeforeRequest RequireSession { get; }
-    BeforeRequest RequireSessionOrCredential { get; }
+    BeforeRequest RequireCredential { get; }
+    BeforeRequest ShareLegBSession { get; }
     Task<ServerGauges> Gauges();
     Task<Health> Health();
 }
@@ -1234,8 +1235,8 @@ public interface IClient : IAsyncDisposable
 ```
 
 `Server<TData>`, `WebSocketServer<TData>` and `HttpServer<TData>` implement the first, the last two
-gaining `RequireSessionOrCredential` and giving their transport by an explicit implementation;
-`WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`.
+gaining `RequireCredential` and `ShareLegBSession` and giving their transport by an explicit
+implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in `Bead.Core`.
 
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,

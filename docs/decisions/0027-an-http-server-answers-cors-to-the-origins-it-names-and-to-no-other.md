@@ -164,8 +164,14 @@ certificate or the browser's own HTTP authentication: every request to a Bead se
 credentials, which is what makes the wildcards hold, and no listed page reads what a user's cookies
 would open on the server's domain.
 
-**`null` is echoed when `origins` names it**: `origins: ['null']` already takes every page that
-sends it, over both transports, and the answer carries what no cookie opened.
+**`null` is never taken**: it serializes every opaque origin alike
+([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2), the HTML Standard), so naming
+it would take a sandboxed frame of any site, which reads every answer (OWASP's HTML5 Security Cheat
+Sheet, WSTG-CLNT-07, CWE-942); a page that sends it has an origin to serve it from instead, a local
+development server's, the Bead server's own, or an app shell's custom scheme. `origins` refuses it
+as the transport is built
+([0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)), so no
+answer names it.
 
 **Nothing for Private Network Access**: no browser asks it. Whether a page reaches the loopback or a
 private address is its browser's and its user's.
@@ -193,9 +199,6 @@ none of the path's fields
 **On the TypeScript side, `IHTTPResponseLike` requires `setHeader`**, which `node:http`,
 `node:https` and `node:http2`'s responses have.
 
-**`origins: ['null']` lets every page of any site that sends `null` read every HTTP answer**, as it
-already lets each connect.
-
 **A gateway in front that answers CORS for the Bead path stops, or replaces the fields rather than
 appends them**, once the server lists the origin: two `Access-Control-Allow-Origin` fail Fetch's
 CORS check. A gateway that appends, nginx's `add_header` among them, breaks every listed page.
@@ -212,9 +215,9 @@ answer expires: every exchange of a connection is at one URL
 ([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)), which every engine
 keys its preflight cache by.
 
-**The gate.** `spec/transports.json`'s five CORS cases, played by both sides: a listed origin's
+**The gate.** `spec/transports.json`'s four CORS cases, played by both sides: a listed origin's
 preflight; every answer to it once judged; a preflight judged as every request before its origin; an
-`OPTIONS` that is no preflight and an exchange from the server's own origin or from none; `null`.
+`OPTIONS` that is no preflight and an exchange from the server's own origin or from none.
 `unmarked()` holds HTTP's own 400 to none of the path's fields over HTTP and at a WebSocket's
 address, and the WebSocket upgrade from a taken origin to none of CORS's. Twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) hold what no step reaches: the preflight over
@@ -228,8 +231,8 @@ measurement. `docs/support.md` names them.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-one round, and its `Access-Control-Allow-Headers` in a second. Its objections, each with the answer
-that holds:
+one round, its `Access-Control-Allow-Headers` in a second, and its `null` in a third. Its
+objections, each with the answer that holds:
 
 ### On CORS over HTTP
 
@@ -247,3 +250,11 @@ that holds:
 The allow-headers value was revised by
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round; its objections
 and answers are kept there.
+
+### `null`, refused
+
+`null` left `origins` in the round on the footguns before 0.4.0, told in
+[0010](0010-a-request-presents-a-credential-of-a-scheme.md); none of its objections was on `null`,
+which OWASP's HTML5 Security Cheat Sheet and WSTG-CLNT-07 settle, and the option it would have kept,
+one named for every site, `opaqueOrigins`, was weighed and not taken: no page that sends `null` lacks
+an origin to be served from.
