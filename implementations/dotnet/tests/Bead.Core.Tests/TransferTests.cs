@@ -92,6 +92,7 @@ public sealed class TransferTests
         Assert.Equal(1_008, Transfer.ChunkPayloadBytes(new RouterLimits { ChunkBytes = 4_096, MaximumEnvelopeBytes = 1_024 }, 16));
     }
 
+    // spec 12.11
     [Fact]
     public void Lays_the_spec_s_20_MiB_out_byte_by_byte_its_opening_a_credit_a_chunk_with_more_the_last()
     {
@@ -346,6 +347,7 @@ public sealed class TransferTests
         Assert.Equal(whole, incoming.Payload().ToArray());
     }
 
+    // spec 12.6.5
     [Fact]
     public void Refuses_more_runs_of_bytes_apart_than_its_bound_one_byte_at_a_time()
     {

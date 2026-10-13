@@ -918,6 +918,7 @@ const hastyClockOf = () => {
 };
 
 test.describe('createHTTPTransportClient, listening', () => {
+  // spec 15.10
   test('says at connect that it listens, then listens: a batch heard in order, acknowledged by the next listen', async () => {
     const { callOf, client, fake, heard } = await connectListening({ wait: 1_000 });
     const first = envelopeOf(0x13, { callId: 1 });
@@ -997,6 +998,7 @@ test.describe('createHTTPTransportClient, listening', () => {
     await client.disconnect({ isQuick: true });
   });
 
+  // spec 15.10
   test('listens again from where it was when a listen is lost — at once, then later and later, drawn apart — and one that reaches the server ends the losses', async () => {
     const clock = createTestClock();
     const { callOf, client, fake, heard } = await connectListening({ clock });
@@ -1086,6 +1088,7 @@ test.describe('createHTTPTransportClient, listening', () => {
     await client.disconnect({ isQuick: true });
   });
 
+  // spec 15.10
   test('counts its connection lost once its listens were lost for its inactivity timeout, and tells the server', async () => {
     const fake = losingFetch();
     const clock = createTestClock();

@@ -291,6 +291,7 @@ test.describe('writeFailure', () => {
     }
   });
 
+  // spec 7.4
   test('cuts the detail at the limit, at a character’s boundary', () => {
     const detailOf = (detail: string): string => {
       return new TextDecoder().decode(
@@ -310,6 +311,7 @@ test.describe('writeFailure', () => {
     );
   });
 
+  // spec 7.4
   test('writes a lone surrogate as U+FFFD', () => {
     expect(writeFailure({ code: 1, detail: '\uD800', scope: FailureScope.PROTOCOL })).toEqual(
       fromHexadecimal('00 01 00 00  EF BF BD')

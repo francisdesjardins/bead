@@ -241,6 +241,7 @@ test.describe('createHTTPTransportServer', () => {
     await tcpSocketsClosed();
   });
 
+  // spec 15.12.4
   test('keeps its constants in step with the router’s', () => {
     expect(ENVELOPE_KINDS).toEqual({
       CANCEL: EnvelopeKind.CANCEL,
@@ -766,6 +767,7 @@ test.describe('createHTTPTransportServer', () => {
     expect(namesOf(events, 'message')).toEqual([]);
   });
 
+  // spec 15.12.4
   test('bounds its connections, and those of one address; the requests one waits on, and the bytes of body under way', async () => {
     await using started = await startTransport({
       bodyBytesBudget: 32,
@@ -2209,6 +2211,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await server.stop();
   });
 
+  // spec 15.12.4
   test('reads a body up to its limit exactly, declared or counted, refuses one declared past it before any of it, and gives back the bytes each held', async () => {
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
       bodyBytesBudget: 24,

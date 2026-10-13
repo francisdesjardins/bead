@@ -20,6 +20,7 @@ public sealed class RouterLimitsTests
 
     // definition
 
+    // spec 12.2.2, 12.2.3, 12.2.4, 12.2.5, 12.2.7 and 12.2.9
     [Fact]
     public void Holds_by_the_defaults_both_ends_set_alike()
     {

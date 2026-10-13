@@ -181,6 +181,7 @@ public sealed class EnvelopeCodecHeaderTests
             }).Side);
     }
 
+    // spec 4.10
     [Theory]
     [MemberData(nameof(UnwritableNames))]
     public void Refuses_to_write_a_header_and_writes_nothing(string name)
@@ -204,6 +205,7 @@ public sealed class EnvelopeCodecHeaderTests
     // private. A scheme to come without its bytes: a ReadOnlyMemory<byte> is empty at the least, and
     // empty is a scheme to come's. A scheme past 65535, or no integer: CredentialScheme is a ushort.
     // No credential at all, null: a Credential? of null is no block, the TypeScript side's undefined
+    // spec 4.10
     [Theory]
     [MemberData(nameof(UnwritableCredentialNames))]
     public void Refuses_a_credential_its_kind_does_not_take_or_its_scheme_does_not_hold(string name)
@@ -275,6 +277,7 @@ public sealed class EnvelopeCodecHeaderTests
             written);
     }
 
+    // spec 4.10
     [Fact]
     public void Refuses_a_header_of_no_kind_it_writes()
     {

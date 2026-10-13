@@ -17,6 +17,7 @@ import {
 import { createSequence } from '../identifiers';
 
 test.describe('ProtocolCode', () => {
+  // spec 8.1
   test('puts each code in the block of the stage that raises it', () => {
     const blocks = {
       ENVELOPE_MALFORMED: 0,
@@ -161,6 +162,7 @@ test.describe('the wire values', () => {
     }
   });
 
+  // spec 12.2.2, 12.2.3, 12.2.4, 12.2.5, 12.2.7 and 12.2.9
   test('leave room for a full header between an envelope and its payload', () => {
     expect(LIMIT_DEFAULTS).toEqual({
       bufferedBytesBudget: 268_435_456,

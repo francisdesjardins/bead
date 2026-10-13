@@ -57,6 +57,7 @@ public sealed partial class RouterCoreTests
 
     // definition
 
+    // debugging 5.2
     [Fact]
     public async Task Reads_traces_then_dispatches_what_comes_in_and_reports_what_does_not_read_untraced()
     {
@@ -69,6 +70,26 @@ public sealed partial class RouterCoreTests
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
         Assert.Equal(DebugDirection.Rx, Assert.Single(server.Traces).Direction);
         Assert.True(Assert.Single(resolver.Requests).IsAdmitted);
+    }
+
+    // debugging 5.2
+    [Fact]
+    public async Task Reports_the_kinds_to_come_and_skips_the_advisory_ones_in_silence()
+    {
+        var server = new Peer(RouterSide.Server);
+
+        foreach (var kind in new[] { "17", "7F", "80", "FF" })
+        {
+            await server.Deliver($"A1 {kind} 00 02  00 00 00 03");
+        }
+
+        Assert.Empty(server.Sent);
+        Assert.Equal(
+            [(ushort)ProtocolCode.KindUnsupported, (ushort)ProtocolCode.KindUnsupported],
+            server.Reports.Select(CodeOf));
+
+        // none traced: the advisory ones skipped before it, the others reported as they do not read
+        Assert.Empty(server.Traces);
     }
 
     [Fact]
@@ -546,6 +567,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
     }
 
+    // spec 12.3.2
     [Fact]
     public async Task Rejects_a_result_whose_transfer_is_past_the_payload_s_limit_and_cancels_its_call()
     {
@@ -734,6 +756,7 @@ public sealed partial class RouterCoreTests
         Assert.Empty(server.Sent);
     }
 
+    // debugging 5.1
     [Fact]
     public async Task Traces_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
     {
@@ -776,6 +799,7 @@ public sealed partial class RouterCoreTests
         Assert.Empty(server.Sent);
     }
 
+    // spec 10.4
     [Fact]
     public async Task Cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
     {
@@ -897,6 +921,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
     }
 
+    // spec 10.4
     [Fact]
     public async Task Cancels_a_call_waiting_once_throwing_and_reserving_its_call_id_on_its_connection_alone()
     {
@@ -1004,6 +1029,7 @@ public sealed partial class RouterCoreTests
         Assert.Single(client.Sent);
     }
 
+    // spec 12.3.2
     [Fact]
     public async Task Holds_a_procedure_s_limit_both_ways_once_admitted()
     {

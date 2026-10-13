@@ -124,6 +124,8 @@ const runCase = (each: IBreakingCase, category: Category): IDiagnostic[] => {
   });
 };
 
+// spec 16.8: an id or a name a release declared stays its declaration's, or is reserved, and the
+// cases find each change between two releases that would part them
 test('each case of test/breaking/ gives its rules at their pointers, under its category', () => {
   const cases = breakingCases();
 

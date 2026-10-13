@@ -1199,6 +1199,7 @@ test.describe('createRouterClient', () => {
       expect(sent).toEqual([]);
     });
 
+    // spec 11.7, 12.9.2 and 12.9.3
     test('keeps the call id of a subscription let go of a while, silent on what comes under it, then reports it', async () => {
       const { deliver, transport } = createScriptedTransport();
       const clock = createTestClock();
@@ -1390,6 +1391,7 @@ test.describe('createRouterClient', () => {
       expect(triggered).toEqual([Uint8Array.of(5)]);
     });
 
+    // spec 11.7 and 12.9.3
     test('reports a notification under no subscription, and one whose callback throws', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -1425,6 +1427,7 @@ test.describe('createRouterClient', () => {
       expect(activity).not.toContain('notification');
     });
 
+    // spec 12.9.2
     test('a failure after its result ends the subscription: no call unknown, the notification told, the next registration asks anew', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -1546,6 +1549,7 @@ test.describe('createRouterClient', () => {
       }).toThrow(ProgrammerError);
     });
 
+    // spec 11.7.3
     test('forgets each notification when its connection closes, is replaced, or it is disposed, and tells it', async () => {
       const { close, deliver, emitter, transport } = createScriptedTransport();
       const router = createRouterClient(transport);
@@ -1729,6 +1733,7 @@ test.describe('createRouterClient', () => {
       };
     };
 
+    // spec 11.11
     test('asks for its subscription paced, and credits each notification once its callbacks settled', async () => {
       const { creditsOf, deliver, done, errors, router, sent, subscribe, triggered } =
         createPaced(1);
@@ -1761,6 +1766,7 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([]);
     });
 
+    // spec 11.11
     test('opens its window once subscribed, and renews it once half a window settled', async () => {
       const { creditsOf, deliver, done, router, subscribe } = createPaced(4);
 
@@ -1792,6 +1798,7 @@ test.describe('createRouterClient', () => {
       expect(creditsOf()).toEqual([4, 6, 8]);
     });
 
+    // spec 11.11
     test('credits a notification ahead of its result, and its window after, no further than it reaches', async () => {
       const { creditsOf, deliver, done, router, subscribe } = createPaced(2);
 
@@ -2317,6 +2324,7 @@ test.describe('createRouterClient', () => {
   });
 
   test.describe('debug', () => {
+    // debugging 5.1
     test('tells each envelope out and in, with its connection, server, a copy of its header, and never its session token', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2343,6 +2351,7 @@ test.describe('createRouterClient', () => {
       expect(JSON.stringify(seen)).not.toContain(TOKEN);
     });
 
+    // debugging 2.2 and 2.3
     test('a debug listener that throws on an envelope is reported, and the envelope and its call go on, every listener told', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2367,6 +2376,7 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([failure, failure]);
     });
 
+    // debugging 4.4
     test('tells a call’s steps with the call id its REQUEST carries', async () => {
       const { deliver, transport } = createScriptedTransport();
       // a payload past 1,000 bytes goes as a transfer
@@ -2411,6 +2421,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 4.4
     test('two calls to one procedure started in one millisecond and answered in one batch name each its own call id', async () => {
       const start = Date.UTC(2026, 0, 1);
       const { deliver, transport } = createScriptedTransport();
@@ -2458,6 +2469,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 4.4
     test('a subscribing call binds its subscription before debug hears its tx step', async () => {
       const { deliver, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2495,6 +2507,7 @@ test.describe('createRouterClient', () => {
       return `bead_client_call_${rest.replace('{}', `{${labels}}`).replace('{outcome', `{${labels},outcome`)}`;
     };
 
+    // debugging 9.3, 9.6.1 and 9.6.2
     test('counts a call refused before it goes, SESSION_REQUIRED or DESTINATION_UNREACHABLE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { transport } = createScriptedTransport({ carriesCredential: false });
@@ -2547,6 +2560,7 @@ test.describe('createRouterClient', () => {
       ).toEqual([ProtocolCode.SESSION_REQUIRED, ProtocolCode.DESTINATION_UNREACHABLE]);
     });
 
+    // debugging 9.6.11
     test('counts a call its caller cancels as cancelled, and one its transport refuses as an error', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { control, transport } = createScriptedTransport();
@@ -2576,6 +2590,7 @@ test.describe('createRouterClient', () => {
       ]);
     });
 
+    // debugging 9.1.6, 10.2 and 10.3.3
     test('counts a notification heard under a subscription it holds, and a subscription dropped at this end by the failure that ends it or with its connection, never by its own cancel', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { close, deliver, transport } = createScriptedTransport();
