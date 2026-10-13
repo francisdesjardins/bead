@@ -383,6 +383,15 @@ export const isTakenOrigin = (
 };
 
 /**
+ * Whether `origin` is among `origins`, exactly, as {@link isTakenOrigin} compares them: the pages the
+ * server answers CORS to (spec 15.12), `null` among them when named. None is never listed, and the
+ * server's own is listed only when named.
+ */
+export const isListedOrigin = (origin: string | undefined, origins: readonly string[]): boolean => {
+  return origin !== undefined && origins.includes(origin);
+};
+
+/**
  * Refuses, with a {@link ProgrammerError} naming the entry, a `hosts` that holds an entry with a
  * port, an empty one, one that is no host of spec 15.12's grammar — a Unicode IDN among them, which
  * the field never carries — or {@link EVERY_HOST} beside another. `[]` and none take the hosts every

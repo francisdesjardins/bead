@@ -123,8 +123,10 @@ over HTTP/1.1, its stream reset over HTTP/2, before the transport judges anythin
 both transports. Under [0004](0004-one-behaviour-in-every-language.md)'s rule, where one side takes
 Y and the other Y and Z, every one takes Y: Y is what both servers take. Each side writes the 400
 its server does not, the C# side for a control character Kestrel took, the TypeScript side for an
-octet past ASCII Node took. So every string a refusal carries is printable, and the same on both
-sides.
+octet past ASCII Node took, as its server writes its own, with none of the fields every response on
+the path carries
+([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). So
+every string a refusal carries is printable, and the same on both sides.
 
 **A client names the status and the reason of a refusal it reads** (spec 15.6): the HTTP connect,
 "the server drew no connection: {status} {reason}", an unmarked status by its number alone; the

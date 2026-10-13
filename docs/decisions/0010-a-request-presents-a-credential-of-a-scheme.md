@@ -3,7 +3,9 @@
 - **Status**: accepted
 - **Scope**: the protocol, every implementation, the relays and the transports. A request's
   authority, the hosts a server takes, and the form of a host, are
-  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s.
+  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; what
+  an HTTP server answers of CORS is
+  [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)'s.
 
 ## Context
 
@@ -433,8 +435,10 @@ from `DESTINATION_UNKNOWN` which destinations exist: that step's promise, that a
 admitted learns only whether the relay has any destination, holds for a call presenting none or
 `OPAQUE` alone, unless the relay `verifies`.
 
-**A page presents `ELSEWHERE` to its own origin only.** `Authorization` is not a header CORS lets
-through without a preflight, and the HTTP transport answers none.
+**A page presents `ELSEWHERE` to its own origin, or to one `origins` names.** `Authorization` is
+not a header CORS lets through without a preflight, which an HTTP server answers to the origins it
+names alone, and no cookie goes with it
+([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)).
 
 **A page of another origin reaches a WebSocket server only when the server takes it.** Its upgrade
 is refused 403 otherwise, as an HTTP exchange is, since no same-origin policy guards it and a server

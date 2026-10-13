@@ -8,6 +8,7 @@ import {
   HOST_REFUSAL,
   isIPAddress,
   isIPv4Address,
+  isListedOrigin,
   isTakenHost,
   isTakenOrigin,
   isVisibleField,
@@ -423,6 +424,28 @@ test.describe('hosts and origins', () => {
         return isTakenOrigin(origin, { host, origins: [] });
       })
     ).toEqual([]);
+  });
+
+  // spec 15.12
+  test('isListedOrigin takes an Origin that origins names exactly, null among them, the server’s own only when named, and never none', () => {
+    // ORIGINS names a page and null; the server's own is bead.test's
+    expect(
+      [
+        'https://bead.example',
+        'null',
+        'https://Bead.Example',
+        'https://bead.example:443',
+        'http://bead.example',
+        'https://bead.test',
+        undefined,
+      ].map((origin) => {
+        return isListedOrigin(origin, ORIGINS);
+      })
+    ).toEqual([true, true, false, false, false, false, false]);
+    // the server's own, named
+    expect(isListedOrigin('https://bead.test', ['https://bead.test'])).toBe(true);
+    // none, whatever is named
+    expect([isListedOrigin(undefined, []), isListedOrigin('null', [])]).toEqual([false, false]);
   });
 
   test('isIPAddress takes a bare IP address by RFC 3986’s grammar, and refuses a name, every other form, brackets, a zone and an IPv4-mapped address', () => {

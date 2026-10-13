@@ -97,7 +97,7 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 95 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                              |
+| [`transports.json`](spec/transports.json)               | 100 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
@@ -247,6 +247,17 @@ cd implementations/typescript && BEAD_INTEROP_REQUIRED=1 yarn test:interop
 cd implementations/dotnet && BEAD_INTEROP_REQUIRED=1 dotnet test --project tests/Bead.Interop.Tests
 ```
 
+A page of another origin calls both HTTP servers in Chromium: `yarn test:browser`, in a Playwright
+config of its own, serves a page on `localhost` whose bundled HTTP client calls each side's interop
+server on `127.0.0.1`, which names the page's origin as `BEAD_INTEROP_ORIGINS` lists it. Its C#
+half starts `Bead.Interop.Server` with `dotnet run`, and skips or fails as the interop does.
+
+```sh
+cd implementations/typescript
+yarn playwright install chromium
+BEAD_INTEROP_REQUIRED=1 yarn test:browser
+```
+
 ## The demo
 
 A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
@@ -385,9 +396,10 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
 (regenerate, then diff, then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9
 (install, check, test, the demo's static build, and the root's files under the same formatter),
-`dotnet` (format, build, the builder's C# goldens among its projects, test, and the interop both
-ways with `BEAD_INTEROP_REQUIRED=1`), `builder` (install, protoc by its pin's sha256, test with
-`BEADC_PROTOC_REQUIRED=1` and `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
+`dotnet` (format, build, the builder's C# goldens among its projects, test, the interop both ways
+with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium against both HTTP servers),
+`builder` (install, protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and
+`BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
 `beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
 Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and

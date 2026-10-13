@@ -489,6 +489,25 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
+    public void IsListedOrigin_takes_an_Origin_that_origins_names_exactly_null_among_them_the_server_s_own_only_when_named_and_never_none()
+    {
+        Assert.True(HostsAndOrigins.IsListedOrigin("https://bead.example", Origins));
+        Assert.True(HostsAndOrigins.IsListedOrigin("null", Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin("https://Bead.Example", Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin("https://bead.example:443", Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin("Null", Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin(null, Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin(null, ["null"]));
+
+        // the server's own, taken by IsTakenOrigin, is listed only when named
+        Assert.All(Own, (own) =>
+        {
+            Assert.False(HostsAndOrigins.IsListedOrigin(own.Origin, []), own.Origin);
+            Assert.True(HostsAndOrigins.IsListedOrigin(own.Origin, [own.Origin]), own.Origin);
+        });
+    }
+
+    [Fact]
     public void Folds_ASCII_alone_a_host_that_differs_past_ASCII_is_another()
     {
         // the Kelvin sign and a dotted capital I, which a fold past ASCII would take for a k and an

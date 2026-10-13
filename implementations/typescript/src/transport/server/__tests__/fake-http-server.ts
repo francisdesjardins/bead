@@ -39,6 +39,7 @@ const joined = (body: Uint8Array | undefined, data: Uint8Array): Uint8Array => {
 
 const createFakeResponse = (): IFakeResponse => {
   const emitter = new EventEmitter();
+  const set: Record<string, string> = {};
   const response: IFakeResponse = {
     body: undefined,
     close: () => {
@@ -69,9 +70,13 @@ const createFakeResponse = (): IFakeResponse => {
     write: (data) => {
       response.body = joined(response.body, data);
     },
+    // what `setHeader` set, which `writeHead` merges with its own, as Node's does
+    setHeader: (name, value) => {
+      set[name.toLowerCase()] = value;
+    },
     writeHead: (status, headers) => {
       response.status = status;
-      response.headers = headers;
+      response.headers = { ...set, ...headers };
       (response as { headersSent: boolean }).headersSent = true;
     },
   };

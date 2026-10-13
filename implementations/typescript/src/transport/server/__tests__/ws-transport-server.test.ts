@@ -1529,6 +1529,14 @@ const answerFromOf = async (port: number, head: string) => {
       Number(answer.text.split(' ')[1]),
       /bead-refusal: (?<mark>.*)\r\n/u.exec(answer.text)?.groups?.['mark'] ?? null,
     ],
+    // the names of the fields its head carries, in lower case
+    fields: answer.text
+      .split('\r\n\r\n')[0]
+      ?.split('\r\n')
+      .slice(1)
+      .map((line) => {
+        return (line.split(':')[0] ?? '').toLowerCase();
+      }),
     localPort,
   };
 };
@@ -1646,7 +1654,7 @@ test.describe('WSTransportServer, the refusals it tells', () => {
     expect(refusals).toEqual([told(localPort, { reason: 'busy', status: 503 })]);
   });
 
-  test('answers 400 unmarked a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
+  test('answers 400 unmarked, with none of the path’s fields, a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
     const refusals = refusalsOf(server);
@@ -1662,8 +1670,16 @@ test.describe('WSTransportServer, the refusals it tells', () => {
 
     for (const field of fields) {
       const request = requestOf('GET / HTTP/1.1', [field]);
+      const { answer, fields: names } = await answerFromOf(port, request);
 
-      expect((await answerFromOf(port, request)).answer, request).toEqual([400, null]);
+      expect(answer, request).toEqual([400, null]);
+      // none of what a refusal of the server's own carries
+      expect(
+        names?.filter((name) => {
+          return ['cache-control', 'vary', 'x-content-type-options'].includes(name);
+        }),
+        request
+      ).toEqual([]);
     }
 
     expect([refusals, server.clients]).toEqual([[], []]);

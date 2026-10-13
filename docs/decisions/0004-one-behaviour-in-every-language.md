@@ -316,7 +316,8 @@ harnesses skip what is excused in their loops, and check nothing more.
 
 **The interop needs both runtimes in one place.** In CI, only the `dotnet` job has both: it installs
 the TypeScript side for its interop server, runs the C# tests, the C# client's interop among them,
-then the TypeScript side's `test:interop`. The `typescript` job leaves out the tests of the C#
+then the TypeScript side's `test:interop`, and its `test:browser`, whose page of another origin
+calls both sides' HTTP servers in Chromium. The `typescript` job leaves out the tests of the C#
 server.
 
 **A language joins with every vector, conversation and transport case passing, and with interop

@@ -9,13 +9,24 @@ using Bead.Transport.WebSockets;
 // of its own, given the service's credentials on the system's clock, which is theirs: its first
 // line on the standard output says their ports, as {"port":n,"httpPort":m}; it serves until its
 // standard input closes. A port given as its one argument is the WebSocket server's; none, any free
-// one. The HTTP server takes any free one.
+// one. The HTTP server takes any free one. Each names the origins `BEAD_INTEROP_ORIGINS` lists,
+// separated by spaces, none when it is not set: a page of another origin calls them so. The
+// TypeScript side's interop server does the same.
 
 var port = args.Length > 0 ? int.Parse(args[0], CultureInfo.InvariantCulture) : 0;
+var origins = (Environment.GetEnvironmentVariable("BEAD_INTEROP_ORIGINS") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
 var credentials = InteropCredentials.Of(TimeProvider.System);
 
-await using var server = new WebSocketServer<string>(new WebSocketServerOptions { Server = new ServerOptions { Credentials = credentials } });
-await using var httpServer = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Credentials = credentials } });
+await using var server = new WebSocketServer<string>(new WebSocketServerOptions
+{
+    Server = new ServerOptions { Credentials = credentials },
+    Transport = new WebSocketTransportServerOptions { Origins = origins },
+});
+await using var httpServer = new HttpServer<string>(new HttpServerOptions
+{
+    Server = new ServerOptions { Credentials = credentials },
+    Transport = new HttpTransportServerOptions { Origins = origins },
+});
 
 void Report(Exception reason, string? connectionHandle)
 {

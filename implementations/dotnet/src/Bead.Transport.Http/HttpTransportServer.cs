@@ -85,9 +85,13 @@ public sealed record HttpTransportServerOptions
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
     /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly:
-    /// none by default. <c>null</c> among them takes every exchange that sends it. No CORS is
-    /// answered. Each is <c>null</c> or an origin as RFC 6454 §6.2 serializes it; <c>*</c>, which no
-    /// origin is, and any other entry are an <see cref="ArgumentException"/> as the transport is built.
+    /// none by default. It serves a proxy that rewrites the host, and a page of another origin, to
+    /// which the server answers CORS (spec 15.12): its preflight 204, and on every answer once its
+    /// origin is judged <c>Access-Control-Allow-Origin</c> and every field exposed, never
+    /// <c>Access-Control-Allow-Credentials</c>. <c>null</c> among them takes, and lets read every
+    /// answer, every page that sends it. Each is <c>null</c> or an origin as RFC 6454 §6.2
+    /// serializes it; <c>*</c>, which no origin is, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 
@@ -147,9 +151,12 @@ public sealed record HttpTransportStartOptions
 /// absent; no other exchange's is read, and a <c>POST</c> with two is refused 400. An answer, and
 /// what a listen brings back, carry none. A cancel ends the exchange of its call; one before its
 /// request buries that call id for 5 seconds. Each refusal of its own is marked in
-/// <see cref="HttpTransport.RefusalHeader"/>. An exchange lost — its client gone before the transport
-/// ended it — closes the connection, as a socket that drops does; so do a request unanswered past its
-/// exchange timeout and a connection idle past its inactivity timeout. What the server sends of its
+/// <see cref="HttpTransport.RefusalHeader"/>. To a page of an origin
+/// <see cref="HttpTransportServerOptions.Origins"/> names, it answers CORS (spec 15.12): its
+/// preflight 204, and every answer once its origin is judged naming it and exposing every field, no
+/// credential allowed. An exchange lost — its client gone before the transport ended it — closes the
+/// connection, as a socket that drops does; so do a request unanswered past its exchange timeout and
+/// a connection idle past its inactivity timeout. What the server sends of its
 /// own waits, numbered, in the outbox of a connection whose client said at connect that it listens,
 /// until a <c>GET</c> listen brings it back in a batch; each listen held, once past its refusals,
 /// raises <see cref="Listen"/> with true, and its end, while its connection stands, with false. Each
@@ -182,6 +189,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private static readonly End Malformed = new(StatusCodes.Status400BadRequest, HttpRefusals.Malformed);
     private static readonly End Unknown = new(StatusCodes.Status404NotFound, HttpRefusals.ConnectionUnknown);
     private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy, new Dictionary<string, string> { ["retry-after"] = "1" });
+
+    // a CORS preflight's answer from an origin the server lists, whatever it asks for: the browser
+    // judges its request against it (Fetch §4.8). `*` is a wildcard for a request without
+    // credentials (Fetch §3.3.4), which every request to the server is, and no wildcard covers
+    // Authorization, which is named
+    private static readonly End Preflight = new(StatusCodes.Status204NoContent, null, new Dictionary<string, string>
+    {
+        ["access-control-allow-methods"] = "GET, POST, DELETE",
+        ["access-control-allow-headers"] = "authorization, *",
+        ["access-control-max-age"] = "7200",
+    });
 
     private readonly HttpTransportServerOptions _options;
     private readonly TimeProvider _clock;
@@ -773,11 +791,28 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         await response.CompleteAsync();
     }
 
-    // what every response on the path carries: never stored, never sniffed
+    // what every response on the path carries: never stored, never sniffed, and which one a request
+    // gets turns on its Origin (RFC 9110 §12.5.5)
     private static void StampOf(HttpResponse response)
     {
         response.Headers.CacheControl = "no-store";
         response.Headers.XContentTypeOptions = "nosniff";
+        response.Headers.Vary = "Origin";
+    }
+
+    // what HTTP refuses of its own, as Kestrel answers it: 400, unmarked, none of the path's fields,
+    // its socket closed behind it, nothing told (spec 15.12)
+    private static async Task RefuseMalformed(HttpContext context)
+    {
+        var response = context.Response;
+
+        if (!response.HasStarted)
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            response.Headers.Connection = "close";
+        }
+
+        await response.CompleteAsync();
     }
 
     // a stop: every connection closed, as lost, then the port freed
@@ -900,7 +935,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 return;
             }
 
-            await Finish(context, new End(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" }));
+            await RefuseMalformed(context);
 
             return;
         }
@@ -914,7 +949,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
         {
-            await Finish(context, new End(StatusCodes.Status400BadRequest, null, new Dictionary<string, string> { ["connection"] = "close" }));
+            await RefuseMalformed(context);
 
             return;
         }
@@ -938,6 +973,26 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         if (!IsAllowedOrigin((request, authority)))
         {
             await Finish(context, new End(StatusCodes.Status403Forbidden, HttpRefusals.Origin));
+
+            return;
+        }
+
+        var origin = HeaderOf(request, HeaderNames.Origin);
+        var isListed = HostsAndOrigins.IsListedOrigin(origin, _options.Origins);
+
+        // * every answer a page Origins names can read carries it, a refusal's too, which its client
+        // reads; a refusal judged before the origin answers a preflight no browser reads (Fetch
+        // §4.8). EndWith and the head writers keep what is set here
+        if (isListed)
+        {
+            context.Response.Headers.AccessControlAllowOrigin = origin;
+            context.Response.Headers.AccessControlExposeHeaders = "*";
+        }
+
+        // a preflight is no refusal, so EndWith, never Finish: nothing told, no connection drawn
+        if (isListed && HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
+        {
+            await EndWith(context, Preflight);
 
             return;
         }
