@@ -18,6 +18,21 @@ const atPointer = diagnosticOf('NAME_FORM', {
   place: { file: 'spec/a.json', line: 9, column: 3, pointer: '/services/0/procedureName' },
 });
 
+// ! CI's runner sets GITHUB_WORKSPACE, which moves every file the github format names: these
+// findings are printed outside a workflow, as given
+let workspace: string | undefined;
+
+test.beforeEach(() => {
+  workspace = process.env['GITHUB_WORKSPACE'];
+  delete process.env['GITHUB_WORKSPACE'];
+});
+
+test.afterEach(() => {
+  if (workspace !== undefined) {
+    process.env['GITHUB_WORKSPACE'] = workspace;
+  }
+});
+
 test('prints a finding as file:line:column, or at its JSON Pointer, as text', () => {
   expect(formatDiagnostic(atLine, ErrorFormat.TEXT)).toBe(
     "proto/catalog/v3/catalog.proto:41:5: error PROCEDURE_ID_UNIQUE: id 4, Slow's already"

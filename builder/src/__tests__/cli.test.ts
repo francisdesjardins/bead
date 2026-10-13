@@ -16,8 +16,8 @@ const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
 const PAIR = 'test/breaking/buf';
 const ARCHIVE = new URL('../../test/breaking/archive/archive.tar', import.meta.url);
 
-// beadc as a user runs it: Node, src/cli.ts as written, from builder/ or the folder given, after
-// the modules `node` is given to load first, `input` on its standard input
+// beadc as a user runs it, outside a workflow: Node, src/cli.ts as written, from builder/ or the
+// folder given, after the modules `node` is given to load first, `input` on its standard input
 const beadc = (
   args: readonly string[],
   options: {
@@ -38,6 +38,8 @@ const beadc = (
     {
       cwd: options.cwd ?? BUILDER,
       encoding: 'utf8',
+      // ! CI's runner sets GITHUB_WORKSPACE, which moves every file the github format names
+      env: { ...process.env, GITHUB_WORKSPACE: '' },
       ...(options.input === undefined ? {} : { input: options.input }),
     }
   );
