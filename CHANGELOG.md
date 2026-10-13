@@ -93,8 +93,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   snippet that makes it again by the page's own service manager. Metrics shows a row a procedure and
   its calls a second over the last minute, a procedure's name showing its calls alone; Wire names
   each procedure a client told, says a listen for a `POST` with no body, and copies an exchange as
-  the skeleton of an entry of `spec/conversations.json`. An empty panel says why and offers to
-  reload the page.
+  the skeleton of an entry of `spec/conversations.json`, a credential's own bytes zeroed. An empty
+  panel says why and offers to reload the page.
 - The extension's hook, while a panel watches, tells the panel more of each call: a failure whole —
   where it was raised, the relays it crossed, its destination, the call id its envelope named — the
   call's options whole, `destinationId` and `closeOnTimeout` among them, each payload as a tree of
