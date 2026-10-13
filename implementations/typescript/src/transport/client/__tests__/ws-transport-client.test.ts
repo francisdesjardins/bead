@@ -575,6 +575,33 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(client.isOpen()).toBe(true);
       });
 
+      test('reconnects though a reconnect listener throws, the throw reported, the next listener told', async () => {
+        const reported: Error[] = [];
+        let told = 0;
+
+        client.on('reconnect', () => {
+          throw new Error('a reconnect listener that throws');
+        });
+        client.on('reconnect', () => {
+          told += 1;
+        });
+        client.on('error', (error) => {
+          reported.push(error);
+        });
+
+        await client.connect({ host, port });
+        await client.disconnect();
+        await client.reconnect({ delay: 10, maxAttempts: 1 });
+
+        expect(client.isOpen()).toBe(true);
+        expect(told).toBe(1);
+        expect(
+          reported.map((error) => {
+            return error.message;
+          })
+        ).toEqual(['a reconnect listener that throws']);
+      });
+
       test('reconnects an open transport without emitting "close"', async () => {
         let closeCount = 0;
         client.on('close', () => {

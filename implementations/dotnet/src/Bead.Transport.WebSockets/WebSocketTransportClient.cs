@@ -147,15 +147,17 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     public event Action<bool, bool>? Close;
 
     /// <summary>
-    /// What broke the connection, before its close; or what a listener of its messages or its close
-    /// threw, the client going on as if it returned (spec 15.1).
+    /// What broke the connection, before its close; or what a listener of its messages, its close or
+    /// its reconnection threw, the client going on as if it returned (spec 15.1).
     /// </summary>
     public event Action<Exception>? Error;
 
     /// <summary>
     /// A reconnection starts: what was sent on the connection it replaces will not be answered
-    /// there, and an open one it replaces tells no close, so this is the one sign of it. Reached
-    /// through <see cref="IRouterClientTransport"/>: <see cref="Reconnect"/> names the method here.
+    /// there, and an open one it replaces tells no close, so this is the one sign of it. Each
+    /// listener is told within its guard, its throw reported through <see cref="Error"/>, and the
+    /// reconnection goes on. Reached through <see cref="IRouterClientTransport"/>:
+    /// <see cref="Reconnect"/> names the method here.
     /// </summary>
     event Action? IRouterClientTransport.Reconnect
     {
@@ -391,10 +393,11 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
         try
         {
-            // the connection replaced goes whatever a listener does
+            // each listener within its guard, its throw reported through Error; the connection
+            // replaced goes whatever a listener of Error does
             try
             {
-                starting?.Invoke();
+                _listeners.Tell(starting);
             }
             finally
             {

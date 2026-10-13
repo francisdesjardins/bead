@@ -212,8 +212,8 @@ export type TransportClientEventMap = {
    */
   close: [wasClean: boolean, wasQuick: boolean];
   /**
-   * What a listener of its `message` or its `close` threw, which changes nothing the client does.
-   * A failure of the connection itself shows as `connect` rejecting, or as `close`.
+   * What a listener of its `message`, its `close` or its `reconnect` threw, which changes nothing the
+   * client does. A failure of the connection itself shows as `connect` rejecting, or as `close`.
    */
   error: [error: Error];
   /**

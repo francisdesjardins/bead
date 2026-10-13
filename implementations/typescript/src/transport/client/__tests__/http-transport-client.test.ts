@@ -798,6 +798,39 @@ test.describe('createHTTPTransportClient', () => {
     await client.disconnect();
   });
 
+  test('reconnects though a reconnect listener throws, the throw reported, the next listener told', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    const client = createHTTPTransportClient({ isListening: false });
+    const reported: Error[] = [];
+    let told = 0;
+
+    client.on('reconnect', () => {
+      throw new Error('a reconnect listener that throws');
+    });
+    client.on('reconnect', () => {
+      told += 1;
+    });
+    client.on('error', (error) => {
+      reported.push(error);
+    });
+    await client.connect({ host, port });
+
+    const first = handleOf(server);
+
+    await client.reconnect();
+
+    expect(client.isOpen()).toBe(true);
+    expect(handleOf(server)).not.toBe(first);
+    expect(told).toBe(1);
+    expect(
+      reported.map((error) => {
+        return error.message;
+      })
+    ).toEqual(['a reconnect listener that throws']);
+    await client.disconnect();
+  });
+
   test('marks its refusals as the server does', () => {
     expect([REFUSAL_HEADER, CONNECTION_UNKNOWN]).toEqual(['bead-refusal', 'connection-unknown']);
   });

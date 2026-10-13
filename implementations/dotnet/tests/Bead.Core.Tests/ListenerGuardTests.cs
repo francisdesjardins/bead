@@ -25,6 +25,7 @@ public sealed class ListenerGuardTests
         Action<string>? connection = null;
         Action<bool, string>? close = null;
         Action<bool, bool>? closed = null;
+        Action? reconnect = null;
 
         connection += (_) =>
         {
@@ -53,15 +54,26 @@ public sealed class ListenerGuardTests
             told.Add($"closed {wasClean} {wasQuick}");
         };
 
+        // nor does its reconnection, which carries nothing
+        reconnect += () =>
+        {
+            throw thrown;
+        };
+        reconnect += () =>
+        {
+            told.Add("reconnect");
+        };
+
         guard.Tell(connection, Handle);
         guard.Tell(close, (false, Handle));
         guard.Tell(closed, (true, false));
+        guard.Tell(reconnect);
 
         // nobody listening: nothing told, nothing reported
         guard.Tell<string>(null, Handle);
 
-        Assert.Equal([$"connection {Handle}", $"close False {Handle}", "closed True False"], told);
-        Assert.Equal([(thrown, Handle), (thrown, Handle), (thrown, null)], reported);
+        Assert.Equal([$"connection {Handle}", $"close False {Handle}", "closed True False", "reconnect"], told);
+        Assert.Equal([(thrown, Handle), (thrown, Handle), (thrown, null), (thrown, null)], reported);
     }
 
     [Fact]
