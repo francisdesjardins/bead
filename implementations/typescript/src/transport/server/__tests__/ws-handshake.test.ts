@@ -432,7 +432,8 @@ test.describe('refusalOfHandshake', () => {
     ).toEqual([ORIGIN, ORIGIN, ORIGIN, ORIGIN]);
   });
 
-  test('takes whatever its hosts the hosts every server takes and any page of its own, and refuses 403 any other host, an empty one and none, before its method and its upgrade', () => {
+  // spec 15.12
+  test('takes whatever its hosts the hosts every server takes and any page of its own by a host it takes by name, and refuses 403 any other host, an empty one and none, before its method and its upgrade', () => {
     const answerGiven = (hosts: readonly string[] | undefined) => {
       return (request: IHandshakeRequestLike) => {
         const refusal = refusalOfHandshake(request, { hosts, origins: [] });
@@ -506,15 +507,18 @@ test.describe('refusalOfHandshake', () => {
       ].map(answerGiven(undefined))
     ).toEqual([UPGRADE, HOST_REFUSED]);
 
-    // every host under *, an empty one and none, which asks no WebSocket; and a page of its own
+    // every host under *, an empty one and none, which asks no WebSocket; a page of its own by a
+    // host every server takes, and none by a host * alone takes: the page that rebinds its name
     expect(
       [
+        naming('rebind.example:8080'),
+        naming('a.localhost:8080', [['Origin', 'http://a.localhost:8080']]),
         naming('rebind.example:8080', [['Origin', 'http://rebind.example:8080']]),
         naming(''),
         requestOf([], { httpVersion: '1.0', without: ['host'] }),
         naming('[::1', [], { method: 'POST' }),
       ].map(answerGiven(['*']))
-    ).toEqual(['taken', 'taken', UPGRADE, HOST]);
+    ).toEqual(['taken', 'taken', ORIGIN, 'taken', UPGRADE, HOST]);
   });
 });
 

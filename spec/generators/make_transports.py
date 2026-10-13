@@ -364,11 +364,13 @@ cases = [
     ('hosts empty takes the hosts every server takes, and no other', ['15.12'], {'hosts': []}, [
         connect('literal'), expect('literal', 201),
         connect('other', host='bead.test'), refused('other', 403, 'host-refused')]),
-    ('hosts * takes every host, an empty one and none among them', ['15.12'], {'hosts': ['*']}, [
-        connect('rebound', host='rebind.example:8080', fields={'origin': 'http://rebind.example:8080'}),
-        expect('rebound', 201),
-        connect('empty', host=''), expect('empty', 201),
-        send('none', 'POST', http='HTTP/1.0', host=None, fields={'content-type': BEAD}), expect('none', 201)]),
+    ('hosts * takes every host, an empty one and none among them, and makes none of their origins its own: a page that rebinds its name is refused 403 origin-refused, marked',
+     ['15.6.5', '15.12'], {'hosts': ['*']}, [
+         connect('rebound', host='rebind.example:8080', fields={'origin': 'http://rebind.example:8080'}),
+         refused('rebound', 403, 'origin-refused'),
+         connect('plain', host='rebind.example:8080'), expect('plain', 201),
+         connect('empty', host=''), expect('empty', 201),
+         send('none', 'POST', http='HTTP/1.0', host=None, fields={'content-type': BEAD}), expect('none', 201)]),
     # 15.12: a request's authority, an absolute-form target's before its Host (RFC 9112 §3.2.2)
     ('a request whose target is in absolute-form names its host by the target, its Host ignored, a differing one that no client should send among them, and its own origin with it',
      ['15.6.5', '15.12'], None, [
@@ -407,17 +409,16 @@ cases = [
         connect(host='Bead.Test', fields={'origin': 'http://bead.test'}), expect('connect', 201)]),
     # 15.12: the field read as it came, a serialized origin, never parsed: a browser on an IDN host
     # sends its Host and its Origin in punycode, and a Host of invalid punycode is a host as any other
-    ('a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken, under hosts *',
-     ['15.12'], {'hosts': ['*']}, [
-         connect('idn', host='xn--bad-bma.test', fields={'origin': 'http://xn--bad-bma.test'}), expect('idn', 201),
-         connect('port', host='xn--bad-bma.test:8443', fields={'origin': 'https://xn--bad-bma.test:8443'}),
-         expect('port', 201),
-         connect('invalid', host='xn--a', fields={'origin': 'http://xn--a'}), expect('invalid', 201),
+    ('a Host of invalid punycode is taken under hosts *, and its Origin is none of the server\'s own',
+     ['15.6.5', '15.12'], {'hosts': ['*']}, [
+         connect('invalid', host='xn--a', fields={'origin': 'http://xn--a'}), refused('invalid', 403, 'origin-refused'),
          connect('dotted', host='xn--a.test'), expect('dotted', 201),
          connect('hyphen', host='xn---bad-cpa.test'), expect('hyphen', 201)]),
     ('hosts names an IDN host in punycode, as the Host field carries it, and refuses a Host of invalid punycode, marked',
      ['15.6.5', '15.12'], {'hosts': ['xn--bad-bma.test']}, [
          connect('idn', host='xn--bad-bma.test', fields={'origin': 'http://xn--bad-bma.test'}), expect('idn', 201),
+         connect('port', host='xn--bad-bma.test:8443', fields={'origin': 'https://xn--bad-bma.test:8443'}),
+         expect('port', 201),
          connect('invalid', host='xn--a'), refused('invalid', 403, 'host-refused'),
          connect('dotted', host='xn--a.test'), refused('dotted', 403, 'host-refused'),
          connect('hyphen', host='xn---bad-cpa.test'), refused('hyphen', 403, 'host-refused')]),
@@ -428,8 +429,6 @@ cases = [
          connect('ws', fields={'origin': 'ws://{host}'}), refused('ws', 403, 'origin-refused'),
          connect('path', fields={'origin': 'http://{host}/'}), refused('path', 403, 'origin-refused'),
          connect('own', fields={'origin': 'https://{host}'}), expect('own', 201)]),
-    ('an Origin of null is taken when origins names it', ['15.12'], {'origins': ['null']}, [
-        connect(fields={'origin': 'null'}), expect('connect', 201)]),
     # 15.12: CORS, to the origins a server names (Fetch §3.3), and to no other
     ('a preflight from an origin the server names is answered 204, naming that origin, the methods, Authorization, the fields it asks for in its lines joined and any other field, for 7200 seconds, whatever method it asks for',
      ['15.6', '15.6.3', '15.12'], {'origins': [PAGE]}, [
@@ -485,12 +484,6 @@ cases = [
          expect('none', 405, fields={**NO_CORS, 'bead-refusal': 'method-refused'}, body=''),
          connect('ownconnect', fields={'origin': 'http://{host}'}), expect('ownconnect', 201, fields=NO_CORS),
          connect('noorigin'), expect('noorigin', 201, fields=NO_CORS)]),
-    ('an Origin of null that origins names is answered as any origin it names: its preflight 204, its exchanges naming null',
-     ['15.6.3', '15.12'], {'origins': ['null']}, [
-         preflight('preflight', 'POST', origin='null'),
-         expect('preflight', 204, fields={**preflighted(), 'access-control-allow-origin': 'null'}, body=''),
-         connect('connect', fields={'origin': 'null'}),
-         expect('connect', 201, fields={**CORS, 'access-control-allow-origin': 'null'})]),
     # 15.12: the bounds, past which the server answers 429 or 503
     ('past the connections a server holds, a connect is refused 503, with Retry-After',
      ['15.6.13', '15.12.1'], {'maximumConnections': 1}, [
@@ -860,18 +853,17 @@ websocket = [
     ('an upgrade\'s host and origin are compared in any ASCII case', ['15.2', '15.2.2', '15.2.7', '15.12'], {'options': {'hosts': ['bead.test']}}, [
         *upgrade(host='Bead.Test', fields={'origin': 'http://bead.test'}), message('socket', binary=ECHO),
         heard('socket', envelope=result(1, '"x"'))]),
-    ('an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken, under hosts *',
-     ['15.2', '15.2.2', '15.2.7', '15.12'], {'options': {'hosts': ['*']}}, [
-         *upgrade('idn', {'origin': 'http://xn--bad-bma.test'}, host='xn--bad-bma.test'),
-         message('idn', binary=ECHO), heard('idn', envelope=result(1, '"x"')),
-         *upgrade('port', {'origin': 'https://xn--bad-bma.test:8443'}, host='xn--bad-bma.test:8443'),
-         *upgrade('invalid', {'origin': 'http://xn--a'}, host='xn--a'),
+    ('an upgrade naming a Host of invalid punycode is taken under hosts *, and its Origin is none of the server\'s own',
+     ['15.2', '15.2.2', '15.2.7', '15.6.5', '15.12'], {'options': {'hosts': ['*']}}, [
+         handshake('invalid', {'origin': 'http://xn--a'}, host='xn--a'),
+         refused('invalid', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('dotted', host='xn--a.test'),
          *upgrade('hyphen', host='xn---bad-cpa.test')]),
     ('an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked',
-     ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'hosts': ['xn--bad-bma.test']}}, [
+     ['15.2', '15.2.2', '15.2.7', '15.6.5', '15.12'], {'options': {'hosts': ['xn--bad-bma.test']}}, [
          *upgrade('idn', {'origin': 'http://xn--bad-bma.test'}, host='xn--bad-bma.test'),
          message('idn', binary=ECHO), heard('idn', envelope=result(1, '"x"')),
+         *upgrade('port', {'origin': 'https://xn--bad-bma.test:8443'}, host='xn--bad-bma.test:8443'),
          handshake('invalid', host='xn--a'), refused('invalid', 403, 'host-refused', UPGRADE_REFUSED),
          handshake('dotted', host='xn--a.test'), refused('dotted', 403, 'host-refused', UPGRADE_REFUSED),
          handshake('hyphen', host='xn---bad-cpa.test'), refused('hyphen', 403, 'host-refused', UPGRADE_REFUSED)]),
@@ -892,9 +884,11 @@ websocket = [
          *upgrade('port', host='bead.test:8443'), message('port', binary=ECHO), heard('port', envelope=result(1, '"x"')),
          *upgrade('loopback', host='localhost'),
          handshake('other', host='rebind.example'), refused('other', 403, 'host-refused', UPGRADE_REFUSED)]),
-    ('a WebSocket server whose hosts is * takes an upgrade naming any host, and judges one naming none by its version',
-     ['15.2', '15.2.2', '15.2.5', '15.6.11', '15.12'], {'options': {'hosts': ['*']}}, [
-         *upgrade('rebound', {'origin': 'http://rebind.example:8080'}, host='rebind.example:8080'),
+    ('a WebSocket server whose hosts is * takes an upgrade naming any host that carries no Origin, refuses one whose Origin is its authority\'s 403 origin-refused, and judges one naming none by its version',
+     ['15.2', '15.2.2', '15.2.5', '15.2.7', '15.6.5', '15.6.11', '15.12'], {'options': {'hosts': ['*']}}, [
+         handshake('rebound', {'origin': 'http://rebind.example:8080'}, host='rebind.example:8080'),
+         refused('rebound', 403, 'origin-refused', UPGRADE_REFUSED),
+         *upgrade('plain', host='rebind.example:8080'),
          *upgrade('empty', host=''),
          asked('old', http='HTTP/1.0', host=None), refused('old', 426, 'upgrade-required', UPGRADE_REQUIRED)]),
     # 15.12: an upgrade's authority, an absolute-form target's before its Host (RFC 9112 §3.2.2)
@@ -912,8 +906,6 @@ websocket = [
          handshake('path', {'origin': 'http://{host}/'}), refused('path', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('own', {'origin': 'https://{host}'}), message('own', binary=ECHO),
          heard('own', envelope=result(1, '"x"'))]),
-    ('an upgrade with an Origin of null is taken when origins names it', ['15.2', '15.2.7', '15.12'], {'options': {'origins': ['null']}}, [
-        *upgrade(fields={'origin': 'null'}), message('socket', binary=ECHO), heard('socket', envelope=result(1, '"x"'))]),
     # 15.2: the method, then whether a WebSocket is asked at all, then its version, then its form
     ('a request at a WebSocket\'s address of a method but GET or HEAD is refused 405, its Allow naming GET and HEAD, before its handshake is read',
      ['15.2', '15.2.3', '15.6.7'], {}, [

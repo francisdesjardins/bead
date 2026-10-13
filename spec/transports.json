@@ -2042,8 +2042,9 @@
       ]
     },
     {
-      "name": "hosts * takes every host, an empty one and none among them",
+      "name": "hosts * takes every host, an empty one and none among them, and makes none of their origins its own: a page that rebinds its name is refused 403 origin-refused, marked",
       "clauses": [
+        "15.6.5",
         "15.12"
       ],
       "transport": "http",
@@ -2061,9 +2062,33 @@
         },
         {
           "expect": {
-            "status": 201
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "rebind.example:8080",
+              "origin": "http://rebind.example:8080",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example:8080\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "plain"
         },
         {
           "send": {
@@ -2544,8 +2569,9 @@
       ]
     },
     {
-      "name": "a page on an IDN host, its Host and its Origin in punycode, is its own, and a Host of invalid punycode is taken, under hosts *",
+      "name": "a Host of invalid punycode is taken under hosts *, and its Origin is none of the server's own",
       "clauses": [
+        "15.6.5",
         "15.12"
       ],
       "transport": "http",
@@ -2557,37 +2583,25 @@
       "steps": [
         {
           "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: xn--bad-bma.test\r\ncontent-type: application/prs.bead\r\norigin: http://xn--bad-bma.test\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "idn"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "idn"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: xn--bad-bma.test:8443\r\ncontent-type: application/prs.bead\r\norigin: https://xn--bad-bma.test:8443\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "port"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "port"
-        },
-        {
-          "send": {
             "head": "POST /bead HTTP/1.1\r\nhost: xn--a\r\ncontent-type: application/prs.bead\r\norigin: http://xn--a\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
           },
           "on": "invalid"
         },
         {
           "expect": {
-            "status": 201
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "xn--a",
+              "origin": "http://xn--a",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
           },
           "on": "invalid"
         },
@@ -2641,6 +2655,18 @@
             "status": 201
           },
           "on": "idn"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: xn--bad-bma.test:8443\r\ncontent-type: application/prs.bead\r\norigin: https://xn--bad-bma.test:8443\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "port"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "port"
         },
         {
           "send": {
@@ -2831,32 +2857,6 @@
             "status": 201
           },
           "on": "own"
-        }
-      ]
-    },
-    {
-      "name": "an Origin of null is taken when origins names it",
-      "clauses": [
-        "15.12"
-      ],
-      "transport": "http",
-      "options": {
-        "origins": [
-          "null"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: null\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "connect"
-        },
-        {
-          "expect": {
-            "status": 201
-          },
-          "on": "connect"
         }
       ]
     },
@@ -3420,64 +3420,6 @@
             }
           },
           "on": "noorigin"
-        }
-      ]
-    },
-    {
-      "name": "an Origin of null that origins names is answered as any origin it names: its preflight 204, its exchanges naming null",
-      "clauses": [
-        "15.6.3",
-        "15.12"
-      ],
-      "transport": "http",
-      "options": {
-        "origins": [
-          "null"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "OPTIONS /bead HTTP/1.1\r\nhost: {host}\r\norigin: null\r\naccess-control-request-method: POST\r\nconnection: close\r\n\r\n"
-          },
-          "on": "preflight"
-        },
-        {
-          "expect": {
-            "status": 204,
-            "fields": {
-              "access-control-allow-origin": "null",
-              "access-control-expose-headers": "*",
-              "vary": "Origin",
-              "access-control-allow-credentials": null,
-              "access-control-allow-methods": "GET, POST, DELETE",
-              "access-control-max-age": "7200",
-              "cache-control": "no-store",
-              "x-content-type-options": "nosniff",
-              "bead-refusal": null,
-              "access-control-allow-headers": "authorization, *"
-            },
-            "body": ""
-          },
-          "on": "preflight"
-        },
-        {
-          "send": {
-            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\norigin: null\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
-          },
-          "on": "connect"
-        },
-        {
-          "expect": {
-            "status": 201,
-            "fields": {
-              "access-control-allow-origin": "null",
-              "access-control-expose-headers": "*",
-              "vary": "Origin",
-              "access-control-allow-credentials": null
-            }
-          },
-          "on": "connect"
         }
       ]
     },
@@ -7194,17 +7136,94 @@
       ]
     },
     {
-      "name": "an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken, under hosts *",
+      "name": "an upgrade naming a Host of invalid punycode is taken under hosts *, and its Origin is none of the server's own",
       "clauses": [
         "15.2",
         "15.2.2",
         "15.2.7",
+        "15.6.5",
         "15.12"
       ],
       "transport": "websocket",
       "options": {
         "hosts": [
           "*"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: xn--a\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://xn--a\r\n\r\n"
+          },
+          "on": "invalid"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "xn--a",
+              "origin": "http://xn--a",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "invalid"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: xn--a.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "dotted"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "dotted"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: xn---bad-cpa.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "hyphen"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "hyphen"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked",
+      "clauses": [
+        "15.2",
+        "15.2.2",
+        "15.2.7",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "hosts": [
+          "xn--bad-bma.test"
         ]
       },
       "steps": [
@@ -7255,103 +7274,6 @@
             }
           },
           "on": "port"
-        },
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn--a\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://xn--a\r\n\r\n"
-          },
-          "on": "invalid"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "invalid"
-        },
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn--a.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
-          },
-          "on": "dotted"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "dotted"
-        },
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn---bad-cpa.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
-          },
-          "on": "hyphen"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "hyphen"
-        }
-      ]
-    },
-    {
-      "name": "an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked",
-      "clauses": [
-        "15.2",
-        "15.2.2",
-        "15.6.5",
-        "15.12"
-      ],
-      "transport": "websocket",
-      "options": {
-        "hosts": [
-          "xn--bad-bma.test"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: xn--bad-bma.test\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: http://xn--bad-bma.test\r\n\r\n"
-          },
-          "on": "idn"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "idn"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
-          },
-          "on": "idn"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 78 22"
-            }
-          },
-          "on": "idn"
         },
         {
           "send": {
@@ -7731,11 +7653,13 @@
       ]
     },
     {
-      "name": "a WebSocket server whose hosts is * takes an upgrade naming any host, and judges one naming none by its version",
+      "name": "a WebSocket server whose hosts is * takes an upgrade naming any host that carries no Origin, refuses one whose Origin is its authority's 403 origin-refused, and judges one naming none by its version",
       "clauses": [
         "15.2",
         "15.2.2",
         "15.2.5",
+        "15.2.7",
+        "15.6.5",
         "15.6.11",
         "15.12"
       ],
@@ -7754,13 +7678,39 @@
         },
         {
           "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "rebind.example:8080",
+              "origin": "http://rebind.example:8080",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example:8080\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "plain"
+        },
+        {
+          "expect": {
             "status": 101,
             "fields": {
               "upgrade": "websocket",
               "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
             }
           },
-          "on": "rebound"
+          "on": "plain"
         },
         {
           "send": {
@@ -8022,54 +7972,6 @@
             }
           },
           "on": "own"
-        }
-      ]
-    },
-    {
-      "name": "an upgrade with an Origin of null is taken when origins names it",
-      "clauses": [
-        "15.2",
-        "15.2.7",
-        "15.12"
-      ],
-      "transport": "websocket",
-      "options": {
-        "origins": [
-          "null"
-        ]
-      },
-      "steps": [
-        {
-          "send": {
-            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: null\r\n\r\n"
-          },
-          "on": "socket"
-        },
-        {
-          "expect": {
-            "status": 101,
-            "fields": {
-              "upgrade": "websocket",
-              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-            }
-          },
-          "on": "socket"
-        },
-        {
-          "send": {
-            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
-          },
-          "on": "socket"
-        },
-        {
-          "expect": {
-            "envelope": {
-              "kind": 17,
-              "callId": 1,
-              "payload": "22 78 22"
-            }
-          },
-          "on": "socket"
         }
       ]
     },

@@ -767,14 +767,19 @@ test.describe('WSTransportServer, its hosts and origins', () => {
     };
     const taken = ['HTTP/1.1 101 Switching Protocols', undefined];
     const refused = ['HTTP/1.1 403 Forbidden', 'host-refused'];
+    const notOwn = ['HTTP/1.1 403 Forbidden', 'origin-refused'];
 
     // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-    // and a Host of punycode that decodes to none, taken where every host is
+    // and a Host of punycode that decodes to none, taken where every host is; under *, no page is
+    // the server's own by a host * alone takes (spec 15.12)
     const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
 
     expect(
-      await answersOf(['*'], [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
-    ).toEqual([taken, taken, taken, taken]);
+      await answersOf(
+        ['*'],
+        [page, ['xn--a', 'http://xn--a'], ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']]
+      )
+    ).toEqual([notOwn, notOwn, taken, taken, taken]);
 
     // hosts name an IDN host as the field carries it, in punycode, and none past them is taken
     expect(
@@ -785,7 +790,8 @@ test.describe('WSTransportServer, its hosts and origins', () => {
     ).toEqual([taken, taken, refused, refused, refused]);
   });
 
-  test('refuses as it is built a hosts entry with a port, and an origins entry that is *', () => {
+  // spec 15.12
+  test('refuses as it is built a hosts entry with a port, and an origins entry that is * or null', () => {
     const built = (options: Partial<IWSTransportServerOptions>) => {
       return () => {
         return createWSTransportServer({ ...options, WebSocketServer });
@@ -796,7 +802,10 @@ test.describe('WSTransportServer, its hosts and origins', () => {
     expect(built({ hosts: ['bead.test', '*'] })).toThrow(ProgrammerError);
     expect(built({ origins: ['*'] })).toThrow(ProgrammerError);
     expect(built({ origins: ['https://bead.test/'] })).toThrow(ProgrammerError);
-    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).not.toThrow();
+    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).toThrow(
+      ProgrammerError
+    );
+    expect(built({ hosts: ['*'], origins: ['https://bead.test'] })).not.toThrow();
   });
 });
 

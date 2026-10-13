@@ -10,6 +10,7 @@ import {
   isTakenOrigin,
   ORIGIN_REFUSAL,
   originOf,
+  ownAuthorityOf,
   requestTargetOf,
 } from './hosts-and-origins';
 
@@ -281,7 +282,9 @@ export const refusalOfHandshake = (
     return MALFORMED_HANDSHAKE;
   }
 
-  if (!isTakenOrigin(originOf(linesOf(request, 'origin')), { host: authority, origins })) {
+  const own = ownAuthorityOf(authority, hosts);
+
+  if (!isTakenOrigin(originOf(linesOf(request, 'origin')), { host: own, origins })) {
     return ORIGIN_REFUSED;
   }
 

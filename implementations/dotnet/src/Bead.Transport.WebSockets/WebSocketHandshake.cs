@@ -312,7 +312,11 @@ internal static class WebSocketHandshake
 
         var origin = headers.Origin;
 
-        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (authority, options.Origins)))
+        // ! the own origin by a host taken by name alone: under *, a page that rebinds its name is
+        // its own origin by the very Host * did not check
+        var own = HostsAndOrigins.OwnAuthorityOf(authority, options.Hosts);
+
+        if (!HostsAndOrigins.IsTakenOrigin(origin.Count == 0 ? null : origin.ToString(), (own, options.Origins)))
         {
             return OriginRefused;
         }

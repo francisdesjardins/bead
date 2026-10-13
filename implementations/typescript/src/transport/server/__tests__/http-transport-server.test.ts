@@ -709,13 +709,18 @@ test.describe('createHTTPTransportServer', () => {
     };
 
     // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-    // and a Host of punycode that decodes to none, taken where every host is
+    // and a Host of punycode that decodes to none, taken where every host is; under *, no page is
+    // the server's own by a host * alone takes (spec 15.12)
     const page = ['xn--bad-bma.test:8080', 'http://xn--bad-bma.test:8080'] as const;
 
     expect(
-      await answersOf(['*'], [page, ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']])
+      await answersOf(
+        ['*'],
+        [page, ['xn--a', 'http://xn--a'], ['xn--a'], ['xn--a.test'], ['xn---bad-cpa.test']]
+      )
     ).toEqual([
-      [201, null],
+      [403, REFUSALS.ORIGIN],
+      [403, REFUSALS.ORIGIN],
       [201, null],
       [201, null],
       [201, null],
@@ -1299,7 +1304,8 @@ test.describe('createHTTPTransportServer', () => {
     expect(EXCHANGE_TIMEOUT).toBe(300_000);
   });
 
-  test('refuses as it is built a hosts entry with a port, and an origins entry that is *', () => {
+  // spec 15.12
+  test('refuses as it is built a hosts entry with a port, and an origins entry that is * or null', () => {
     const built = (options: Partial<IHTTPTransportServerOptions>) => {
       return () => {
         return createHTTPTransportServer({
@@ -1315,7 +1321,10 @@ test.describe('createHTTPTransportServer', () => {
     expect(built({ hosts: ['bead.test', '*'] })).toThrow(ProgrammerError);
     expect(built({ origins: ['*'] })).toThrow(ProgrammerError);
     expect(built({ origins: ['https://bead.test/'] })).toThrow(ProgrammerError);
-    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).not.toThrow();
+    expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).toThrow(
+      ProgrammerError
+    );
+    expect(built({ hosts: ['*'], origins: ['https://bead.test'] })).not.toThrow();
   });
 });
 
@@ -3318,7 +3327,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
 
   // spec 15.6, 15.12
   test('answers a preflight from an origin it names 204, naming it, the methods, Authorization, the fields it asks for in its lines joined and any other field, for 7200 seconds, and tells no refusal', async () => {
-    await using started = await startTransport({ origins: [PAGE, 'null'] });
+    await using started = await startTransport({ origins: [PAGE] });
     const { events, server, url } = started;
     const refusals = refusalsOf(server);
     // what a page asks before a connect, before a listen at the connection's one URL, and of a
@@ -3343,14 +3352,6 @@ test.describe('createHTTPTransportServer, CORS', () => {
         [],
       ]);
     }
-
-    // null, when named, as any origin named
-    const opaque = await preflight(url, { method: 'POST', origin: 'null' });
-
-    expect([opaque.status, fieldsOf(opaque.headers, preflightAnswerOf())]).toEqual([
-      204,
-      { ...preflightAnswerOf(), 'access-control-allow-origin': 'null' },
-    ]);
 
     // what it asks in two field lines, joined as one value (RFC 9110 §5.3), and nothing asked
     // when the field is empty
@@ -3378,7 +3379,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
 
   // spec 15.4, 15.9, 15.12
   test('names an origin it names on every answer it writes to it once that origin is judged, a batch and a refusal among them, and exposes every field', async () => {
-    await using started = await startTransport({ origins: [PAGE, 'null'] });
+    await using started = await startTransport({ origins: [PAGE] });
     const { events, server, url } = started;
     const headers = { origin: PAGE };
     const named: unknown[] = [];
@@ -3464,14 +3465,6 @@ test.describe('createHTTPTransportServer, CORS', () => {
     );
     expect(bare.headers.get('allow')).toBe('GET, POST, DELETE');
     expect(namesOf(events, 'message')).toHaveLength(2);
-
-    // null, when named, as any origin named
-    const opaque = await post(url, { headers: { origin: 'null' } });
-
-    expect([opaque.status, fieldsOf(opaque.headers, NAMED_ANSWER)]).toEqual([
-      201,
-      { ...NAMED_ANSWER, 'access-control-allow-origin': 'null' },
-    ]);
   });
 
   // spec 15.6, 15.12

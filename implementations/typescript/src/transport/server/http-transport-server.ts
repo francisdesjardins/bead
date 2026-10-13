@@ -42,6 +42,7 @@ import {
   type IAuthority,
   ORIGIN_REFUSAL,
   originOf,
+  ownAuthorityOf,
   requestTargetOf,
 } from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
@@ -1220,11 +1221,11 @@ export const createHTTPTransportServer = (
           return (finish(exchange, { reason: REFUSALS.PATH, status: 404 }), undefined);
         }
 
-        // an exchange from the server's own origin, or one it was told; one with no `Origin` comes
-        // from anywhere, and any client that sends one is judged by it
+        // an exchange from the server's own origin, by a host it takes by name, or one it was told;
+        // one with no `Origin` comes from anywhere, and any client that sends one is judged by it
         const origin = headerOf(request, 'origin');
 
-        if (!isTakenOrigin(origin, { host: authority, origins })) {
+        if (!isTakenOrigin(origin, { host: ownAuthorityOf(authority, hosts), origins })) {
           return (finish(exchange, { reason: REFUSALS.ORIGIN, status: 403 }), undefined);
         }
 

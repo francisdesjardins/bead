@@ -37,9 +37,11 @@ public sealed record HttpTransportServerOptions
     /// host in punycode: none besides when none or empty. A request names its host by its
     /// authority: an absolute-form target's, else its <c>Host</c>, which carries HTTP/2's
     /// <c>:authority</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one and none,
-    /// and so takes a page that rebinds its name to the server's address again: the server judges
-    /// its own origin by the request's authority, so this is what refuses one. An entry with a
-    /// port, an empty one, one that is no host, and <c>*</c> beside another are an
+    /// and makes none of their origins its own: the server's own origin is its request's authority
+    /// only when its host is taken by name, one every server takes or one listed here, so under
+    /// <c>*</c> a page that rebinds its name to the server's address is refused 403,
+    /// <c>origin-refused</c>, and a page of the application's own is taken only when
+    /// <see cref="Origins"/> names it. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another are an
     /// <see cref="ArgumentException"/> as the transport is built. A server reached by a name, a
     /// public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in a
     /// cluster, names it here, or refuses it 403, <c>host-refused</c>, which the transport tells
@@ -84,14 +86,16 @@ public sealed record HttpTransportServerOptions
 
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly:
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
+    /// by name, never by <c>*</c>, each compared exactly:
     /// none by default. It serves a proxy that rewrites the host, and a page of another origin, to
     /// which the server answers CORS (spec 15.12): its preflight 204, and on every answer once its
     /// origin is judged <c>Access-Control-Allow-Origin</c> and every field exposed, never
-    /// <c>Access-Control-Allow-Credentials</c>. <c>null</c> among them takes, and lets read every
-    /// answer, every page that sends it. Each is <c>null</c> or an origin as RFC 6454 §6.2
-    /// serializes it; <c>*</c>, which no origin is, and any other entry are an
-    /// <see cref="ArgumentException"/> as the transport is built.
+    /// <c>Access-Control-Allow-Credentials</c>. Each is an origin as RFC 6454 §6.2 serializes it;
+    /// <c>*</c>, which no origin is, <c>null</c>, which a browser sends for every page with no origin
+    /// of its own, a sandboxed frame of any site among them, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built: a page that sends <c>null</c> is
+    /// served from an origin, which is named here.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 
@@ -896,11 +900,16 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return _options.IsProxyTrusted && Loopback.Contains(address) && isAddress ? forwarded : address;
     }
 
-    // an exchange from the server's own origin, its request's authority under http or https, or one
-    // it was told; one with no Origin comes from anywhere, and any client that sends one is judged by it
+    // an exchange from the server's own origin, its request's authority under http or https when its
+    // host is taken by name, or one it was told; one with no Origin comes from anywhere, and any
+    // client that sends one is judged by it
     private bool IsAllowedOrigin((HttpRequest Request, string? Authority) exchange)
     {
-        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (exchange.Authority, _options.Origins));
+        // ! the own origin by a host taken by name alone: under *, a page that rebinds its name is
+        // its own origin by the very Host * did not check
+        var own = HostsAndOrigins.OwnAuthorityOf(exchange.Authority, _options.Hosts);
+
+        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (own, _options.Origins));
     }
 
     // an exchange: what it is, as its method, its path, its host, its origin and its token say

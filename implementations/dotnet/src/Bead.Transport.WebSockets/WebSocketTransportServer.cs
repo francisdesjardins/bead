@@ -62,9 +62,11 @@ public sealed record WebSocketTransportServerOptions
     /// host in punycode, checked before anything else of the request but its authority's form: none
     /// besides when none or empty. A request names its host by its authority: an absolute-form
     /// target's, else its <c>Host</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one
-    /// and none, and so takes a page that rebinds its name to the server's address again: the server
-    /// judges its own origin by the request's authority, so this is what refuses one, whatever it
-    /// sends. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another
+    /// and none, and makes none of their origins its own: the server's own origin is its request's
+    /// authority only when its host is taken by name, one every server takes or one listed here, so
+    /// under <c>*</c> a page that rebinds its name to the server's address is refused 403,
+    /// <c>origin-refused</c>, and a page of the application's own is taken only when
+    /// <see cref="Origins"/> names it. An entry with a port, an empty one, one that is no host, and <c>*</c> beside another
     /// are an <see cref="ArgumentException"/> as the transport is built. A server reached by a name,
     /// a public one, one behind a proxy that keeps the <c>Host</c>, a service reached by its name in
     /// a cluster, names it here, or refuses it 403, <c>host-refused</c>, which a page's WebSocket
@@ -74,13 +76,14 @@ public sealed record WebSocketTransportServerOptions
 
     /// <summary>
     /// The origins an upgrade that sends an <c>Origin</c> may come from besides the server's own,
-    /// <c>http://</c> or <c>https://</c> followed by its request's authority, each compared exactly,
-    /// checked once its version and its form are a handshake's: none by default. <c>null</c> among
-    /// them takes every upgrade that sends it. No same-origin policy guards an upgrade, so a page of
-    /// an origin named here is served outright. A WebSocket answers no CORS, which no browser asks
-    /// of an upgrade. Each is <c>null</c> or an origin as RFC 6454 §6.2 serializes it; <c>*</c>,
-    /// which no origin is, and any other entry are an <see cref="ArgumentException"/> as the
-    /// transport is built.
+    /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
+    /// by name, never by <c>*</c>, each compared exactly,
+    /// checked once its version and its form are a handshake's: none by default. No same-origin
+    /// policy guards an upgrade, so a page of an origin named here is served outright. A WebSocket
+    /// answers no CORS, which no browser asks of an upgrade. Each is an origin as RFC 6454 §6.2
+    /// serializes it; <c>*</c>, which no origin is, <c>null</c>, which a browser sends for every page
+    /// with no origin of its own, a sandboxed frame of any site among them, and any other entry are
+    /// an <see cref="ArgumentException"/> as the transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
 }

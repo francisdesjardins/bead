@@ -15,6 +15,7 @@ import {
   isWellFormedHost,
   ORIGIN_REFUSAL,
   originOf,
+  ownAuthorityOf,
 } from '../hosts-and-origins';
 import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
 
@@ -73,7 +74,7 @@ const OTHER_HOSTS = [
   'béad.test',
   'xn--a.test',
 ];
-const ORIGINS = ['https://bead.example', 'null'];
+const ORIGINS = ['https://bead.example'];
 
 // a `Host` value HTTP takes, an authority of spec 15.12's grammar, and one it does not (RFC 9112
 // §3.2): the rows the C# side judges alike
@@ -175,7 +176,6 @@ const REFUSED_HOSTS = [
 
 // an `origins` entry that is built, and one that is refused as it is built
 const BUILT_ORIGINS = [
-  'null',
   'http://bead.test',
   'https://bead.test',
   'http://bead.test:8080',
@@ -192,6 +192,7 @@ const BUILT_ORIGINS = [
 ];
 const REFUSED_ORIGINS = [
   '*',
+  'null',
   'http://*.bead.test',
   'https://bead.test/',
   'https://bead.test/path',
@@ -361,7 +362,8 @@ test.describe('hosts and origins', () => {
     }).toThrow(/bead\.test, not bead\.test:8080/u);
   });
 
-  test('refuses an origins entry that is *, or neither null nor an origin as RFC 6454 serializes it', () => {
+  // spec 15.12
+  test('refuses an origins entry that is * or null, or not an origin as RFC 6454 serializes it', () => {
     expect(() => {
       assertOrigins(undefined);
       assertOrigins([]);
@@ -377,6 +379,10 @@ test.describe('hosts and origins', () => {
     expect(() => {
       assertOrigins(['*']);
     }).toThrow(/no wildcard/u);
+    // null names every page with no origin of its own, and the message the better path
+    expect(() => {
+      assertOrigins(['https://bead.example', 'null']);
+    }).toThrow(/does not take null: .* serve the page from an origin, and name that one$/u);
   });
 
   test('reads an IPv4 address by RFC 3986’s grammar, never as the platform’s parser reads one', () => {
@@ -412,7 +418,7 @@ test.describe('hosts and origins', () => {
       [undefined, 'https://bead.example', 'null', 'https://Bead.Example'].map((origin) => {
         return isTakenOrigin(origin, { host: 'bead.test', origins: ORIGINS });
       })
-    ).toEqual([true, true, true, false]);
+    ).toEqual([true, true, false, false]);
 
     expect(
       OWN.filter(([origin, host]) => {
@@ -427,8 +433,59 @@ test.describe('hosts and origins', () => {
   });
 
   // spec 15.12
-  test('isListedOrigin takes an Origin that origins names exactly, null among them, the server’s own only when named, and never none', () => {
-    // ORIGINS names a page and null; the server's own is bead.test's
+  test('ownAuthorityOf gives the authority of a host taken by name, every server’s or one listed, and none of one only * takes', () => {
+    const authorities = [
+      'localhost:8080',
+      '127.0.0.1:8080',
+      '[::1]:8080',
+      'Bead.Test:8443',
+      'rebind.example:8080',
+      '',
+      undefined,
+    ];
+
+    // by name, every server's or one listed, whether * is there or not
+    expect(
+      authorities.map((authority) => {
+        return ownAuthorityOf(authority, ['bead.test']);
+      })
+    ).toEqual([
+      'localhost:8080',
+      '127.0.0.1:8080',
+      '[::1]:8080',
+      'Bead.Test:8443',
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // * takes every host, and vouches for none of them: the rebound page names its own Host
+    expect(
+      authorities.map((authority) => {
+        return ownAuthorityOf(authority, ['*']);
+      })
+    ).toEqual([
+      'localhost:8080',
+      '127.0.0.1:8080',
+      '[::1]:8080',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(ownAuthorityOf('bead.test', undefined)).toBeUndefined();
+    // and so the rebound page is none of the server's own under *, though * took its host
+    expect(isTakenHost('rebind.example:8080', ['*'])).toBe(true);
+    expect(
+      isTakenOrigin('http://rebind.example:8080', {
+        host: ownAuthorityOf('rebind.example:8080', ['*']),
+        origins: [],
+      })
+    ).toBe(false);
+  });
+
+  // spec 15.12
+  test('isListedOrigin takes an Origin that origins names exactly, the server’s own only when named, and never none', () => {
+    // ORIGINS names a page; the server's own is bead.test's
     expect(
       [
         'https://bead.example',
@@ -441,7 +498,7 @@ test.describe('hosts and origins', () => {
       ].map((origin) => {
         return isListedOrigin(origin, ORIGINS);
       })
-    ).toEqual([true, true, false, false, false, false, false]);
+    ).toEqual([true, false, false, false, false, false, false]);
     // the server's own, named
     expect(isListedOrigin('https://bead.test', ['https://bead.test'])).toBe(true);
     // none, whatever is named

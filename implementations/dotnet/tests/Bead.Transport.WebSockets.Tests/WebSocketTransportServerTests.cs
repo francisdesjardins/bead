@@ -817,12 +817,20 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
 
         // a page on an IDN host, its Host and its Origin in punycode as a browser writes them both,
-        // and a Host of punycode that decodes to none, taken where every host is
+        // and a Host of punycode that decodes to none, taken where every host is; under *, no page is
+        // the server's own by a host * alone takes (spec 15.12)
         var page = ("xn--bad-bma.test:8080", "http://xn--bad-bma.test:8080");
 
         await Start(new WebSocketTransportServerOptions { Hosts = ["*"] });
 
-        foreach (var from in new (string Host, string? Origin)[] { page, ("xn--a", null), ("xn--a.test", null), ("xn---bad-cpa.test", null) })
+        var notOwn = new[] { await AnswerOf(page), await AnswerOf(("xn--a", "http://xn--a")) };
+
+        Assert.Equal([(403, "origin-refused"), (403, "origin-refused")], notOwn.Select((refusal) =>
+        {
+            return (refusal.Status, refusal.Fields["bead-refusal"]);
+        }));
+
+        foreach (var from in new (string Host, string? Origin)[] { ("xn--a", null), ("xn--a.test", null), ("xn---bad-cpa.test", null) })
         {
             await Upgraded(from);
         }
@@ -840,8 +848,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }));
     }
 
+    // spec 15.12
     [Fact]
-    public void Refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star()
+    public void Refuses_as_it_is_built_a_hosts_entry_with_a_port_and_an_origins_entry_that_is_a_star_or_null()
     {
         var port = Assert.Throws<ArgumentException>(() =>
         {
@@ -851,10 +860,19 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             return new WebSocketTransportServer(new WebSocketTransportServerOptions { Origins = ["*"] });
         });
+        var opaque = Assert.Throws<ArgumentException>(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { Hosts = ["*"], Origins = ["https://bead.test", "null"] });
+        });
 
-        Assert.Equal(("Hosts", "Origins"), (port.ParamName, star.ParamName));
+        Assert.Equal(("Hosts", "Origins", "Origins"), (port.ParamName, star.ParamName, opaque.ParamName));
         Assert.Contains("\"bead.test:8080\"", port.Message, StringComparison.Ordinal);
         Assert.Contains("no wildcard of origins", star.Message, StringComparison.Ordinal);
+        Assert.Contains("a sandboxed frame of any site", opaque.Message, StringComparison.Ordinal);
+        Assert.Null(Record.Exception(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { Hosts = ["*"], Origins = ["https://bead.test"] });
+        }));
     }
 
     [Fact]

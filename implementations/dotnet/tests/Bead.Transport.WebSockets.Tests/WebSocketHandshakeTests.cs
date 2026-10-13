@@ -313,8 +313,9 @@ public sealed class WebSocketHandshakeTests
         }));
     }
 
+    // spec 15.12
     [Fact]
-    public void Takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own_and_refuses_403_any_other_host_an_empty_one_and_none_before_its_method_and_its_upgrade()
+    public void Takes_whatever_its_hosts_the_hosts_every_server_takes_and_any_page_of_its_own_by_a_host_it_takes_by_name_and_refuses_403_any_other_host_an_empty_one_and_none_before_its_method_and_its_upgrade()
     {
         WebSocketTransportServerOptions[] every = [new(), new() { Hosts = [] }, new() { Hosts = ["bead.test"] }];
 
@@ -342,11 +343,15 @@ public sealed class WebSocketHandshakeTests
             Assert.Equal((400, null), AnswerOf(("GET / HTTP/1.1", ["Host: [::1"]), options));
         });
 
-        // * takes every host, an empty one and none, and judges the rest as it would
+        // * takes every host, an empty one and none, and judges the rest as it would; a page of its
+        // own by a host every server takes, and none by a host * alone takes: the page that rebinds
+        // its name
         var any = new WebSocketTransportServerOptions { Hosts = ["*"] };
 
-        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Origin: http://elsewhere.test"]), any));
-        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: xn---bad-cpa.test", "Origin: http://xn---bad-cpa.test"]), any));
+        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: rebind.example:8080"]), any));
+        Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: a.localhost:8080", "Origin: http://a.localhost:8080"]), any));
+        Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Host: rebind.example:8080", "Origin: http://rebind.example:8080"]), any));
+        Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Host: xn---bad-cpa.test", "Origin: http://xn---bad-cpa.test"]), any));
         Assert.Equal((101, null), AnswerOf(("GET / HTTP/1.1", ["Host: :8080"]), any));
         Assert.Equal((403, WebSocketRefusals.Origin), AnswerOf(("GET / HTTP/1.1", ["Host: elsewhere.test", "Origin: https://bead.example"]), any));
         Assert.Equal((426, WebSocketRefusals.Upgrade), AnswerOf(("GET / HTTP/1.0", ["Host"]), any));

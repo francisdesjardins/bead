@@ -1097,8 +1097,9 @@ credential beside an envelope, either way: a request that presents `ELSEWHERE` o
 `SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
 before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake carried,
 its `Authorization` among it, is no credential beside an envelope, and never stands for `ELSEWHERE`.
-A server judges a request at its WebSocket's address in this order, and answers the first that
-applies:
+A client writes no `Origin` on its upgrade: a page's browser writes its own, which the server judges
+(step 7). A server judges a request at its WebSocket's address in this order, and answers the first
+that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, or a field that holds a control character or an octet past
@@ -1106,7 +1107,8 @@ applies:
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
-   server's address is its own origin by its authority, and `hosts` is what refuses it.
+   server's address is its own origin by its authority, and `hosts` is what refuses it — under `*`,
+   which takes it here, step 7 does, its origin none of the server's own (section 15.12).
 3. A method other than `GET` or `HEAD` is refused 405, its `Allow` naming both
    ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)).
 4. A request that asks no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming
@@ -1175,9 +1177,11 @@ that call id for 5 seconds — what a requester reserves one for when its call w
 A client writes the credential a request carries in the `Authorization` field of its `POST`
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2)), as it is given, and
 fails the send before it goes for one no field can carry: anything but visible ASCII, spaces and
-tabs. The server reads that field on a `POST` that carries a REQUEST, and no other exchange's: it
-hands the router the field's value with the request, as it came, whole — its auth-scheme included —
-its surrounding whitespace removed, and none when the field is empty or absent. Two calls of one
+tabs. It writes no `Origin`, on any exchange: a page's browser writes its own, which the server
+judges (section 15.12). The server reads that field on a `POST` that carries a REQUEST, and no other
+exchange's: it hands the router the field's value with the request, as it came, whole — its
+auth-scheme included — its surrounding whitespace removed, and none when the field is empty or
+absent. Two calls of one
 connection may so present two credentials, and a token is renewed without connecting again. A
 `POST /bead` that presents a token with more than one `Authorization` field is refused, 400, before
 its body is read: the field is no list to combine
@@ -1364,24 +1368,25 @@ request; over HTTP/1.1 and at a WebSocket's address, the parser strips that whit
 part of the value ([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)). An empty
 `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may name
 besides those every server takes, `hosts`, and the origins an exchange may come from besides its
-own, `origins`, none when not given. Its own is its request's authority under `http` or `https`: an
-`Origin` that is `http://` or `https://` followed by that authority, compared ASCII
+own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,
+when its host is one the server takes by name — one every server takes, or one `hosts` lists —
+never by `*`: an `Origin` that is `http://` or `https://` followed by that authority, compared ASCII
 case-insensitively, the field read as the serialized origin it carries
 ([RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2)), never parsed as a URL; a
 browser writes both from one URL alike. Any other `Origin` is none of its own, whatever host it
 names: `null`, which a browser sends for an opaque origin — a sandboxed frame's, a `file:` or a
 `data:` page's — and in place of one it withholds, after a cross-origin redirect or under a referrer
-policy; and any other scheme, an extension's or a `blob:` URL's among them. A server takes `null`,
-as any other, only when `origins` names it, and then from every page that sends it. A request
-without an `Origin` comes from no page, and is taken.
+policy; and any other scheme, an extension's or a `blob:` URL's among them. A server never takes
+`null`: it is what every page that has no origin of its own sends, a sandboxed frame of any site
+among them, so no `origins` names it. A request without an `Origin` comes from no page, and is
+taken.
 
 An HTTP server answers the CORS protocol
 ([Fetch Standard §3.3](https://fetch.spec.whatwg.org/#http-cors-protocol)) to the origins `origins`
 names, and to no other. Once a request's origin is taken (section 15.6's order), every response it
 writes to a request whose `Origin` `origins` names, whatever its status, carries
-`access-control-allow-origin`, that `Origin` as it came, `null` among them, and
-`access-control-expose-headers: *`; a refusal judged before the origin carries neither, since a
-browser reads no answer to a preflight that is not ok
+`access-control-allow-origin`, that `Origin` as it came, and `access-control-expose-headers: *`; a
+refusal judged before the origin carries neither, since a browser reads no answer to a preflight that is not ok
 ([Fetch §4.8](https://fetch.spec.whatwg.org/#cors-preflight-fetch)). None carries
 `access-control-allow-credentials`: Bead's credential is no cookie but the request's own (section
 15.5), so every request to it is one without credentials, for which the Fetch Standard reads `*` as
@@ -1412,13 +1417,15 @@ written as one, nor to a localhost name where its resolver answers it with the l
 [RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3) asks of resolvers and caching
 servers; a user agent that sends one on to a resolver that does not is the residual. `hosts` takes
 those it lists besides, each a host without its port, none when it lists none or is not given, and
-`*`, alone in it, takes every host, an empty one and none. Any other host, an empty one and none
+`*`, alone in it, takes every host, an empty one and none, and makes none of their origins its own.
+Any other host, an empty one and none
 are refused 403, `host-refused` (section 15.6). A server is refused as it is built a `hosts` entry
 with a port, an empty one, one that is no host, or `*` beside another; and an `origins` entry that
-is `*`, or neither `null` nor an origin as
+is `*` or `null`, or not an origin as
 [RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it. Since a page
 that rebinds its name to the server's address names its own `Host`, `hosts` is what refuses it,
-never the origin's test: a server a browser reaches by a name names it in `hosts`. A WebSocket
+and, under `*`, the origin's test, which takes no origin as the server's own by a host it did not
+name: a server a browser reaches by a name names it in `hosts`. A WebSocket
 server takes both alike on an upgrade (section 15.2). A client's address is its socket's, an IPv4
 address an IPv6 socket carries mapped read as that IPv4 address
 ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)); behind a proxy on

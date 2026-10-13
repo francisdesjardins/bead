@@ -7,10 +7,11 @@ namespace Bead;
 /// optional port, of 15.12's grammar, a restriction of RFC 3986 §3.2.2. Its host, the port aside,
 /// is taken when every server takes it — <c>localhost</c>, a name under <c>.localhost</c>, an IPv6
 /// address in brackets, an IPv4 address — or when the server's hosts list it, compared ASCII
-/// case-insensitively (RFC 9110 §4.2.3), as the request carries it; <c>*</c> takes every host. A
-/// request with no <c>Origin</c>, or one from its own origin, or from one among those it takes, is
-/// taken. An origin is read as the serialized origin the field carries (RFC 6454 §6.2), compared as
-/// a string, never parsed as a URL, as the TypeScript side compares it.
+/// case-insensitively (RFC 9110 §4.2.3), as the request carries it; <c>*</c> takes every host, and
+/// makes none of their origins its own. A request with no <c>Origin</c>, or one from its own origin,
+/// by a host it takes by name, or from one among those it takes, is taken. An origin is read as the
+/// serialized origin the field carries (RFC 6454 §6.2), compared as a string, never parsed as a
+/// URL, as the TypeScript side compares it.
 /// </summary>
 internal static class HostsAndOrigins
 {
@@ -27,7 +28,10 @@ internal static class HostsAndOrigins
     /// </summary>
     public const string OriginRefusal = "origin-refused";
 
-    /// <summary>The one entry of a server's hosts that takes every host, an empty one and none.</summary>
+    /// <summary>
+    /// The one entry of a server's hosts that takes every host, an empty one and none, and makes none
+    /// of their origins its own.
+    /// </summary>
     public const string AnyHost = "*";
 
     /// <summary>What may stand around a field's value, and is not of it (RFC 9110 §5.5): SP and HTAB.</summary>
@@ -406,11 +410,22 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
+    /// The authority a request's origin is the server's own by (spec 15.12): the request's, when its
+    /// host is taken by name — one every server takes, or one <paramref name="hosts"/> lists — and
+    /// none when only <c>*</c> takes it, since a page that rebinds its name to the server's address
+    /// names that name, which <c>*</c> never checked.
+    /// </summary>
+    public static string? OwnAuthorityOf(string? authority, IReadOnlyList<string>? hosts)
+    {
+        return IsTakenHost(authority, hosts is [AnyHost] ? [] : hosts) ? authority : null;
+    }
+
+    /// <summary>
     /// Whether a request from <paramref name="origin"/> is taken: one with no <c>Origin</c> comes
     /// from no page, and is; one among <c>Origins</c>, exactly; or the server's own, <c>http://</c>
-    /// or <c>https://</c> followed by the request's authority as it carries it, in any ASCII case.
-    /// Any other, <c>null</c> and every other scheme among them, or a request without a host, is
-    /// none of its own.
+    /// or <c>https://</c> followed by its own authority, as <see cref="OwnAuthorityOf"/> gives it, as
+    /// the request carries it, in any ASCII case. Any other, <c>null</c> and every other scheme among
+    /// them, or a request without an authority of its own, is none of its own.
     /// </summary>
     public static bool IsTakenOrigin(string? origin, (string? Authority, IReadOnlyList<string> Origins) taken)
     {
@@ -430,8 +445,8 @@ internal static class HostsAndOrigins
     /// <summary>
     /// Whether <paramref name="origin"/> is among the pages an HTTP server answers CORS to (spec
     /// 15.12): an <c>Origin</c> among <paramref name="origins"/>, exactly, as
-    /// <see cref="IsTakenOrigin"/> compares them, <c>null</c> among them; none is never listed, and
-    /// the server's own origin only when named.
+    /// <see cref="IsTakenOrigin"/> compares them; none is never listed, and the server's own origin
+    /// only when named.
     /// </summary>
     public static bool IsListedOrigin(string? origin, IReadOnlyList<string> origins)
     {
@@ -485,11 +500,12 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
-    /// A server's origins, as it is built: each <c>null</c>, or an origin as RFC 6454 §6.2
-    /// serializes it — a scheme in lower case, <c>://</c>, a host of 15.12's grammar and a port
-    /// with no leading zero, nothing after; for <c>http</c>, <c>https</c>, <c>ws</c> and
-    /// <c>wss</c>, the host in lower case and no port where it is the scheme's default. <c>*</c>, and
-    /// any other entry, is an <see cref="ArgumentException"/> naming the option and the entry.
+    /// A server's origins, as it is built: each an origin as RFC 6454 §6.2 serializes it — a scheme
+    /// in lower case, <c>://</c>, a host of 15.12's grammar and a port with no leading zero, nothing
+    /// after; for <c>http</c>, <c>https</c>, <c>ws</c> and <c>wss</c>, the host in lower case and no
+    /// port where it is the scheme's default. <c>*</c>; <c>null</c>, which a browser sends for every
+    /// page with no origin of its own, a sandboxed frame of any site among them; and any other entry
+    /// are an <see cref="ArgumentException"/> naming the option and the entry.
     /// </summary>
     public static void AssertOrigins(IReadOnlyList<string>? entries, string name)
     {
@@ -497,14 +513,16 @@ internal static class HostsAndOrigins
         {
             ArgumentNullException.ThrowIfNull(entry, name);
 
-            if (entry == "null")
-            {
-                continue;
-            }
-
             if (entry == AnyHost)
             {
-                throw Refused((name, entry), "no wildcard of origins exists; each entry is null or one origin, and a page of any other is refused");
+                throw Refused((name, entry), "no wildcard of origins exists; each entry is one origin, and a page of any other is refused");
+            }
+
+            // ! null serializes every opaque origin alike (RFC 6454 §6.2), so naming it would take a
+            // sandboxed frame of any site, which reads every answer
+            if (entry == "null")
+            {
+                throw Refused((name, entry), "a browser sends it for every page with no origin of its own, a sandboxed frame of any site among them; serve the page from an origin, and name that one");
             }
 
             var separator = entry.IndexOf("://", StringComparison.Ordinal);
