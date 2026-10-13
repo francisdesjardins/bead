@@ -333,7 +333,7 @@ public sealed class RelayTests
             Failure.OfProtocol(ProtocolCode.DestinationUnknown, "no destination 8 behind this relay"),
             AdmitOf(8)(new AdmissionRequest(First, HeaderOf(3, 8))));
         Assert.Equal(
-            Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription yet"),
+            Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription"),
             AdmitOf(7)(new AdmissionRequest(First, HeaderOf(5) with { OpensSubscription = true })));
         Assert.Null(AdmitOf(7)(new AdmissionRequest(First, HeaderOf(7))));
         Assert.Equal(["device 7", "device 8", "first 8", "first 7", "first 7"], asked);
@@ -850,7 +850,7 @@ public sealed class RelayTests
 
         // C# only: a subscription is refused before a connection closed, as the TypeScript side checks
         Assert.Equal(
-            Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription yet"),
+            Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription"),
             test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1) with { OpensSubscription = true })));
         await Handled(admitted, PropsOf(HeaderOf(3)));
 

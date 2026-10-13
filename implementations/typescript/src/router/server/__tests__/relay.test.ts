@@ -579,7 +579,7 @@ test.describe('createRelay', () => {
       admitOf(7)?.({ connectionHandle: first, header: headerOf(5, { opensSubscription: true }) })
     ).toEqual({
       ...SERVER_FAILURES.subscriptionUnsupported,
-      detail: 'this relay carries no subscription yet',
+      detail: 'this relay carries no subscription',
     });
     expect(admitOf(7)?.({ connectionHandle: first, header: headerOf(7) })).toBeUndefined();
     expect(asked).toEqual(['device 7', 'device 8', 'first 8', 'first 7', 'first 7']);
