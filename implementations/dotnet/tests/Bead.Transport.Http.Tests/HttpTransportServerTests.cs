@@ -863,7 +863,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Takes_an_Authorization_as_it_came_its_surrounding_spaces_and_tabs_removed_an_empty_one_carrying_none()
+    public async Task Takes_an_Authorization_as_it_came_an_empty_one_carrying_none()
     {
         await Start();
 
@@ -879,11 +879,10 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         foreach (var (callId, field) in new (uint CallId, string Field)[]
         {
-            (1, "Authorization: \tBearer  mF_9.B5f-4.1JqM \t\r\n"),
+            (1, "Authorization: Bearer  mF_9.B5f-4.1JqM\r\n"),
             (3, "Authorization: basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\r\n"),
             (5, "Authorization:\r\n"),
-            (7, "Authorization: \t \r\n"),
-            (9, ""),
+            (7, ""),
         })
         {
             using var wire = await Wire.Open(_port);
@@ -894,7 +893,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             Assert.Equal(200, (await wire.Read()).Head.Status);
         }
 
-        Assert.Equal(["Bearer  mF_9.B5f-4.1JqM", "basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==", null, null, null], taken);
+        Assert.Equal(["Bearer  mF_9.B5f-4.1JqM", "basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==", null, null], taken);
     }
 
     [Fact]
@@ -2258,7 +2257,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_holding_a_control_character_but_a_tab_and_Kestrel_ends_the_session_of_an_octet_that_is_no_UTF_8()
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_holding_a_control_character_but_a_tab_or_whose_value_starts_or_ends_with_a_space_or_a_tab_and_Kestrel_ends_the_session_of_an_octet_that_is_no_UTF_8()
     {
         await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
 
@@ -2270,8 +2269,50 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("origin", "http://a.example\u001b[2J")));
         Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("x-other", "a\u0007b")));
 
+        // and a value with a space or a tab at either end (RFC 9113 §8.2.1), which Node's parser
+        // drops alike under its default
+        Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("x-other", " a")));
+        Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("x-other", "a\t")));
+
         // ! a lone 0xE9, no UTF-8, Kestrel refuses of its own, ending the session, PROTOCOL_ERROR
         Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of(own, bead, ("x-other", "café")));
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+    }
+
+    [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_whose_value_starts_or_ends_with_a_space_or_a_tab_PROTOCOL_ERROR_and_tells_nothing()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, Origins = [Page] });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+        var answers = new List<(string Field, TlsAnswer Answer)>();
+
+        // each field the transport reads, padded: Kestrel hands it on as it came, and the transport
+        // resets its stream before it reads any, PROTOCOL_ERROR (RFC 9113 §8.1.1), nothing written —
+        // a credential never presented, a body never taken, an origin never judged, a count never read
+        foreach (var field in new[]
+        {
+            ("authorization", "  Bearer x "),
+            ("content-type", $"{HttpTransport.MediaType} "),
+            ("origin", $" {Page}"),
+            (HttpTransport.AfterHeader, "\t0"),
+        })
+        {
+            (string, string)[] fields = field.Item1 == "content-type" ? [own, field] : [own, bead, field];
+
+            answers.Add((field.Item1, await Http2Of(fields)));
+        }
+
+        Assert.Equal(
+            [
+                ("authorization", new TlsAnswer(null, null, 0x1)),
+                ("content-type", new TlsAnswer(null, null, 0x1)),
+                ("origin", new TlsAnswer(null, null, 0x1)),
+                (HttpTransport.AfterHeader, new TlsAnswer(null, null, 0x1)),
+            ],
+            answers);
         Assert.Empty(_refusals);
         Assert.Empty(_connections);
     }

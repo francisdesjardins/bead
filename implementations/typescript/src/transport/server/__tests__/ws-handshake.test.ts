@@ -162,11 +162,11 @@ test.describe('refusalOfHandshake', () => {
         requestOf([['Sec-WebSocket-Key', 'AAAAAAAAAAAAAAAAAAAAAA==']], {
           without: ['sec-websocket-key'],
         }),
-        requestOf([['Sec-WebSocket-Key', `  ${KEY}\t`]], { without: ['sec-websocket-key'] }),
+        requestOf([['Upgrade', 'h2c ,\twebsocket']], { without: ['upgrade'] }),
         requestOf([['Sec-WebSocket-Key', 'abcdefghijklmnopqrstuw==']], {
           without: ['sec-websocket-key'],
         }),
-        requestOf([['Sec-WebSocket-Version', ' 13 ']], { without: ['sec-websocket-version'] }),
+        requestOf([['Connection', 'keep-alive\t, upgrade']], { without: ['connection'] }),
         requestOf([['Sec-WebSocket-Protocol', 'bead, chat']]),
         requestOf([
           ['Sec-WebSocket-Protocol', 'bead'],
@@ -209,7 +209,7 @@ test.describe('refusalOfHandshake', () => {
     ).toBe(WS_REFUSALS.UPGRADE);
   });
 
-  test('refuses first, unmarked, a field holding a control character but a tab or an octet past ASCII, whatever else the request holds', () => {
+  test('refuses first, unmarked, a field holding a control character but a tab or an octet past ASCII, or whose value starts or ends with a space or a tab, whatever else the request holds', () => {
     // in Origin, in a field it never reads, in its Host; from a host it does not take, under
     // another method, with no upgrade
     expect(
@@ -226,9 +226,12 @@ test.describe('refusalOfHandshake', () => {
           { without: ['host'] }
         ),
         requestOf([['X-Other', 'café']], { method: 'POST', without: ['upgrade'] }),
+        // padded, which HTTP/1.1's parser strips before any request reaches the transport
+        requestOf([['Sec-WebSocket-Key', `  ${KEY}\t`]], { without: ['sec-websocket-key'] }),
+        requestOf([['Sec-WebSocket-Version', ' 13 ']], { without: ['sec-websocket-version'] }),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 6 }, () => {
+      Array.from({ length: 8 }, () => {
         return HOST;
       })
     );

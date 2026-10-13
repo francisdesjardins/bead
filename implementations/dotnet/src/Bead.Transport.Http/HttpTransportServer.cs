@@ -752,7 +752,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     // whether every field value of a request is one a server reads (spec 15.12): visible ASCII, SP
-    // and HTAB alone
+    // and HTAB alone, neither SP nor HTAB at either end
     private static bool HasVisibleFields(HttpRequest request)
     {
         return request.Headers.All((field) =>
@@ -933,8 +933,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         // * a field HTTP would call malformed before anything else is judged (spec 15.12): Kestrel
         // refuses 400 an octet that is no UTF-8, and decodes the rest, a character past ASCII among
-        // them, and takes a control character, which this refuses as HTTP refuses a malformed field —
-        // over HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own
+        // them, and takes a control character, or a value with a space or a tab at either end over
+        // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
+        // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own
         if (!HasVisibleFields(request))
         {
             if (HttpProtocol.IsHttp2(request.Protocol) && context.Features.Get<IHttpResetFeature>() is { } reset)

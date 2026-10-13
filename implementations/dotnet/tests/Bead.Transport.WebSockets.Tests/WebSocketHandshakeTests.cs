@@ -29,7 +29,7 @@ public sealed class WebSocketHandshakeTests
     private static readonly (int Status, string? Refusal, string Start, string[] Fields)[] Answers =
     [
         // taken: an Upgrade in any case, in a list, in two field lines; a Connection among other
-        // tokens, in any case, in two field lines; no content; whitespace around a value; a key of
+        // tokens, in any case, in two field lines; no content; whitespace inside a list; a key of
         // lower-case base64; a list of subprotocols; an origin of its own or among those it takes
         (101, null, "GET / HTTP/1.1", []),
         (101, null, "GET /any/path?query HTTP/1.1", []),
@@ -41,7 +41,8 @@ public sealed class WebSocketHandshakeTests
         (101, null, "GET / HTTP/1.1", ["Connection: keep-alive", "Connection: upgrade"]),
         (101, null, "GET / HTTP/1.1", ["Content-Length: 0"]),
         (101, null, "GET / HTTP/1.1", ["Content-Length: 00"]),
-        (101, null, "GET / HTTP/1.1", ["Sec-WebSocket-Key:  dGhlIHNhbXBsZSBub25jZQ==\t", "Sec-WebSocket-Version: \t13 "]),
+        (101, null, "GET / HTTP/1.1", ["Upgrade: h2c ,\twebsocket"]),
+        (101, null, "GET / HTTP/1.1", ["Connection: keep-alive\t, upgrade"]),
         (101, null, "GET / HTTP/1.1", ["Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA=="]),
         (101, null, "GET / HTTP/1.1", ["Sec-WebSocket-Key: abcdefghijklmnopqrstuw=="]),
         (101, null, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead, chat"]),
@@ -256,7 +257,7 @@ public sealed class WebSocketHandshakeTests
     }
 
     [Fact]
-    public void Refuses_first_unmarked_a_field_holding_a_control_character_but_a_tab_or_an_octet_past_ASCII_whatever_else_the_request_holds()
+    public void Refuses_first_unmarked_a_field_holding_a_control_character_but_a_tab_or_an_octet_past_ASCII_or_whose_value_starts_or_ends_with_a_space_or_a_tab_whatever_else_the_request_holds()
     {
         // in Origin, in a field it never reads, in its Host; from a host it does not take, under
         // another method, with no upgrade
@@ -268,6 +269,10 @@ public sealed class WebSocketHandshakeTests
             ("GET / HTTP/1.1", ["X-Other: a\u007fb"]),
             ("GET / HTTP/1.1", ["Host: béad.test", "Origin: https://elsewhere.test"]),
             ("POST / HTTP/1.1", ["X-Other: café", "Upgrade"]),
+
+            // padded, which HTTP/1.1's parser strips before any request reaches the transport
+            ("GET / HTTP/1.1", ["Sec-WebSocket-Key:  dGhlIHNhbXBsZSBub25jZQ==\t"]),
+            ("GET / HTTP/1.1", ["Sec-WebSocket-Version: \t13 "]),
         ];
 
         Assert.All(requests, (request) =>

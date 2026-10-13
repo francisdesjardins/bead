@@ -1197,8 +1197,9 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
-        // * a field of a control character but a tab, or of an octet past ASCII, before anything
-        // else: Node's parser answers the first itself, so this meets the second alone
+        // * a field of a control character but a tab, of an octet past ASCII, or padded at either
+        // end, before anything else: Node's parser answers the first itself, and drops a padded one
+        // over HTTP/2 unless `strictFieldWhitespaceValidation` is false
         if (!hasVisibleFields(request.rawHeaders)) {
           return (refuseMalformed(exchange), undefined);
         }

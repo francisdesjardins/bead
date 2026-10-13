@@ -438,7 +438,7 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
-    public void IsVisibleField_takes_HTAB_SP_and_visible_ASCII_and_refuses_each_other_control_character_DEL_and_0x80_to_0xFF()
+    public void IsVisibleField_takes_HTAB_SP_and_visible_ASCII_and_refuses_each_other_control_character_DEL_and_0x80_to_0xFF_none_at_either_end()
     {
         var visible = new string([.. Enumerable.Range(0x20, 0x7F - 0x20).Select((code) =>
         {
@@ -452,8 +452,21 @@ public sealed class HostsAndOriginsTests
             return (char)code;
         }).ToList();
 
-        Assert.True(HostsAndOrigins.IsVisibleField($"\t{visible}"));
+        // visible runs from SP, so it opens on a letter
+        Assert.True(HostsAndOrigins.IsVisibleField($"a\t{visible}"));
         Assert.True(HostsAndOrigins.IsVisibleField(""));
+
+        // neither SP nor HTAB at either end (RFC 9113 §8.2.1)
+        Assert.Equal(
+            [false, false, false, false, false, true],
+            [
+                HostsAndOrigins.IsVisibleField(" x"),
+                HostsAndOrigins.IsVisibleField("x\t"),
+                HostsAndOrigins.IsVisibleField("\tx"),
+                HostsAndOrigins.IsVisibleField(" "),
+                HostsAndOrigins.IsVisibleField("\t"),
+                HostsAndOrigins.IsVisibleField("x \ty"),
+            ]);
         Assert.DoesNotContain(others, (character) =>
         {
             return HostsAndOrigins.IsVisibleField($"a{character}b");

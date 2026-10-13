@@ -50,8 +50,9 @@ const IPV4_MAPPED = /^::ffff:(?<ipv4>\d{1,3}(?:\.\d{1,3}){3})$/iu;
 // a port of one digit at least
 const PORT = /^\d+$/u;
 
-// a field value of visible ASCII, spaces and tabs alone (RFC 9110 §5.5)
-const VISIBLE_FIELD = /^[\t -~]*$/u;
+// a field value of visible ASCII, spaces and tabs alone, none at either end (RFC 9110 §5.5, RFC 9113
+// §8.2.1)
+const VISIBLE_FIELD = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
 
 // the two schemes whose target in absolute-form names the request's authority, written as HTTP
 // servers read them, in lower case
@@ -186,9 +187,11 @@ export const assertListeningAddress = (address: string): void => {
 };
 
 /**
- * Whether a field value is one a server reads (spec 15.12): visible ASCII, spaces and tabs alone.
- * A control character but a tab, `DEL` among them, and an octet past ASCII, which a request
- * carries as the character of its Latin-1 code, are none (RFC 9110 §5.5).
+ * Whether a field value is one a server reads (spec 15.12): visible ASCII, spaces and tabs alone,
+ * none of them at either end. A control character but a tab, `DEL` among them, and an octet past
+ * ASCII, which a request carries as the character of its Latin-1 code, are none (RFC 9110 §5.5); so
+ * is a value that starts or ends with a space or a tab, which HTTP/1.1's parser strips and HTTP/2
+ * calls malformed (RFC 9113 §8.2.1).
  */
 export const isVisibleField = (value: string): boolean => {
   return VISIBLE_FIELD.test(value);
@@ -196,8 +199,9 @@ export const isVisibleField = (value: string): boolean => {
 
 /**
  * Whether every field value of a request, as it came — each name before its value — is one
- * {@link isVisibleField} takes. A request that holds another is answered 400 unmarked, as HTTP
- * answers a malformed field, before anything else of it is judged.
+ * {@link isVisibleField} takes, none padded at either end. A request that holds another is answered
+ * 400 unmarked, as HTTP answers a malformed field, or over HTTP/2 its stream reset, before anything
+ * else of it is judged.
  */
 export const hasVisibleFields = (rawHeaders: readonly string[]): boolean => {
   for (let index = 1; index < rawHeaders.length; index += 2) {

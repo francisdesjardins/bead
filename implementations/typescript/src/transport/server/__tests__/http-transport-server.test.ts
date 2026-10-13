@@ -492,7 +492,7 @@ test.describe('createHTTPTransportServer', () => {
     ]);
   });
 
-  test('takes an Authorization as it came, its surrounding spaces and tabs removed, an empty one carrying none', async () => {
+  test('takes an Authorization as it came, an empty one carrying none', async () => {
     const { connectScripted, exchangeOf, fake, server } = await startScripted();
     const { connectionToken } = connectScripted();
     const taken: unknown[] = [];
@@ -502,10 +502,9 @@ test.describe('createHTTPTransportServer', () => {
     });
 
     for (const [callId, authorization] of [
-      [1, ' \tBearer  mF_9.B5f-4.1JqM \t'],
+      [1, 'Bearer  mF_9.B5f-4.1JqM'],
       [3, 'basic QWxhZGRpbjpvcGVuIHNlc2FtZQ=='],
       [5, ''],
-      [7, ' \t '],
     ] as const) {
       fake.feed(exchangeOf(connectionToken, { authorization }).request, [
         envelopeOf(ENVELOPE_KINDS.REQUEST, { callId }),
@@ -513,13 +512,12 @@ test.describe('createHTTPTransportServer', () => {
     }
 
     fake.feed(exchangeOf(connectionToken).request, [
-      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 9 }),
+      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7 }),
     ]);
 
     expect(taken).toEqual([
       'Bearer  mF_9.B5f-4.1JqM',
       'basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==',
-      undefined,
       undefined,
       undefined,
     ]);
@@ -1638,7 +1636,7 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     expect(await answerOverHTTP2(session, { 'x-other': 'a\tb' })).toEqual([201, undefined]);
   });
 
-  test('takes over HTTP/2 a request with a field holding a control character but a tab, which Node’s parser drops before the transport reads the request', async () => {
+  test('takes over HTTP/2 a request with a field holding a control character but a tab, or whose value starts or ends with a space or a tab, which Node’s parser drops before the transport reads the request', async () => {
     await using started = await startSecure();
     const { server, session } = started;
     const told: unknown[] = [];
@@ -1647,18 +1645,60 @@ test.describe('createHTTPTransportServer, over TLS', () => {
       told.push(refusal);
     });
 
-    // ! nghttp2 drops a regular field whose value holds one, and Node gives the request without it:
-    // an Origin judged as none, where the C# side's transport resets the stream
+    // ! nghttp2 drops a regular field whose value holds one, or is padded, and Node gives the
+    // request without it: an Origin judged as none, where the C# side's transport resets the stream
     expect(
       await Promise.all([
         answerOverHTTP2(session, { origin: 'http://a.example\u001B[2J' }),
         answerOverHTTP2(session, { 'x-other': 'a\u0007b' }),
+        answerOverHTTP2(session, { origin: ' http://a.example' }),
+        answerOverHTTP2(session, { origin: 'http://a.example\t' }),
+        answerOverHTTP2(session, { 'x-other': ' a ' }),
       ])
-    ).toEqual([
-      [201, undefined],
-      [201, undefined],
-    ]);
+    ).toEqual(
+      Array.from({ length: 5 }, () => {
+        return [201, undefined];
+      })
+    );
     expect(told).toEqual([]);
+  });
+
+  test('resets over HTTP/2 the stream of a request with a field whose value starts or ends with a space or a tab, PROTOCOL_ERROR, when its server hands it on, and tells nothing', async () => {
+    // * a server that hands a padded value on, as Kestrel does, rather than drop the field
+    await using started = await startSecure({
+      createServer: (listener) => {
+        return createSecureServer(
+          { ...TLS_FIXTURE, allowHTTP1: true, strictFieldWhitespaceValidation: false },
+          (request, response) => {
+            listener(request, response);
+          }
+        );
+      },
+    });
+    const { server, session } = started;
+    const told: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+
+    expect(
+      await Promise.all([
+        resetOf(session, { authorization: ` ${BEARER}` }),
+        resetOf(session, { authorization: `${BEARER}\t` }),
+        resetOf(session, { 'content-type': `${BEAD_MEDIA_TYPE} ` }),
+        resetOf(session, { origin: `\t${PAGE}` }),
+        resetOf(session, { [AFTER_HEADER]: ' 0' }),
+        resetOf(session, { [AFTER_HEADER]: '0 ' }),
+      ])
+    ).toEqual(
+      Array.from({ length: 6 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    // a space within a value is taken
+    expect(await answerOverHTTP2(session, { 'x-other': 'a b' })).toEqual([201, undefined]);
   });
 
   test('serves HTTP/2 and HTTP/1.1 on one port, a call over each, and closes its sessions as it stops', async () => {
