@@ -361,6 +361,12 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     }
 
     /// <inheritdoc/>
+    public Failure? AnsweredOf(AnswerTarget target)
+    {
+        return _core.AnsweredOf(target);
+    }
+
+    /// <inheritdoc/>
     public bool HasNotification(INotificationLike notification)
     {
         ArgumentNullException.ThrowIfNull(notification);

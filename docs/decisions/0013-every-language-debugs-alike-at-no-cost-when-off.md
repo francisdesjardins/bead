@@ -176,12 +176,19 @@ reading ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). Ea
 names it as its envelopes do, `callId` and `connectionHandle`, `server` on a client: a call made
 once its router drew its id, which the router's `request` hands its manager through `onCallId`,
 `OnCallId`; a request received by its header's. The manager tells a call's `tx` step from its own
-flow once it holds the id, never from its router's turn. A call refused before its id is drawn
-names none, and neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4). An error on a
-`tx` step says its `tx` did not go out, and why, for an answer as for a notification: an answer its
-router could not send is told again at its start with its error, and a resolver that failed before
-it answered tells a step of no answer with what it failed with; the `PROCEDURE_FAILED` that goes in
-their place is the envelopes' to tell. A call answered nothing tells no failure (debugging 4.2,
+flow once it holds the id, never from its router's turn. A call refused before its id is drawn names
+none, and neither does a notification, sent or heard (debugging 4.1, 4.2, 4.4). An error on a `tx`
+step says its `tx` did not go out, and why, for an answer as for a notification: an answer its
+router could not send is told again at its start with its error; an answer to a request its router
+already answered in its resolver's place, its subscription's queue past its bounds (spec 11.10), is
+told once, as its resolver answers, with the failure its router answered, which the router holds for
+its manager from the moment it answers in the resolver's place, `answeredOf`, `AnsweredOf`; and a
+resolver that failed before it answered tells a step of no answer with what it failed with. On the
+C# side, an answer that goes to its router as that router answers in the resolver's place, on its
+own thread, is told again at its start with the router's failure, as one its router could not send
+is. What goes in their place, `PROCEDURE_FAILED` or the router's own failure, is the envelopes' to
+tell. So a span a bridge makes of the step takes its status from what the call returned, as
+OpenTelemetry's RPC conventions set it. A call answered nothing tells no failure (debugging 4.2,
 4.3).
 
 **A listener's error never changes a call** (debugging 2.2 and 2.3). It is reported, as spec 9.0

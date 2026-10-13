@@ -1536,6 +1536,74 @@ public sealed class ServiceManagerTests
             }));
     }
 
+    // debugging 4.2; the C# side's alone, whose router answers in its resolver's place on its own
+    // thread while the resolver's answer goes to it
+    [Fact]
+    public async Task Tells_again_at_its_start_the_failure_its_router_answered_in_its_place_as_its_answer_went_to_it()
+    {
+        var time = new FakeTimeProvider(Started);
+        var router = new RecordingRouter { Clock = time };
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var exceeded = Failure.OfProtocol(ProtocolCode.CapacityExceeded, "the notifications queued for call 7 went past their bounds");
+        Failure? held = null;
+
+        // its router answers in its place 5 ms after its answer was told, before that answer reaches it
+        router.FailureAnswered = (target) =>
+        {
+            return ReferenceEquals(target.Header, Header) ? held : null;
+        };
+        router.RespondError = (_) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(5));
+            held = exceeded;
+
+            return null;
+        };
+
+        var resolver = manager.GetRequestResolver(Echo, Answered())((request, response) =>
+        {
+            time.Advance(TimeSpan.FromMilliseconds(10));
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        var told = Assert.IsType<FailureException>(seen[^1].Error);
+
+        Assert.Same(exceeded, told.Failure);
+        Assert.Equal((FailureOrigin.Local, (RouterSide?)RouterSide.Server), (told.Origin, told.Side));
+        Assert.Equal<IEnvelopeHeader?>(new FailureHeader { CallId = 7 }, told.Header);
+        Assert.Equal<(DebugDirection, bool, object?, DateTimeOffset, TimeSpan?)>(
+            [
+                (DebugDirection.Rx, false, null, Started, null),
+                (DebugDirection.Tx, false, new Text("hi"), Started, TimeSpan.FromMilliseconds(10)),
+                (DebugDirection.Tx, true, new Text("hi"), Started, TimeSpan.FromMilliseconds(15)),
+            ],
+            seen.Select((step) =>
+            {
+                return (step.Event.Direction, step.Error is not null, step.Event.Tx, step.Event.StartedAt, step.Event.Duration);
+            }));
+
+        // a failure its own resolver answered is never told again
+        held = null;
+        router.RespondError = (answer) =>
+        {
+            held = answer.Failure;
+
+            return null;
+        };
+        seen.Clear();
+
+        await manager.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "fail" }, Answered())((_, response) =>
+        {
+            return response.Fail(Failure.OfApplication(7));
+        }).Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal([(DebugDirection.Rx, DebugType.Request), (DebugDirection.Tx, DebugType.Request)], StepsOf(seen));
+    }
+
     // debugging 4.2
     [Fact]
     public async Task Tells_nothing_more_than_its_request_for_a_callback_that_fails_on_its_signal_its_call_cancelled_or_gone_with_its_connection()
@@ -2858,6 +2926,12 @@ public sealed class ServiceManagerTests
             return null;
         };
 
+        // the failure it answered a request with in its resolver's place; none unless a test says
+        public Func<AnswerTarget, Failure?> FailureAnswered { get; set; } = (_) =>
+        {
+            return null;
+        };
+
         // what a notify waits on once recorded, before it settles, and what it then fails with
         public Task NotifyGate { get; set; } = Task.CompletedTask;
 
@@ -2979,6 +3053,11 @@ public sealed class ServiceManagerTests
             }
 
             return Task.FromResult(target.Header.CallId);
+        }
+
+        public Failure? AnsweredOf(AnswerTarget target)
+        {
+            return FailureAnswered(target);
         }
 
         public bool HasNotification(INotificationLike notification)

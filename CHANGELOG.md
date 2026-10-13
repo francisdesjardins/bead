@@ -214,6 +214,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's transport, as the server gives it, carries `error` and `refusal` alike, so an
   application hears both through `server.transport`, `server.Transport`, whichever transport it
   built: `IServerTransportLike` gains `error` and `refusal`, and `IServerTransport` gains `Error`.
+- A router tells its service manager the failure it answered a request with in its resolver's
+  place: `IRouterLike` gains `answeredOf`, `AnsweredOf` on the C# side, which a router of the
+  application's own implements (decision 0013).
 
 ### Removed
 
@@ -261,6 +264,10 @@ archive` writing a submodule as an empty folder.
   series' lines from that reading, so its `_count` is the sum of its handled counts and its started
   never below them at every exposition; `debugging.md` 8.5 and 11.2 state each series at one
   reading, and across series each at its own instant (decision 0013).
+- The trace tells the failure a router answered in the resolver's place: a `tx` step whose request
+  its router already answered, its subscription's queue past its bounds, carries the
+  `CAPACITY_EXCEEDED` it answered, where it told an answer with no error (`debugging.md` 4.2;
+  decision 0013).
 
 ### Security
 

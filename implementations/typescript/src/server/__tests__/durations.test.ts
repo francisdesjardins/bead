@@ -272,6 +272,9 @@ const createFakeRouter = () => {
     clock: createTestClock(),
     failures: SERVER_FAILURES,
 
+    answeredOf: () => {
+      return undefined;
+    },
     declareRequester: () => {
       return undefined;
     },

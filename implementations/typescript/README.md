@@ -976,10 +976,12 @@ and came in, decoded and copied; and what it failed with, a failure by its code,
 detail. A call made and its answer, a request received once admitted and decoded and the answer it
 sends, a notification sent or heard: each is a step. An error on a `tx` step says its `tx` did not
 go out, and why: a notification that could not go; an answer its router could not send, told again
-at its start with what its router refused it with; or none, from a resolver that failed before it
-answered, with what it failed with. The `PROCEDURE_FAILED` that goes in their place is the
-envelopes' to tell, and a call answered nothing — cancelled, gone with its connection, its router
-disposed — tells no failure. Each router's own `debug` tells each envelope
+at its start with what its router refused it with; an answer to a request its router already
+answered in its resolver's place, as its subscription's queue went past its bounds, told once with
+the failure its router answered, which its router's `answeredOf` gives the manager; or none, from a
+resolver that failed before it answered, with what it failed with. The `PROCEDURE_FAILED` that goes
+in their place is the envelopes' to tell, and a call answered nothing — cancelled, gone with its
+connection, its router disposed — tells no failure. Each router's own `debug` tells each envelope
 (section 5), out once it is written within its bound, in once it reads: its direction, its
 connection — `server` on a client — and a copy of its header, which carries its credential's scheme
 in place of its credential.

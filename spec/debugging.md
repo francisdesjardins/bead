@@ -119,11 +119,14 @@ them, since its call may still read what it changed.
 
 A `tx` step with an error says that its `tx` did not go out, and why: a notification that could not
 go; an answer its router could not send, past its limit say, told again at its start with what its
-router refused it with; or none, from a resolver that failed before it answered, with what it failed
-with. A request whose answer did not go is answered `PROCEDURE_FAILED` in its place (`spec.md` 9.5,
-12.1), which the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or
-whose router was disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a
-resolver that fails once it answered.
+router refused it with; an answer to a request its router already answered in its resolver's place,
+as its subscription's queue went past its bounds (`spec.md` 11.10), told once, as its resolver
+answers, with the failure its router answered it with; or none, from a resolver that failed before
+it answered, with what it failed with. A request whose answer did not go is answered
+`PROCEDURE_FAILED` in its place (`spec.md` 9.5, 12.1), unless its router answered it first, which
+the trace of envelopes tells (5.1). A call cancelled, gone with its connection, or whose router was
+disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a resolver that fails
+once it answered.
 
 4.3. A request refused by its admission, or whose admission fails, answered `PROCEDURE_FAILED`
 (`spec.md` 9.2, step 5), or whose payload does not decode, is not traced: no step of it was told,

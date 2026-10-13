@@ -523,6 +523,12 @@ public sealed class RouterServer : IRouterLike, IDisposable
         return _relay.Destinations();
     }
 
+    /// <inheritdoc/>
+    public Failure? AnsweredOf(AnswerTarget target)
+    {
+        return _core.AnsweredOf(target);
+    }
+
     /// <summary>A server holds no notification: it sends them.</summary>
     public bool HasNotification(INotificationLike notification)
     {

@@ -22,6 +22,13 @@ public interface IRouterLike
     Task Respond(RouterAnswer response, AnswerTarget target);
 
     /// <summary>
+    /// The failure the router answered a request with in its resolver's place — a server's, as the
+    /// subscription the request opens queued past its bounds (spec 11.10) — read as its resolver
+    /// answers, whose answer then goes nowhere; none while the request is its resolver's to answer.
+    /// </summary>
+    Failure? AnsweredOf(AnswerTarget target);
+
+    /// <summary>
     /// Sends a request, and settles with its result. <see cref="RouterRequest.OnCallId"/> hears the
     /// call's id once the router drew it, before the request goes; a call refused before it draws
     /// one is never heard, and a router that never calls it leaves every step of its calls unnamed.
@@ -1344,6 +1351,14 @@ public sealed class ServiceManager
 
                 IsAnswered = true;
 
+                // * a request its router answered in its place takes this answer nowhere: its step is
+                // told once, with the failure its router answered, and nothing failed here
+                // (spec/debugging.md 4.2)
+                if (ToldInPlace(answered))
+                {
+                    return;
+                }
+
                 // traced once its request was, to whoever listens
                 Told(answered, null);
 
@@ -1362,6 +1377,47 @@ public sealed class ServiceManager
 
                     throw;
                 }
+
+                ToldLate(answered, answer);
+            }
+
+            // whether its router answered its request in its place, its step told with that failure;
+            // ! no local of its own in Send, whose state machine a request allocates
+            private bool ToldInPlace(object? answered)
+            {
+                if (resolver._router.AnsweredOf(Target) is not { } inPlace)
+                {
+                    return false;
+                }
+
+                if (answering.Started.HasValue)
+                {
+                    Told(answered, FailureOf(inPlace));
+                }
+
+                return true;
+            }
+
+            // ! its router answered in its place on its own thread while this answer went to it, so
+            // it went nowhere: told again at its start, with the failure its router answered; never
+            // the failure this answer was
+            private void ToldLate(object? answered, RouterAnswer answer)
+            {
+                if (answering.Started.HasValue
+                    && resolver._router.AnsweredOf(Target) is { } late
+                    && !ReferenceEquals(late, answer.Failure))
+                {
+                    Told(answered, FailureOf(late));
+                }
+            }
+
+            // the failure its router answered in its place, raised here, on its call id
+            private FailureException FailureOf(Failure failure)
+            {
+                return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, resolver._router.Side))
+                {
+                    Header = new FailureHeader { CallId = Target.Header.CallId },
+                };
             }
 
             // ! tells its answer's step, or why it did not go, to whoever listens; built here, out of

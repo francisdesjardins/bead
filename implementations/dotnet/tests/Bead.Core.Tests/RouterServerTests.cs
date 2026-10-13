@@ -1943,6 +1943,48 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_errors);
     }
 
+    // debugging 4.2
+    [Fact]
+    public async Task Tells_the_failure_its_router_answered_in_the_resolver_s_place()
+    {
+        var news = StartPaced(new PacingLimits { MaximumQueuedNotifications = 1 });
+
+        // the steps of the call in flight: their direction, what came in and went out, and why
+        var told = new List<(DebugDirection Direction, object? Rx, object? Tx, (ProtocolCode, string, RouterSide?)? Error)>();
+
+        Services.Debug += (error, step) =>
+        {
+            if (step.CallId == 3)
+            {
+                told.Add((
+                    step.Direction,
+                    step.Rx,
+                    step.Tx,
+                    error is FailureException failure ? ((ProtocolCode)failure.Failure.Code, failure.Failure.Detail, failure.Side) : null));
+            }
+        };
+        Deliver(First, PacedOf(3, "hold"));
+        await Settle();
+
+        foreach (var word in new[] { "a", "b", "c" })
+        {
+            await news.Notify(word).WaitAsync(Patience, Cancelled);
+        }
+
+        _released.SetResult();
+        await Settle();
+
+        // its resolver's answer goes nowhere, told once with the failure that went in its place
+        Assert.Equal(["first notification 3 a", "first failure 3 CapacityExceeded"], SentSince());
+        Assert.Equal(
+            [
+                (DebugDirection.Rx, "hold", null, null),
+                (DebugDirection.Tx, "hold", "ok", (ProtocolCode.CapacityExceeded, "the notifications queued for call 3 went past their bounds", RouterSide.Server)),
+            ],
+            told);
+        Assert.Empty(_errors);
+    }
+
     [Fact]
     public async Task Reports_the_failure_it_could_not_send_a_call_in_flight_whose_queue_went_past_its_bounds()
     {

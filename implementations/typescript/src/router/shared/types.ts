@@ -511,6 +511,12 @@ export interface IRouterCore<Handle extends string> {
   readonly limits: IRouterLimits;
 
   /**
+   * The failure the call of a request this side dispatched was answered with, kept once its call
+   * closed: so its resolver, answering after it, finds the failure its router answered in its place.
+   * None for a request answered otherwise, not yet answered, or never dispatched.
+   */
+  answeredOf(request: { connectionHandle: Handle; header: IRequestHeader }): IFailure | undefined;
+  /**
    * Cancels a call this side opened: one still waiting is rejected with a {@link CancelError}, the
    * peer is sent a cancel, and the call id is reserved for `timeout` — the call's own when it is
    * waiting and none is given — or, once its result came in part, for as long as the peer keeps the
@@ -802,6 +808,14 @@ export interface IRouterLike<Handle extends string = ConnectionHandle> {
   readonly clock: IClock;
   readonly failures: IRouterFailures;
 
+  /**
+   * The failure the router answered a request with in its resolver's place — a server's, as the
+   * subscription the request opens queued past its bounds (spec 11.10) — read as its resolver
+   * answers, whose answer then goes nowhere; none while the request is its resolver's to answer.
+   */
+  answeredOf(
+    request: Pick<IRequestResolverProps<Handle>, 'connectionHandle' | 'header'>
+  ): IFailure | undefined;
   /**
    * Declares a requester of `procedure` to the router's metrics, as it is made, and gives the series
    * each of its calls carries to `request`; none when the router counts nothing. A procedure off

@@ -12,6 +12,7 @@ import {
   DEBUG_EVENT,
   DEPRECATED_EVENT,
   DROPPED_EVENT,
+  EnvelopeKind,
   FailureScope,
   SERVER_CONNECTION_HANDLE,
 } from './constants';
@@ -688,6 +689,9 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
         isAnswered = true;
 
+        // a request its router answered in its place takes this answer nowhere: its step is told
+        // once, with the failure its router answered, and nothing failed here
+        const answered = router.answeredOf(target);
         const step =
           started === undefined
             ? undefined
@@ -703,7 +707,21 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
               } as const);
 
         if (step !== undefined) {
-          trace(procedure, step);
+          trace(
+            procedure,
+            answered === undefined
+              ? step
+              : {
+                  ...step,
+                  error: new FailureError(answered, {
+                    header: { callId: header.callId, kind: EnvelopeKind.FAILURE },
+                  }),
+                }
+          );
+        }
+
+        if (answered !== undefined) {
+          return;
         }
 
         try {

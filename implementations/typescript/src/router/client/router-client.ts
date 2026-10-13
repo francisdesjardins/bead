@@ -551,6 +551,9 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       return transport;
     },
 
+    answeredOf: ({ header }) => {
+      return core.answeredOf({ connectionHandle: SERVER_CONNECTION_HANDLE, header });
+    },
     declareRequester: (procedure) => {
       checkDeclaration(procedure);
       checkProcedureKind(procedure, 'client-requester');
