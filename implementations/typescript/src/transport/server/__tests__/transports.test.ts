@@ -168,7 +168,7 @@ interface IReport {
 /** A server of the interop service, whichever its transport, as a case plays it. */
 type ServerUnderTest = AsyncDisposable &
   IServer<IServerTransportLike, string> & {
-    transport: Pick<ITransportServer, 'clients' | 'gauges' | 'on' | 'start'>;
+    transport: Pick<ITransportServer, 'clients' | 'gauges' | 'start'>;
   };
 
 // constants

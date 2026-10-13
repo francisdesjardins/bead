@@ -10,6 +10,22 @@ namespace Bead;
 /// </summary>
 internal sealed class ListenerGuard(Action<Exception, string?> report)
 {
+    /// <summary>Tells each of <paramref name="listeners"/> of an event that carries nothing, a client's reconnection, each within its guard.</summary>
+    public void Tell(Action? listeners)
+    {
+        foreach (var listener in Delegate.EnumerateInvocationList(listeners))
+        {
+            try
+            {
+                listener();
+            }
+            catch (Exception reason)
+            {
+                report(reason, null);
+            }
+        }
+    }
+
     /// <summary>Tells <paramref name="argument"/> to each of <paramref name="listeners"/>, each within its guard.</summary>
     public void Tell<T>(Action<T>? listeners, T argument)
     {

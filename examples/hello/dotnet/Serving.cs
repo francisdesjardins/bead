@@ -19,6 +19,17 @@ public static class Serving
         {
             Console.Error.Write($"{connectionHandle ?? "no connection"}: {reason.Message}\n");
         };
+
+        // what a socket or a listener of the transport's events threw, and each request it refused
+        // of its own, which no router forwards
+        server.Transport.Error += (reason, connectionHandle) =>
+        {
+            Console.Error.Write($"{(connectionHandle.Length == 0 ? "no connection" : connectionHandle)}: {reason.Message}\n");
+        };
+        server.Transport.Refusal += (refusal) =>
+        {
+            Console.Error.Write($"refused {refusal.Status} {refusal.Reason}\n");
+        };
         Resolvers.OfferHello(server);
 
         var address = await server.Transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });

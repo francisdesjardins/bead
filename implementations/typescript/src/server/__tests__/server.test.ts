@@ -1,5 +1,8 @@
+import { once } from 'node:events';
+import { type IncomingMessage, request } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
+import { WebSocketServer } from 'ws';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
 import { CredentialScheme, EnvelopeKind } from '../../router/shared/constants';
@@ -15,7 +18,11 @@ import type {
 } from '../../router/shared/types';
 import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
-import type { TransportServerConnectionHandle } from '../../transport/server/types';
+import type {
+  ITransportServerRefusal,
+  TransportServerConnectionHandle,
+} from '../../transport/server/types';
+import { createWSTransportServer } from '../../transport/server/ws-transport-server';
 import { createEmitter } from '../../transport/shared/emitter';
 import { ProgrammerError } from '../../transport/shared/errors';
 import type { ITransportMessage } from '../../transport/shared/types';
@@ -25,6 +32,7 @@ import {
   DisconnectError,
   ProtocolCode,
   TimeoutError,
+  type IServer,
   type IServerOptions,
   type IServerTransportLike,
 } from '../server';
@@ -1190,6 +1198,49 @@ test.describe('createServer', () => {
         return emitter.listenerCount(event);
       })
     ).toEqual([0, 0, 0, 0]);
+  });
+
+  test("hears its transport's error and refusal through the server's transport", async () => {
+    const transport = createWSTransportServer({ WebSocketServer });
+    // typed by what a server asks of its transport alone, as code over any transport sees it
+    await using server: IServer = createServer({ transport });
+    const refusals: [status: number, reason: string][] = [];
+    const errors: [message: string, connectionHandle: string][] = [];
+    const onRefusal = ({ reason, status }: ITransportServerRefusal) => {
+      refusals.push([status, reason]);
+
+      throw new Error('a refusal listener that throws');
+    };
+
+    server.transport.on('refusal', onRefusal);
+    server.transport.on('error', (error, connectionHandle) => {
+      errors.push([error.message, connectionHandle]);
+    });
+
+    const { port } = await transport.start({ address: '127.0.0.1', findOpenPort: true });
+    const post = async () => {
+      const posted = request({ agent: false, host: '127.0.0.1', method: 'POST', port });
+
+      posted.end();
+
+      const [answer] = (await once(posted, 'response')) as [IncomingMessage];
+
+      answer.resume();
+      await once(answer, 'end');
+
+      return [answer.statusCode, answer.headers['bead-refusal']];
+    };
+
+    expect(await post()).toEqual([405, 'method-refused']);
+    expect(refusals).toEqual([[405, 'method-refused']]);
+    expect(errors).toEqual([['a refusal listener that throws', '']]);
+
+    // let go of, it hears nothing more
+    server.transport.off('refusal', onRefusal);
+
+    expect(await post()).toEqual([405, 'method-refused']);
+    expect(refusals).toHaveLength(1);
+    expect(errors).toHaveLength(1);
   });
 
   test.describe('gauges and health', () => {

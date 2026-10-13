@@ -207,6 +207,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its `proto` codec checks a payload's records before its library reads them; a C# project that
   binds `proto` references `Bead.Protobuf`. The runtimes no longer carry version 2, so code
   generated before 0.4.0 must be regenerated.
+- A client transport calls each listener of its `reconnect`, `Reconnect` on the C# side, within its
+  guard, on both sides: a throw is reported through its `error`, the next listener is told and the
+  reconnection goes on; `spec.md` 15.1 names a reconnection among the events it guards (decision
+  0023).
+- A server's transport, as the server gives it, carries `error` and `refusal` alike, so an
+  application hears both through `server.transport`, `server.Transport`, whichever transport it
+  built: `IServerTransportLike` gains `error` and `refusal`, and `IServerTransport` gains `Error`.
 
 ### Removed
 

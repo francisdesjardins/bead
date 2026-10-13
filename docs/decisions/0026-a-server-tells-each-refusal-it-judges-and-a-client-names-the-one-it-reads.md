@@ -140,8 +140,8 @@ cause kept. Over the global `WebSocket` it reads nothing past its close 1006, a 
 
 ## Consequences
 
-**Every server transport gains a public event and a record type**, on both sides, and both
-`IServerTransport` and the TypeScript event map carry it.
+**Every server transport gains a public event and a record type**, on both sides, and
+`IServerTransport`, `IServerTransportLike` and the TypeScript event map carry it.
 
 **`spec/transports.json` checks each marked refusal's tell**: every marked `expect` holds `told`,
 computed by its generator from the request its step sent, its port `{port}`, which each runner fills

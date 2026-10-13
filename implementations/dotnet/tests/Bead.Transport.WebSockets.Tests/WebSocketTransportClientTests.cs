@@ -1290,6 +1290,41 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Reconnects_though_a_reconnect_listener_throws_the_throw_reported_the_next_listener_told()
+    {
+        var thrown = new InvalidOperationException("a reconnect listener that throws");
+        var reported = new List<Exception>();
+        var told = 0;
+
+        ((IRouterClientTransport)_client).Reconnect += () =>
+        {
+            throw thrown;
+        };
+        ((IRouterClientTransport)_client).Reconnect += () =>
+        {
+            Interlocked.Increment(ref told);
+        };
+        _client.Error += (reason) =>
+        {
+            lock (reported)
+            {
+                reported.Add(reason);
+            }
+        };
+
+        await _client.Connect(Target, Cancelled);
+        await _client.Reconnect().WaitAsync(Patience, Cancelled);
+
+        // the reconnection went on to its attempt, which opened
+        Assert.Equal(ReadyState.Open, _client.ReadyState);
+        Assert.Equal(1, told);
+        lock (reported)
+        {
+            Assert.Equal([thrown], reported);
+        }
+    }
+
+    [Fact]
     public async Task Makes_its_first_attempt_at_once()
     {
         // a clock that never moves: a first attempt that waited would wait for ever

@@ -2328,6 +2328,43 @@ public sealed class HttpTransportClientTests
     }
 
     [Fact]
+    public async Task Reconnects_though_a_reconnect_listener_throws_the_throw_reported_the_next_listener_told()
+    {
+        await using var started = await Started.Start();
+        await using var client = new HttpTransportClient(NotListening);
+        var thrown = new InvalidOperationException("a reconnect listener that throws");
+        var reported = new List<Exception>();
+        var told = 0;
+
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            throw thrown;
+        };
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            Interlocked.Increment(ref told);
+        };
+        client.Error += (reason) =>
+        {
+            lock (reported)
+            {
+                reported.Add(reason);
+            }
+        };
+
+        await client.Connect(started.Target(), Cancelled);
+        await client.Reconnect().WaitAsync(Patience, Cancelled);
+
+        // the reconnection went on to its attempt, which opened
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(1, told);
+        lock (reported)
+        {
+            Assert.Equal([thrown], reported);
+        }
+    }
+
+    [Fact]
     public async Task Throws_a_ReconnectException_carrying_the_last_failure_ending_closed()
     {
         await using var faked = await ConnectRefused(NotListening);

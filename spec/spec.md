@@ -1062,17 +1062,17 @@ carries none (section 15.4); its form is its implementation's, written for a rea
 an application compares a handle whole. A transport reads nothing of an envelope but what this
 section says; what it refuses of its own is no envelope, and the router never sees it. A side calls
 each listener of its transport's events — a connection opened, an envelope, a listen, a close, a
-refusal — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one throws is
-reported, as section 9.0 reports an error, by its transport with the connection it was told of; the
-listeners after it are called all the same, and the transport goes on as if it returned. A side
-awaits nothing a listener returns: what it settles to later is its platform's, as is what a listener
-of the transport's own `error` throws. A listener's throw refuses no connection, fails no exchange
-and closes nothing. A server's transport tells each refusal it judges of its own: a request it
-refuses as it arrives, in section 15.6's order, or whose body it refuses as it comes, marked in
-`bead-refusal`. It never tells the 404 that ends an exchange or a listen it had taken as their
-connection closes (section 15.7), which its close tells, nor what HTTP refuses of its own, unmarked.
-A refusal told carries its status, its reason, the request's authority and its `Origin`, each as it
-came, the field's lines joined by ", "
+refusal, a reconnection — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3):
+what one throws is reported, as section 9.0 reports an error, by its transport with the connection
+it was told of; the listeners after it are called all the same, and the transport goes on as if it
+returned. A side awaits nothing a listener returns: what it settles to later is its platform's, as
+is what a listener of the transport's own `error` throws. A listener's throw refuses no connection,
+fails no exchange and closes nothing. A server's transport tells each refusal it judges of its own:
+a request it refuses as it arrives, in section 15.6's order, or whose body it refuses as it comes,
+marked in `bead-refusal`. It never tells the 404 that ends an exchange or a listen it had taken as
+their connection closes (section 15.7), which its close tells, nor what HTTP refuses of its own,
+unmarked. A refusal told carries its status, its reason, the request's authority and its `Origin`,
+each as it came, the field's lines joined by ", "
 ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
 address and port (section 15.12); nothing else of the request, so neither its target, nor its
 connection's token, nor a credential. It names no connection: a refusal is a request's, and a

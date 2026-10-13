@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Bead;
 
 /// <summary>
@@ -28,6 +30,29 @@ public interface IServerTransport : IRouterServerTransport
     /// origins. A transport that refuses nothing of its own never raises it, as this default.
     /// </summary>
     event Action<TransportServerRefusal>? Refusal
+    {
+        add
+        {
+        }
+
+        remove
+        {
+        }
+    }
+
+    /// <summary>
+    /// What went wrong on a connection, with its handle, as spec 9.0 reports an error: what a
+    /// listener of its events threw, the transport going on as if it returned (spec 15.1), or what
+    /// broke a connection's socket; with the empty handle for a throw of a <see cref="Refusal"/>
+    /// listener, which names no connection. The routers forward none of it to their own error, so
+    /// an application hears it here, whichever transport it built. A transport that reports nothing
+    /// never raises it, as this default.
+    /// </summary>
+    [SuppressMessage(
+        "Naming",
+        "CA1716:Identifiers should not match keywords",
+        Justification = "each transport's event is Error, as every router's and the TypeScript side's error: one word, one meaning (0003)")]
+    event Action<Exception, string>? Error
     {
         add
         {

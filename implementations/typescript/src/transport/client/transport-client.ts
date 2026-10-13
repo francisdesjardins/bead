@@ -30,6 +30,7 @@ import type {
   ITransportClientDefineOptions,
   ITransportClientOptions,
   ITransportClientReconnectOptions,
+  TRANSPORT_CLIENT_EVENTS,
   TransportClientEventMap,
 } from './types';
 
@@ -174,17 +175,20 @@ export const createTransportClient = <
   let lastConnectOptions: ConnectOptions | undefined;
 
   // each listener within a guard (spec 15.1): what one throws is reported, and the transport goes
-  // on as if it returned
-  const defineOptions: ITransportClientDefineOptions = {
-    tell: (event, params) => {
-      return emitter.emitEach(event, {
-        onError: (error) => {
-          emitter.emit(ERROR_EVENT, toError(error));
-        },
-        params,
-      });
-    },
+  // on as if it returned; the transport tells its `message` and its `close` by it, and the client
+  // its `reconnect`
+  const tell = <K extends Exclude<TRANSPORT_CLIENT_EVENTS, ERROR_EVENT>>(
+    event: K,
+    params: TransportClientEventMap[K]
+  ): boolean => {
+    return emitter.emitEach(event, {
+      onError: (error) => {
+        emitter.emit(ERROR_EVENT, toError(error));
+      },
+      params,
+    });
   };
+  const defineOptions: ITransportClientDefineOptions = { tell };
 
   const client: ITransportClientInternal<Socket, ConnectOptions> = {
     socket: null,
@@ -294,7 +298,7 @@ export const createTransportClient = <
 
       const target = lastConnectOptions;
 
-      emitter.emit(RECONNECT_EVENT);
+      tell(RECONNECT_EVENT, []);
 
       if (client.isOpen()) {
         // dropped without a handshake, so no `close` reaches the listeners for a connection replaced
