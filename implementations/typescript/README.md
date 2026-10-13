@@ -1086,11 +1086,12 @@ commands among them, and `bead_server_*` those it answers. A series is labelled 
 service's id in decimal, and `procedure`, its name; a call's, by its `type`, `request` or
 `command`; a call ended, by its `outcome` — `result`, `failure`, `timeout`, `cancelled`, `closed` or
 `error` — and a failure by its `code`: the protocol's name for it, `application` for a procedure's
-own, `_OTHER` for one the protocol names none of. What is under way is a family's started count less
-its handled counts, exact at each exposition, and no gauge is kept besides. A duration is whole
-microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written as Prometheus 3
-stores it. Node reads its monotonic clock finer than a microsecond; a browser coarsens it to 100 µs,
-or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
+own, `_OTHER` for one the protocol names none of. What is under way is a series' started count less
+its handled counts, each series written from one reading of its counts, so the difference never
+reads below 0 and its `_count` is the sum of its handled counts; no gauge is kept besides. A
+duration is whole microseconds, in the 42 buckets of gRPC's A66, from 0 to 100 s, each bound written
+as Prometheus 3 stores it. Node reads its monotonic clock finer than a microsecond; a browser
+coarsens it to 100 µs, or 5 µs once cross-origin isolated, and the buckets under that hold zeros.
 
 `exposition()` writes every series the registry holds in the Prometheus text format 0.0.4, and gives
 its media type with it: `{ contentType, text }`, `contentType` being `METRICS_CONTENT_TYPE`,

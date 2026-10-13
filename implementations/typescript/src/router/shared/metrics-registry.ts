@@ -541,7 +541,7 @@ const maximumOf = (given: number | undefined): number => {
  * address — two names one when their ASCII letters are read in one case (spec 16.6) — of a service
  * at another revision than it holds, or past `maximumProcedures`. Its
  * exposition is the Prometheus text format 0.0.4, at `/metrics` or appended to a scrape of that
- * format: Bead opens no port.
+ * format, each series written from one reading of its counts: Bead opens no port.
  *
  * @example
  * import { createMetricsRegistry, createServer } from '@francisdesjardins/bead/server';

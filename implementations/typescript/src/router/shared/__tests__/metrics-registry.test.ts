@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import {
+  CallEnding,
   createMetricsRegistry,
   METRICS_REGISTRY_DEFAULTS,
   microsecondsOf,
@@ -9,6 +10,35 @@ import {
 // helpers
 
 const echo = { procedureId: 1, procedureName: 'echo', serviceId: 2, serviceRevision: 3 };
+
+/**
+ * What an exposition writes of the calls a server answers, by each series' labels: its handled
+ * counts summed, its `_count` and its started count.
+ */
+const answeredOf = (
+  text: string
+): Map<string, { count: number; handled: number; started: number }> => {
+  const read = new Map<string, { count: number; handled: number; started: number }>();
+
+  for (const line of text.split('\n')) {
+    const sample =
+      /^bead_server_call_(handled_total|started_total|duration_seconds_count)\{(service="[^"]*",procedure="[^"]*",type="[^"]*")[^}]*\} (\d+)$/u.exec(
+        line
+      );
+
+    if (sample !== null) {
+      const [, family = '', labels = '', value = ''] = sample;
+      const counts = read.get(labels) ?? { count: 0, handled: 0, started: 0 };
+      const key =
+        family === 'handled_total' ? 'handled' : family === 'started_total' ? 'started' : 'count';
+
+      counts[key] += Number(value);
+      read.set(labels, counts);
+    }
+  }
+
+  return read;
+};
 
 // definition
 
@@ -74,6 +104,48 @@ test.describe('createMetricsRegistry', () => {
       )
     );
     expect(registry.exposition().text).toBe(before);
+  });
+
+  // debugging 8.5 and 11.2
+  test('writes each series from one reading of its counts', () => {
+    const registry = createMetricsRegistry();
+    const metrics = registry.attach('server');
+    const echoing = metrics.declareResolver(echo, { notifies: false }).calls;
+    const failing = metrics.declareResolver(
+      { ...echo, procedureId: 2, procedureName: 'fail' },
+      { notifies: false }
+    ).calls;
+
+    // three echoes started, two ended; one failing call ended; one call of _OTHER under way
+    for (const series of [echoing, echoing, echoing, failing, metrics.otherServer]) {
+      series.start();
+    }
+
+    echoing.end(CallEnding.RESULT, 10);
+    echoing.end(CallEnding.APPLICATION, 20);
+    failing.end(CallEnding.TIMEOUT, 30);
+
+    const { text } = registry.exposition();
+    const answered = answeredOf(text);
+
+    // * its `_count` the sum of its handled counts, and what is under way never below 0
+    for (const [labels, { count, handled, started }] of answered) {
+      expect(count, labels).toBe(handled);
+      expect(started, labels).toBeGreaterThanOrEqual(handled);
+    }
+
+    expect(
+      [...answered].map(([labels, { handled, started }]) => {
+        return [labels, started - handled];
+      })
+    ).toEqual([
+      ['service="2",procedure="echo",type="request"', 1],
+      ['service="2",procedure="fail",type="request"', 0],
+      ['service="_OTHER",procedure="_OTHER",type="request"', 1],
+    ]);
+    expect(text.indexOf('# HELP bead_server_call_handled_total')).toBeLessThan(
+      text.indexOf('# HELP bead_server_call_started_total')
+    );
   });
 
   // spec 16.7

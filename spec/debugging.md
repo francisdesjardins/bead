@@ -342,10 +342,13 @@ dropped by a failure: a protocol code by its name in section 8 of `spec.md`, `AC
 section 8 names none of, `_OTHER`; a procedure's own failure, `application`. A label left out is
 written nowhere, as Prometheus reads an empty one.
 
-8.5. What is under way is a family's started count less its handled counts, exact at each
-exposition: a family's `_handled_total` is written, and its counts read, before its
-`_started_total`, as their names order them, so the difference never reads below 0. No gauge is
-kept besides.
+8.5. What is under way is a started count less the handled counts of its `service`, `procedure` and
+`type`, exact within each series at its reading: a registry reads the counts of each `service`,
+`procedure` and `type` of a role once, its handled counts before its started count, and writes each
+of their lines from that one reading, so the difference never reads below 0. Across series, a side
+that counts from several threads reads each at its own instant, as Prometheus's client libraries
+collect. A family's `_handled_total` is written before its `_started_total`, as their names order
+them. No gauge is kept besides.
 
 ## 9. The gates
 
@@ -471,7 +474,7 @@ binary fraction drops no microsecond, 0.3 ms less 0.2 ms reading 100 µs; the C#
 ticks over 10.
 
 11.2. Every call that ends is observed, whatever its outcome, so a series' `_count` is the sum of
-its handled counts.
+its handled counts, each series at one reading (section 8.5).
 
 11.3. The buckets are A66's, its 0 included: 41 bounds and `+Inf`, 42 buckets, from 0 to 100 s. A
 duration of _d_ µs falls in every bucket whose bound, in microseconds, is _d_ or more: an integer

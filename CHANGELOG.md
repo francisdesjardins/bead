@@ -257,6 +257,10 @@ archive` writing a submodule as an empty folder.
 - `debugging.md` 8.1 names where its families part from OpenTelemetry's RPC conventions, and the
   shape their `_handled_total` families take; each of its references to a unit of `spec.md` names
   it.
+- The C# exposition reads each series' counts once, its handled before its started, and writes the
+  series' lines from that reading, so its `_count` is the sum of its handled counts and its started
+  never below them at every exposition; `debugging.md` 8.5 and 11.2 state each series at one
+  reading, and across series each at its own instant (decision 0013).
 
 ### Security
 

@@ -104,6 +104,94 @@ public sealed class MetricsRegistryTests
             }));
     }
 
+    // debugging 8.5 and 11.2
+    [Fact]
+    public async Task Writes_each_series_from_one_reading_of_its_counts()
+    {
+        const int Threads = 4;
+        const int Readings = 200;
+
+        var registry = new MetricsRegistry();
+        var calls = registry.Give(RouterSide.Client).DeclareRequester(Echo);
+        var failed = (CallOutcome.Failure, (Failure?)Failure.OfApplication(1));
+        using var running = new CountdownEvent(Threads);
+        using var read = new CancellationTokenSource();
+
+        // * its calls counted from several threads for as long as it reads, each ending in its own
+        // bucket and column, by turns
+        var counting = Task.WhenAll(Enumerable.Range(0, Threads).Select((_) =>
+        {
+            return Task.Factory.StartNew(
+                () =>
+                {
+                    running.Signal();
+
+                    for (var call = 0; !read.IsCancellationRequested; call += 1)
+                    {
+                        calls.Start();
+                        calls.End(call % 2 == 0 ? (CallOutcome.Result, null) : failed, call % 1_000);
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+        }));
+
+        Assert.True(running.Wait(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+
+        for (var reading = 0; reading < Readings; reading += 1)
+        {
+            HoldsOneReading(registry.Exposition().Text);
+        }
+
+        await read.CancelAsync();
+        await counting.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+
+        // once nobody counts, every call started ended
+        var (started, handled) = HoldsOneReading(registry.Exposition().Text);
+
+        Assert.True(started > 0);
+        Assert.Equal(started, handled);
+    }
+
+    // what one reading of the echo series holds, its started count and the sum of its handled
+    // counts: its started count never below its handled counts, its _count and its +Inf bucket their
+    // sum, and its buckets rising to it
+    private static (long Started, long Handled) HoldsOneReading(string text)
+    {
+        const string Labels = "{service=\"1\",procedure=\"echo\",type=\"request\"";
+
+        long CountOf(string line)
+        {
+            return long.Parse(line[(line.LastIndexOf(' ') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var lines = text.Split('\n');
+        var started = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_started_total{Labels}", StringComparison.Ordinal);
+        }).Select(CountOf).Single();
+        var handled = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_handled_total{Labels}", StringComparison.Ordinal);
+        }).Sum(CountOf);
+        var buckets = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_duration_seconds_bucket{Labels}", StringComparison.Ordinal);
+        }).Select(CountOf).ToList();
+        var count = lines.Where((line) =>
+        {
+            return line.StartsWith($"bead_client_call_duration_seconds_count{Labels}", StringComparison.Ordinal);
+        }).Select(CountOf).Single();
+
+        Assert.True(started >= handled, $"started {started}, below its handled counts' {handled}");
+        Assert.Equal(handled, count);
+        Assert.Equal(handled, buckets[^1]);
+        Assert.Equal(buckets.Order(), buckets);
+
+        return (started, handled);
+    }
+
     [Fact]
     public void Writes_a_lone_surrogate_in_a_name_as_U_FFFD_as_spec_7_4_writes_a_detail()
     {

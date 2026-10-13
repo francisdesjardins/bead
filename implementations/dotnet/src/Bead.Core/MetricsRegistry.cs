@@ -274,9 +274,11 @@ public sealed class MetricsRegistry
     /// <summary>
     /// Writes every series, in the Prometheus text format 0.0.4 (12.1 to 12.6): the families in the
     /// order of their names, each one group, its <c># HELP</c> then its <c># TYPE</c>, a family that
-    /// holds none left out; its series by service, procedure, type, outcome and code; each count read
-    /// as it is written, so a family's handled counts are read before its started ones, and what is
-    /// under way never reads below 0.
+    /// holds none left out; its series by service, procedure, type, outcome and code. Each series of
+    /// calls is read once, its handled counts before its started count, and each of its lines written
+    /// from that one reading (8.5): its <c>_count</c> is the sum of its handled counts (11.2), and what
+    /// is under way never reads below 0. Across series, each is read at its own instant, as threads
+    /// go on counting.
     /// </summary>
     public MetricsExposition Exposition()
     {
@@ -340,12 +342,13 @@ public sealed class MetricsRegistry
 
         foreach (var role in new[] { CallRole.Client, CallRole.Server })
         {
+            // * each series read once, before any of its lines is written
             var ofRole = calls.Where((entry) =>
             {
                 return entry.Key.Role == role;
             }).Select((entry) =>
             {
-                return entry.Series;
+                return (entry.Series, Reading: entry.Series.Read());
             }).ToList();
             var (duration, handled, started) = role == CallRole.Client
                 ? (ClientDuration, ClientHandled, ClientStarted)
@@ -353,9 +356,9 @@ public sealed class MetricsRegistry
 
             Write(duration, [.. ofRole.SelectMany(DurationLinesOf(duration))]);
             Write(handled, [.. ofRole.SelectMany(HandledLinesOf(handled))]);
-            Write(started, [.. ofRole.Select((series) =>
+            Write(started, [.. ofRole.Select((read) =>
             {
-                return $"{started}{{{series.Labels}}} {CountOf(series.Started())}";
+                return $"{started}{{{read.Series.Labels}}} {CountOf(read.Reading.Started)}";
             })]);
 
             if (role == CallRole.Client)
@@ -390,38 +393,44 @@ public sealed class MetricsRegistry
         return new MetricsExposition(MediaType, text.ToString());
     }
 
-    // a histogram's lines of one series: its buckets rising to +Inf, each holding those under it,
-    // then its _sum, then its _count, which is its +Inf bucket's
-    private static Func<CallSeries, IEnumerable<string>> DurationLinesOf(string family)
+    // a histogram's lines of one series, from its reading: its buckets rising, each holding those
+    // under it, then +Inf, its _sum, and its _count, which are the sum of its handled counts (11.2),
+    // never below its buckets' at one reading
+    private static Func<(CallSeries Series, CallReading Reading), IEnumerable<string>> DurationLinesOf(string family)
     {
-        return (series) =>
+        return (read) =>
         {
+            var (series, reading) = read;
             var lines = new List<string>(MetricsBuckets.Count + 2);
+            var handled = reading.Handled.Sum();
             var count = 0L;
 
-            for (var index = 0; index < MetricsBuckets.Count; index += 1)
+            for (var index = 0; index < MetricsBuckets.Count - 1; index += 1)
             {
-                count += series.Bucket(index);
+                count += reading.Buckets[index];
                 lines.Add($"{family}_bucket{{{series.Labels},le=\"{MetricsBuckets.Les[index]}\"}} {CountOf(count)}");
             }
 
-            lines.Add($"{family}_sum{{{series.Labels}}} {SecondsOf(series.Sum())}");
-            lines.Add($"{family}_count{{{series.Labels}}} {CountOf(count)}");
+            lines.Add($"{family}_bucket{{{series.Labels},le=\"{MetricsBuckets.Les[^1]}\"}} {CountOf(handled)}");
+            lines.Add($"{family}_sum{{{series.Labels}}} {SecondsOf(reading.Sum)}");
+            lines.Add($"{family}_count{{{series.Labels}}} {CountOf(handled)}");
 
             return lines;
         };
     }
 
-    // a series' handled lines, by outcome, then by code under failure
-    private static Func<CallSeries, IEnumerable<string>> HandledLinesOf(string family)
+    // a series' handled lines, from its reading, by outcome, then by code under failure
+    private static Func<(CallSeries Series, CallReading Reading), IEnumerable<string>> HandledLinesOf(string family)
     {
-        return (series) =>
+        return (read) =>
         {
+            var (series, reading) = read;
+
             return series.Table.Columns.Select((column, index) =>
             {
                 var code = column.Code is { } named ? $",code=\"{named}\"" : "";
 
-                return $"{family}{{{series.Labels},outcome=\"{column.Outcome}\"{code}}} {CountOf(series.Handled(index))}";
+                return $"{family}{{{series.Labels},outcome=\"{column.Outcome}\"{code}}} {CountOf(reading.Handled[index])}";
             });
         };
     }

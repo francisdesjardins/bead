@@ -225,9 +225,12 @@ has its reason:
   a family means something (debugging 8 and 10);
 - **client and server are a call's roles**, as OpenTelemetry's span kinds are: `bead_client_*`
   counts the calls a side makes, and `bead_server_*` those it answers, whatever the side;
-- **in flight is started less handled**, exact at each exposition, and no gauge is kept besides: it
-  would read that same difference at the scrape, and miss what started and ended between two
-  (debugging 8.5);
+- **in flight is started less handled**, exact within each series at its reading, and no gauge is
+  kept besides: it would read that same difference at the scrape, and miss what started and ended
+  between two (debugging 8.5). A registry reads each series' counts once, its handled before its
+  started, and writes every line of it from that reading, so its `_count` is the sum of its handled
+  counts (debugging 11.2); across series, a side that counts from several threads reads each at its
+  own instant, as Prometheus's client libraries collect;
 - **a value a label does not know is `_OTHER`**, on every label, `code` included, as OpenTelemetry's
   `rpc.method` and `error.type` spell it; no label is ever a connection, a session, a call id, a
   destination or a credential (debugging 8);
@@ -324,6 +327,10 @@ of the codes its exits can end with, and no series waits at 0 for a code its exi
 registry holds at another address, at an address it holds under another name, or at another revision
 of a service it holds, is refused as the side is built, and so is one off section 16, by its router
 ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).
+
+**One reading costs a series' counts copied.** The C# side copies each series' counts into a
+snapshot at each exposition while its threads go on counting, and writes the series' lines from it;
+the TypeScript side reads on one thread, so its reading is one already.
 
 **Latency is not split by outcome.** A histogram carries no `outcome`, which would multiply its
 series by its five or six outcomes: a burst of quick refusals lowers its quantiles, and the handled
