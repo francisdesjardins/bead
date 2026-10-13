@@ -273,8 +273,8 @@ jobs:
         working-directory: .
         run: node builder/src/cli.ts generate --check
       # ! beadc breaking, against the last release, the interop's blueprint and examples/hello's:
-      # every release carries both, and one without fails the step, so it never passes by comparing
-      # nothing. The last release is the newest
+      # the last release carries both, and one without fails the step, so it never passes by
+      # comparing nothing. The last release is the newest
       # vX.Y.Z, as tools/release.mjs reads one, whose commit is not HEAD's: on a release's own
       # commit, the one before it, so a waiver the release carried still waives its change. Read by
       # the tag's commit, never by ancestry, which the shallow fetch does not hold. Every warning

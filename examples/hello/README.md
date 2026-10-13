@@ -119,8 +119,8 @@ by Yarn's `portal:` protocol, the C# half by a `ProjectReference` of each assemb
 `Bead.Protobuf` among them, whose check its generated `proto` codecs call. A project of its own
 names each runtime as a package, by its name and a version:
 `"@francisdesjardins/bead": "<version>"`,
-`<PackageReference Include="Bead.Transport.WebSockets" Version="<version>" />` and
-`<PackageReference Include="Bead.Protobuf" Version="<version>" />`.
+`<PackageReference Include="FrancisDesjardins.Bead.Transport.WebSockets" Version="<version>" />` and
+`<PackageReference Include="FrancisDesjardins.Bead.Protobuf" Version="<version>" />`.
 
 From source, the TypeScript runtime is its `.ts` files, which a consumer's compiler compiles under
 the consumer's options. [`typescript/tsconfig.consumer.json`](typescript/tsconfig.consumer.json)

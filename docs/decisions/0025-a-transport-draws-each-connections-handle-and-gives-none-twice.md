@@ -60,13 +60,14 @@ The options weighed:
 
 **A server's transport draws each connection's handle as it takes it, and gives none twice** (spec
 15.1): no two connections it holds are one, and its bounds, its gauges and its stop reach each. A
-WebSocket server's handle is `type=WS;ip=…;port=…;ordinal=n`: the peer's address and port, kept for
-a reader of a trace, and the rank the transport took the connection at, counted per transport from
-1 and never reset, a stop and a start included. It is drawn once the connection is taken, after the
-check for a socket already gone and, on the C# side, after the accept, so ranks run in the order
-connections were taken; the C# side's count of arrivals is its rank. Every handle reads
-`type=…;ip=…;` and ends `ordinal=n`, a socket's carrying `port=…` between, which also tells apart the
-handles two WebSocket transports of one process draw at the same rank.
+WebSocket server's handle is `type=WS;ip=…;port=…;ordinal=n`: the client's address, as 15.12 reads
+it ([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)), and its
+socket's peer port, kept for a reader of a trace, and the rank the transport took the connection at,
+counted per transport from 1 and never reset, a stop and a start included. It is drawn once the
+connection is taken, after the check for a socket already gone and, on the C# side, after the
+accept, so ranks run in the order connections were taken; the C# side's count of arrivals is its
+rank. Every handle reads `type=…;ip=…;` and ends `ordinal=n`, a socket's carrying `port=…` between,
+which also tells apart the handles two WebSocket transports of one process draw at the same rank.
 
 **A handle's form is its implementation's**, written for a reader of a trace; the spec promises none,
 and an application compares a handle whole. The TypeScript type states the two forms as template
