@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Bead.Interop;
 
@@ -372,11 +373,11 @@ public sealed class NotificationTests : IDisposable
     {
         var ticks = TicksOf();
         var heard = new List<string>();
-        var dropped = new List<Failure?>();
+        var dropped = new ConcurrentQueue<Failure?>();
 
         _services.Dropped += (_, failure) =>
         {
-            dropped.Add(failure);
+            dropped.Enqueue(failure);
         };
 
         var registering = ticks.Register(JsonOf("{\"hold\":1}"), HeardBy(heard, "held"))();
@@ -399,7 +400,12 @@ public sealed class NotificationTests : IDisposable
 
         // on its call id, what comes finds no subscription, and no callback
         _clientEnd.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = "1"u8.ToArray() }));
-        await Settle();
+        // ! the manager is told of the drop on the connection's close, which may come after the
+        // registration's failure: wait for it, not for the settling alone
+        await SettleUntil(() =>
+        {
+            return !dropped.IsEmpty;
+        });
 
         Assert.Equal([null], dropped);
         Assert.Empty(heard);
