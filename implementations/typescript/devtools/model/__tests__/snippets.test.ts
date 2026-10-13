@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { FailureScope, ProtocolCode } from '../../../src/router/client/router-client';
-import { EnvelopeKind } from '../../../src/router/shared/constants';
+import { CredentialScheme, EnvelopeKind } from '../../../src/router/shared/constants';
 import { writeEnvelope } from '../../../src/router/shared/envelope';
 import { readBody } from '../../wire';
 import { codeOfCall, conversationOf } from '../snippets';
@@ -67,5 +67,36 @@ test.describe('conversationOf', () => {
         },
       },
     ]);
+  });
+
+  test('zeroes the bytes of a credential a request presented, its scheme and its length kept', () => {
+    const token = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ5b3UifQ.c2lnbmF0dXJl';
+    const request = writeEnvelope({
+      header: {
+        callId: 1,
+        credential: { scheme: CredentialScheme.JWT, token },
+        kind: EnvelopeKind.REQUEST,
+        procedureId: 1,
+        serviceId: 1,
+      },
+      kind: EnvelopeKind.REQUEST,
+      payload: encoder.encode('{"a":1}'),
+    });
+    const conversation = JSON.parse(
+      conversationOf({ request: readBody(request, 'envelope').envelopes, response: [] })
+    ) as { steps: { send: string }[] };
+    const sent = conversation.steps[0]?.send ?? '';
+    const hex = (text: string): string => {
+      return [...encoder.encode(text)]
+        .map((byte) => {
+          return byte.toString(16).padStart(2, '0').toUpperCase();
+        })
+        .join(' ');
+    };
+
+    expect(sent).not.toContain(hex(token.slice(0, 8)));
+    // the head: JWT, scheme 2, and the token's length, 52 bytes
+    expect(sent).toContain('00 02 00 34');
+    expect(sent.endsWith('| 7B 22 61 22 3A 31 7D')).toBe(true);
   });
 });

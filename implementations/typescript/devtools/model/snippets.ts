@@ -4,12 +4,13 @@
 // page's console, which makes a call again by the page's own service manager, its payload whole:
 // the panel never calls itself (decision 0015). The second is the skeleton of an entry of
 // `spec/conversations.json`, from the bytes an HTTP exchange carried, for whoever writes the next
-// one: what went out, in hexadecimal as `spec/vectors.json` writes it, and each envelope that came
-// back, as a conversation expects it.
+// one: what went out, in hexadecimal as `spec/vectors.json` writes it, a credential's own bytes
+// zeroed, and each envelope that came back, as a conversation expects it.
 
 // dependencies
 
-import { EnvelopeKind } from '../../src/router/shared/constants';
+import { EnvelopeFlag, EnvelopeKind } from '../../src/router/shared/constants';
+import { credentialBytesAt } from '../../src/router/shared/header';
 import type { IWireEnvelope } from '../wire';
 import type { ICall } from './calls';
 import {
@@ -35,10 +36,31 @@ const hexOf = (bytes: Uint8Array): string => {
 };
 
 /**
- * An envelope as a conversation sends it: its header, its first two groups of four bytes apart,
- * then, after a bar, what follows it.
+ * An envelope's bytes, its credential's own bytes zeroed, its scheme and its length kept: a
+ * conversation is pasted where others read it, and a credential leaves the page by its scheme alone
+ * (decision 0015).
  */
-const sendOf = ({ bytes, headerBytes }: IWireEnvelope): string => {
+const withoutCredentialOf = ({ bytes, header, headerBytes }: IWireEnvelope): Uint8Array => {
+  const flags = bytes[2] ?? 0;
+
+  if (header['advisory'] === true || (flags & EnvelopeFlag.CREDENTIAL) === 0) {
+    return bytes;
+  }
+
+  const masked = bytes.slice();
+
+  masked.fill(0, credentialBytesAt(bytes[1] ?? 0, flags), headerBytes);
+
+  return masked;
+};
+
+/**
+ * An envelope as a conversation sends it: its header, its first two groups of four bytes apart,
+ * then, after a bar, what follows it; a credential's own bytes zeroed.
+ */
+const sendOf = (envelope: IWireEnvelope): string => {
+  const { headerBytes } = envelope;
+  const bytes = withoutCredentialOf(envelope);
   const header = [bytes.subarray(0, 4), bytes.subarray(4, 8), bytes.subarray(8, headerBytes)]
     .filter((group) => {
       return group.length > 0;

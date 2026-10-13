@@ -769,6 +769,14 @@ export const readHeader = (bytes: Uint8Array, failures: ReadFailures): IReadHead
 };
 
 /**
+ * Where, in a header of `kind` with `flags` that carries a credential, the credential's own bytes
+ * start: after the fixed blocks and the credential's head, its scheme and its length.
+ */
+export const credentialBytesAt = (kind: number, flags: number): number => {
+  return fixedSizeOf(kind, flags) + CREDENTIAL_HEAD_BYTES;
+};
+
+/**
  * How long `header` is once written. Throws as {@link writeHeader} does for a block its kind lacks,
  * a credential that is not one, or a header past 1,020 bytes.
  */
