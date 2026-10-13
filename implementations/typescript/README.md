@@ -24,8 +24,8 @@ first layer of a transport → router → service stack, which is why they sit t
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
 and the connection registry for a server. The transport supplies what only it knows: how to open,
-close and send on the wire. WebSocket is the first, HTTP the second — see [HTTP](#http); another
-transport supplies its own.
+close and send on the wire. WebSocket, HTTP — see [HTTP](#http) — and a Web Worker each supply
+theirs; another transport supplies its own.
 
 The client runs on the global `WebSocket` — every browser, and Node 24.9, the package's floor — or
 on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
@@ -49,7 +49,8 @@ ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form
 403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
 request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
 13, the one it speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among
-`origins`. Each refusal but HTTP's own is marked, its body empty, closes its connection, and is
+`origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it would take once its stop began. Each
+refusal but HTTP's own is marked, its body empty, closes its connection, and is
 told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
 [HTTP](#http).
 
@@ -203,7 +204,7 @@ far a request went:
 | 19   | `PROCEDURE_UNKNOWN`        | the service is known, the procedure is not                                                                                                                                                |
 | 20   | `CALL_UNKNOWN`             | an answer or a chunk belongs to no call, nor to a call id reserved or a call abandoned                                                                                                    |
 | 21   | `SUBSCRIPTION_UNKNOWN`     | a notification comes under no subscription, nor a call id reserved                                                                                                                        |
-| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP                                                                             |
+| 22   | `SUBSCRIPTION_UNSUPPORTED` | the request opens a subscription on a path that carries no notification back: a relay, a connection over HTTP whose client does not listen                                                |
 | 32   | `SESSION_REQUIRED`         | the procedure needs a session the call has not, or the credential the request presents does not hold                                                                                      |
 | 33   | `ACCESS_DENIED`            | `beforeRequest` refused the request, on its header and the call's session                                                                                                                 |
 | 34   | `PAYLOAD_TOO_LARGE`        | a payload or an envelope going out passes its limit, a transfer declares no bytes, or a payload needs a transfer it cannot have                                                           |
@@ -506,7 +507,9 @@ The codecs are spec 17's, `PAYLOAD_CODECS.raw`, `.text` and `.json`, the last re
 and writing what section 17.7 takes; `payloadCodecOf({ decode, encode })` makes one of two
 functions, a protobuf message's from protobuf-es's `fromBinary(schema, bytes, { recursionLimit:
 101 })` and `toBinary` — 101, since protobuf-es counts the top message, and section 17.9 bounds a
-message 100 deep below it. Before it reads, generated code calls `checkProtoRecords(bytes, schema)`
+message 100 deep below it
+([0031](../../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
+Before it reads, generated code calls `checkProtoRecords(bytes, schema)`
 from `@francisdesjardins/bead/proto`, which reads the payload's records against the message's own
 descriptor and throws a `SyntaxError` where they are no encoding of it and protobuf-es would read on,
 or where sections 17.9.5 and 17.9.6 refuse them: a field at a wire type its type does not take, and
@@ -649,7 +652,7 @@ The limits are options of each router and each facade — `createClient(layers, 
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
 from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a timeout a timer
 holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
-least, since its header holds 1,020. Nothing announces them yet: both ends of a connection are set
+least, since its header holds 1,020. Nothing announces them: both ends of a connection are set
 alike. A transport that carries transfers delimits its messages, knows the envelope's size at both
 ends, delivers every chunk and credit — in any order, a copy tolerated — and carries both ways.
 WebSocket does all four. The router copies every payload it reads, so a transport may use its
@@ -756,8 +759,9 @@ rights, as a deputy that lends its own authority (CWE-441). One that presents a 
 `ELSEWHERE` shares leg B's call ids and transfer places alike, and runs at the target in the session
 its own credential resolves to there, never in leg B's. An answer names its call alone: a
 destination, which means something to its relay only, is malformed on a RESULT or a FAILURE. A relay
-carries no subscription yet — a request that opens one is refused, `SUBSCRIPTION_UNSUPPORTED` — and
-forms no chain: leg B names no destination, so no loop can form.
+carries no subscription — a request that opens one is refused, `SUBSCRIPTION_UNSUPPORTED`, a relay
+that carries one being a decision of its own — and forms no chain: leg B names no destination, so no
+loop can form.
 
 ### HTTP
 
@@ -825,7 +829,7 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                         |
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                         |
-| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                                                   |
+| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                  |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
@@ -917,12 +921,14 @@ port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC 5952 wri
 `unknown` or a zone among them, ends the walk at the proxy that wrote it. None trusts no proxy, the
 loopback among them; a name, a network whose bits past its prefix are set, and a network of prefix
 0, which would trust what every client writes, throw a `ProgrammerError` as the transport is built.
-`Forwarded` is never read, and a WebSocket server reads no `X-Forwarded-For`. A proxy not listed is
-a client as any other: every client behind it is its address, which `maximumConnectionsPerAddress`
-counts, so a told `busy` whose `address` is your proxy's, or a `largestAddressConnections` near its
-ceiling on `/health`, is a proxy to list. A deployment whose proxies' addresses it cannot name, a
-platform's router or a cloud load balancer on public addresses, counts one address per proxy for
-now. A bound by address counts as one the users behind one NAT, and as many the addresses of one
+`Forwarded` is never read, and a WebSocket server reads no `X-Forwarded-For`, the same list on it
+being ahead. A proxy not listed is a client as any other: every client behind it is its address,
+which `maximumConnectionsPerAddress` counts, so a told `busy` whose `address` is your proxy's, or a
+`largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A deployment whose
+proxies' addresses it cannot name, a platform's router or a cloud load balancer on public addresses,
+counts one address per proxy, a hop bound for such proxies being ahead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+A bound by address counts as one the users behind one NAT, and as many the addresses of one
 IPv6 network.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
@@ -1482,8 +1488,8 @@ model they draw from in `model/` and their views in `views/`, which ask of the b
 leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each other, in
 `messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
 extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
-page with the panel open on it; `devtools.ts`, which adds the panel; and `panel.ts`, which makes
-the panel's host of Chrome's API.
+page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
+panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
 unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's

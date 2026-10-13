@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-13
+
 ### Added
 
 - Every server transport tells each refusal it judges of its own, the event `refusal`, `Refusal`, on
@@ -21,8 +23,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `.claude/workflows/bead-release-documents.js`: a release brings to itself every document that
   states what holds and where Bead goes — the records, the spec and its companion, the READMEs, the
   matrix, `CLAUDE.md` — what landed in the present and what is ahead kept ahead, the spec moving in
-  form alone, records regrouped, renamed or renumbered where that reads clearer, every citation moved
-  with them; `tools/release.mjs prepare` lists it among what a release owes by hand.
+  form alone, records regrouped, merged, split or renamed where that reads clearer, a number never
+  given again, every citation moved with them; `tools/release.mjs prepare` lists it among what a
+  release owes by hand.
 - `docs/support.md`'s "Leveled down": each place where every side keeps to what one platform can do
   though a standard allows more, with the standard, what forces it, what would lift it and the tests
   that hold it on each side.
@@ -113,10 +116,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.4.0 (`spec-v0.4.0`), and its companion, `spec/debugging.md`, to 0.2.0
+  (`debugging-v0.2.0`).
 - A decision record's number names its decision for good and is never given to another: records
   are still regrouped, moved in the index and renamed between releases, but none is renumbered,
   and one merged into another keeps a short file naming its successor (`docs/decisions/README.md`,
   the `bead-release-documents` workflow).
+- The documents are brought to 0.4.0: the records, the spec and its companion in form alone, the
+  READMEs, the support matrix and `CLAUDE.md` state what holds and where Bead goes. What a `proto`
+  payload is, protobuf's format with Bead's own rules and its bound of 100, which decision 0018 held
+  beside the service layer, is a decision of its own, 0031; 0018 keeps the layer, and the index
+  groups 0016, 0028 and 0031 under Payloads. No record is renumbered.
 - A WebSocket server names each connection `type=WS;ip=…;port=…;ordinal=…`, by its peer's port and
   the rank it was taken at, so no two connections share a handle. On the TypeScript side,
   `generateHandle` takes `{ ip, ordinal, port, type }`, `port` optional, one
@@ -147,8 +157,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its version and its target, absolute-form among them.
 - The TypeScript side names a client that comes over IPv4 to a dual-stack listener by its IPv4
   address, in its handle and its address, as the C# side does.
-- A record's number names one decision within a release: between two releases, records may be
-  renumbered, and the release's CHANGELOG section maps the old numbers to the new.
 - A server listens on `127.0.0.1` unless `start` is given an address, on both transports and both
   sides, where it listened on `0.0.0.0`; a container, or any server another machine reaches, says
   `0.0.0.0` or `::`. On its defaults a server is secure (spec 13.4). An address is an IP address
@@ -1217,7 +1225,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.3.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.0...develop
+[0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/francisdesjardins/bead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0

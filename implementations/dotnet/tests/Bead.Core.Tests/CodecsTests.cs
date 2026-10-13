@@ -9,7 +9,7 @@ namespace Bead.Tests;
 
 /// <summary>
 /// Bead's codecs, <c>spec/codecs.json</c>, played whole through this side's (decisions 0016 and
-/// 0018): each payload read in its encoding, then refused, or written back to the bytes given, the
+/// 0031): each payload read in its encoding, then refused, or written back to the bytes given, the
 /// value read equal by <see cref="JsonElement.DeepEquals"/> to the value read of those bytes and its
 /// raw text those very bytes, so that the value handed on is the canonical form's; a <c>proto</c>
 /// payload read as <c>Probe</c>, of <c>spec/codecs.proto</c>, through the codec generated code makes

@@ -30,7 +30,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md):
   identities, section 16;
 - [0018](../docs/decisions/0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md):
-  a procedure's kind, section 16, and the `proto` encoding, section 17;
+  a procedure's kind, section 16;
 - [0019](../docs/decisions/0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md): relays,
   section 14;
 - [0020](../docs/decisions/0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md): HTTP,
@@ -54,9 +54,11 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0029](../docs/decisions/0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md): a
   listen's cursor and wait in fields, section 15.9;
 - [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md):
-  a client's address behind the proxies an HTTP server names, section 15.12.
+  a client's address behind the proxies an HTTP server names, section 15.12;
+- [0031](../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md):
+  the `proto` encoding, section 17.9.
 
-**Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.4.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations

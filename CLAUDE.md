@@ -2,7 +2,8 @@
 
 Bead is a binary wire protocol: its spec and conformance files in `spec/`, a TypeScript
 implementation in `implementations/typescript` and a C# one in `implementations/dotnet`, at
-behavioural parity, and the demo. `README.md` says how each part builds and tests.
+behavioural parity, the builder, `beadc`, in `builder/`, an example in `examples/hello`, the demo
+and the DevTools extension. `README.md` says how each part builds and tests.
 
 What a session needs beyond this file lives in `.claude/`:
 
@@ -115,7 +116,8 @@ options = null` when every member is optional, a `CancellationToken` inside it);
 - the author's style: section comments, `I`-prefixed interfaces, block-bodied arrow functions, at
   most two parameters then at most one options object, always last, frozen objects over `enum`;
 - one test file per module, named after it, in a `__tests__/` folder beside it
-  (`src/transport/create-promise.ts` → `src/transport/__tests__/create-promise.test.ts`).
+  (`src/transport/shared/create-promise.ts` →
+  `src/transport/shared/__tests__/create-promise.test.ts`).
 
 ## The Bead page
 

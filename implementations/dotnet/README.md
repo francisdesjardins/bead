@@ -243,12 +243,15 @@ entry is read in RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db
 wrote it. None trusts no proxy, the loopback among them; a name, a network whose bits past its
 prefix are set, and a network of prefix 0, which would trust what every client writes, are an
 `ArgumentException` as the transport is built. `Forwarded` is never read, and a WebSocket server
-reads no `X-Forwarded-For`. A proxy not listed is a client as any other: every client behind it is
-its address, which `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
-proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A
-deployment whose proxies' addresses it cannot name, a platform's router or a cloud load balancer on
-public addresses, counts one address per proxy for now. A bound by address counts as one the users
-behind one NAT, and as many the addresses of one IPv6 network.
+reads no `X-Forwarded-For`, the same list on it being ahead. A proxy not listed is a client as any
+other: every client behind it is its address, which `MaximumConnectionsPerAddress` counts, so a
+told `busy` whose `Address` is your proxy's, or a `largestAddressConnections` near its ceiling on
+`/health`, is a proxy to list. A deployment whose proxies' addresses it cannot name, a platform's
+router or a cloud load balancer on public addresses, counts one address per proxy, a hop bound for
+such proxies being ahead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+A bound by address counts as one the users behind one NAT, and as many the addresses of one IPv6
+network.
 
 A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which `curl -i` and a
 browser's network panel show. Each refusal the server judges of its own it tells, the event

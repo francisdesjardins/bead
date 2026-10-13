@@ -1,6 +1,6 @@
 """Writes spec/codecs.json: what each encoding of spec section 17 reads of bytes, and what it writes back
 of them or why it refuses them; and what a writer writes of a value, or why it refuses it (decisions
-0016 and 0018).
+0016 and 0031).
 
 Each outcome is section 17 played here a third time, beside the two sides, never written by hand: a
 reader that refuses as 17.5 says, in the order the TypeScript reader checks, the depth counted over the
@@ -1105,7 +1105,7 @@ def taken(text, number, nested, **more):
     return {'text': text, 'number': number, 'nested': nested, **more}
 
 
-# the proto rows as 0018 and 0028 state them, each taken with what was read, or refused for its reason;
+# the proto rows as 0031 and 0028 state them, each taken with what was read, or refused for its reason;
 # and the deep rows' bytes as protobuf's writers write them
 FEFF_A, A_FEFF = code_units(chr(0xFEFF) + 'a'), code_units('a' + chr(0xFEFF))
 PROTO_RECORD = {
@@ -1160,7 +1160,7 @@ assert {entry['name']: entry['written'] for entry in values if entry['encoding']
 document = {
     '$schema': 'schemas/codecs.schema.json',
     '$comment': [
-        "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0018), which every implementation's harness plays through its side's codecs.",
+        "Bead's codecs: what each encoding of spec section 17 reads and writes, raw, text and json (decision 0016) and proto (decision 0031), which every implementation's harness plays through its side's codecs.",
         'payloads are bytes read, in an encoding: written is the bytes its writer writes back of the value its reader read, the same bytes where they are canonical already; read, of a proto payload, what its reader read of them; refused, the reason its reader refuses them for. A harness checks the refusal, or that the bytes written are those given and that the value read equals the value its reader reads of them, or that what it read is read.',
         "proto: a Probe, the message of spec/codecs.proto, read and written through the code each side's stock generator writes for it over its stock library, as generated code reads one: its records checked against Probe's descriptor before the library reads them (decision 0028), and the bound of 17.9.3 set in the call. read is what was read of the top Probe: text, its string as UTF-16 code units in hexadecimal, four capital digits each and a space between; number; nested, how deep messages nest below it, through child, delimited and children, a map's entry counting as a message and its value as another; counts and stamps, where it holds any, their values in their order; children, where it holds any, each key, its code units as text gives them, to what was read of its value, its text, number and nested; and delimited, where it is set, what was read of it, its text, number and nested. A harness checks these and nothing else, since protobuf fixes no message's bytes whole.",
         'values are a value given to a writer, in an encoding: written is the bytes it writes; refused, the reason it refuses the value for. A value is given in one of eight forms.',

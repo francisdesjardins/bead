@@ -9,6 +9,8 @@
   `tools/protobuf-conformance.mjs`, its pin, each side's testee and failure list, and their CI job;
   the support matrix's `proto` rows. What section 17 states of `proto`, and why it restates none of
   protobuf's format, is
+  [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s;
+  the codec of two functions,
   [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s;
   the generated codec, and what a target writes beside what a runtime does,
   [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)'s;
@@ -74,13 +76,13 @@ own failure list for C# and protobuf-es's empty one; the extension fails because
 no extension registry, so an extension reads as an unknown field. The check refuses nothing the
 suite takes, with the wire-type rule or without.
 
-**A `Probe` of a string, a uint32 and a message of its own kind reaches none of it**: with no
-repeated field, no map and no group, no entry holds a packed record, a map's entry or a group.
+**A `Probe` of a string, a uint32 and a message of its own kind would reach none of it**: with no
+repeated field, no map and no group, no entry would hold a packed record, a map's entry or a group.
 
 The options weighed:
 
 - **Each library's fix, reported upstream.** The parts are protobuf-es's but the tag; the reports
-  wait, by the user's word of 2026-10-12, and Bead does not wait on them.
+  wait, by the user's word, and Bead does not wait on them.
 - **A shape beadc writes as data, a table per message.** A second copy of the descriptor: stale
   under `messages: external`, its editions' features and map entries resolved again, its format
   frozen at the contract, and no tie to the library generated code already has.
@@ -91,12 +93,12 @@ The options weighed:
 
 **Each side checks a `proto` payload's records against its message before its stock library reads
 them, and refuses what protobuf refuses where a library reads on.** One check, the same on both
-sides, closes the four open rows and the parts above, and guards each side against its library
-regressing on what the other's gets right.
+sides, refuses what each stock library reads past protobuf's rules, and the parts above, and guards
+each side against its library regressing on what the other's gets right.
 
 **A side narrows what reads; it never changes what its stock library reads or writes.** The check
-refuses a payload before the library sees it, as 17.9.1 already has it of bytes that are no
-encoding of the message; where protobuf states no rule and the libraries read apart, a refusal is a
+refuses a payload before the library sees it, as 17.9.1 has it of bytes that are no encoding of the
+message; where protobuf states no rule and the libraries read apart, a refusal is a
 leveling, put to the user. It never reads in the library's place, and nothing writes in its place:
 a difference in what a library writes, the order of unknown fields and a map's entry's key at its
 default among them, is a platform row.
@@ -154,7 +156,7 @@ gives, and the check is the runtime's behaviour
   repeated scalar of a numeric type taking its own and the length-delimited (17.9.5);
 - a field a map's entry does not declare (17.9.6).
 
-**Two levelings, the user's choice of 2026-10-12, both as recommended**: 17.9.5 and 17.9.6. No
+**Two levelings, the user's choice, both as recommended**: 17.9.5 and 17.9.6. No
 standard settles either: protobuf states no rule of them, and the reference parsers keep the first
 as an unknown field and skip the second. The parity rule settles the direction
 ([0004](0004-one-behaviour-in-every-language.md)): where one library reads Y and the other Y and Z,
@@ -171,13 +173,14 @@ as Google.Protobuf counts them.
 `checkProtoRecords` imported from `@francisdesjardins/bead/proto`, and
 `GENERATED_CODE_SUPPORTS_VERSION_3`. C#:
 `global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor);` before the framing,
-and `GeneratedCode.SupportsVersion3`. The generated code changes and needs an export the runtime did
-not have, which is what moves the counter. **Version 2 goes on both sides at 0.4.0**:
-`GENERATED_CODE_SUPPORTS_VERSION_2` and `GeneratedCode.SupportsVersion2` go, so code generated
-before 0.4.0 fails its type-check and its build until it is regenerated. A runtime keeps a constant
-while it still serves the code that names it, and one that would run version-2 code unchecked no
-longer serves it as Bead conforms: before 1.0.0, an older constant goes once the code that names it
-no longer conforms through the runtime; from 1.0.0, it stays for the whole major.
+and `GeneratedCode.SupportsVersion3`. Generated code that calls the check needs an export a runtime
+without it lacks, which is what moves the counter. **The runtime holds contract 3 alone**, on both
+sides: it holds no `GENERATED_CODE_SUPPORTS_VERSION_2` and no `GeneratedCode.SupportsVersion2`, so
+code that names 2, an earlier beadc's, fails its type-check and its build until it is regenerated.
+A runtime keeps a constant while it still serves the code that names it, and one that would run
+version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
+once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the
+whole major.
 
 **`spec/codecs.proto` is edition 2023, protobuf's current form, and `Probe` reaches each record**:
 
@@ -199,17 +202,20 @@ message Probe {
 }
 ```
 
-Implicit presence keeps `text` and `number` as proto3 reads them, so every earlier entry keeps its
-bytes and its reading; `counts` is packed, edition 2023's default; `delimited` is a group on the
-wire. The new fields take 10 to 13, since entries read 4 to 6, 9 and 15 as fields `Probe` does not
-declare, and a message field's name is never `nested`, which a row's `read` gives as a depth.
-protoc 36.2, protoc-gen-es 2.16.0 under buf, and Grpc.Tools 2.84.0 each compile it. A row's `read`
-gives, beside the top `Probe`'s text, number and depth, its `counts` and `stamps`, each key of
-`children` to its value's text, number and depth, and `delimited`'s, each where it holds any.
+Implicit presence keeps `text` and `number` as proto3 has them, so the entries on the first three
+fields read and write as they would under proto3; `counts` is packed, edition 2023's default;
+`delimited` is a group on the wire. The fields of these records take 10 to 13, since entries read 4
+to 6, 9 and 15 as fields `Probe` does not declare, and a message field's name is never `nested`,
+which a row's `read` gives as a depth. protoc 36.2, protoc-gen-es 2.16.0 under buf, and Grpc.Tools
+2.84.0 each compile it. A row's `read` gives, beside the top `Probe`'s text, number and depth, its
+`counts` and `stamps`, each key of `children` to its value's text, number and depth, and
+`delimited`'s, each where it holds any.
 
-**The entries.** The entries of the four rows keep their names, bytes and outcomes, and no side is
-excused from them. Each part has its entries, each citing its unit, none excused, every reading
-confirmed on both libraries, the check in front:
+**The entries.** The entries of what a stock library reads past protobuf's rules — a tag of more
+than 5 bytes or past 32 bits, a length past 32 bits, an unknown varint of more than 10 bytes, a
+record past the end of its message — are played by every side, none excused. Each part has its
+entries, each citing its unit, none excused, every reading confirmed on both libraries, the check
+in front:
 
 - read: `counts packed`, `counts unpacked and packed, in one message`, `stamps unpacked`,
   `stamps packed`, `a map's entry, its value before its key`, `a group closed by its own end group`
@@ -286,18 +292,18 @@ platform rows; any other parting fails it.
 
 ## Consequences
 
-**The matrix closes four open rows and a platform row**: "A proto record past the end of its
-message", "An unknown proto varint of more than 10 bytes", "A proto tag of more than 5 bytes, or
-past 32 bits" and "A proto length past 32 bits" go, both sides playing their entries; "A proto field
-at a wire type not its own" leaves Differences for "Leveled down", as "A known proto field at a wire
-type its type does not take, a map's entry's included", beside "A proto map's entry with a field
-other than its key and its value"; two platform rows join, "A proto message's unknown fields,
-written back" and "A proto map's entry, its key at its default, written back". "A string's leading U+FEFF in a proto payload" stays open, as it says why, and "A
-proto string no string holds, given to a writer" stays.
+**The matrix holds no open row for a stock library reading past protobuf's rules**, both sides
+playing those entries. Its "Leveled down" holds "A known proto field at a wire type its type does
+not take, a map's entry's included" and "A proto map's entry with a field other than its key and
+its value"; two platform rows, "A proto message's unknown fields, written back" and "A proto map's
+entry, its key at its default, written back", say what each library writes; "A string's leading
+U+FEFF in a proto payload" is open, as it says why, and "A proto string no string holds, given to a
+writer" is a platform row
+([0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
 
-**Code generated before 0.4.0 must be regenerated**, a breaking change on both sides. A C# project
-that binds `proto` references `Bead.Protobuf`; a TypeScript one already carries `@bufbuild/protobuf`
-for its messages, which `./proto` takes as a peer.
+**Code that names contract 2 is regenerated**, on both sides, before it builds against the runtime.
+A C# project that binds `proto` references `Bead.Protobuf`; a TypeScript one carries
+`@bufbuild/protobuf` for its messages, which `./proto` takes as a peer.
 
 **The cost is a walk beside the read**, linear and bounded by `maximumPayloadBytes`. Measured with
 each message's shape cached and the packed walk included, on `TestAllTypesProto3`: protobuf-es
@@ -320,7 +326,7 @@ decoding of each. The bound each runtime holds: on each row, the check costs no 
 library's read, the packed walk included, and allocates nothing per record; the C# side's allocates
 no byte over 1,000 checks of each payload.
 
-**The gate.** [0006](0006-a-rule-has-its-gate.md)'s table gains the suite and the differential, a
+**The gate.** [0006](0006-a-rule-has-its-gate.md)'s table holds the suite and the differential, a
 job of their own, `protobuf-conformance`; `spec/codecs.json`'s entries hold the parts the suite at
 v36.2 does not reach; each side's twin tests of the check, `src/proto/__tests__/records.test.ts` and
 `tests/Bead.Protobuf.Tests/ProtoRecordsTests.cs`, one sentence each pair, hold what no entry of
@@ -331,8 +337,8 @@ and adds its testee to the suite.
 
 **Out of scope**: the U+FEFF row, which stays open; the writer's surrogate; and the upstream
 reports, protobuf-es's points, its packed reading, its map entries, its depth count and its wire
-types, which wait, by the user's word of 2026-10-12. Google.Protobuf's unknown ordering is tracked
-by protobuf already.
+types, which wait, by the user's word. Google.Protobuf's unknown ordering is tracked by protobuf
+already.
 
 ## The Tenth Man
 
@@ -348,11 +354,11 @@ the answer that holds:
 | A packed record whose values do not end at its length passes the walk. protobuf-es reads on past it and swallows a record, while Google.Protobuf refuses it. So "the four rows close" and "refuses what protobuf refuses" are false, and the shape must carry each field's wire types whether or not the leveling is taken | Accepted: the probe reproduces both cases, and protobuf-es's list reader never checks the record's end. The check refuses a packed record whose values do not end exactly at its length (a fixed width that does not divide it, or a varint that runs past it), whatever the leveling, under 17.9.1, since Google.Protobuf refuses it. Each field's wire kind is read from its descriptor, always. Two entries and a pair of twins hold it.                                                                                                                                                                          |
 | The check never enters a map's entry. protobuf-es reads an entry by field number alone, ignoring the wire type and skipping no undeclared field, so the two sides read some entries apart; and the two prototypes differ                                                                                                   | Accepted: protobuf-es's `compileMapFieldReader` has no default case and reads no wire type. The check walks an entry as the message it is on the wire, its key at 1 and its value at 2, by the descriptor on both sides. A key at another wire type is refused under the first leveling, which reaches into entries. An undeclared field is legal protobuf, so refusing it is a second leveling, put to the user, who took it.                                                                                                                                                                                       |
 | "The library refuses the same" is false through a map. Google.Protobuf counts a map's entry toward its depth and protobuf-es does not, so from 34 to 50 cycles the sides part, with no row and no entry                                                                                                                    | Accepted: both depth probes show it. 17.9.3 says that a group and a map's entry each count as a message, since a map is a repeated entry message on the wire (Encoding, "Maps") and Google.Protobuf counts it so. The check counts them on both sides, and refuses before protobuf-es would read on. Two entries, 50 and 51 maps deep, pin it. The sentence is struck.                                                                                                                                                                                                                                               |
-| Probe has no map, no repeated field and no group, so no entry, nor the review's corpus, can reach the cases above, which is why they slipped past all three proofs                                                                                                                                                         | Accepted: `spec/codecs.proto` is edition 2023, with field presence implicit so that the earlier entries keep their readings. `Probe` gains a packed `repeated uint32`, a `repeated fixed32`, a `map<string, Probe>` and a delimited `Probe`, which is a group on the wire; protoc, protoc-gen-es and Grpc.Tools each compile it. `make_codecs.py` writes the entries. The review's corpus, pointed at the widened `Probe`, is played through both generated readers, and stays a gate, as `tools/protobuf-conformance.mjs differential`.                                                                             |
+| Probe has no map, no repeated field and no group, so no entry, nor the review's corpus, can reach the cases above, which is why they slipped past all three proofs                                                                                                                                                         | Accepted: `spec/codecs.proto` is edition 2023, with field presence implicit so that the earlier entries keep their readings. `Probe` holds a packed `repeated uint32`, a `repeated fixed32`, a `map<string, Probe>` and a delimited `Probe`, which is a group on the wire; protoc, protoc-gen-es and Grpc.Tools each compile it. `make_codecs.py` writes the entries. The review's corpus, pointed at the widened `Probe`, is played through both generated readers, and stays a gate, as `tools/protobuf-conformance.mjs differential`.                                                                             |
 | A shape written by beadc is a second copy of the descriptor. It goes stale under external messages, re-resolves features and map entries, freezes a table format at contract 3, and avoids a tie to the libraries that generated code already has. C#'s double walk is unmeasured                                          | Accepted, as (a): the runtime builds each message's shape from the library's own descriptor, once, cached by the descriptor. TypeScript does it in the subpath `./proto`, by `import type` with an optional peer dependency; C# in the `Bead.Protobuf` assembly, so `Bead.Core` still references no Google.Protobuf. No table exists to go stale or to freeze, and the library resolves features and entries itself. (b) is refused: it reads the descriptor too, and adds a table to check against it. C#'s cost is measured, at most 54% of the read, and the check is held under the library's read on every row. |
 | The user's decision is too narrow: it covers the wire-type rule on Probe's fields, not whether the rule reaches into map entries, nor the second leveling an entry's undeclared field needs                                                                                                                                | Accepted: two levelings were put to the user, each with its Leveled down row and its entries, and the user took both. The wire-type rule reaches into entries. The point the dissenter checked and did not press, that buf's `WIRE` flags every change between singular and repeated, is the reason the first breaks no evolution beadc passes.                                                                                                                                                                                                                                                                      |
 | The CI floor of 2,832 successes fails the C# run, which has 2,828 successes and 5 expected failures                                                                                                                                                                                                                        | Accepted: the floor is the side's successes plus its expected failures, 2,833 on both sides, with 2,816 skips. Both move only with the pin.                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | The suite's location crosses the toolchains: a 10 MB runner in the TypeScript lockfile installed everywhere, the C# gate on the TypeScript install, a C# testee whose place under the solution's gates is unsaid, and no procedure for moving the pin                                                                      | In part: the goal is taken, but not the location. A root `package.json` would break 0005 ("The root's tools are Node scripts without dependencies"), so the runner is fetched by its pinned sha512, as `builder/protoc.json` and its fetch script do for protoc, into an ignored, cached folder, with no lockfile. The TypeScript lockfile does not carry it. The C# testee sits under `Directory.Build.props`, outside `Bead.slnx`, with its own lock file, and its format is run by name. This record states how the pin moves with either library.                                                                |
-| Keeping version 2 lets code generated before the check run unchecked on a runtime that claims to refuse those payloads                                                                                                                                                                                                     | Accepted: version 2 goes on both sides at 0.4.0, so old code fails its type-check and build until it is regenerated. The reason is the runtime's own rule ("while the runtime still serves the code that names it"): a runtime that would run version-2 code unchecked no longer serves it as Bead conforms. `generated-code.ts` and its C# twin state the rule before and after 1.0.0.                                                                                                                                                                                                                              |
+| Keeping version 2 lets code generated before the check run unchecked on a runtime that claims to refuse those payloads                                                                                                                                                                                                     | Accepted: the runtime holds contract 3 alone, on both sides, so code that names 2 fails its type-check and build until it is regenerated. The reason is the runtime's own rule ("while the runtime still serves the code that names it"): a runtime that would run version-2 code unchecked no longer serves it as Bead conforms. `generated-code.ts` and its C# twin state the rule before and after 1.0.0.                                                                                                                                                                                                         |
 | Filing the unknown ordering as `open` contradicts the matrix's own kinds, 17.9 and the row's own text, and the draft gives no criterion for when a side may go past its library                                                                                                                                            | Accepted: the row is `platform`, lifting when Google.Protobuf keeps the order. This record states the criterion: a side may narrow what reads before its library, never read or write in its place. The check is a refusal before a read. Reordering a write would replace the library's writer, which 17.9 does not allow.                                                                                                                                                                                                                                                                                          |
-| The U+FEFF row's "the decoder strips it before any check could" passes over `configureTextEncoding`                                                                                                                                                                                                                        | In part: the row already names `configureTextEncoding` and why it is not taken (global to the library's copy, and deprecated), so the row stands as it is. The draft's out-of-scope sentence passed over it, and now points at the row.                                                                                                                                                                                                                                                                                                                                                                              |
+| The U+FEFF row's "the decoder strips it before any check could" passes over `configureTextEncoding`                                                                                                                                                                                                                        | In part: the row already names `configureTextEncoding` and why it is not taken (global to the library's copy, and deprecated), so the row stands as it is. The out-of-scope sentence points at the row.                                                                                                                                                                                                                                                                                                                                                                                                              |

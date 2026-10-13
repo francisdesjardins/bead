@@ -74,7 +74,8 @@ the earliest timer armed to be the one it names, and alone so due, so a timer th
 clear never fires first.
 
 **A WebSocket peer that only hears needs to speak**, or a connection timeout without end: its pings
-are the platform's, and reach no layer (0011).
+are the platform's, and reach no layer
+([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
 **The transports' file and the conversations play each rule here**, the clock advanced: among them,
 a listen held for its wait and for the server's bound, a session ending during a held listen, and a

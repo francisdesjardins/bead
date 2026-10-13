@@ -6,8 +6,8 @@
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
 relays, and transfers of large payloads under credit. Each envelope is written at fixed big-endian
-offsets, behind an 8-byte prefix whose first byte is the layout, `0xA1` today, so a reader knows
-before anything else whether it can read the rest.
+offsets, behind an 8-byte prefix whose first byte is the layout, `0xA1`, so a reader knows before
+anything else whether it can read the rest.
 
 This repository holds the protocol and its implementations, side by side:
 
@@ -20,7 +20,7 @@ This repository holds the protocol and its implementations, side by side:
 - **an interop service** each side offers, which the other side's client calls over both
   transports.
 
-Nothing is published yet.
+Nothing is published.
 
 ## Why Bead
 
@@ -29,8 +29,8 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and a
-publish/subscribe broker (coming).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and next a
+topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -45,16 +45,36 @@ publish/subscribe broker (coming).
   commands, the server's own calls to the client.
 - **One behaviour in every language.** The spec and its conformance files are the contract. The
   TypeScript and C# implementations both play them, and call each other in CI over both transports.
-- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed.
+- **No dependency.** The TypeScript side runs in browsers and in Node with nothing else installed;
+  a project that binds `proto` brings protobuf-es, an optional peer.
 
 Bead fits wherever a client and its server hold a conversation rather than trade messages: directly,
-from a browser over WebSocket or plain HTTP, or across a publish/subscribe broker that already joins
-services and devices (coming). Think of a dashboard or a collaborative tool that follows state as it
-changes, an app that uploads large files while it keeps working, a back office whose server needs to
-ask the client something, or a gateway that forwards calls it never reads. A browser speaks Bead
-natively, with no proxy in between. Over a broker, Bead adds what topics alone lack: calls with
-their answers and failures, cancels, each client's own pace, and transfers under credit. Both ends
-keep the same API, whatever carries the envelopes.
+from a browser over WebSocket or plain HTTP, and, [where Bead goes](#where-bead-goes), across a
+topic-based publish/subscribe broker that already joins services and devices. Think of a dashboard
+or a collaborative tool that follows state as it changes, an app that uploads large files while it
+keeps working, a back office whose server needs to ask the client something, or a gateway that
+forwards calls it never reads. A browser speaks Bead natively, with no proxy in between. Over a
+broker, Bead is to add what topics alone lack: calls with their answers and failures, cancels, each
+client's own pace, and transfers under credit. Both ends keep the same API, whatever carries the
+envelopes.
+
+## Where Bead goes
+
+- **0.5.0**: a topic-based publish/subscribe broker as one more transport, one core and one
+  adapter a broker, Bead's envelope, routers and sessions the same at each end
+  ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
+- **A 0.4.x**: `trustedProxies` on the WebSocket server too, and a hop bound for proxies whose
+  address a deployment cannot name
+  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+- **After 0.4.0**: a penetration test of Bead's servers.
+- **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
+  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
+  latency bench and a constrained C side, each bound by the records that
+  [the index](docs/decisions/README.md#where-bead-goes) names.
+- **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
+  one port, mounted in an application's own web server, which would take the place of the
+  small local proxy that couples the two transports
+  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)).
 
 ## Layout
 
@@ -63,8 +83,8 @@ spec/                         spec.md, debugging.md, the conformance files both 
   generators/                 the Python scripts that write them
   schemas/                    their JSON Schemas
 implementations/
-  typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, tools/
-  dotnet/                     Bead.slnx: src/, interop/, tests/
+  typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
+  dotnet/                     Bead.slnx: src/, interop/, tests/; and tools/, outside it
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
   Dockerfile                  beadc's image, built from the root, its tests run on the image itself
   wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
@@ -158,7 +178,7 @@ yarn check        # types, lint and its plugin's cases, format, comment budget, 
 yarn test         # the unit tests, and the interop against the C# server
 ```
 
-The package is `@francisdesjardins/bead`, private for now; its `exports` point at the sources. Its
+The package is `@francisdesjardins/bead`, private; its `exports` point at the sources. Its
 [README](implementations/typescript/README.md) describes each layer.
 
 ## C#
