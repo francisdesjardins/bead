@@ -16,6 +16,9 @@ SERVICE = json.load(open(ROOT + 'interop-service.json', encoding='utf8'))
 API = json.load(open(ROOT + 'interop-blueprint.json', encoding='utf8'))['services'][0]
 SERVICE_ID = API['serviceId']
 PROCEDURES = {procedure['procedureName']: procedure['procedureId'] for procedure in API['procedures']}
+# the interop's own failures, by their names in its blueprint's catalogue: a code renumbered there moves here
+FAILURES = {failure['failureName']: failure['code'] for failure in API['failures']}
+ON_PURPOSE, REGISTERED_ALREADY = FAILURES['ON_PURPOSE'], FAILURES['REGISTERED_ALREADY']
 
 MALFORMED, LAYOUT_UNSUPPORTED, KIND_UNSUPPORTED, TOO_LARGE = 1, 2, 3, 4
 DESTINATION_UNKNOWN, SERVICE_UNKNOWN, PROCEDURE_UNKNOWN, CALL_UNKNOWN = 16, 18, 19, 20
@@ -153,6 +156,22 @@ OPENED, ENDED = 'OPAQUE', 'NONE'
 # their numbers: a request that presents none is always taken, and names no scheme
 SCHEMES_TAKEN = 'OPAQUE, JWT, ELSEWHERE'
 
+
+def detail_of(procedure, member):
+    """The one detail interop-service.json's prose gives a procedure's failure, in what it answers or
+    admits."""
+    entry = next(each for each in SERVICE['procedures'] if each['procedureName'] == procedure)
+    found = re.findall(r'detail "([^"]*)"', entry[member])
+    assert len(found) == 1, (procedure, member, found)
+    return found[0]
+
+
+# the details the interop service states of its failures: fail's, as ticks' held and failing, denied's,
+# logout's in a credential's session, and register's of a destination registered already
+FAILS_ON_PURPOSE, ADMITS_NOBODY = detail_of('fail', 'answers'), detail_of('denied', 'admits')
+ENDS_NO_CONNECTIONS, REGISTERED = detail_of('logout', 'admits'), detail_of('register', 'answers')
+assert detail_of('ticks', 'answers') == FAILS_ON_PURPOSE
+
 # what SESSION_REQUIRED's detail says of a credential that does not resolve (9.2, step 5)
 NO_CREDENTIAL, DOES_NOT_HOLD = 'no credential came', 'the credential does not hold'
 
@@ -206,7 +225,8 @@ def credit_in(call_id, end):
 
 
 def credited(call_id, end):
-    return {'expect': {'kind': CREDIT, 'callId': call_id, 'creditEnd': end}}
+    # a server credits the bytes of a transfer it receives, never notifications: PACED is clear
+    return {'expect': {'kind': CREDIT, 'callId': call_id, 'paced': False, 'creditEnd': end}}
 
 
 def result_opening(call_id, data, total):
@@ -400,7 +420,7 @@ def jwt_conversations():
         ('logout, in a credential\'s session, is refused ACCESS_DENIED, and its connection\'s session stays',
          ['9.2.5', '13.5'], None, [
              login(1, 'ada'), result(1, '"ada"', OPENED),
-             presenting(3, 'logout', 'null', jwt(HS_GRACE)), failure(3, ACCESS_DENIED),
+             presenting(3, 'logout', 'null', jwt(HS_GRACE)), failure(3, ACCESS_DENIED, detail=ENDS_NO_CONNECTIONS),
              json_request(5, 'whoami', 'null'), result(5, '"ada"')]),
         # one subscription per procedure and per session: none, two issuers' sessions, and a later request
         # of one of them, which holds nothing
@@ -691,7 +711,7 @@ conversations = [
     ('echo answers with its request\'s payload', ['9.2.8', '9.3'], None, [
         json_request(1, 'echo', '{"a":1}'), result(1, '{"a":1}')]),
     ('fail answers with its own failure, of the application', ['9.5'], None, [
-        json_request(3, 'fail', 'null'), failure(3, 7, APPLICATION)]),
+        json_request(3, 'fail', 'null'), failure(3, ON_PURPOSE, APPLICATION, detail=FAILS_ON_PURPOSE)]),
     ('a service unknown is answered SERVICE_UNKNOWN', ['9.2.4'], None, [
         json_request(1, 1, '{}', service_id=9), failure(1, SERVICE_UNKNOWN)]),
     ('a request to service 0 is read, and answered SERVICE_UNKNOWN by routing', ['4.7', '9.2.4'], None, [
@@ -699,7 +719,7 @@ conversations = [
     ('a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN', ['9.2.4'], None, [
         json_request(1, 99, '{}'), failure(1, PROCEDURE_UNKNOWN)]),
     ('an admission that refuses is answered with its refusal', ['9.2.5'], None, [
-        json_request(1, 'denied', 'null'), failure(1, ACCESS_DENIED)]),
+        json_request(1, 'denied', 'null'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY)]),
     ('a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN', ['9.2.3', '14.1'], None, [
         json_request(1, 'echo', 'null', flags=0x02, words=4, tail='00 00 00 05'), failure(1, DESTINATION_UNKNOWN)]),
     ('a request that opens a transfer, to a server that takes none, is answered PAYLOAD_TOO_LARGE', ['9.2.7', '12.2.6'],
@@ -742,7 +762,7 @@ conversations = [
     ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
         json_request(1, 'echo', '1E400'), failure(1, PAYLOAD_UNDECODABLE)]),
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.5'], None, [
-        request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED),
+        request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),
     ('an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE', ['12.1'],
      {**SMALL, 'maximumTransfers': 0}, [
@@ -763,8 +783,8 @@ conversations = [
     ('the server asks its client a command, and answers with what the client answered', ['9.1'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), answer(2, '"noon"'), result(1, '"noon"')]),
     ('a command the client fails fails the call that asked it, which is reported', ['9.1'], None, [
-        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), refusal(2, 7, APPLICATION),
-        failure(1, PROCEDURE_FAILED), report(7)]),
+        json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), refusal(2, ON_PURPOSE, APPLICATION),
+        failure(1, PROCEDURE_FAILED), report(ON_PURPOSE)]),
     # 9.6, steps 3 and 5: an answer that does not read ends its call, cancelled; a late one is dropped
     ('an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence', ['9.6', '9.6.3', '9.6.5'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), raw('A1 11 40 02  00 00 00 02'),
@@ -796,7 +816,8 @@ conversations = [
         result(5, 'null')]),
     ('a call answered while the first is unanswered waits, and takes the place when the first fails', ['11.3'], None, [
         subscribe(1, hold=1, fail=True), subscribe(3), result(3, 'null'), tick(5, 1), notification(1, '1'),
-        failure(1, 7, APPLICATION), result(5, 'null'), tick(7, 2), notification(3, '2'), result(7, 'null')]),
+        failure(1, ON_PURPOSE, APPLICATION, detail=FAILS_ON_PURPOSE), result(5, 'null'), tick(7, 2), notification(3, '2'),
+        result(7, 'null')]),
     # 11.8 to 11.10: pacing
     ('a paced subscription is sent a notification per credit, the first credited by its request', ['11.8'], None, [
         subscribe(1, paced=True), result(1, 'null'), tick(3, 1), notification(1, '1'), result(3, 'null'),
@@ -1063,12 +1084,12 @@ conversations += [
     ('a failure of the destination\'s crosses one relay more', ['14.5.2', '14.6'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(relayed(3, 'fail', 'null'), 'client'), leg_b(2, 'fail', 'null'),
-        on(refusal(2, 7, APPLICATION), 'device'), on(failure(3, 7, APPLICATION, relays=1), 'client')]),
+        on(refusal(2, ON_PURPOSE, APPLICATION), 'device'), on(failure(3, ON_PURPOSE, APPLICATION, relays=1), 'client')]),
     ('a failure that crossed 255 relays crosses at 255', ['7.5', '14.6'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),
         on(relayed(3, 'fail', 'null'), 'client'), leg_b(2, 'fail', 'null'),
         on({'send': 'A1 12 00 02  00 00 00 02 | 00 07 FF 01'}, 'device'),
-        on(failure(3, 7, APPLICATION, relays=255), 'client')]),
+        on(failure(3, ON_PURPOSE, APPLICATION, relays=255), 'client')]),
     ('a relay asks for a session by default, and its own failure crosses no relay', ['14.3.1', '14.6'], None, [
         opened('client'), opened('device'), *registered(),
         on(relayed(1, 'echo', '"x"'), 'client'), on(failure(1, SESSION_REQUIRED), 'client')]),
@@ -1086,7 +1107,7 @@ conversations += [
          opened('client'), opened('device'), *logged_in(), *registered(), closed('device'),
          on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client'),
          opened('device'), on(relayed(5, 'echo', '"y"'), 'client'), on(failure(5, DESTINATION_UNREACHABLE), 'client'),
-         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device'), on(failure(1, 8, APPLICATION), 'device'),
+         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device'), on(failure(1, REGISTERED_ALREADY, APPLICATION, detail=REGISTERED), 'device'),
          on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
          *registered(5), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
          on(answer(2, '"z"'), 'device'), on(result(7, '"z"'), 'client')]),
@@ -1345,7 +1366,7 @@ document = {
         'A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client\'s connection.',
         'carried, beside a send, is the credential the client\'s transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization\'s value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination\'s connection, what leg B\'s transport carried beside it. Absent, it carried none.',
         'token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.',
-        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.',
+        'expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header\'s, a JWT\'s token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session\'s token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.',
         'report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server\'s, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket\'s or a listen\'s batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.',

@@ -8031,7 +8031,8 @@
             "failure": {
               "code": 7,
               "scope": 1,
-              "relays": 0
+              "relays": 0,
+              "detail": "this procedure fails, on purpose"
             }
           }
         },
@@ -9090,7 +9091,8 @@
             "failure": {
               "code": 33,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "this procedure admits nobody"
             }
           }
         },
@@ -9384,6 +9386,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -9472,6 +9475,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -9557,6 +9561,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -9656,6 +9661,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -10638,6 +10644,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 100
           }
         },
@@ -11725,6 +11732,7 @@
           "expect": {
             "kind": 21,
             "callId": 2,
+            "paced": false,
             "creditEnd": 156
           }
         },

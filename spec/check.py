@@ -31,7 +31,8 @@ alone reads the file; and no file git lists outside spec/, the tests and the int
 published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
-none and what it notifies where it notifies.
+none and what it notifies where it notifies, and each code it names a failure of the blueprint's
+catalogue that its procedure lists.
 Exit 1 on any of them.
 
   python spec/check.py --write-units [unit…]
@@ -399,6 +400,34 @@ for entry, declared in zip(prose, api):
     if ('notifies' in entry) != (declared['procedureKind'] == 'notifies'):
         problems.append(f'interop-service.json: {entry["procedureName"]!r} states what it notifies where '
                         f'its kind is not notifies, or does not where it is')
+
+# each code the interop service's prose names is a failure of its blueprint's catalogue, which the
+# conversations' generator takes by its name: one its procedure lists, where a procedure names it
+catalogue = {failure['code']: failure['failureName'] for failure in documents['interop-blueprint']['services'][0]['failures']}
+
+
+def prose_of(value):
+    """Every string of a value, its members' and its items' among them."""
+    if isinstance(value, dict):
+        return [text for member in value.values() for text in prose_of(member)]
+
+    if isinstance(value, list):
+        return [text for item in value for text in prose_of(item)]
+
+    return [value] if isinstance(value, str) else []
+
+
+for entry, declared in zip(prose, api):
+    for code in re.findall(r'\bcode (\d+)', ' '.join(prose_of(entry))):
+        if catalogue.get(int(code)) not in declared['failures']:
+            problems.append(f'interop-service.json: {entry["procedureName"]!r} names code {code}, which is no failure '
+                            f'of interop-blueprint.json\'s catalogue that {entry["procedureName"]} lists')
+
+for code in re.findall(r'\bcode (\d+)', ' '.join(prose_of({key: value for key, value in documents['interop-service'].items()
+                                                         if key not in ('procedures', '$comment')}))):
+    if int(code) not in catalogue:
+        problems.append(f'interop-service.json names code {code}, which is no failure of interop-blueprint.json\'s '
+                        'catalogue')
 
 vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]

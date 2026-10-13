@@ -19,6 +19,8 @@ export interface IExpected {
   creditEnd?: number;
   isLast?: boolean;
   offset?: number;
+  /** A credit's: whether it carries PACED, counting notifications rather than bytes. */
+  paced?: boolean;
   total?: number;
   /**
    * An answer's, the scheme of what it announced; a request's, the credential it presents, as the
@@ -155,7 +157,12 @@ export const expectedOf = (bytes: Uint8Array): IExpected | undefined => {
   }
 
   if (envelope.kind === EnvelopeKind.CREDIT) {
-    return { callId, creditEnd: envelope.header.creditEnd, kind: envelope.kind };
+    return {
+      callId,
+      creditEnd: envelope.header.creditEnd,
+      kind: envelope.kind,
+      paced: envelope.header.paced === true,
+    };
   }
 
   // a command the server sends its client, or a relay's leg B, its flags the byte after its kind

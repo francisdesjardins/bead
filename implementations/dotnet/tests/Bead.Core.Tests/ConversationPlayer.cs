@@ -178,7 +178,7 @@ internal static class ConversationPlayer
             ResultHeader { Total: { } total } => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential} total {total}",
             ResultHeader or NotificationHeader => $"{kind} {callId} {Convert.ToHexString(envelope.Payload.Span)}{credential}",
             ChunkHeader chunk => $"{kind} {callId} from {chunk.Offset}{(chunk.IsLast ? " last" : "")} {Convert.ToHexString(envelope.Payload.Span)}",
-            CreditHeader credit => $"{kind} {callId} credit {credit.CreditEnd}",
+            CreditHeader credit => $"{kind} {callId}{(credit.Paced ? " paced" : "")} credit {credit.CreditEnd}",
 
             // a command the server sends its client, with its flags, the envelope's byte 2 as sent,
             // the credential it presents, and what its transport carried beside it
@@ -277,7 +277,7 @@ internal static class ConversationPlayer
 
         if (expected.TryGetProperty("creditEnd", out var creditEnd))
         {
-            return $"{kind} {callId} credit {creditEnd.GetInt64()}";
+            return $"{kind} {callId}{(expected.GetProperty("paced").GetBoolean() ? " paced" : "")} credit {creditEnd.GetInt64()}";
         }
 
         var total = expected.TryGetProperty("total", out var declared) ? $" total {declared.GetInt64()}" : "";
