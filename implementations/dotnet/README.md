@@ -192,9 +192,24 @@ server.Transport.Refusal += (refusal) =>
 };
 ```
 
-A transport goes on through what its listener throws, and awaits nothing it returns (spec 15.1):
-an `async` lambda given to one of its events is `async void`, whose exception ends the process, so
-a listener catches its own.
+A transport goes on through what its listener throws, a reconnection's listener among them, and
+awaits nothing it returns (spec 15.1): what one throws is reported through the transport's `Error`,
+which no router forwards to its own. A server gives its transport as `IServerTransport`, which
+carries `Error` and `Refusal` alike, so an application hears both through `server.Transport`,
+whichever transport it built, beside its router's; a client's, through the client transport it
+built. An `async` lambda given to one of its events is `async void`, whose exception ends the
+process, so a listener catches its own.
+
+```csharp
+server.Router.Error += (reason, connectionHandle) =>
+{
+    Console.Error.WriteLine($"router, {connectionHandle ?? "no connection"}: {reason.Message}");
+};
+server.Transport.Error += (reason, connectionHandle) =>
+{
+    Console.Error.WriteLine($"transport, {(connectionHandle.Length == 0 ? "no connection" : connectionHandle)}: {reason.Message}");
+};
+```
 
 Where the platform makes the sides differ, or a difference is still open, the [support
 matrix](../../docs/support.md) has the row and its test.

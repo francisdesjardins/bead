@@ -68,25 +68,29 @@ its close as a server goes down is 1001, going away
 ## Decision
 
 **A transport goes on through its listener's throw** (spec 15.1). Each listener of a transport's
-event, a connection opened, an envelope, a listen or a close, is called within its own guard, on
-every transport, server and client, on both sides: what one throws is reported, as spec 9.0 reports
-an error, through its transport's `error` event with the connection it was told of; the listeners
-after it are called all the same; and the transport goes on as if it returned. Its connection is
-drawn and its 201 written, or its socket kept; its envelope is handed on, and the router's answer
-written; its close is done. A listener's throw refuses no connection, fails no exchange and closes
-nothing. It is [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s rule for a debug
-listener, carried to the transports, and the DOM's inner invoke is its standard. A listener of the
-transport's `error` that throws is its platform's, as a listener of a router's `error` is, and so is
-what a listener returns: a side awaits nothing of it.
+event, a connection opened, an envelope, a listen, a close or a reconnection, is called within its
+own guard, on every transport, server and client, on both sides: what one throws is reported, as
+spec 9.0 reports an error, through its transport's `error` event with the connection it was told of;
+the listeners after it are called all the same; and the transport goes on as if it returned. Its
+connection is drawn and its 201 written, or its socket kept; its envelope is handed on, and the
+router's answer written; its close is done; its reconnection goes on to its attempts. A listener's
+throw refuses no connection, fails no exchange and closes nothing. It is
+[0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s rule for a debug listener, carried
+to the transports, and the DOM's inner invoke is its standard. A listener of the transport's `error`
+that throws is its platform's, as a listener of a router's `error` is, and so is what a listener
+returns: a side awaits nothing of it.
 
 **The transport's `error` is where it is told.** Every TypeScript transport carries one, and its
 emitter returns `false` for an `error` nobody listens to, so a report ends nothing. On the C# side,
 `HttpTransportServer` and `HttpTransportClient` carry `Error` in their WebSocket siblings' shapes,
 `Action<Exception, string>` on a server, the connection's handle last, and `Action<Exception>` on a
-client. The routers listen to a transport's `connection`, `message` and `close` alone, and forward
-none of its errors to their own: an application hears its transport's on the transport it built,
-`server.transport.on('error', …)`, the concrete transport's `Error` on the C# side, where a socket's
-error already goes.
+client. The routers listen to a transport's `connection`, `message` and `close`, and a client's
+router to its `reconnect`, `Reconnect` on the C# side, and forward none of its errors to their own.
+A server's transport, as the server gives it, carries `error` and `refusal` as each transport does:
+`IServerTransportLike` on the TypeScript side, `IServerTransport` on the C# side. So an application
+hears its transport's through its server, whichever transport it built,
+`server.transport.on('error', …)` and `server.Transport.Error`, where a socket's error already goes,
+and a client's on the client transport it built.
 
 **Once its stop began, a server takes nothing new** (spec 15.2, 15.6, 15.7). A server's transport
 stops when its application stops it (spec 15.1). Over HTTP it draws no connection, a connect it
@@ -151,8 +155,10 @@ listener the stop calls, a head written in two halves or a scripted `WebSocketSe
 `refuses a connect that comes as it stops, busy, told when to come back, drawing nothing`;
 `answers the 404 marked connection-unknown an exchange that comes as it stops, its connection not yet closed, nothing handed on`;
 `refuses an upgrade that comes as it stops, 503 busy, told when to come back`;
-`closes going away a connection whose accept a stop crossed`; and the clients'
-`hears the next message after a message listener throws, the throw reported`
+`closes going away a connection whose accept a stop crossed`; the clients'
+`hears the next message after a message listener throws, the throw reported` and
+`reconnects though a reconnect listener throws, the throw reported, the next listener told`; and
+the servers' `hears its transport's error and refusal through the server's transport`
 ([0004](0004-one-behaviour-in-every-language.md)).
 
 ## The Tenth Man

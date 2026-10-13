@@ -419,7 +419,11 @@ this package's server transports carries a credential beside an envelope it send
 presenting `ELSEWHERE` fails before it goes, `DESTINATION_UNREACHABLE`, as a `JWT` command does
 over a connection that is not secure. A command left unanswered past its timeout closes its
 connection when the server's `closeOnCommandTimeout` says so, or the command's own
-`closeOnTimeout`. `ws-server` is the server over WebSocket:
+`closeOnTimeout`. `ws-server` is the server over WebSocket. A server hears what goes wrong where
+each layer tells it: a call's on its router's `error`, and its transport's — a socket's, or what a
+listener of its events threw — on the transport's `error`, beside each refusal it tells, both on
+`server.transport` whichever transport it was built on
+([decision 0023](../../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)):
 
 ```ts
 const server = createWSServer({
@@ -430,6 +434,15 @@ const server = createWSServer({
   transport: { WebSocketServer },
 });
 
+server.router.on('error', (error, connectionHandle) => {
+  console.error(connectionHandle ?? 'no connection', error);
+});
+server.transport.on('error', (error, connectionHandle) => {
+  console.error(connectionHandle === '' ? 'the transport' : connectionHandle, error);
+});
+server.transport.on('refusal', ({ reason, status }) => {
+  console.warn(`refused ${String(status)} ${reason}`);
+});
 await server.transport.start({ port });
 ```
 

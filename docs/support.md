@@ -194,9 +194,13 @@ listener throws, …`, `closes a connection idle past its timeout though a close
 …`); `ws-transport-server.test.ts` and `WebSocketTransportServerTests` (`keeps a connection whose
 connection listener throws, …`, `hears the next message after a message listener throws, …`);
   `transport/client/__tests__/ws-transport-client.test.ts` and `WebSocketTransportClientTests`
-  (`hears the next message after a message listener throws, the throw reported`);
+  (`hears the next message after a message listener throws, the throw reported`;
+  `reconnects though a reconnect listener throws, the throw reported, the next listener told`);
   `http-transport-client.test.ts` and `HttpTransportClientTests` (`hears the rest of a batch when a
-listener throws, the throw reported`), each twin named by the same sentence;
+listener throws, the throw reported`; `reconnects though a reconnect listener throws, …`), each twin
+  named by the same sentence; and the server's transport, as the server gives it, carrying `error`
+  and `refusal` alike: `server/__tests__/server.test.ts` and `Bead.Core.Tests/ServerTests`
+  (`hears its transport's error and refusal through the server's transport`);
 - what a server's stop answers what arrives during it, and the order its refusals keep inside it (spec
   15.6), which no step can send into (spec 15.2.8, 15.3, 15.6 rows 6 and 13, 15.7; decision 0023):
   `transport/server/__tests__/http-transport-server.test.ts`
