@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- A relay refuses a call that opens a subscription with the detail "this relay carries no
+  subscription", on both sides: a relay carries none, and one that would is a decision of its own.
+
 ## [0.4.0] - 2026-10-13
 
 ### Added
