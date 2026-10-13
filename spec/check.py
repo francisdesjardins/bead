@@ -32,7 +32,9 @@ published test key; each blueprint of spec/ is in its form, RFC 8785's member or
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
 none and what it notifies where it notifies, and each code it names a failure of the blueprint's
-catalogue that its procedure lists.
+catalogue that its procedure lists; and every count the tables of files of docs/support.md and the
+README state is what the files it counts hold, protobuf's conformance suite's tests the floor of its
+runner, and no other number stands in a row of either, a unit cited and a code span aside.
 Exit 1 on any of them.
 
   python spec/check.py --write-units [unit…]
@@ -1377,6 +1379,248 @@ for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
             if f"'{place['id']}'" not in played and f'"{place["id"]}"' not in played:
                 problems.append(f'{side}: its harness, {harness}, plays no {place["id"]}')
 
+# ── The counts the tables of files state ────────────────────────────────────────────────────────
+
+# a count written by hand is held to the files it counts: docs/support.md's table of files and the
+# README's, where a change that adds entries moves its totals (0004), each row by what it states
+README = os.path.join(ROOT, 'README.md')
+TABLES = (('docs/support.md', SUPPORT, '### The conformance files'),
+          ('README.md', README, '## The specification and its conformance files'))
+COLUMNS = ('File', 'What it holds', *SIDES)
+
+# protobuf's conformance suite counts its own tests: its row is held to the floor of its runner, which
+# tools/protobuf-conformance.mjs holds each side to, and states the suite's other counts as its own
+SUITE = "protobuf's conformance suite"
+RUNNER = os.path.join(ROOT, 'tools', 'protobuf-conformance', 'runner.json')
+
+# a count is written in digits, a thousand set apart by a comma, or in a word
+NUMBER_WORDS = ('one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+                'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty')
+NUMBER = rf'\b(\d{{1,3}}(?:,\d{{3}})+|\d+|{"|".join(NUMBER_WORDS)})\b'
+
+# what a row cites, which counts nothing: a code span, a link's target, a unit of the spec or the companion
+CITED = re.compile(r'`[^`]*`|\]\([^)]*\)|§\s*[\d.]+(?:[–-][\d.]+)?|\b(?:spec|debugging) \d+(?:\.\d+)+')
+
+# the transports a case is played over, each by the name a row gives it
+TRANSPORT_NAMES = {'http': 'HTTP', 'websocket': 'WebSocket'}
+
+
+def number_of(written):
+    return NUMBER_WORDS.index(written) + 1 if written in NUMBER_WORDS else int(written.replace(',', ''))
+
+
+def written_as(count, written):
+    """A count written as the row writes the one it replaces: a word for a word, a comma for a comma."""
+    if written in NUMBER_WORDS and 0 < count <= len(NUMBER_WORDS):
+        return NUMBER_WORDS[count - 1]
+
+    return f'{count:,}' if ',' in written else str(count)
+
+
+def table_of_files(path, heading):
+    """The rows of the first table under a heading, each by the file its first cell names, and its cells."""
+    with open(path, encoding='utf-8') as file:
+        lines = file.read().splitlines()
+
+    if heading not in lines:
+        problems.append(f'{os.path.relpath(path, ROOT)} has no heading {heading!r}, above its table of files')
+        return {}
+
+    table = {}
+
+    for line in lines[lines.index(heading) + 1:]:
+        if line.startswith('#') or (table and not line.startswith('|')):
+            break
+
+        if not line.startswith('| ') or set(line) <= set('|- '):
+            continue
+
+        cells = [cell.strip() for cell in line.split('|')[1:-1]]
+        target = re.search(r'\]\((spec/[^)]+)\)', cells[0])
+        table[target.group(1) if target else cells[0].strip('`')] = cells
+
+    table.pop('File', None)
+    return table
+
+
+counted = 0
+
+
+def hold(place, cells, holds):
+    """Holds each count a row states to the count of its files, and gives back its cells with those counts
+    blanked out, for what is left to name no other."""
+    global counted
+    left = [list(cell) for cell in cells]
+
+    for column, pattern, count, what in holds:
+        where = place + (f', its column {COLUMNS[column]}' if column > 1 else '')
+        found = re.search(pattern.replace('{n}', NUMBER), cells[column])
+
+        if found is None:
+            problems.append(f'{where}: states no count of {what}, which its files hold at {count}')
+            continue
+
+        counted += 1
+        start, end = found.span(1)
+        left[column][start:end] = ' ' * (end - start)
+
+        if number_of(found.group(1)) != count:
+            phrase = found.group(0)
+            fixed = (phrase[:start - found.start()] + written_as(count, found.group(1))
+                     + phrase[end - found.start():])
+            problems.append(f'{where}: "{phrase}" should read "{fixed}", the count of {what}')
+
+    return [''.join(cell) for cell in left]
+
+
+transport_counts = {}
+
+for case in named['transports']:
+    transport_counts[case['transport']] = transport_counts.get(case['transport'], 0) + 1
+
+for transport in sorted(set(transport_counts) - set(TRANSPORT_NAMES)):
+    problems.append(f'transports: cases over {transport}, which TRANSPORT_NAMES does not name, so no row counts them')
+
+# the entries of codecs.json a side does not play, each excused by a row of docs/support.md
+unplayed = {side: sum(any(crossed['language'] == side for crossed in entry.get('differs', []))
+                      for group in WHOLE['codecs'] for entry in named[group])
+            for side in SIDES}
+
+vectors_total = sum(len(vectors[group]) for group in groups)
+ways_total = sum(len(place['ways']) for place in places)
+
+
+def played_by_each(count):
+    """The cells that say each side plays every entry of a file, by its count."""
+    return [(column, r'^all {n}\b', count, f'entries the {side} side plays') for column, side in enumerate(SIDES, 2)]
+
+
+COUNTS = {
+    'docs/support.md': {
+        'spec/vectors.json': [
+            (1, r'^{n} vectors in', vectors_total, 'vectors'),
+            (1, r'\bin {n} groups', len(groups), 'groups of vectors'),
+            # each group by its name, its words apart and in any case: jwtVerdicts, JWT verdicts
+            *[(1, rf'(?i:\b{re.escape(re.sub(r"(?<=[a-z])(?=[A-Z])", " ", group))}) {{n}}(?:,|$)',
+               len(vectors[group]), f'the vectors of {group}') for group in groups],
+        ],
+        'spec/conversations.json': [
+            (1, r'^{n} conversations', len(named['conversations']), 'conversations'),
+            *played_by_each(len(named['conversations'])),
+        ],
+        'spec/transports.json': [
+            (1, r'^{n} cases', len(named['transports']), "transports' cases"),
+            *[(1, rf'\b{{n}} over {name}\b', transport_counts.get(transport, 0), f'cases over {name}')
+              for transport, name in TRANSPORT_NAMES.items()],
+            (1, r'\b{n} of them on the real clock', sum(bool(case.get('realTime')) for case in named['transports']),
+             'cases marked realTime'),
+            (1, r'\b{n} on the clock the server is given, advanced',
+             sum(any('advance' in step for step in case['steps']) for case in named['transports']),
+             'cases that advance the clock the server is given'),
+            (1, r'\b{n} responses cut across reads', len(responses), 'responses cut across reads'),
+            *played_by_each(len(named['transports'])),
+        ],
+        'spec/clocks.json': [
+            (1, r'^{n} clock cases', len(named['clocks']), 'clock cases'),
+            *played_by_each(len(named['clocks'])),
+        ],
+        'spec/durations.json': [
+            (1, r'^{n} places', len(places), 'places of durations'),
+            (1, r'\bby {n} ways', ways_total, "the places' ways"),
+            (1, r'\beach of {n} inputs', len(inputs), "the durations' inputs"),
+            *played_by_each(len(places)),
+        ],
+        'spec/identities.json': [
+            (1, r'^{n} procedure names', len(named['names']), 'names'),
+            (1, r'\b{n} ids and revisions', len(named['ids']), 'ids and revisions'),
+            (1, r'\b{n} procedure kinds', len(named['procedureKinds']), 'procedure kinds'),
+            (1, r'\bdeclared {n} ways', len(documents['identities']['ways']), 'the ways a procedure is declared'),
+            (1, r'\b{n} folds', len(named['folds']), 'folds'),
+        ],
+        'spec/codecs.json': [
+            (1, r'^{n} payloads read', len(named['payloads']), 'payloads'),
+            (1, r'\b{n} values written', len(named['values']), 'values'),
+            *[(column, r'^all but {n}\b', unplayed[side], f'entries the {side} side does not play, each by its row')
+              for column, side in enumerate(SIDES, 2)],
+        ],
+        'spec/debug-filters.json': [
+            (1, r'^{n} debug filters', len(named['filters']), 'debug filters'),
+            (1, r'\bof {n} calls', fixtures['call'], "the filters' calls"),
+            (1, r'\b{n} envelopes it keeps', fixtures['envelope'], "the filters' envelopes"),
+            (1, r'\b{n} filters given as functions', len(named['sources']), 'filters given as functions'),
+            *played_by_each(len(named['filters']) + len(named['sources'])),
+        ],
+        'spec/metrics.json': [
+            (1, r'^{n} expositions', len(named['expositions']), 'expositions'),
+            (1, r'\b{n} exits', len(named['exits']), 'exits'),
+            *played_by_each(len(named['expositions']) + len(named['exits'])),
+        ],
+    },
+    'README.md': {
+        'spec/vectors.json': [
+            (1, r'^{n} named vectors', vectors_total, 'vectors'),
+            (1, r'\bin {n} groups', len(groups), 'groups of vectors'),
+        ],
+        'spec/transports.json': [(1, r'^{n} cases', len(named['transports']), "transports' cases")],
+        'spec/clocks.json': [(1, r'^{n} clock cases', len(named['clocks']), 'clock cases')],
+        'spec/durations.json': [
+            (1, r'^{n} places', len(places), 'places of durations'),
+            (1, r'\bby {n} ways', ways_total, "the places' ways"),
+            (1, r'\beach of {n} inputs', len(inputs), "the durations' inputs"),
+        ],
+        'spec/identities.json': [
+            (1, r'^{n} procedure names', len(named['names']), 'names'),
+            (1, r'\b{n} ids and revisions', len(named['ids']), 'ids and revisions'),
+            (1, r'\b{n} procedure kinds', len(named['procedureKinds']), 'procedure kinds'),
+            (1, r'\bdeclared the {n} ways', len(documents['identities']['ways']), 'the ways a procedure is declared'),
+            (1, r'\b{n} pairs of names', len(named['folds']), 'folds'),
+        ],
+        'spec/debug-filters.json': [
+            (1, r'^{n} debug filters', len(named['filters']), 'debug filters'),
+            (1, r'\b{n} filters given as functions', len(named['sources']), 'filters given as functions'),
+        ],
+        'spec/metrics.json': [
+            (1, r'^{n} expositions', len(named['expositions']), 'expositions'),
+            (1, r'\b{n} exits', len(named['exits']), 'exits'),
+        ],
+        'spec/interop-blueprint.json': [
+            (1, r'\bits {n} service\b', len(documents['interop-blueprint']['services']), "the blueprint's services"),
+            (1, r'\bits {n} procedures', len(api), "the blueprint's procedures"),
+        ],
+    },
+}
+
+floor = next((suite['tests'] for suite in load(RUNNER)['floor'] if suite['suite'] == 'binary and JSON'), None)
+
+if floor is None:
+    problems.append("tools/protobuf-conformance/runner.json: its floor has no suite 'binary and JSON', which "
+                    "docs/support.md's row of the suite counts")
+
+for document, path, heading in TABLES:
+    table = table_of_files(path, heading)
+
+    # ! a row gone from a table fails, so that no count goes unheld for want of its row, or of its table
+    for row in sorted(set(COUNTS[document]) - set(table)):
+        problems.append(f'{document}: its table of files has no row {row}, whose counts spec/check.py holds')
+
+    for row, cells in table.items():
+        if len(cells) < 2:
+            problems.append(f'{document}, the row {row}: no cell of what it holds')
+        elif row.startswith(SUITE):
+            tests = (1, r'^{n} tests, binary', floor, "the suite's tests, runner.json's floor")
+            hold(f'{document}, the row {row}', cells, [tests] if floor is not None else [])
+        else:
+            # a number a row states that no count holds is one a change would leave behind
+            for column, cell in enumerate(hold(f'{document}, the row {row}', cells, COUNTS[document].get(row, []))):
+                where = f'{document}, the row {row}' + (f', its column {COLUMNS[column]}' if column > 1 else '')
+
+                for number in re.findall(r'\d[\d,]*\d|\d', CITED.sub(' ', cell)) if column else ():
+                    problems.append(f'{where}: states {number}, which no count of spec/check.py holds: hold it, or '
+                                    'write no count')
+
+    if document == 'docs/support.md' and not any(row.startswith(SUITE) for row in table):
+        problems.append(f"docs/support.md: its table of files has no row of {SUITE}, which runner.json's floor holds")
+
 if problems:
     report_and_exit()
 
@@ -1401,7 +1645,8 @@ print(f'spec: {version}, its companion {companion_version}; {len(documents)} fil
       f'{len(named["folds"])} folds; '
       f'{len(units["spec"])} units of the spec, {len(citing["spec"])} cited and {reasons_of("spec")}, in '
       f'units.txt; {len(units["debugging"])} of the companion, {len(citing["debugging"])} cited and '
-      f'{reasons_of("debugging")}, in debugging-units.txt; {len(TEST_KEYS)} published test keys, which none of '
+      f'{reasons_of("debugging")}, in debugging-units.txt; {counted} counts of the tables of files of '
+      f'docs/support.md and the README, each as its files hold it; {len(TEST_KEYS)} published test keys, which none of '
       f'the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())
