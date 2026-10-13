@@ -243,7 +243,9 @@ has its reason:
   destination or a credential (debugging 8);
 - **a procedure is keyed by its address, and the registry holds one name for it**: a declaration
   that names an address it holds under another name, or a name its service holds at another address,
-  is refused as it is made, as a resolver registered twice is, never on a call (debugging 7.3);
+  is refused as it is made, as a resolver registered twice is, never on a call; one of its service
+  at another revision takes the same series, since no label carries a revision and Prometheus
+  identifies a series by its name and its labels (debugging 7.3);
 - **each family's procedures have a ceiling**, `maximumProcedures`, 1,000 by default, and a
   declaration past it is refused as it is made, so `_OTHER` means a value not known, never a bound
   reached (debugging 7.4);
@@ -331,9 +333,10 @@ pass it: a declaration past the ceiling is refused as the side is built. Each fa
 of the codes its exits can end with, and no series waits at 0 for a code its exits never reach.
 
 **A declaration can be refused.** A resolver registered, or a requester made, under a name the
-registry holds at another address, at an address it holds under another name, or at another revision
-of a service it holds, is refused as the side is built, and so is one off section 16, by its router
-([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)).
+registry holds at another address, or at an address it holds under another name, is refused as the
+side is built, and so is one off section 16, by its router
+([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)). Two revisions of one
+service in one process, two generated copies of it say, count into the same series.
 
 **One reading costs a series' counts copied.** The C# side copies each series' counts into a
 snapshot at each exposition while its threads go on counting, and writes the series' lines from it;
@@ -372,7 +375,7 @@ supervision link or a relay's, is the C side's to decide.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-five rounds. Its objections, each with the answer that holds:
+six rounds. Its objections, each with the answer that holds:
 
 ### The first round
 
@@ -434,3 +437,17 @@ five rounds. Its objections, each with the answer that holds:
 | The notifying side's new row rests on no clause, and `dropSubscriptions` sends a protocol code that a resolver's answer refuses                                                 | Accepted in part: spec 11.7, item 2, names the failure an application ends a subscription with, and debugging 10.3's row cites it. `dropSubscriptions`, `DropSubscriptions`, takes every code, as the side that hears receives one, spec 8.1 reading a code it does not name as a number: the notifying side's series take the 24 codes, `_OTHER` among them, made at 0 as its procedure is declared, with no record of the series made. Refusing a protocol code section 8 does not name, as a resolver's answer is refused one, is weighed and left.                                                                       |
 | A closure made for every request, while nobody listens, breaks debugging 3.1                                                                                                    | Accepted: no closure a request makes; each step is told behind the check that someone listens, the C# side building its answer's step in a method of its own, outside its asynchronous send, so that a request allocates nothing more, its gate's pin unmoved.                                                                                                                                                                                                                                                                                                                                                               |
 | A guard that reads a string's tokens alone misses an f-string's literal text, which Python's tokenizer gives apart                                                              | Accepted: the debug filters' generator holds every string it writes to ASCII, a character outside it as its escape, reading an f-string's and a t-string's literal parts where its tokenizer has them; an entry that names a code point holds it, and so does each fixture whose comment names one, by its index.                                                                                                                                                                                                                                                                                                            |
+
+### On the companion's 0.2.0
+
+The round that [0004](0004-one-behaviour-in-every-language.md),
+[0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md),
+[0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)
+and
+[0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)
+share, at xhigh effort, met the trace's failure answered in a resolver's place, the one reading of
+each series and the series a second revision counts into, and put no objection to them; its
+objections are those records'. Each of the three rests on a standard, and none was put to the user:
+a span's status set from the status its call returned, OpenTelemetry's RPC conventions; each metric
+collected at its own instant, Prometheus's client libraries; and a series identified by its name and
+its labels, Prometheus's.

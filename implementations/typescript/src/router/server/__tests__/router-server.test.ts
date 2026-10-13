@@ -4759,7 +4759,7 @@ test.describe('createRouterServer, its metrics', () => {
   });
 
   // spec 16.7
-  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded and its service at one revision', () => {
+  test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded', () => {
     const { transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
       clock: createTestClock(),
@@ -4780,15 +4780,6 @@ test.describe('createRouterServer, its metrics', () => {
     }).toThrow(
       new ProgrammerError(
         'the metrics registry holds "echo" at 2/1, and is given "eCHO" at 2/2: its name at another address'
-      )
-    );
-
-    // its service at another revision
-    expect(() => {
-      resolve({ ...echo, procedureId: 3, procedureName: 'slow', serviceRevision: 4 });
-    }).toThrow(
-      new ProgrammerError(
-        'the metrics registry holds service 2 at revision 3, and is given 2/3 at revision 4: another revision of its service'
       )
     );
 

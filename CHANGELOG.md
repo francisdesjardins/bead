@@ -268,6 +268,11 @@ archive` writing a submodule as an empty folder.
   its router already answered, its subscription's queue past its bounds, carries the
   `CAPACITY_EXCEEDED` it answered, where it told an answer with no error (`debugging.md` 4.2;
   decision 0013).
+- A registry counts a service declared at a second revision into its series, where it refused it:
+  `spec.md` 16.7's MUST holds one name an address and one address a name, its SHOULD one revision a
+  service, and `debugging.md` 7.3 no longer refuses `another revision of its service`, its
+  `past the ceiling` now 7.3.3. `metrics.json` plays a service at three revisions on three routers,
+  and its schema drops the reason (decision 0017).
 
 ### Security
 

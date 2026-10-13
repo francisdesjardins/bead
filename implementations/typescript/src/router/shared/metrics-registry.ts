@@ -5,14 +5,7 @@
 import { ProgrammerError } from '../../transport/shared/errors';
 import { FailureScope, ProtocolCode } from './constants';
 import { areOneName } from './identity';
-import type {
-  IFailure,
-  IProcedure,
-  ProcedureId,
-  RouterSide,
-  ServiceId,
-  ServiceRevision,
-} from './types';
+import type { IFailure, IProcedure, ProcedureId, RouterSide, ServiceId } from './types';
 
 // interfaces
 
@@ -158,7 +151,10 @@ interface ICallFamilies {
 
 // types
 
-/** A procedure as it is declared: its address, its name, and its service's revision. */
+/**
+ * A procedure as it is declared: its address, its name, and its service's revision, which keys no
+ * series.
+ */
 export type DeclaredProcedure = Pick<
   IProcedure,
   'procedureId' | 'procedureName' | 'serviceId' | 'serviceRevision'
@@ -535,13 +531,13 @@ const maximumOf = (given: number | undefined): number => {
  * A registry of Bead's metrics, which a router counts into once given it as its `metricsRegistry`,
  * and the servers and clients that build a router pass on: one given to two routers sums them. It
  * counts what its side declares — each resolver registered, each requester made, each notification
- * registered — each procedure keyed by its address under one name, and each service at one
- * revision, its series made at 0 as it is declared, and refuses, with a {@link ProgrammerError}, a
- * declaration of an address it holds under another name, of a name its service holds at another
- * address — two names one when their ASCII letters are read in one case (spec 16.6) — of a service
- * at another revision than it holds, or past `maximumProcedures`. Its
- * exposition is the Prometheus text format 0.0.4, at `/metrics` or appended to a scrape of that
- * format, each series written from one reading of its counts: Bead opens no port.
+ * registered — each procedure keyed by its address under one name, its series made at 0 as it is
+ * declared, a service at another revision counting into the same series, which no label tells
+ * apart; and refuses, with a {@link ProgrammerError}, a declaration of an address it holds under
+ * another name, of a name its service holds at another address — two names one when their ASCII
+ * letters are read in one case (spec 16.6) — or past `maximumProcedures`. Its exposition is the
+ * Prometheus text format 0.0.4, at `/metrics` or appended to a scrape of that format, each series
+ * written from one reading of its counts: Bead opens no port.
  *
  * @example
  * import { createMetricsRegistry, createServer } from '@francisdesjardins/bead/server';
@@ -560,8 +556,6 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
   const entries = new Map<number, IEntry>();
   // each service's names, and the procedure each names
   const names = new Map<ServiceId, Map<string, ProcedureId>>();
-  // each service's one revision
-  const revisions = new Map<ServiceId, ServiceRevision>();
   const groups = Object.freeze({
     answered: { keys: new Set<number>(), what: 'server families' },
     made: { keys: new Set<number>(), what: 'client families' },
@@ -588,7 +582,7 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
 
   // the entry `procedure` is declared as, to `declared`, refused as `spec/debugging.md` 7.3 says
   const admit = (procedure: DeclaredProcedure, declared: readonly IGroup[]): IEntry => {
-    const { procedureId, procedureName, serviceId, serviceRevision } = procedure;
+    const { procedureId, procedureName, serviceId } = procedure;
     const key = serviceId * 0x1_00_00 + procedureId;
     const held = entries.get(key);
     const at = `${String(serviceId)}/${String(procedureId)}`;
@@ -605,14 +599,6 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
     if (elsewhere !== undefined) {
       throw new ProgrammerError(
         `the metrics registry holds ${JSON.stringify(elsewhere[0])} at ${String(serviceId)}/${String(elsewhere[1])}, and is given ${JSON.stringify(procedureName)} at ${at}: its name at another address`
-      );
-    }
-
-    const revision = revisions.get(serviceId);
-
-    if (revision !== undefined && revision !== serviceRevision) {
-      throw new ProgrammerError(
-        `the metrics registry holds service ${String(serviceId)} at revision ${String(revision)}, and is given ${at} at revision ${String(serviceRevision)}: another revision of its service`
       );
     }
 
@@ -648,7 +634,6 @@ export const createMetricsRegistry = (options?: IMetricsRegistryOptions): IMetri
 
     named.set(procedureName, procedureId);
     names.set(serviceId, named);
-    revisions.set(serviceId, serviceRevision);
     entries.set(key, entry);
 
     return entry;

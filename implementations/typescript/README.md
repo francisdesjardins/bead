@@ -1058,10 +1058,10 @@ given to two routers sums them. It counts what its side declares: each resolver 
 notification registered, and each requester made — `getRequest`'s, `getCommand`'s, a
 notification's — which the service manager declares to its router through `declareRequester` as it
 makes it, each of its calls carrying the series the declaration gave back. The registry keys a
-procedure by its address and holds one name for it, and one revision for each service: a
-declaration of an address it holds under another name, of a name its service holds at another
-address — two names one when they are equal once their ASCII letters are read in one case (spec
-16.6) — or of a service at another revision than it holds, is a `ProgrammerError` as it is made,
+procedure by its address and holds one name for it; a service declared at another revision counts
+into the same series, which no label tells apart. A declaration of an address it holds under
+another name, or of a name its service holds at another address — two names one when they are equal
+once their ASCII letters are read in one case (spec 16.6) — is a `ProgrammerError` as it is made,
 never on a call, and so is one past `maximumProcedures`, the procedures each group of families names
 at most, 1,000 by default. Its router refuses first, whatever its registry, a declaration off
 section 16: an id or a revision out of its range, a procedure's name off its form, or a procedure

@@ -88,11 +88,8 @@ public sealed class MetricsRegistry
     private readonly Lock _gate = new();
     private readonly int _maximumProcedures;
 
-    // the one name each address is held under
+    // the one name each address is held under; a service's revision keys no series, so none is held
     private readonly Dictionary<ProcedureAddress, string> _names = [];
-
-    // the one revision each service is held at
-    private readonly Dictionary<ushort, int> _revisions = [];
 
     // the addresses each group of families names, for its ceiling (7.4)
     private readonly HashSet<ProcedureAddress> _client = [];
@@ -205,13 +202,13 @@ public sealed class MetricsRegistry
 
     // a declaration of a procedure to some groups of families, or its refusal (7.3): an address held
     // under another name, compared exactly; a name its service holds at another address, the two
-    // one by spec 16.6; a service held at another revision; or one procedure past a group's
-    // ceiling. Under the lock; a declaration refused declares nothing
+    // one by spec 16.6; or one procedure past a group's ceiling. Its service at another revision
+    // takes the same series, which no label tells apart (8.1). Under the lock; a declaration refused
+    // declares nothing
     private void Declare(Procedure procedure, HashSet<ProcedureAddress>[] groups)
     {
         var address = procedure.Address;
         var name = procedure.ProcedureName;
-        var revision = procedure.ServiceRevision;
 
         if (_names.TryGetValue(address, out var held) && !string.Equals(held, name, StringComparison.Ordinal))
         {
@@ -230,13 +227,6 @@ public sealed class MetricsRegistry
             }
         }
 
-        if (_revisions.TryGetValue(address.ServiceId, out var heldRevision) && heldRevision != revision)
-        {
-            throw new ArgumentException(
-                string.Create(CultureInfo.InvariantCulture, $"a metrics registry holds service {address.ServiceId} at revision {heldRevision}: \"{name}\" at {address.ServiceId}/{address.ProcedureId}, revision {revision}, is another revision of its service"),
-                nameof(procedure));
-        }
-
         foreach (var group in groups)
         {
             if (!group.Contains(address) && group.Count >= _maximumProcedures)
@@ -248,7 +238,6 @@ public sealed class MetricsRegistry
         }
 
         _names[address] = name;
-        _revisions[address.ServiceId] = revision;
 
         foreach (var group in groups)
         {

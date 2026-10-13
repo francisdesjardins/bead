@@ -247,17 +247,18 @@ and the clients that build a router pass on. One registry given to two routers s
 3. as a notification is registered, on the side that hears, to the notification families.
 
 7.3. A registry keys a procedure by its address, its service id and its procedure id, whichever
-families declare it, and holds one name for it and one revision for its service: a declaration of
-an address it holds under the same name takes the same series. A router refuses first what
-`spec.md` section 16.10 refuses. A side MUST refuse a declaration as it is made, never on a call, as
-it refuses a resolver registered twice, for the first of these reasons that applies, in their order:
+families declare it, and holds one name for it: a declaration of an address it holds under the same
+name takes the same series, and so does one of its service at another revision, which no label
+carries (section 8.1), as Prometheus identifies a series by its name and its labels. A router
+refuses first what `spec.md` section 16.10 refuses. A side MUST refuse a declaration as it is made,
+never on a call, as it refuses a resolver registered twice, for the first of these reasons that
+applies, in their order:
 
-| Reason                            | A declaration that names                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| `another name at its address`     | an address the registry holds under another name, one by `spec.md` 16.6 or not |
-| `its name at another address`     | a name its service holds at another address, the two one by `spec.md` 16.6     |
-| `another revision of its service` | a service the registry holds at another revision                               |
-| `past the ceiling`                | one procedure more than its families name at most (7.4)                        |
+| Reason                        | A declaration that names                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| `another name at its address` | an address the registry holds under another name, one by `spec.md` 16.6 or not |
+| `its name at another address` | a name its service holds at another address, the two one by `spec.md` 16.6     |
+| `past the ceiling`            | one procedure more than its families name at most (7.4)                        |
 
 A declaration refused declares nothing.
 

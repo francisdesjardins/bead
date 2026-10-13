@@ -87,13 +87,6 @@ test.describe('createMetricsRegistry', () => {
       )
     );
     expect(() => {
-      return metrics.declareRequester({ ...echo, serviceRevision: 4 });
-    }).toThrow(
-      new ProgrammerError(
-        'the metrics registry holds service 2 at revision 3, and is given 2/1 at revision 4: another revision of its service'
-      )
-    );
-    expect(() => {
       return metrics.declareResolver(
         { ...echo, procedureId: 3, procedureName: 'slow' },
         { notifies: false }
@@ -104,6 +97,39 @@ test.describe('createMetricsRegistry', () => {
       )
     );
     expect(registry.exposition().text).toBe(before);
+  });
+
+  // spec 16.7
+  test('counts a service declared at a second revision into its series', () => {
+    const registry = createMetricsRegistry();
+    const metrics = registry.attach('server');
+    const first = metrics.declareResolver(echo, { notifies: false }).calls;
+    // another router of the same side, given the registry, its service at a second revision
+    const second = registry
+      .attach('server')
+      .declareResolver({ ...echo, serviceRevision: 4 }, { notifies: false }).calls;
+    const other = metrics.declareResolver(
+      { ...echo, procedureId: 2, procedureName: 'fail', serviceRevision: 5 },
+      { notifies: false }
+    ).calls;
+
+    for (const series of [first, second, other]) {
+      series.start();
+      series.end(CallEnding.RESULT, 10);
+    }
+
+    const answered = answeredOf(registry.exposition().text);
+
+    expect(answered.get('service="2",procedure="echo",type="request"')).toEqual({
+      count: 2,
+      handled: 2,
+      started: 2,
+    });
+    expect(answered.get('service="2",procedure="fail",type="request"')).toEqual({
+      count: 1,
+      handled: 1,
+      started: 1,
+    });
   });
 
   // debugging 8.5 and 11.2
