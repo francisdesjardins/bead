@@ -80,8 +80,7 @@
       "properties": {
         "path": {
           "description": "Its path from its root, as an import names it, parts by /.",
-          "type": "string",
-          "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\\.proto(?![\\s\\S])"
+          "$ref": "#/$defs/protoPath"
         },
         "package": {
           "description": "Its protobuf package; empty for none.",
@@ -100,8 +99,7 @@
         },
         "file": {
           "description": "The path, among its files, of the file that declares it.",
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/protoPath"
         }
       }
     },
@@ -190,8 +188,7 @@
           "properties": {
             "file": {
               "description": "The path, among its files, of the file that declares it.",
-              "type": "string",
-              "minLength": 1
+              "$ref": "#/$defs/protoPath"
             },
             "fullName": {
               "$ref": "#/$defs/fullName"
@@ -339,6 +336,11 @@
       "description": "A protobuf full name, its package and its nesting parted by dots.",
       "type": "string",
       "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*(?![\\s\\S])"
+    },
+    "protoPath": {
+      "description": "A path from its root, as an import names it, parts by /.",
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9_.-]*/)*[A-Za-z0-9_-][A-Za-z0-9_.-]*\\.proto(?![\\s\\S])"
     },
     "serviceName": {
       "description": "An upper-case ASCII letter, then 62 ASCII letters or digits at most.",

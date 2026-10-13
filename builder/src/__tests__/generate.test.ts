@@ -16,6 +16,7 @@ import { expect, test } from '@playwright/test';
 import { checkBlueprintFile, checkRoots, type IChecked } from '../check.ts';
 import { type IConfig, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
+import type { IBlueprint } from '../model/blueprint.ts';
 import { differencesOf, EDITOR_COPY, planOf, writeEditorCopy, writePlan } from '../generate.ts';
 import { PROTOC_CSHARP_HEADER } from '../protoc.ts';
 import { needsProtoc } from './pinned.ts';
@@ -377,8 +378,7 @@ test('refuses two files written at one path, naming both sources', () => {
   );
 });
 
-// a blueprint `check` takes whose service names `file` as its `.proto`, a description in it that a
-// shell would run
+// a blueprint whose service names `file` as its `.proto`, a description in it that a shell would run
 const climbingOf = (file: string): string => {
   return `${JSON.stringify(
     {
@@ -414,7 +414,7 @@ const climbingOf = (file: string): string => {
   )}\n`;
 };
 
-test("refuses a file outside its output's folder, which a blueprint's proto.file climbs to, and writes nothing", () => {
+test("a blueprint's proto.file that climbs out is check's PROTO_FILE, and planOf, given it unchecked, still refuses a file outside its output's folder and writes nothing", () => {
   const folder = projectOf(
     [
       'version: 1',
@@ -432,11 +432,20 @@ test("refuses a file outside its output's folder, which a blueprint's proto.file
   writeFileSync(wrapper, '#!/bin/sh\necho kept\n');
 
   const config = configOf(folder);
-  const checked = checkedOf(config);
 
-  expect(checked.diagnostics).toEqual([]);
+  expect(
+    checkedOf(config).diagnostics.map((diagnostic) => {
+      return `${diagnostic.rule} ${diagnostic.pointer ?? ''}`;
+    })
+  ).toEqual(['PROTO_FILE /services/0/proto/file']);
+
+  // * the layer below: a blueprint given to planOf through the API, without check
+  const unchecked = (file: string): IChecked => {
+    return { diagnostics: [], blueprint: JSON.parse(climbingOf(file)) as IBlueprint };
+  };
+
   expect(() => {
-    return planOf(config, checked);
+    return planOf(config, unchecked('../../beadc.sh'));
   }).toThrow(
     "generate would write beadc.sh, outside its output gen/ts: a service's proto.file in the blueprint names a path that climbs out of it"
   );
@@ -444,17 +453,16 @@ test("refuses a file outside its output's folder, which a blueprint's proto.file
   for (const args of [['generate'], ['generate', '--check']]) {
     const run = spawnSync(process.execPath, [CLI, ...args], { cwd: folder, encoding: 'utf8' });
 
-    expect(run.status, args.join(' ')).toBe(2);
-    expect(run.stderr, args.join(' ')).toContain('outside its output gen/ts');
+    expect(run.status, args.join(' ')).toBe(1);
+    expect(run.stdout, args.join(' ')).toContain('PROTO_FILE');
   }
 
   expect(readFileSync(wrapper, 'utf8')).toBe('#!/bin/sh\necho kept\n');
   expect(existsSync(join(folder, 'gen'))).toBe(false);
 
   // above the project's folder, where a run on Node reaches
-  writeFileSync(join(folder, 'api.blueprint.json'), climbingOf('../../../outside/.bashrc.proto'));
   expect(() => {
-    return planOf(config, checkedOf(config));
+    return planOf(config, unchecked('../../../outside/.bashrc.proto'));
   }).toThrow(/generate would write \.\.\/outside\/\.bashrc_bead\.ts, outside its output gen\/ts/u);
 });
 

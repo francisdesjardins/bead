@@ -202,6 +202,11 @@ const RULE_OF_PLACE: readonly (readonly [RegExp, RuleName, string])[] = [
     "a failure's name is upper-case ASCII letters and digits in words parted by one underscore (builder/README.md)",
   ],
   [
+    /^\/(?:services\/\d+\/proto\/file|proto\/messages\/\d+\/file|proto\/files\/\d+\/path)$/u,
+    'PROTO_FILE',
+    'a proto path is a path from its root, parts by /, none . or .., ending in .proto',
+  ],
+  [
     /^\/services\/\d+\/procedures\/\d+\/notification$/u,
     'NOTIFICATION_MESSAGE',
     'a notification binding is there exactly when its procedure notifies (spec 11.2)',

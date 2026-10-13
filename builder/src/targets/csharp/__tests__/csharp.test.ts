@@ -6,9 +6,9 @@ import { expect, test } from '@playwright/test';
 
 import { hasPinnedProtoc } from '../../../__tests__/pinned.ts';
 import { checkRoots } from '../../../check.ts';
-import type { IBlueprint } from '../../../model/blueprint.ts';
+import { checkValue, type IBlueprint } from '../../../model/blueprint.ts';
 import { applyPatch, blueprintCases } from '../../../model/__tests__/patch.ts';
-import { generateCSharpMessages, protocPin } from '../../../protoc.ts';
+import { csharpPathOf, generateCSharpMessages, protocPin } from '../../../protoc.ts';
 import { RULES, Severity } from '../../../rules.ts';
 import { beadcVersion } from '../../../version.ts';
 import { type IGeneratedFile, type ITargetInput, Messages } from '../../target.ts';
@@ -45,6 +45,11 @@ const UNQUALIFIED = /(?<!global::|[\w.])(?:Bead|System|Google)\.[A-Z]/u;
 
 const interop = (): IBlueprint => {
   return JSON.parse(readFileSync(INTEROP, 'utf8')) as IBlueprint;
+};
+
+// a pointer's place in a blueprint checked as a value
+const placeAt = (pointer: string): { file: string; pointer: string } => {
+  return { file: 'blueprint.json', pointer };
 };
 
 const interopInput = (blueprint: IBlueprint = interop()): ITargetInput => {
@@ -212,7 +217,7 @@ test("an accepted case's output differs from the interop's by its patch alone: S
   }
 });
 
-test("writes a service a blueprint alone declares at the output's root, under its name, in the output's namespace, and one a .proto declares beside protoc's file, in its namespace's folder", () => {
+test("writes a service with no proto member at the output's root, under its name, in the output's namespace, and one a .proto declares beside protoc's file, in its namespace's folder", () => {
   const alone = csharpTarget.generate(interopInput(), INTEROP_OPTIONS);
   const comments = csharpTarget.generate(fixtureInput(FIXTURES, [COMMENTS_PROTO]), DEFAULTS);
   const messages = csharpTarget.generate(fixtureInput(MESSAGES), DEFAULTS);
@@ -231,6 +236,35 @@ test("writes a service a blueprint alone declares at the output's root, under it
   expect(contentOf(comments, 'Bead/Comments/V1/CommentsBead.cs')).toContain(
     '\nnamespace Bead.Comments.V1;\n'
   );
+});
+
+test("a service's proto file steers its path, whichever the source, and one with none lands at the root", () => {
+  // the interop's blueprint, its service read from a .proto that proto.files lists
+  const read = applyPatch(interop(), [
+    {
+      op: 'add',
+      path: '/proto',
+      value: { files: [{ path: 'acme/v1/api.proto', package: 'acme.v1' }], messages: [] },
+    },
+    {
+      op: 'add',
+      path: '/services/0/proto',
+      value: { file: 'acme/v1/api.proto', fullName: 'acme.v1.InteropService' },
+    },
+  ]) as IBlueprint;
+  const namesOf = (blueprint: IBlueprint): string[] => {
+    return csharpTarget.generate(interopInput(blueprint), INTEROP_OPTIONS).map((file) => {
+      return file.name;
+    });
+  };
+
+  expect(checkValue(read, { placeOf: placeAt }).diagnostics).toEqual([]);
+  // * its folder the output's namespace's segments, its name protoc's for the file
+  expect(namesOf(read)).toEqual([
+    csharpPathOf('acme/v1/api.proto', 'Bead.Interop').replace(/\.cs$/u, 'Bead.cs'),
+  ]);
+  expect(namesOf(read)).toEqual(['Bead/Interop/ApiBead.cs']);
+  expect(namesOf(interop())).toEqual(['InteropBead.cs']);
 });
 
 test('writes two services of one .proto in one file, the contract with the runtime once', () => {

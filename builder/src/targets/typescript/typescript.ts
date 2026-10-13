@@ -2,9 +2,10 @@
 
 // The TypeScript target, a protoplugin plugin run in beadc's process (decision 0022): protoc's
 // plugin request built from buf's set, its files in their order and the services' files to
-// generate, or empty for a blueprint alone; one `<file>_bead.ts` for each `.proto` file that
-// declares a service, at its path under the output, or `<name>_bead.ts` at the output's root for a
-// service a blueprint alone declares; each under beadc's header.
+// generate, or empty for a blueprint alone; one `<file>_bead.ts` for each file a service's `proto`
+// member names, at its path under the output whichever the source, as protoc and buf write a file
+// at the path its descriptor names, or `<name>_bead.ts` at the output's root for a service with no
+// `proto` member; each under beadc's header.
 
 // dependencies
 
@@ -37,7 +38,8 @@ const lowerFirst = (name: string): string => {
   return `${name.slice(0, 1).toLowerCase()}${name.slice(1)}`;
 };
 
-// the file a service is written in, under the output's folder
+// the file a service is written in, under the output's folder: its `proto` member's, whichever the
+// source, which the blueprint's schema and PROTO_FILE hold to a path under its root
 const fileNameOf = (service: IServiceEntry): string => {
   return service.proto === undefined
     ? `${lowerFirst(service.serviceName)}_bead.ts`

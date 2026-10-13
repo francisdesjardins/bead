@@ -2,6 +2,19 @@
   "earlier": [
     {
       "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "x/v1/x.proto",
+            "package": "x.v1"
+          }
+        ],
+        "messages": []
+      }
+    },
+    {
+      "op": "add",
       "path": "/services/0/proto",
       "value": {
         "file": "x/v1/x.proto",
@@ -10,6 +23,19 @@
     }
   ],
   "current": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "x/v1/interop.proto",
+            "package": "x.v1"
+          }
+        ],
+        "messages": []
+      }
+    },
     {
       "op": "add",
       "path": "/services/0/proto",
