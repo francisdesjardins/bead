@@ -18,6 +18,9 @@
     // the example's own: it runs on Node, and the compiler writes nothing, esbuild bundling
     "types": ["node"],
     "skipLibCheck": true,
+    // the runtime is a portal here, a link: read through it, as an installed package is, its
+    // imports resolve from this project
+    "preserveSymlinks": true,
     "noEmit": true
   },
   "include": ["src/**/*"]
