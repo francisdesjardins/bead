@@ -662,8 +662,7 @@ record whose Scope holds each change: the client's address in
 and origins in
 [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md), and here a
 credential, through a relay and at the client. The user decided what no standard settles:
-`trustedProxies` on the HTTP server alone, a hop bound and the WebSocket server's list ahead, each
-by a decision of its own
+`trustedProxies` on both server transports, a hop bound ahead, by a decision of its own
 ([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)), and no refusal
 of `hosts: ['*']` at start.
 

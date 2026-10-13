@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A WebSocket server believes `X-Forwarded-For` from the proxies it is told of, `trustedProxies`,
+  `TrustedProxies`, as an HTTP server does: the same entries, the same refusals as it is built, a
+  network of prefix 0 among them, and the same walk of the upgrade's field, so a connection behind
+  a proxy it names is named and told by its client's address, never the proxy's. It bounds no
+  address, so nothing else moves (spec 15.12; decision 0030).
+
 ### Changed
 
 - A relay refuses a call that opens a subscription with the detail "this relay carries no

@@ -63,8 +63,7 @@ envelopes.
 - **0.5.0**: a topic-based publish/subscribe broker as one more transport, one core and one
   adapter a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
-- **A 0.4.x**: `trustedProxies` on the WebSocket server too, and a hop bound for proxies whose
-  address a deployment cannot name
+- **A 0.4.x**: a hop bound for proxies whose address a deployment cannot name
   ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
 - **After 0.4.0**: a penetration test of Bead's servers.
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
@@ -117,7 +116,7 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 104 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
+| [`transports.json`](spec/transports.json)               | 106 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
