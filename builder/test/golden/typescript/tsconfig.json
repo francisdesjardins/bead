@@ -11,7 +11,8 @@
     "paths": {
       "@francisdesjardins/bead/service": [
         "../../../../implementations/typescript/src/service/service.ts"
-      ]
+      ],
+      "@francisdesjardins/bead/proto": ["../../../../implementations/typescript/src/proto/records.ts"]
     }
   },
   "include": ["**/*.ts"]

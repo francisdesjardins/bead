@@ -450,5 +450,5 @@ public sealed class OldCommentsClient
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion2;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion3;
 }

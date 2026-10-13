@@ -15,7 +15,7 @@ import {
   Messages,
   sourceNameOf,
 } from '../target.ts';
-import { DEFAULT_RUNTIME } from '../typescript/options.ts';
+import { DEFAULT_PROTO_RUNTIME, DEFAULT_RUNTIME } from '../typescript/options.ts';
 import { typescriptTarget } from '../typescript/typescript.ts';
 
 const INTEROP = new URL('../../../../spec/interop-blueprint.json', import.meta.url);
@@ -67,6 +67,7 @@ test("the header names the messages' generator and the oldest runtime its output
       typescriptTarget.generate(input, {
         importExtension: 'ts',
         runtime: DEFAULT_RUNTIME,
+        protoRuntime: DEFAULT_PROTO_RUNTIME,
         messages: Messages.GENERATE,
       })
     )

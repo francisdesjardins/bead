@@ -101,6 +101,9 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
       input.set === undefined ? undefined : fromBinary(FileDescriptorSetSchema, input.set);
     // ! protoplugin changes the extension of a relative import that ends in `.js` alone
     const runtime = RELATIVE.test(options.runtime) ? `${options.runtime}.js` : options.runtime;
+    const protoRuntime = RELATIVE.test(options.protoRuntime)
+      ? `${options.protoRuntime}.js`
+      : options.protoRuntime;
     const files = new Map<string, IServiceEntry[]>();
     // * the files that mark a deprecation or name a message protobuf deprecates: their own uses are
     // silenced, and only theirs, so the TypeScript side's lint holds every other file to its rules
@@ -144,14 +147,14 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           }
 
           for (const service of services) {
-            printService(f, { service, runtime, messageOf });
+            printService(f, { service, runtime, protoRuntime, messageOf });
           }
 
           f.print();
           f.print(
             '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here'
           );
-          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_2', runtime), ';');
+          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_3', runtime), ';');
         }
       },
     });

@@ -3,7 +3,7 @@
 /* eslint-disable */
 
 import type { IFailureCatalogue, IListedFailure, IListedFailureError, IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_2, PAYLOAD_CODECS, requestOf } from "@francisdesjardins/bead/service";
+import { createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_3, PAYLOAD_CODECS, requestOf } from "@francisdesjardins/bead/service";
 
 
 /**
@@ -379,4 +379,4 @@ export class OldCommentsClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_2;
+void GENERATED_CODE_SUPPORTS_VERSION_3;

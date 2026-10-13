@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 
 import { againstOfText, type IConfig, isInside, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
-import { DEFAULT_RUNTIME } from '../targets/typescript/options.ts';
+import { DEFAULT_PROTO_RUNTIME, DEFAULT_RUNTIME } from '../targets/typescript/options.ts';
 
 test("a path outside the folder is refused in Windows' forms, a backslash, a drive letter and a second drive, through path.win32", () => {
   const folder = 'C:\\work\\project';
@@ -84,6 +84,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       out: '/work/gen',
       importExtension: 'ts',
       runtime: DEFAULT_RUNTIME,
+      protoRuntime: DEFAULT_PROTO_RUNTIME,
       messages: 'generate',
     },
   ]);
@@ -94,6 +95,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
         '    out: interop/generated',
         '    importExtension: none',
         '    runtime: ../../src/service/service',
+        '    protoRuntime: ../../src/proto/records',
         '    messages: external',
         '    messagesOut: interop/messages',
         '',
@@ -105,6 +107,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       out: '/work/interop/generated',
       importExtension: 'none',
       runtime: '../../src/service/service',
+      protoRuntime: '../../src/proto/records',
       messages: 'external',
       messagesOut: '/work/interop/messages',
     },
@@ -176,6 +179,14 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
     [
       '  - language: typescript\n    out: gen\n    runtime: /abs/service\n',
       /runtime is a package's name/u,
+    ],
+    [
+      '  - language: typescript\n    out: gen\n    protoRuntime: ./records.ts\n',
+      /protoRuntime: \.\/records\.ts names no extension/u,
+    ],
+    [
+      '  - language: typescript\n    out: gen\n    protoRuntime: /abs/records\n',
+      /protoRuntime is a package's name/u,
     ],
     ['  - language: typescript\n    out: gen\n    messages: none\n', /generate or external/u],
     ['  - language: typescript\n    out: gen\n    messagesOut: msgs\n', /messagesOut/u],

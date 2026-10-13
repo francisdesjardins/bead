@@ -14,6 +14,7 @@ const contentOf = (blueprint: IBlueprint): string => {
     {
       importExtension: 'none',
       runtime: '@francisdesjardins/bead/service',
+      protoRuntime: '@francisdesjardins/bead/proto',
       messages: Messages.GENERATE,
     }
   );

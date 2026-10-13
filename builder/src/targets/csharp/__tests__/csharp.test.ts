@@ -291,9 +291,40 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('public sealed class CommentsServer<TData>\n');
   expect(content).toContain('public sealed class OtherServer<TData>\n');
-  expect(content.match(/GeneratedCode\.SupportsVersion2;/gu)).toHaveLength(1);
+  expect(content.match(/GeneratedCode\.SupportsVersion3;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
   expect(content.match(/^namespace /gmu)).toHaveLength(1);
+});
+
+test("the codec a target writes checks a payload's records by its message's descriptor before its library reads it", () => {
+  const content = contentOf(
+    csharpTarget.generate(fixtureInput(MESSAGES), DEFAULTS),
+    'Bead/Messages/V1/MessagesBead.cs'
+  );
+  const decoders = [
+    ...content.matchAll(/\(bytes\) =>\n\s*\{\n(?<body>(?:.*\n)*?)\s*return message;/gu),
+  ].map((match) => {
+    return match.groups?.['body'] ?? '';
+  });
+
+  expect(decoders.length).toBeGreaterThan(0);
+
+  // * the check first, by the descriptor of the very message Google.Protobuf reads into
+  for (const decoder of decoders) {
+    const check =
+      /global::Bead\.Protobuf\.ProtoRecords\.Check\(bytes\.Span, (?<message>[\w.:]+)\.Descriptor\);/u.exec(
+        decoder
+      );
+
+    expect(check, decoder).not.toBeNull();
+    expect(decoder.indexOf(check?.[0] ?? ''), decoder).toBeLessThan(decoder.indexOf('framed'));
+    expect(decoder, decoder).toContain(`var message = new ${check?.groups?.['message'] ?? ''}();`);
+  }
+
+  // a file that binds no proto message names no check
+  expect(
+    contentOf(csharpTarget.generate(interopInput(), INTEROP_OPTIONS), 'InteropBead.cs')
+  ).not.toContain('ProtoRecords');
 });
 
 test("writes */, <, & and two paragraphs as XML documentation, a command's among them, and a character C# reads as a line's end, a lone CR among them, as its reference", () => {

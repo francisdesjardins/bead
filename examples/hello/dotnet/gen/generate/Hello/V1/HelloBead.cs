@@ -27,6 +27,10 @@ public sealed class HelloProcedures
             Request = global::Bead.PayloadCodecs.Of<global::Hello.V1.SayHelloRequest>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.SayHelloRequest.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -54,6 +58,10 @@ public sealed class HelloProcedures
             Result = global::Bead.PayloadCodecs.Of<global::Hello.V1.SayHelloResponse>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.SayHelloResponse.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -89,6 +97,10 @@ public sealed class HelloProcedures
             Request = global::Bead.PayloadCodecs.Of<global::Hello.V1.CountDownRequest>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.CountDownRequest.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -116,6 +128,10 @@ public sealed class HelloProcedures
             Result = global::Bead.PayloadCodecs.Of<global::Hello.V1.CountDownResponse>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.CountDownResponse.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -143,6 +159,10 @@ public sealed class HelloProcedures
             Notification = global::Bead.PayloadCodecs.Of<global::Hello.V1.Tick>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.Tick.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -178,6 +198,10 @@ public sealed class HelloProcedures
             Request = global::Bead.PayloadCodecs.Of<global::Hello.V1.AskNameRequest>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.AskNameRequest.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -205,6 +229,10 @@ public sealed class HelloProcedures
             Result = global::Bead.PayloadCodecs.Of<global::Hello.V1.AskNameResponse>(
                 (bytes) =>
                 {
+                    // ! the check first, by the descriptor Google.Protobuf reads with: it refuses what protobuf
+                    // refuses where a stock library reads on (decision 0028)
+                    global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Hello.V1.AskNameResponse.Descriptor);
+
                     // ! spec 17.9's bound, set here rather than left to the library's default. The payload is
                     // read as a message field holds one, after its length, and the top message counts: 101 is
                     // 100 below it
@@ -443,5 +471,5 @@ public sealed class HelloClient
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
 file static class GeneratedCodeContract
 {
-    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion2;
+    private const bool Supported = global::Bead.GeneratedCode.SupportsVersion3;
 }

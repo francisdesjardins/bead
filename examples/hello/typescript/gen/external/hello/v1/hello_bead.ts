@@ -2,11 +2,12 @@
 // Do not edit: regenerate with beadc.
 
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_2, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_3, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
 import type { AskNameRequest, AskNameResponse, CountDownRequest, CountDownResponse, SayHelloRequest, SayHelloResponse, Tick } from "../../../messages/hello/v1/hello_pb.ts";
 import { AskNameRequestSchema, AskNameResponseSchema, CountDownRequestSchema, CountDownResponseSchema, SayHelloRequestSchema, SayHelloResponseSchema, TickSchema } from "../../../messages/hello/v1/hello_pb.ts";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { checkProtoRecords } from "@francisdesjardins/bead/proto";
 
 
 /**
@@ -22,8 +23,8 @@ export const HelloProcedures = Object.freeze({
     admission: 'none',
     failures: { NAMELESS: 1 },
     procedure: { procedureId: 1, procedureName: 'sayHello', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({ decode: (bytes) => { return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given)); } }),
-    result: payloadCodecOf<SayHelloResponse, MessageInitShape<typeof SayHelloResponseSchema>>({ decode: (bytes) => { return fromBinary(SayHelloResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SayHelloResponseSchema, create(SayHelloResponseSchema, given)); } }),
+    request: payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, SayHelloRequestSchema); return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given)); } }),
+    result: payloadCodecOf<SayHelloResponse, MessageInitShape<typeof SayHelloResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, SayHelloResponseSchema); return fromBinary(SayHelloResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SayHelloResponseSchema, create(SayHelloResponseSchema, given)); } }),
   }),
   /**
    * Counts down from a number to 0, a Tick a step, for a caller its connection greeted. Admits a call its hook `greeted` admits.
@@ -31,10 +32,10 @@ export const HelloProcedures = Object.freeze({
   countDown: requestOf({
     admission: { hook: 'greeted' },
     failures: { TOO_FAR: 2 },
-    notification: payloadCodecOf<Tick, MessageInitShape<typeof TickSchema>>({ decode: (bytes) => { return fromBinary(TickSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TickSchema, create(TickSchema, given)); } }),
+    notification: payloadCodecOf<Tick, MessageInitShape<typeof TickSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TickSchema); return fromBinary(TickSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TickSchema, create(TickSchema, given)); } }),
     procedure: { procedureId: 2, procedureName: 'countDown', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<CountDownRequest, MessageInitShape<typeof CountDownRequestSchema>>({ decode: (bytes) => { return fromBinary(CountDownRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CountDownRequestSchema, create(CountDownRequestSchema, given)); } }),
-    result: payloadCodecOf<CountDownResponse, MessageInitShape<typeof CountDownResponseSchema>>({ decode: (bytes) => { return fromBinary(CountDownResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CountDownResponseSchema, create(CountDownResponseSchema, given)); } }),
+    request: payloadCodecOf<CountDownRequest, MessageInitShape<typeof CountDownRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, CountDownRequestSchema); return fromBinary(CountDownRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CountDownRequestSchema, create(CountDownRequestSchema, given)); } }),
+    result: payloadCodecOf<CountDownResponse, MessageInitShape<typeof CountDownResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, CountDownResponseSchema); return fromBinary(CountDownResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CountDownResponseSchema, create(CountDownResponseSchema, given)); } }),
   }),
   /**
    * Asks the client its name: a command the client answers. Admits every call.
@@ -43,8 +44,8 @@ export const HelloProcedures = Object.freeze({
     admission: 'none',
     failures: {},
     procedure: { procedureId: 3, procedureName: 'askName', serviceId: 1, serviceRevision: 1 },
-    request: payloadCodecOf<AskNameRequest, MessageInitShape<typeof AskNameRequestSchema>>({ decode: (bytes) => { return fromBinary(AskNameRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskNameRequestSchema, create(AskNameRequestSchema, given)); } }),
-    result: payloadCodecOf<AskNameResponse, MessageInitShape<typeof AskNameResponseSchema>>({ decode: (bytes) => { return fromBinary(AskNameResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskNameResponseSchema, create(AskNameResponseSchema, given)); } }),
+    request: payloadCodecOf<AskNameRequest, MessageInitShape<typeof AskNameRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, AskNameRequestSchema); return fromBinary(AskNameRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskNameRequestSchema, create(AskNameRequestSchema, given)); } }),
+    result: payloadCodecOf<AskNameResponse, MessageInitShape<typeof AskNameResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, AskNameResponseSchema); return fromBinary(AskNameResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskNameResponseSchema, create(AskNameResponseSchema, given)); } }),
   }),
 });
 
@@ -152,4 +153,4 @@ export class HelloClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_2;
+void GENERATED_CODE_SUPPORTS_VERSION_3;
