@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Each side's tests run under coverage in CI, and what they run, lines and branches each, holds the
+  side's floor in `tools/coverage-floors.json`: `tools/coverage-report.mjs --floor` fails under it,
+  or where nothing was measured, and writes the report into the run's summary. A floor sits half a
+  point under what was measured and rises with `--raise`, never down but by a decision (decision
+  0006). The C# side is measured over the whole solution, its six test projects.
+
 ## [0.4.1] - 2026-10-13
 
 ### Added

@@ -67,8 +67,9 @@ jobs:
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
   # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
-  # then its tests. The interop against the C# server runs in the .NET job. On the current line and
-  # on the floor `engines.node` declares, so the floor holds by a run.
+  # then its tests, on the current line under coverage, held to the side's floor. The interop
+  # against the C# server runs in the .NET job. On the current line and on the floor
+  # `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -97,7 +98,18 @@ jobs:
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
       - run: $YARN check
-      - run: $YARN test --grep-invert "the C# server of the interop service"
+      - if: matrix.node != '26'
+        run: $YARN test --grep-invert "the C# server of the interop service"
+      # On the current line, the same tests under c8, then what they ran held to the TypeScript
+      # side's floor in tools/coverage-floors.json, the report in the run's summary.
+      - if: matrix.node == '26'
+        run: $YARN test:coverage --grep-invert "the C# server of the interop service"
+      - if: matrix.node == '26'
+        name: Coverage, held to its floor
+        working-directory: .
+        run: >-
+          node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json
+          --under implementations/typescript/src --floor typescript --summary "$GITHUB_STEP_SUMMARY"
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
@@ -117,11 +129,12 @@ jobs:
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
   # the analyzers, the generated folders left to their generator; `dotnet build` builds every
   # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
-  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests — and
-  # the interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts
-  # with Node, then the TypeScript client against the C# server; then a page of another origin in
-  # Chromium against both sides' HTTP servers, what proves a browser reads their CORS answer. Only
-  # the TypeScript side is installed, for its interop server and its page, and Chromium.
+  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests under
+  # coverage, held to the side's floor — and the interop, both ways: the C# client against the
+  # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
+  # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
+  # proves a browser reads their CORS answer. Only the TypeScript side is installed, for its interop
+  # server and its page, and Chromium.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -153,7 +166,15 @@ jobs:
       - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
       # every project, which `dotnet test` does not: it builds the test projects alone
       - run: dotnet build Bead.slnx
-      - run: dotnet test --solution Bead.slnx
+      # the tests under coverage, one cobertura report per test project, then what they ran held to
+      # the C# side's floor in tools/coverage-floors.json, the report in the run's summary
+      - run: >-
+          dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura
+          --results-directory TestResults/coverage
+      - name: Coverage, held to its floor
+        run: >-
+          node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml
+          --under implementations/dotnet/src --floor csharp --summary "$GITHUB_STEP_SUMMARY"
       - run: $YARN test:interop
         working-directory: implementations/typescript
       - run: $YARN playwright install --with-deps chromium

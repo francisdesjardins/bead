@@ -310,24 +310,27 @@ yarn test:devtools    # its tests, once it and the demo's static build are built
 
 ## Coverage
 
-A local command, not a CI job. Each side writes its own report — c8 an istanbul
-`coverage-final.json`, `dotnet test --coverage` one cobertura XML per test project — and
-`tools/coverage-report.mjs` reads either, merges what they say of the same file, and prints each
-file's lines and branches run, then the lines no report ran.
+Each side's tests run under coverage in CI, and what they run is held to the side's floor in
+[`tools/coverage-floors.json`](tools/coverage-floors.json), lines and branches each. Each side
+writes its own report — c8 an istanbul `coverage-final.json`, `dotnet test --coverage` one cobertura
+XML per test project — and `tools/coverage-report.mjs` reads either, merges what they say of the
+same file, and prints each file's lines and branches run, then the lines no report ran; with
+`--floor`, it fails under the side's floor, or when it measured nothing, and with `--summary`, it
+writes the report into the run's summary. A floor sits half a point under what was measured, and
+rises with `--raise`, never down but by a decision
+([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Locally, the same commands as CI's:
 
 ```sh
 cd implementations/typescript
-yarn test:coverage
-node ../../tools/coverage-report.mjs coverage/coverage-final.json --under implementations/typescript/src
+yarn test:coverage --grep-invert "the C# server of the interop service"
+node ../../tools/coverage-report.mjs coverage/coverage-final.json --under implementations/typescript/src --floor typescript
 ```
 
 ```sh
 cd implementations/dotnet
-dotnet test --project tests/Bead.Core.Tests --coverage --coverage-output-format cobertura --coverage-output core.cobertura.xml --results-directory TestResults/coverage
-dotnet test --project tests/Bead.Transport.WebSockets.Tests --coverage --coverage-output-format cobertura --coverage-output transport.cobertura.xml --results-directory TestResults/coverage
-dotnet test --project tests/Bead.Transport.Http.Tests --coverage --coverage-output-format cobertura --coverage-output http.cobertura.xml --results-directory TestResults/coverage
-dotnet test --project tests/Bead.Interop.Tests --coverage --coverage-output-format cobertura --coverage-output interop.cobertura.xml --results-directory TestResults/coverage
-node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src
+rm -rf TestResults/coverage  # every report in the folder is merged: a stale one counts too
+dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura --results-directory TestResults/coverage
+node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src --floor csharp
 ```
 
 ## Support
