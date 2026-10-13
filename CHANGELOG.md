@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-13
+
 ### Added
 
 - Every server transport tells each refusal it judges of its own, the event `refusal`, `Refusal`, on
@@ -113,6 +115,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.4.0 (`spec-v0.4.0`), and its companion, `spec/debugging.md`, to 0.2.0
+  (`debugging-v0.2.0`).
 - A decision record's number names its decision for good and is never given to another: records
   are still regrouped, moved in the index and renamed between releases, but none is renumbered,
   and one merged into another keeps a short file naming its successor (`docs/decisions/README.md`,
@@ -1217,7 +1221,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.3.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.0...develop
+[0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/francisdesjardins/bead/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/francisdesjardins/bead/releases/tag/v0.1.0

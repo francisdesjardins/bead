@@ -56,7 +56,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md):
   a client's address behind the proxies an HTTP server names, section 15.12.
 
-**Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.4.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
