@@ -86,6 +86,23 @@ public sealed record WebSocketTransportServerOptions
     /// an <see cref="ArgumentException"/> as the transport is built.
     /// </summary>
     public IReadOnlyList<string> Origins { get; init; } = [];
+
+    /// <summary>
+    /// The proxies it believes an upgrade's <c>X-Forwarded-For</c> from (spec 15.12): none by
+    /// default, the loopback among them. Each is an IP address written bare, as a server listens on
+    /// one, or a network, that address, <c>/</c> and its prefix's length (RFC 4632 §3.1, RFC 4291
+    /// §2.3), from 1, its bits past the prefix zero: <c>10.0.0.0/8</c>, or a compose network's, for a
+    /// proxy in a container or an ingress; <c>127.0.0.1</c> for one on this machine. A name, a
+    /// network of prefix 0, which would trust what every client writes, and any other entry are an
+    /// <see cref="ArgumentException"/> as the transport is built. While the address reached is one
+    /// they hold, the next entry of the field from the right is the client's, when it is an address,
+    /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
+    /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. The
+    /// client's address so read names its connection, <c>ip=</c> in its handle, and its refusals; its
+    /// port is the socket's, the nearest proxy's connection's behind one. A proxy left out is a
+    /// client as any other: every client behind it is named by its address.
+    /// </summary>
+    public IReadOnlyList<string>? TrustedProxies { get; init; }
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -109,9 +126,10 @@ public sealed record WebSocketTransportStartOptions
 
 /// <summary>
 /// A transport server over WebSocket connections, on Kestrel: one envelope per binary message, a
-/// connection named <c>type=WS;ip=…;port=…;ordinal=…</c>, by its peer's address and port and the
-/// rank it was taken at, from 1, never reset, so no handle is given twice (spec 15.1); a client
-/// over IPv4 to a dual-stack listener named by its IPv4 address; each pinged every <see
+/// connection named <c>type=WS;ip=…;port=…;ordinal=…</c>, by its client's address, read past the
+/// proxies it trusts (<see cref="WebSocketTransportServerOptions.TrustedProxies"/>), its peer's port
+/// and the rank it was taken at, from 1, never reset, so no handle is given twice (spec 15.1); a
+/// client over IPv4 to a dual-stack listener named by its IPv4 address; each pinged every <see
 /// cref="WebSocketTransportServerOptions.Heartbeat"/>. A text message is delivered as text, which
 /// a router reports. What goes out to one connection goes in order, one message at a time. It goes
 /// from <see cref="ReadyState.Uninitialized"/> through Connecting and Open to Closing and Closed,
@@ -125,6 +143,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 {
     private readonly WebSocketTransportServerOptions _options;
     private readonly TimeProvider _clock;
+    // the networks of the proxies it believes X-Forwarded-For from
+    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
     // each connection, and its end as the server tells it: gone from the handles, its close raised
     private readonly ConcurrentDictionary<string, Held> _connections = new();
     // its ready state, and the guards around its start and its stop, as every transport server's
@@ -141,8 +161,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
     /// <summary>
     /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
-    /// holds is an <see cref="ArgumentOutOfRangeException"/>; an entry of its hosts or origins
-    /// neither takes, an <see cref="ArgumentException"/> naming it.
+    /// holds is an <see cref="ArgumentOutOfRangeException"/>; an entry of its hosts, origins or
+    /// trusted proxies none takes, an <see cref="ArgumentException"/> naming it.
     /// </summary>
     public WebSocketTransportServer(WebSocketTransportServerOptions? options = null)
     {
@@ -150,6 +170,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
+        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(WebSocketTransportServerOptions.TrustedProxies));
         _options = given with
         {
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
@@ -464,6 +485,20 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
+    // the client's address, in its one form: the socket's, walked past each proxy it trusts through
+    // the upgrade's X-Forwarded-For, its lines joined by commas, from the right
+    private string? AddressOf(HttpContext context)
+    {
+        if (context.Connection.RemoteIpAddress is not { } remote)
+        {
+            return null;
+        }
+
+        var forwarded = context.Request.Headers["x-forwarded-for"];
+
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
+    }
+
     // a refusal written: its status, its fields, its mark when it has one, its date from the
     // server's clock, and an empty body whose length is written, a HEAD's as its GET's would be;
     // then, marked, told (spec 15.1)
@@ -491,10 +526,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         // * built only when a listener listens
         if (refusal.Refusal is { } reason && Refusal is { } listeners)
         {
-            var address = context.Connection.RemoteIpAddress;
             var (authority, origin) = WebSocketHandshake.ToldOf(context.Request);
             var told = new TransportServerRefusal(
-                (address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address)?.ToString(),
+                AddressOf(context),
                 authority,
                 origin,
                 context.Connection.RemotePort,
@@ -533,13 +567,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
 
         var accepted = await context.WebSockets.AcceptWebSocketAsync();
-        var address = context.Connection.RemoteIpAddress;
-        var ip = (address is { IsIPv4MappedToIPv6: true } ? address.MapToIPv4() : address)?.ToString() ?? "";
+        var ip = AddressOf(context) ?? "";
         var port = context.Connection.RemotePort;
 
-        // * the handle drawn as the connection is taken, by the rank it came at: the peer's address
-        // and port, which another connection may share (RFC 9293 §3.4.1), never name it alone, and
-        // its port ties it to the network's records
+        // * the handle drawn as the connection is taken, by the rank it came at: the client's
+        // address and the peer's port, which another connection may share (RFC 9293 §3.4.1), never
+        // name it alone, and its port ties it to the network's records
         var arrival = Interlocked.Increment(ref _arrivals);
         var drawnHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port};ordinal={arrival}";
         var (socket, connectionHandle) = Accepted?.Invoke(accepted, drawnHandle) ?? (accepted, drawnHandle);

@@ -384,7 +384,8 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
  * case's options on the transport and its limits on the router, every layer on the transport's
  * `clock`, given the interop service's credentials. Over HTTP, its transport is given them as they
  * are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself; its server layer, its own
- * connection timeout. Over WebSocket, its transport takes the `hosts` and `origins` alike.
+ * connection timeout. Over WebSocket, its transport takes the `hosts`, `origins` and
+ * `trustedProxies` alike.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
@@ -402,6 +403,7 @@ const serverOf = (
         hosts: bounds.hosts,
         maxPayload: maximumMessageBytes,
         origins: bounds.origins,
+        trustedProxies: bounds.trustedProxies,
         WebSocketServer,
       },
     });
