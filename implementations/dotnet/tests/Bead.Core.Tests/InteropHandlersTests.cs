@@ -3,34 +3,45 @@ using Bead.Interop;
 
 namespace Bead.Tests;
 
-/// <summary><see cref="InteropHandlers"/>: what <c>endSessionsOf</c> takes.</summary>
+/// <summary>
+/// <see cref="InteropHandlers"/>: what <c>endSessionsOf</c> takes, by <c>verifiers.endSessionsOf</c>
+/// of <c>spec/interop-service.json</c>, which the TypeScript side's handler answers alike.
+/// </summary>
 public sealed class InteropHandlersTests
 {
+    // constants
+
+    private static readonly JsonElement EndSessionsOf = Load().GetProperty("verifiers").GetProperty("endSessionsOf");
+
+    // helpers
+
+    private static JsonElement Load()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "interop-service.json")));
+
+        return document.RootElement.Clone();
+    }
+
+    // definition
+
     [Fact]
     public void The_interop_service_s_endSessionsOf_takes_an_issuer_alone_a_string_and_throws_for_anything_else()
     {
-        const string Issuer = "https://hs256.interop.bead.example";
+        var refusal = EndSessionsOf.GetProperty("refusal").GetString();
 
-        Assert.Equal(Issuer, InteropHandlers.IssuerOf(JsonSerializer.SerializeToElement(new { issuer = Issuer })));
-        Assert.Equal("", InteropHandlers.IssuerOf(JsonSerializer.SerializeToElement(new { issuer = "" })));
+        foreach (var taken in EndSessionsOf.GetProperty("takes").EnumerateArray())
+        {
+            Assert.Equal(taken.GetProperty("issuer").GetString(), InteropHandlers.IssuerOf(taken.GetProperty("request")));
+        }
 
-        foreach (var request in new[]
+        foreach (var request in EndSessionsOf.GetProperty("refuses").EnumerateArray())
         {
-            "[]",
-            "null",
-            "7",
-            "\"https://hs256.interop.bead.example\"",
-            "{}",
-            "{\"issuer\":7}",
-            "{\"issuer\":null}",
-            "{\"issuer\":\"https://hs256.interop.bead.example\",\"sub\":\"grace\"}",
-            "{\"iss\":\"https://hs256.interop.bead.example\"}",
-        })
-        {
-            Assert.Throws<ArgumentException>(() =>
+            var thrown = Assert.Throws<ArgumentException>(() =>
             {
-                return InteropHandlers.IssuerOf(JsonSerializer.Deserialize<JsonElement>(request));
+                return InteropHandlers.IssuerOf(request);
             });
+
+            Assert.Equal(refusal, thrown.Message);
         }
     }
 }

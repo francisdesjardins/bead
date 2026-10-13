@@ -102,9 +102,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `spec/conversations.json` pins the interop's failure details, fail's, ticks', denied's, logout's
   and register's, and each credit's `paced`, which its schema requires and `metrics.json`'s exits
   repeat; the generators take each interop code from the blueprint's catalogue, and `spec/check.py`
-  holds each "code N" of `interop-service.json`'s prose to it; the runners play `stop`, pongs,
-  reserved opcodes and an uncaptured `{name}` alike, and the C# codecs runner refuses an encoding it
-  does not name.
+  holds each "code N" of `interop-service.json`'s prose to it; `interop-service.json`'s `verifiers`
+  holds the ELSEWHERE verifier's verdicts and what `endSessionsOf` takes and refuses, which both
+  sides' interop tests read; the runners play `stop`, pongs, reserved opcodes and an uncaptured
+  `{name}` alike, and the C# codecs runner refuses an encoding it does not name.
 
 ### Removed
 

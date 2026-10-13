@@ -8,7 +8,8 @@
     "notifies: what a notification procedure notifies its subscribers.",
     "relay: what the interop server's relay admits, what it forwards, and whether it verifies what it forwards. Its destinations are its clients' connections, each registered by register, with the audience it verifies or with none, and taken out by unregister.",
     "credentials: what the interop server resolves a request's credential with, by its scheme. elsewhere is its ELSEWHERE verifier: what it reads, the grammar of the values it holds, in ABNF (RFC 5234, where a string is case-insensitive, and RFC 7405, where %s makes one case-sensitive), and what it settles with.",
-    "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's deadline at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other."
+    "credentials.jwt: what the interop server verifies a JWT with (section 13.8), its clients given its keys and its audience alike, for the commands they receive. keys are two issuers' published test keys, each a JWK with its issuer and its one algorithm, whose private halves anyone can read: no configuration outside spec/, the tests and the interop service names one. audience is the audience the server verifies. keySet is the key set the server is given besides: issuers, the issuers it answers for, which the server is given with it, each with the keys it answers, published test keys, and what it answers, on the server's clock; maximumWaitingCalls, the most calls that wait for one issuer's deadline at once, which the server is given with it, small so that a conversation passes it; answers, what it does asked for any other.",
+    "verifiers: what both sides' interop tests hold the interop service's own readers to, read from here. elsewhere, each value its ELSEWHERE verifier is given, as its transport carried it, and its verdict: holds, with the sub its session takes as its id and in its data, and its end when it has one; none; or rejects, with its rejection; at once, or once after milliseconds passed on its server's clock. endSessionsOf, the requests it takes, each with the issuer it reads, and those it refuses, each by throwing its refusal."
   ],
   "specVersion": "0.3.0",
   "relay": {
@@ -206,6 +207,157 @@
         "end         = %x31-39 *15DIGIT  ; milliseconds since the epoch, at most 9007199254740991, 2⁵³ − 1 (spec 1.2)"
       ],
       "settles": "a value of holding with a credential's session: its id sub, its data the JSON object {\"sub\":sub}, given as each side gives a JWT's claims set (spec 13.8), and its end when the value gives one, none otherwise; a value of failing by rejecting, its error \"this verifier fails, on purpose\", which its server answers with PROCEDURE_FAILED and reports; either once after milliseconds passed, on a timer armed on the clock its server is given (decision 0011), whatever its signal, so that its settling may come once its call ended, which its server drops in silence (spec 10.2); without after, at once; any other value, an after or an end past its bound among them, with none: the credential does not hold, which its server refuses with SESSION_REQUIRED, detail \"the credential does not hold\", as it does a session whose end its wall clock has reached as the verifier settles (spec 13.10)"
+    }
+  },
+  "verifiers": {
+    "elsewhere": {
+      "rejection": "this verifier fails, on purpose",
+      "verdicts": [
+        {
+          "carried": "Interop sub=ada",
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "interop sub=ada",
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "INTEROP sub=ada",
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "Interop sub=a",
+          "verdict": "holds",
+          "sub": "a"
+        },
+        {
+          "carried": "Interop sub=abcdefghijklmnopqrstuvwxyzabcdef",
+          "verdict": "holds",
+          "sub": "abcdefghijklmnopqrstuvwxyzabcdef"
+        },
+        {
+          "carried": "Interop sub=abcdefghijklmnopqrstuvwxyzabcdefa",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=Ada",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop  sub=ada",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada,after=1",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, after=0",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, after=2147483647",
+          "after": 2147483647,
+          "verdict": "holds",
+          "sub": "ada"
+        },
+        {
+          "carried": "Interop sub=ada, after=2147483648",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, end=9007199254740991",
+          "verdict": "holds",
+          "sub": "ada",
+          "end": 9007199254740991
+        },
+        {
+          "carried": "Interop sub=ada, end=9007199254740992",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, end=1, after=1",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, SUB=x",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop fail=true",
+          "verdict": "rejects"
+        },
+        {
+          "carried": "Interop fail=true, after=5",
+          "after": 5,
+          "verdict": "rejects"
+        },
+        {
+          "carried": "Interop fail=TRUE",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop sub=ada, fail=true",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop",
+          "verdict": "none"
+        },
+        {
+          "carried": "Interop ",
+          "verdict": "none"
+        },
+        {
+          "carried": "Bearer mF_9.B5f-4.1JqM",
+          "verdict": "none"
+        },
+        {
+          "carried": "Basic YWRh",
+          "verdict": "none"
+        }
+      ]
+    },
+    "endSessionsOf": {
+      "takes": [
+        {
+          "request": {
+            "issuer": "https://hs256.interop.bead.example"
+          },
+          "issuer": "https://hs256.interop.bead.example"
+        },
+        {
+          "request": {
+            "issuer": ""
+          },
+          "issuer": ""
+        }
+      ],
+      "refuses": [
+        null,
+        7,
+        "https://hs256.interop.bead.example",
+        ["https://hs256.interop.bead.example"],
+        [],
+        {},
+        {
+          "issuer": 7
+        },
+        {
+          "issuer": null
+        },
+        {
+          "issuer": "https://hs256.interop.bead.example",
+          "sub": "grace"
+        },
+        {
+          "iss": "https://hs256.interop.bead.example"
+        }
+      ],
+      "refusal": "endSessionsOf names an issuer by {\"issuer\"} alone, a string"
     }
   }
 }

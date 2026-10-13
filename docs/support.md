@@ -120,6 +120,14 @@ that a test of each side does:
   `Bead.Transport.Http.Tests/HttpTransportClientTests`
   (`says at connect that it listens, then listens: …`,
   `listens again from where it was when a listen is lost …`);
+- the interop service's own readers, by `spec/interop-service.json`'s `verifiers`: its
+  `ELSEWHERE` verifier's verdicts and what `endSessionsOf` takes and refuses,
+  `router/server/__tests__/conversations.test.ts`
+  (`the interop service’s ELSEWHERE verifier holds, refuses and fails each value as its words say, at its time on its server’s clock`,
+  `the interop service’s endSessionsOf takes an issuer alone, a string, and throws for anything else`)
+  and `Bead.Core.Tests/InteropCredentialsTests` and `InteropHandlersTests`, each twin named by the
+  same sentence; and `undefined`, which no JSON value is and only a TypeScript caller passes,
+  refused on the TypeScript side alone;
 - a destination that is a router the relay calls through, with its two legs' limits and the session
   every requester presenting none or `OPAQUE` shares behind it (spec 14.3 and 14.7):
   `router/server/__tests__/relay.test.ts` and `Bead.Core.Tests/RelayTests`, until the interop plays a

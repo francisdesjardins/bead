@@ -429,6 +429,14 @@ for code in re.findall(r'\bcode (\d+)', ' '.join(prose_of({key: value for key, v
         problems.append(f'interop-service.json names code {code}, which is no failure of interop-blueprint.json\'s '
                         'catalogue')
 
+# the rejection both sides' tests read of the ELSEWHERE verifier is the error its words settle with
+elsewhere = documents['interop-service']['credentials'].get('elsewhere', {})
+rejection = documents['interop-service']['verifiers']['elsewhere']['rejection']
+
+if f'its error "{rejection}"' not in elsewhere.get('settles', ''):
+    problems.append(f'interop-service.json: verifiers.elsewhere rejects with {rejection!r}, which is not the error '
+                    'credentials.elsewhere.settles states')
+
 vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]
 named = {group: vectors[group] for group in groups}
