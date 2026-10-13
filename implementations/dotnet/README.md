@@ -47,7 +47,8 @@ interop/
     InteropCredentials.cs       its credentials: the key set and the verifier
   BannedSymbols.txt             what the banned-API analyzer refuses there: the service manager,
                                 called through the generated server and client
-  Bead.Interop.Server/          its server, which the TypeScript side's interop calls
+  Bead.Interop.Server/          its server, which the TypeScript side's interop and its page of
+                                another origin call
 tests/
   Bead.*.Tests/                 a project's tests, beside it by name
   Bead.Goldens/                 the builder's C# goldens, builder/test/golden/csharp, compiled
@@ -125,7 +126,22 @@ its own origin.
 
 `Origins` names the origins a request may come from besides the server's own, `http://` or
 `https://` followed by the request's authority, none by default, each compared exactly, `null` among
-them taking every page that sends it. A request with no `Origin` comes from no page, and is taken.
+them taking every page that sends it and, over HTTP, letting each read every answer. A request with
+no `Origin` comes from no page, and is taken.
+
+Over HTTP, the server answers CORS to the origins `Origins` names and to no other (spec 15.12):
+their preflight is answered, allowing `Authorization` and any other field, and every answer to them
+names their origin and exposes every field, so a page of a listed origin connects, calls, listens
+and presents `ELSEWHERE` in `Authorization`. No answer carries `Access-Control-Allow-Credentials`:
+no cookie goes across origins, and a `fetch` given to the TypeScript side's client must not use
+`credentials: 'include'`. A gateway in front that answers CORS for the path stops, or replaces the
+fields rather than appends them, once the server lists the origin: two `Access-Control-Allow-Origin`
+fail the browser's check. A page of the public network reaching a server on the loopback or a
+private address needs besides its user's permission, which the browser asks (Local Network Access),
+in a secure context alone; a secure page reaching `http://` on a private address by a hostname
+passes the browser's mixed-content block only with `targetAddressSpace: 'local'`, which a `fetch`
+given to the TypeScript side's client adds. The server writes nothing for either. A WebSocket
+answers no CORS, which no browser asks of an upgrade.
 
 A server is refused as it is built, an `ArgumentException` naming the option and the entry, a
 `Hosts` entry with a port, an empty one, one that is no host, or `*` beside another; and an

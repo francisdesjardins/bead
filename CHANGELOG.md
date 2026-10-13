@@ -48,6 +48,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `AGAINST_BLUEPRINT`, a warning: an earlier's committed blueprint that its `.proto` contradicts, or
   one named and missing.
 - `clean` in `beadc.yaml`, buf's opt-in removal of what `generate` no longer writes.
+- An HTTP server answers CORS to the origins `origins`, `Origins`, names, and to no other, on both
+  sides: their preflight is answered 204, `Access-Control-Allow-Methods: GET, POST, DELETE`,
+  `Access-Control-Allow-Headers: authorization, *`, `Access-Control-Max-Age: 7200`; every answer to
+  them once their origin is judged names it and exposes every field. A page of a listed origin now
+  connects, calls and listens over HTTP, as it did over WebSocket, its tracing's fields among its
+  requests, and presents `ELSEWHERE` in `Authorization`, which HTTP alone carries (spec 15.12;
+  decision 0027).
+- `yarn test:browser`, on the TypeScript side, in a Playwright config of its own: a page Chromium
+  loads from another origin calls each side's interop server over HTTP with the bundled HTTP client,
+  and CI's .NET job runs it against both. Both interop servers name the origins
+  `BEAD_INTEROP_ORIGINS` lists.
 
 ### Changed
 
@@ -119,6 +130,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds the ELSEWHERE verifier's verdicts and what `endSessionsOf` takes and refuses, which both
   sides' interop tests read; the runners play `stop`, pongs, reserved opcodes and an uncaptured
   `{name}` alike, and the C# codecs runner refuses an encoding it does not name.
+- Every response on an HTTP server's path carries `Vary: Origin`, but HTTP's own 400.
+- A preflight from an origin `origins` names, refused 405 `method-refused` and told, is answered;
+  any other `OPTIONS` is still refused 405.
+- On the TypeScript side, `IHTTPResponseLike` requires `setHeader`, which Node's responses have.
+- `spec.md` 15.12 states the CORS answer, 15.6 a preflight in its order, its 204 and `vary: Origin`,
+  and 15.12's fields rule HTTP's own 400 with none of the path's fields. `transports.json` adds five
+  cases over HTTP, a listed origin's preflight and answers, a preflight judged before its origin, an
+  `OPTIONS` that is no preflight, and `null`; its steps of HTTP's own 400 hold it to none of the
+  path's fields, over HTTP and at a WebSocket's address, and an upgrade from a taken origin to none
+  of CORS's.
 
 - `--except <RULE>@<scope>` names a finding's subject of the rule's kind; a pointer is refused, and
   so is `--except WAIVER_UNUSED`. `SERVICE_SAME_HOOKS` finds once a hook, and `RESERVED_NO_DELETE`'s
@@ -144,6 +165,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On the C# side, HTTP's own 400 at an HTTP server's path carries no `Cache-Control` nor
+  `X-Content-Type-Options`, as the TypeScript side's, Node's and Kestrel's own never did.
 - A `.proto` message marked `deprecated` no longer fails a C# consumer's build through beadc's file,
   nor a TypeScript consumer's lint.
 - beadc makes its temporary folders, `breaking`'s and protoc's, under the project's `.beadc/` where a
@@ -174,6 +197,10 @@ archive` writing a submodule as an empty folder.
 - A server is no longer reachable from the network by default: it listens on the loopback.
 - A WebSocket server no longer takes two sockets from one address and port, to two of its addresses,
   as one connection: each is its own, in its own session, and a stop closes both, 1001.
+- No HTTP answer carries `Access-Control-Allow-Credentials`, so no cookie goes across origins, and a
+  page of an origin no `origins` names reads nothing. Naming `null` in `origins` now lets every page
+  that sends it read an HTTP server's answers too. A page of the public network reaching a server on
+  the loopback or a private address needs, besides, the permission its browser asks of its user.
 
 ## [0.3.0] - 2026-10-12
 

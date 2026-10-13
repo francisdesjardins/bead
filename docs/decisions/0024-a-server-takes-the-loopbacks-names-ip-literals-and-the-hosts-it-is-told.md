@@ -197,7 +197,9 @@ absence, or that is neither `null` nor an origin as
 host in lower case, the host ASCII and of 15.12's grammar, no port where it is the scheme's default
 (`http` and `ws` 80, `https` and `wss` 443), nothing after. A scheme of another kind, an
 extension's or an app shell's, is taken as written, since a browser serializes it so. CORS's
-`Access-Control-Allow-Origin: *` is a response header, never a list a server compares against.
+`Access-Control-Allow-Origin: *` is a response header, never a list a server compares against, and
+one no Bead server writes
+([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)).
 
 **403 `host-refused` stays**, on every listener, under TLS or not: 421 means "retry over a different
 connection" to its client, which is meaningless at a WebSocket's address, and no MUST overrides it.

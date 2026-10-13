@@ -753,7 +753,7 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 | ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                 |
 | 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                          |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing                                                                                                             |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin `origins` names                                                                 |
 | 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed |
 | 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                             |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                              |
@@ -814,15 +814,25 @@ serialized origin it carries (RFC 6454 §6.2), never parsed as a URL: a browser 
 URL alike, and a client that writes a default port, a path or another form on one side alone is
 refused. Any other `Origin` is none of its own, whatever host it names: `null`, an extension's, a
 `blob:` URL's, any scheme but `http` and `https`. So `hosts` is what refuses a page that rebinds its
-name to the server's address, never the origin's test. Over HTTP, `origins` serves a proxy that
-rewrites the host: the server answers no CORS, so a page of another origin is not served yet, and a
-page presents `ELSEWHERE` to its own origin alone: `Authorization` is no field a browser sends
-across origins without a preflight. Over WebSocket no CORS stands in the way, so a listed origin's
-page is served outright, a page of another port of the same machine — a development server — among
-them. Naming `null` takes every request that sends it, from any site: a sandboxed frame's, a `file:`
-or a `data:` page's, and one whose origin a browser withholds, after a cross-origin redirect or
-under a referrer policy. `isProxyTrusted` takes the address a proxy on the same machine forwards in
-`x-forwarded-for` for the client's, which the bound per address counts.
+name to the server's address, never the origin's test. Over HTTP, the server answers CORS to the
+origins `origins` names and to no other (spec 15.12): their preflight is answered, allowing
+`Authorization` and any other field, and every answer to them names their origin and exposes every
+field, so a page of a listed origin connects, calls, listens and presents `ELSEWHERE` in
+`Authorization`. No answer carries `Access-Control-Allow-Credentials`: no cookie goes across
+origins, and a `fetch` given to the client must not use `credentials: 'include'`. A gateway in
+front that answers CORS for the path stops, or replaces the fields rather than appends them, once
+the server lists the origin: two `Access-Control-Allow-Origin` fail the browser's check. A page of
+the public network reaching a server on the loopback or a private address needs besides its user's
+permission, which the browser asks (Local Network Access), in a secure context alone; a secure page
+reaching `http://` on a private address by a hostname passes the browser's mixed-content block only
+with `targetAddressSpace: 'local'`, which a `fetch` given to the client adds. The server writes
+nothing for either. Over WebSocket no CORS stands in the way, so a listed origin's page is served
+outright, a page of another port of the same machine — a development server — among them. Naming
+`null` takes every request that sends it, from any site, and, over HTTP, lets each read every
+answer: a sandboxed frame's, a `file:` or a `data:` page's, and one whose origin a browser
+withholds, after a cross-origin redirect or under a referrer policy. `isProxyTrusted` takes the
+address a proxy on the same machine forwards in `x-forwarded-for` for the client's, which the bound
+per address counts.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,
