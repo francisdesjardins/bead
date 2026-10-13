@@ -79,17 +79,20 @@ share.
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
   503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `x-forwarded-for`
   is read by one rule of its own. `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
+  The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
+  off the machine, HTTPS.
 - **The transports** hold the same ready states on both sides, and the client reconnects alike, its
-  delay, attempts, token and tap, its router rejecting what waited on the connection replaced. A
-  server listens on `127.0.0.1` unless `Start` is given an `Address`, an IP address written bare,
-  RFC 3986's grammar and not the platform's parser's: a container, or any server another machine
-  reaches, says `0.0.0.0` or `::`, and names its hosts; a name, `[::1]`, `127.1` or `0` is an
-  `ArgumentException` as it starts. On the loopback it is secure (spec 13.4); behind a proxy on the
-  same machine that serves the network in the clear, it says `Secure = false`. Both clients race
-  the address families of a name, as RFC 8305 asks and Node's clients and the browsers do, through
-  `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a connect by `localhost` to a server on
-  one family never waits out the other's refusal; an HTTP client given a `Handler` keeps the
-  handler's behaviour.
+  delay, attempts, token and tap, its router rejecting what waited on the connection replaced.
+  Neither client reads a `Retry-After`: a reconnection waits its own schedule, whatever a refusal's
+  `Retry-After` asks (spec 15.7). A server listens on `127.0.0.1` unless `Start` is given an
+  `Address`, an IP address written bare, RFC 3986's grammar and not the platform's parser's: a
+  container, or any server another machine reaches, says `0.0.0.0` or `::`, and names its hosts; a
+  name, `[::1]`, `127.1` or `0` is an `ArgumentException` as it starts. On the loopback it is secure
+  (spec 13.4); behind a proxy on the same machine that serves the network in the clear, it says
+  `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
+  clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
+  connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
+  client given a `Handler` keeps the handler's behaviour.
 - **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
   `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
   own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
@@ -188,6 +191,10 @@ server.Transport.Refusal += (refusal) =>
     Console.Error.WriteLine($"refused {refusal.Status} {refusal.Reason}: authority {JsonSerializer.Serialize(refusal.Authority)}, origin {JsonSerializer.Serialize(refusal.Origin)}, from {refusal.Address}:{refusal.Port}");
 };
 ```
+
+A transport goes on through what its listener throws, and awaits nothing it returns (spec 15.1):
+an `async` lambda given to one of its events is `async void`, whose exception ends the process, so
+a listener catches its own.
 
 Where the platform makes the sides differ, or a difference is still open, the [support
 matrix](../../docs/support.md) has the row and its test.

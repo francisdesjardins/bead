@@ -21,8 +21,9 @@ source when a client connects, and the client presents it on every exchange. The
 sessions and the relays see a connection, as over a socket, and the token names the connection and
 nothing else: a call presents its session or its credential in its own header, or in its exchange's
 `Authorization` ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)). The token is worth
-the session its connection holds: it crosses only TLS off the machine, and no URL, handle, detail or
-log carries it.
+the session its connection holds: it crosses what its exchanges cross, off the machine TLS being the
+deployment's, and in the clear it gives away no more than the exchanges it rides on, the session
+token they carry among them; no URL, handle, detail or log carries it.
 
 **HTTP's transport reads three things of an envelope and nothing else**, its layout, its kind and
 its call id, in the prefix every layout keeps ([0001](0001-the-envelope-sits-at-fixed-offsets.md)),
@@ -91,3 +92,10 @@ listener that throws, whose round
 [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) keeps.
 Where a listen names its acknowledgement and its wait met it with the listen's fields, whose round
 [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md) keeps.
+What the token is worth in the clear met it in a round of its own:
+
+### On the token in the clear
+
+| Objection                                                                                                                                                                                                                                                                                                   | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The client opt-in for plaintext off the machine breaks every plaintext deployment to protect a session that 13.4 already keeps free of bearer credentials. RFC 6750 allows "equivalent transport security", which a scheme cannot show, 0020's sentence would stay false, and the gRPC precedent is misread | In part: no opt-in; the text says what holds. A connection's session can be opened by a procedure that checks credentials (spec 13.1), so it may carry authority, but the clear exposes it whatever the token: the session's `OPAQUE` token is announced and presented on the same exchanges (spec 13.3), and over `ws://` the socket is the connection, with no option at all. So an opt-in would guard nothing the clear does not already give away. Spec 15.4 and this record say what the token is worth in the clear, that TLS off the machine is the deployment's, and that every bearer credential crosses only TLS (spec 13.4) |

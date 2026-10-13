@@ -8,8 +8,8 @@ namespace Bead.Tests;
 
 /// <summary>
 /// <see cref="CredentialResolver"/>: a side's <c>JWT</c>s, verified against its keys and those its
-/// key set answered (spec 13.8), and its <c>ELSEWHERE</c>s, by its verifier (spec 13.10), on the
-/// clock it is given.
+/// key set answered (spec 13.8, 13.9), and its <c>ELSEWHERE</c>s, by its verifier (spec 13.11), on
+/// the clock it is given.
 /// </summary>
 public sealed class CredentialResolverTests
 {

@@ -562,7 +562,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
 
     /// <summary>
     /// Ends a credential's session by its identifier on every connection that keeps it, and nothing
-    /// else: each subscription it bounds fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// else: each subscription it bounds fails SESSION_REQUIRED on its call id (spec 13.10). An
     /// identifier no connection keeps ends nothing. Ending a session refuses no credential: one that
     /// still holds opens it anew, a call that resolved to it before it ended and subscribes as it is
     /// answered after among them. Settles once each failure was tried; one that cannot go out is
@@ -586,7 +586,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// each <see cref="CredentialScheme.Jwt"/>'s session whose identifier's issuer it is, compared
     /// octet for octet, whatever its <c>sid</c> or <c>sub</c>, on every connection that keeps one,
     /// and nothing else — an <see cref="CredentialScheme.Elsewhere"/>'s identifier names no
-    /// issuer. Each subscription they bound fails SESSION_REQUIRED on its call id (spec 13.9). An
+    /// issuer. Each subscription they bound fails SESSION_REQUIRED on its call id (spec 13.10). An
     /// issuer no kept session names ends nothing. Ending a session refuses no credential: one that
     /// still holds opens its session anew, a token a leaked key signed among them while that key
     /// serves. Settles once each failure was tried; one that cannot go out is reported. An issuer

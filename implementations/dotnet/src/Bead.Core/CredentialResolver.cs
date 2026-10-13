@@ -5,13 +5,13 @@ namespace Bead;
 /// <see cref="CredentialScheme.Elsewhere"/> to its credential's session (spec 9.2, step 5), from
 /// the <see cref="Credentials"/> it was given, on the clock it runs on: a JWT verified as section
 /// 13.8 states, its key found among the application's keys and those its key set answered that
-/// serve; an ELSEWHERE by the application's verifier, as section 13.10 states. What does not hold
-/// resolves to none; what fails throws, for its call to fail PROCEDURE_FAILED; a call that would
-/// wait for its issuer's deadline past the calls its key set lets wait, as it comes or as an answer
-/// moves it there, throws a <see cref="RefusalException"/>, for its call to be refused
-/// CAPACITY_EXCEEDED, unreported; a call on an ask is never counted. Its
-/// key set's state is kept under a lock, so calls of any thread find an ask under way, and what an
-/// ask's deadline does is posted where the side runs.
+/// serve, as section 13.9 states; an ELSEWHERE by the application's verifier, as section 13.11
+/// states. What does not hold resolves to none; what fails throws, for its call to fail
+/// PROCEDURE_FAILED; a call that would wait for its issuer's deadline past the calls its key set
+/// lets wait, as it comes or as an answer moves it there, throws a
+/// <see cref="RefusalException"/>, for its call to be refused CAPACITY_EXCEEDED, unreported; a
+/// call on an ask is never counted. Its key set's state is kept under a lock, so calls of any
+/// thread find an ask under way, and what an ask's deadline does is posted where the side runs.
 /// </summary>
 internal sealed class CredentialResolver
 {

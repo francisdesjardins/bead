@@ -1,8 +1,11 @@
 # Bead
 
-What every implementation of Bead does, stated once. The key words MUST, MUST NOT, SHOULD and MAY
-are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
-[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when in capitals.
+What every implementation of Bead does, stated once. The key words "MUST", "MUST NOT", "REQUIRED",
+"SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and
+"OPTIONAL" in this document are to be interpreted as described in
+[BCP 14](https://www.rfc-editor.org/info/bcp14) [[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)]
+[[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)] when, and only when, they appear in all
+capitals, as shown here.
 
 Each file of entries is named, on a line of its own, by a section whose clauses it plays, a group
 of [`vectors.json`](vectors.json) by its name, and each entry cites the units it checks:
@@ -34,12 +37,16 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   section 15;
 - [0021](../docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md): a broker,
   section 15;
+- [0022](../docs/decisions/0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md):
+  the blueprint, the interop's files and their schema, sections 16 and 17;
 - [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
   a transport's listener that throws, and its stop, section 15;
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md):
   a server's hosts, and a request's authority, section 15;
 - [0025](../docs/decisions/0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md): a
   connection's handle, section 15;
+- [0026](../docs/decisions/0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md):
+  a refusal a server tells, the fields it takes, and what a client names of one, section 15;
 - [0027](../docs/decisions/0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md):
   CORS over HTTP, to the origins a server names, section 15;
 - [0028](../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md):
@@ -48,8 +55,10 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   listen's cursor and wait in fields, section 15.9.
 
 **Version: 0.3.0**, of layout `0xA1`. Each of its conformance files repeats it as its
-`specVersion`, and follows its schema in [`schemas/`](schemas/). **Status: every section is
-written; one point is open, section 8.3.**
+`specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
+[`interop-blueprint.json`](interop-blueprint.json), and what its service does,
+[`interop-service.json`](interop-service.json), are files of this version, which the conversations
+play. **Status: every section is written; one point is open, section 8.3.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
@@ -78,9 +87,10 @@ limit, a session's or a transport's bound, a delay — is held as a whole number
 1 to 2³¹ − 1, as every platform's timers hold one alike, a fraction rounded to the nearest, a half
 up. A side MUST refuse one that, as given, is under a millisecond or past 2³¹ − 1, a delay's 0
 aside, and a value that is no number: NaN, or a string or a boolean, as a limit read from JSON may
-be. A timeout or a bound is never 0, and may be without end but where its place says it may not;
-one not given is its default. A delay — a wait before an act: a pause, a reconnection's wait, the
-`wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at once.
+be. A timeout or a bound is never 0, and may be without end but where its place says it is never
+without end; one not given is its default. A delay — a wait before an act: a pause, a reconnection's
+wait, the `wait` a client's listens ask (section 15.10) — is never without end, and takes 0 as at
+once.
 
 ## 2. The prefix
 
@@ -282,14 +292,14 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
 takes no more: a notification past its subscription's queue (section 11.10), a transfer past those
 its connection receives at once or past the budget left (section 12.3), a call past those that wait
-for an issuer's deadline (section 13.8). A requester gives it, too, to a call of its own it has no
+for an issuer's deadline (section 13.9). A requester gives it, too, to a call of its own it has no
 call id free for (section 9.1). It says nothing against the call's credential, and withdraws none
 (section 13.4).
 
 8.3. Open in this version: nothing bounds the calls a peer holds open to its receiver over a
 transport that keeps its connection, a WebSocket or a Web Worker. The receiver holds each request it
 took until it is answered, cancelled, or its connection closes (section 9.10), each with its payload
-whole, a request whose credential still resolves among them (section 13.8), and refuses none of them
+whole, a request whose credential still resolves among them (section 13.9), and refuses none of them
 for their number. Over HTTP, `maximumWaitingExchanges` bounds them, a refusal of the transport's own
 (section 15.12), not this code. A bound of the protocol's, refused with `CAPACITY_EXCEEDED` as a
 receiver takes the request (section 9.2), as HTTP/2 bounds the streams a peer opens
@@ -337,10 +347,10 @@ first that applies:
       requires; its detail SHOULD say whether no credential came or one came and did not hold:
       `no credential came`, or `the credential does not hold`. A verifier that fails — it throws
       or rejects, its key set's ask fails, unreached or unsettled as its deadline is reached
-      (section 13.8) — is answered with `PROCEDURE_FAILED`, and reported, never with
+      (section 13.9) — is answered with `PROCEDURE_FAILED`, and reported, never with
       `SESSION_REQUIRED`, which would have its requester withdraw a credential that holds
       (section 13.4). A `JWT` that would wait for its issuer's deadline past the calls the
-      receiver lets wait for it, as it comes or as an answer moves it there (section 13.8), is
+      receiver lets wait for it, as it comes or as an answer moves it there (section 13.9), is
       answered with `CAPACITY_EXCEEDED`, in the turn it would have waited, and not reported:
       nothing failed, and its requester withdraws nothing (section 8.2);
    3. its admission, synchronous, on the call's session: answered with the admission's failure —
@@ -467,7 +477,7 @@ and takes away what the call subscribed before it.
 call's id, and that session bounds it (section 13.6). A connection's session and a call presenting
 none count as one session for this, the connection's, so a connection whose calls present no
 credential holds one subscription per procedure; calls whose credentials resolve to one identifier
-are of one credential's session, whatever token each presented (section 13.9). A later request of
+are of one credential's session, whatever token each presented (section 13.10). A later request of
 the same session that opens a subscription to the same procedure is answered, and holds nothing;
 one of another session takes one of its own. Should the later request be answered while the first
 call is still unanswered, it waits: if the first call then fails, is cancelled, or its answer does
@@ -604,7 +614,8 @@ and by the side that answers with a failure on its call id:
   the requester receiving a result's ends the call with it, and cancels it;
 - `TRANSFER_STALLED`: the side receiving a request's payload, or sending a result's, answers with
   it once nothing came — no chunk, no credit — for `transferInactivityTimeout`; the requester ends
-  its call as timed out after as long, and cancels it.
+  its call as timed out after as long, and cancels it; the side sending a result's transfer reports
+  its stall as well.
 
 12.8. While a payload or its result goes as a transfer, the transfer's inactivity governs the call:
 each chunk placed and each credit that grants sets it going again. The call's own timeout counts
@@ -722,7 +733,7 @@ failure of section 13.6, should one go out first — announces the end.
 13.6. A session that ends ends the subscriptions it bounds (section 11.3): a connection's session,
 those of its connection that no credential's session bounds; a credential's session, those its
 calls hold on each connection that keeps it, at its end, or by its identifier or its issuer
-(section 13.9). Each is answered with a failure on its call id, `SESSION_REQUIRED`; a call still
+(section 13.10). Each is answered with a failure on its call id, `SESSION_REQUIRED`; a call still
 unanswered is left to its own answer. The connection stays, to open another session.
 
 13.7. A connection's session has two inactivity timeouts: past its session timeout, the session
@@ -795,65 +806,69 @@ A key not shaped for its algorithm — an `ES256` one that is not `EC` on `P-256
 bytes each, an `HS256` one that is not `oct`, its `k` 32 bytes at least (RFC 7518 §3.2) — is the
 application's fault, never the token's: the verifier fails, and refuses nothing.
 
-A side may be given a key set besides its keys, with the issuers it answers for, one at least, and
-the most calls that wait for one issuer's deadline at once, `maximumWaitingCalls`, _M_: a whole
+_Vectors: `jwtVerdicts`._
+
+13.9. A side may be given a key set besides its keys, with the issuers it answers for, one at least,
+and the most calls that wait for one issuer's deadline at once, `maximumWaitingCalls`, _M_: a whole
 number from 1 to 2³¹ − 1, 64 when not given. A key set given with no issuer, or with an _M_ outside
 those bounds, is the application's fault, refused as the side is built. Asked for one of its
 issuers, with a signal, it answers that issuer's keys (RFC 7517 §5), each a JWK with its one
-algorithm, and may wait. The side asks it for no other issuer, compared octet for octet: a token
-whose `iss` it does not name is judged at once by the keys there are, asking nothing, so no peer has
-it asked for an issuer of the peer's choosing. The side asks it once a minute at most for an issuer:
-an ask sets that issuer's deadline a minute past the reading at which it goes, on the side's
-monotonic reading (decision 0011), and its signal aborts as that deadline is reached. A deadline is
-reached once that reading is at it or past it, wherever the side reads that issuer's state — as a
-call of that issuer comes, as an answer comes, as the deadline's timer fires — whichever is first,
-and never as a call leaves its wait, which reads nothing of it: the timer, which may fire late, only
-makes sure it is reached when nothing else reads it. An ask that fails — the key set throws or
-rejects, answers what is not keys shaped for their algorithms, or is unsettled as its deadline is
-reached, what it settles to at or past that deadline being dropped — fails the verifier of every
-call that waits on it (section 9.2, step 5), as a key set that cannot be reached does.
+algorithm, and may wait. The side fetches nothing itself: the key set is the application's to fetch.
+It asks the key set, holds the keys an answer gives, and has a call wait for them as follows:
 
-The keys an answer gave are held for its issuer, beside the application's, in place of those its
-last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
-reading is before the answer's plus 600,000 ms, and an ask that fails replaces none of them. The
-application's own keys are held for good. Step 4 finds a key among the application's keys, in the
-order given, then the held keys that serve, an issuer's in the order its answer gave them.
+1. The side asks it for no other issuer, compared octet for octet: a token whose `iss` it does not
+   name is judged at once by the keys there are, asking nothing, so no peer has it asked for an
+   issuer of the peer's choosing.
+2. The side asks it once a minute at most for an issuer: an ask sets that issuer's deadline a minute
+   past the reading at which it goes, on the side's monotonic reading (decision 0011), and its
+   signal aborts as that deadline is reached. A deadline is reached once that reading is at it or
+   past it, wherever the side reads that issuer's state — as a call of that issuer comes, as an
+   answer comes, as the deadline's timer fires — whichever is first, and never as a call leaves its
+   wait, which reads nothing of it: the timer, which may fire late, only makes sure it is reached
+   when nothing else reads it.
+3. An ask that fails — the key set throws or rejects, answers what is not keys shaped for their
+   algorithms, or is unsettled as its deadline is reached, what it settles to at or past that
+   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step 5),
+   as a key set that cannot be reached does.
+4. The keys an answer gave are held for its issuer, beside the application's, in place of those its
+   last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
+   reading is before the answer's plus 600,000 ms, and an ask that fails replaces none of them. The
+   application's own keys are held for good. Section 13.8's step 4 finds a key among the
+   application's keys, in the order given, then the held keys that serve, an issuer's in the order
+   its answer gave them.
+5. A token the keys that serve verify waits for nothing. One of an issuer the key set names, which
+   they do not verify, waits for that issuer's keys while its key does not serve: while its `kid`
+   names none of its issuer's keys that serve, whatever another issuer's key names, as a verifier
+   asks again for a `kid` it does not know (OpenID Connect Core 1.0 §10.1.1); or, without a `kid`,
+   while none of its issuer's keys serve — none given, none answered yet, or all past their ten
+   minutes — as a `kid` that names none waits, so a side that starts asks for them. It waits on its
+   issuer's ask under way, when one is; otherwise, before that issuer's deadline, for the deadline
+   and the ask that goes then, shared by every call that waits — at a deadline no call waits for,
+   none goes; otherwise, on an ask that goes at once. A call that comes at or past its issuer's
+   deadline on the reading, before the deadline's timer fired, reaches the deadline as it comes: an
+   ask still unsettled has failed then, and the ask the deadline lets go goes then, for the calls
+   that waited for it and for the call that comes, when it waits. An ask went after a token came
+   unless the token found it under way: the ask a token sets off as it comes — at once, or at a
+   deadline its coming reaches — and the ask that goes at a deadline it waited for each went after
+   it came. As an ask answers, each call that waits on it is judged again: one whose key now serves,
+   or whose ask went after its token came, is verified against the keys that serve, so a `kid` that
+   answer did not name is refused then, at section 13.8's step 4 or past it; any other waits on, for
+   the deadline and the ask then, since an ask that went before its token came might not know its
+   key.
+6. At most _M_ calls wait for one issuer's deadline at once, each issuer's apart. A call that waits
+   on an ask is not counted: the key set's own latency bounds its wait, and the ask's deadline. A
+   call is counted as it starts to wait for the deadline, and as an answer moves it there from an
+   ask that went before its token came, the calls that answer moves taken in the order they came to
+   that ask: one that would wait past _M_ is refused `CAPACITY_EXCEEDED` then, in the turn it would
+   have waited, and not reported (section 9.2, step 5). A call holds its place while it waits for
+   the deadline: at the deadline, the calls that waited for it wait on the ask that goes then, and
+   hold none there, and a call that leaves frees its own. A peer that sends tokens whose `kid` no
+   key names holds no more than _M_ calls, and what they carry, for an issuer's deadline, and any
+   more no longer than an ask takes to settle, a minute at most.
+7. A call's own signal — its cancel, which its requester's timeout sends as well (section 9.9), or
+   its connection closing (section 9.10) — ends its own wait, never the ask.
 
-A token the keys that serve verify waits for nothing. One of an issuer the key set names, which they
-do not verify, waits for that issuer's keys while its key does not serve: while its `kid` names none
-of its issuer's keys that serve, whatever another issuer's key names, as a verifier asks again for a
-`kid` it does not know (OpenID Connect Core 1.0 §10.1.1); or, without a `kid`, while none of its
-issuer's keys serve — none given, none answered yet, or all past their ten minutes — as a `kid` that
-names none waits, so a side that starts asks for them. It waits on its issuer's ask under way, when
-one is; otherwise, before that issuer's deadline, for the deadline and the ask that goes then,
-shared by every call that waits — at a deadline no call waits for, none goes; otherwise, on an ask
-that goes at once. A call that comes at or past its issuer's deadline on the reading, before the
-deadline's timer fired, reaches the deadline as it comes: an ask still unsettled has failed then,
-and the ask the deadline lets go goes then, for the calls that waited for it and for the call that
-comes, when it waits. An ask went after a token came unless the token found it under way: the ask a
-token sets off as it comes — at once, or at a deadline its coming reaches — and the ask that goes at
-a deadline it waited for each went after it came. As an ask answers, each call that waits on it is
-judged again: one whose key now serves, or whose ask went after its token came, is verified against
-the keys that serve, so a `kid` that answer did not name is refused then, at step 4 or past it; any
-other waits on, for the deadline and the ask then, since an ask that went before its token came may
-not know its key.
-
-At most _M_ calls wait for one issuer's deadline at once, each issuer's apart. A call that waits on
-an ask is not counted: the key set's own latency bounds its wait, and the ask's deadline. A call is
-counted as it starts to wait for the deadline, and as an answer moves it there from an ask that went
-before its token came, the calls that answer moves taken in the order they came to that ask: one
-that would wait past _M_ is refused `CAPACITY_EXCEEDED` then, in the turn it would have waited, and
-not reported (section 9.2, step 5). A call holds its place while it waits for the deadline: at the
-deadline, the calls that waited for it wait on the ask that goes then, and hold none there, and a
-call that leaves frees its own. A peer that sends tokens whose `kid` no key names holds no more than
-_M_ calls, and what they carry, for an issuer's deadline, and any more no longer than an ask takes
-to settle, a minute at most. A call's own signal — its cancel, which its requester's timeout sends
-as well (section 9.9), or its connection closing (section 9.10) — ends its own wait, never the ask.
-The side fetches nothing itself: the key set is the application's to fetch.
-
-_Vectors: `jwtVerdicts`._
-
-13.9. A credential's session ends at its end, on a timer that reads the wall clock again at each
+13.10. A credential's session ends at its end, on a timer that reads the wall clock again at each
 step, on the clock its side runs on (decision 0011):
 
 1. its end, _E_, is a whole number of milliseconds since the epoch: for a `JWT`, _X_ + 60,000, _X_
@@ -869,7 +884,7 @@ step, on the clock its side runs on (decision 0011):
    before, so an end is never refused for its distance, and a wall clock set by hand takes effect at
    the next due;
 4. an `ELSEWHERE` whose end _W_ has reached when its verification settles does not hold:
-   `SESSION_REQUIRED` (section 13.10).
+   `SESSION_REQUIRED` (section 13.11).
 
 A side keeps a credential's session, per connection and identifier, only while it bounds a
 subscription (section 11.3): its end, the later of those its calls resolved to, and the
@@ -892,7 +907,7 @@ connection — ends the subscriptions it bounds (section 13.6). A token under a 
 `exp` an hour past the reading that times its session, arms 3,660,000 ms; one 30 days past,
 2,147,483,647 ms, then 444,576,353.
 
-13.10. A side resolves an `ELSEWHERE` by its verifier, the application's: a side given none takes
+13.11. A side resolves an `ELSEWHERE` by its verifier, the application's: a side given none takes
 no `ELSEWHERE` (section 9.2, step 5). It asks the verifier once per request that presents one and
 whose transport carried a credential, in a later turn, with what that transport carried, whole
 (section 15.1), and the call's signal, aborted once the call ends while it resolves (sections 9.10,
@@ -1040,30 +1055,34 @@ names each connection it holds by a handle, which its router, its sessions and i
 connection by, and what it reports (`debugging.md` 4.1, 5.1). It draws the handle as it takes the
 connection, never from the peer's address alone, which another connection may share
 ([RFC 9293 §3.4.1](https://www.rfc-editor.org/rfc/rfc9293#section-3.4.1)), and gives none twice:
-no two connections it holds are one, and its bounds, its gauges and its stop reach each. A handle
-is no secret, and carries none (section 15.4); its form is its implementation's, written for a
-reader of a trace, and an application compares a handle whole. A transport reads nothing of an
-envelope but what this section says; what it refuses of its own is no envelope, and the router never
-sees it. A side calls each listener of its transport's events — a connection opened, an envelope, a
-listen, a close, a refusal — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3):
-what one throws is reported, as section 9.0 reports an error, by its transport with the connection
-it was told of; the listeners after it are called all the same, and the transport goes on as if it
-returned. A listener's throw refuses no connection, fails no exchange and closes nothing. A server's
-transport tells each refusal it judges of its own: a request it refuses as it arrives, in section
-15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never tells the 404
-that ends an exchange or a listen it had taken as their connection closes (section 15.7), which its
-close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its status, its
-reason, the request's authority and its `Origin`, each as it came, the field's lines joined by ", "
+no two connections it holds are one, and its bounds, its gauges and its stop reach each. A server's
+transport stops when its application stops it: from then on it takes nothing new (sections 15.2,
+15.7) and it closes each connection it holds (sections 15.3, 15.7). A handle is no secret, and
+carries none (section 15.4); its form is its implementation's, written for a reader of a trace, and
+an application compares a handle whole. A transport reads nothing of an envelope but what this
+section says; what it refuses of its own is no envelope, and the router never sees it. A side calls
+each listener of its transport's events — a connection opened, an envelope, a listen, a close, a
+refusal — within a guard, as it calls a debug listener (`debugging.md` 2.2, 2.3): what one throws is
+reported, as section 9.0 reports an error, by its transport with the connection it was told of; the
+listeners after it are called all the same, and the transport goes on as if it returned. A side
+awaits nothing a listener returns: what it settles to later is its platform's, as is what a listener
+of the transport's own `error` throws. A listener's throw refuses no connection, fails no exchange
+and closes nothing. A server's transport tells each refusal it judges of its own: a request it
+refuses as it arrives, in section 15.6's order, or whose body it refuses as it comes, marked in
+`bead-refusal`. It never tells the 404 that ends an exchange or a listen it had taken as their
+connection closes (section 15.7), which its close tells, nor what HTTP refuses of its own, unmarked.
+A refusal told carries its status, its reason, the request's authority and its `Origin`, each as it
+came, the field's lines joined by ", "
 ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
 address and port (section 15.12); nothing else of the request, so neither its target, nor its
 connection's token, nor a credential. It names no connection: a refusal is a request's, and a
 listener's throw is reported with none. A connection that closes ends what was under way on it
-(sections 9.4, 12.10, 13.7). A transport may carry a credential beside an envelope, both ways: it
-hands the router what it carried with an envelope it took, and carries what the router gives it with
-one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2, step
-5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header says,
-whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's `POST`
-(section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
+(sections 9.4, 9.10, 12.10, 13.7). A transport may carry a credential beside an envelope, both ways:
+it hands the router what it carried with an envelope it took, and carries what the router gives it
+with one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2,
+step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header
+says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's
+`POST` (section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
 credential beside an envelope it sends, and whether it is secure — under TLS, on the loopback, or
 never leaving the machine — so that a side fails before it goes a call whose credential it cannot
 carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
@@ -1076,47 +1095,53 @@ each binary message one envelope. A text message is no envelope: the receiver re
 `ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket carries no
 credential beside an envelope, either way: a request that presents `ELSEWHERE` on one is refused
 `SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
-before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake
-carried, its `Authorization` among it, is no credential beside an envelope, and never stands for
-`ELSEWHERE`. A server judges a request at its WebSocket's address in this order, and answers the
-first that applies. What HTTP refuses of its own, a `Host` missing or repeated, a target in
-absolute-form it does not read, an authority that is no host, or a field that holds a control
-character or an octet past US-ASCII (section 15.12), its HTTP server answers, unmarked. It takes an
-upgrade from the hosts an HTTP exchange is taken from (section 15.12): a request whose authority
-names a host it does not take, or none, is refused 403, its `bead-refusal` `host-refused`, whatever
-else it holds, since a page that rebinds its name to the server's address is its own origin by its
-authority, and `hosts` is what refuses it. A method other than `GET` or `HEAD` is refused 405, its
-`Allow` naming both ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)). A
-request that asks no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming `websocket`
-([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a `HEAD`, which
-cannot switch; an `HTTP/1.0` request, whose `Upgrade` is ignored; one whose `Upgrade` lists no
-`websocket`, or whose `Connection` lists no `upgrade`, each token compared in any ASCII case, across
-the field's lines ([RFC 9110 §7.8](https://www.rfc-editor.org/rfc/rfc9110#section-7.8)). An upgrade
-whose `Sec-WebSocket-Version` comes in more than one field line is malformed; one of any other
-`Sec-WebSocket-Version` but 13, or of none, is answered 426, `version-refused`, its own
-`Sec-WebSocket-Version` naming 13
-([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)), before any field its
-version shapes. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose
-`Sec-WebSocket-Key` is not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a
-list of distinct tokens, or that has content
-([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)). One that carries an
-`Origin` neither its own nor among those it takes is then refused 403, `origin-refused`, so that the
-`Origin` it judges an upgrade by is the field it judges an exchange by; no same-origin policy guards
-an upgrade, and a page of any origin may ask for one
-([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)). Each of these refusals but
-HTTP's own is marked as section 15.6 says, and told (section 15.1), with `cache-control: no-store`
-and `x-content-type-options: nosniff`, its body empty, and closes its connection; a 426 names
-`upgrade` in its `Connection`. Once its stop began, a server takes no upgrade: one it would take is
-refused 503, `busy`, its `Retry-After` 1
-([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
-[§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), marked as section 15.6 says.
+before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake carried,
+its `Authorization` among it, is no credential beside an envelope, and never stands for `ELSEWHERE`.
+A server judges a request at its WebSocket's address in this order, and answers the first that
+applies:
+
+1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
+   read, an authority that is no host, or a field that holds a control character or an octet past
+   US-ASCII (section 15.12), its HTTP server answers, unmarked.
+2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
+   request whose authority names a host it does not take, or none, is refused 403, its
+   `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
+   server's address is its own origin by its authority, and `hosts` is what refuses it.
+3. A method other than `GET` or `HEAD` is refused 405, its `Allow` naming both
+   ([RFC 9110 §15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6)).
+4. A request that asks no WebSocket is answered 426, `upgrade-required`, its `Upgrade` naming
+   `websocket` ([RFC 9110 §15.5.22](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.22)): a
+   `HEAD`, which cannot switch; an `HTTP/1.0` request, whose `Upgrade` is ignored; one whose
+   `Upgrade` lists no `websocket`, or whose `Connection` lists no `upgrade`, each token compared in
+   any ASCII case, across the field's lines
+   ([RFC 9110 §7.8](https://www.rfc-editor.org/rfc/rfc9110#section-7.8)).
+5. An upgrade whose `Sec-WebSocket-Version` comes in more than one field line is malformed; one of
+   any other `Sec-WebSocket-Version` but 13, or of none, is answered 426, `version-refused`, its own
+   `Sec-WebSocket-Version` naming 13
+   ([RFC 6455 §4.2.2](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.2)), before any field its
+   version shapes.
+6. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose `Sec-WebSocket-Key` is
+   not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a list of distinct
+   tokens, or that has content
+   ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)).
+7. An upgrade that carries an `Origin` neither its own nor among those it takes is then refused 403,
+   `origin-refused`, so that the `Origin` it judges an upgrade by is the field it judges an exchange
+   by; no same-origin policy guards an upgrade, and a page of any origin may ask for one
+   ([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)).
+8. Once its stop began, a server takes no upgrade: one it would take is refused 503, `busy`, its
+   `Retry-After` 1 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
+   [§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)).
+
+Each of these refusals but HTTP's own is marked as section 15.6 says, and told (section 15.1), with
+`cache-control: no-store` and `x-content-type-options: nosniff`, its body empty, and closes its
+connection; a 426 names `upgrade` in its `Connection`.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
 side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
 connection that left a ping unanswered, so a peer gone without a word ends in a close. A side that
-closes says 1000; a server that stops, 1001, to each connection it holds, one that registers as its
-stop begins among them. A close with 1000 is the clean one.
+closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
+handshake completes as its stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1130,7 +1155,10 @@ the same header, and a `DELETE /bead` ends the connection. The router, the sessi
 see a connection, as over a socket. The connection's token names the connection and nothing else —
 no session, no credential, which a call presents in its own header or its `POST`'s
 `Authorization` (section 15.5) — and is written nowhere but in its header: no handle, no event, no
-report carries it.
+report carries it. Off the machine, the token crosses what its exchanges cross. Under TLS it is kept
+as they are. In the clear, an on-path observer reads it as it reads the exchanges and the session
+token they carry (section 13.3), as over a WebSocket in the clear. TLS off the machine is the
+deployment's, and every bearer credential crosses only TLS off the machine (section 13.4).
 
 15.5. Each `POST /bead` carries one envelope, of type `application/prs.bead`. The transport reads its
 layout, kind and call id, in the prefix every layout keeps (section 2), and nothing else:
@@ -1216,7 +1244,8 @@ it would take is refused 503, `busy`, its `Retry-After` 1
 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
 [§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)), and an exchange it would look up
 by a well-formed token is answered the 404 marked `connection-unknown`, nothing of it handed on, in
-section 15.6's order.
+section 15.6's order. A client MAY wait longer than its reconnection's delay (section 15.10), as a
+`Retry-After` asks ([RFC 9110 §10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)).
 
 15.8. What the server sends of its own — a notification, a request of its own, a cancel, the failure
 that ends a subscription — reaches a client that listens. The client says so at connect,
@@ -1290,7 +1319,7 @@ alike (section 15.10):
 | `connectionInactivityTimeout`  | 30 s                         | the server's own connection timeout (section 13.7)                                |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
-`maximumWait` may not.
+`maximumWait` is never without end.
 
 Past the first four it answers 429 or 503, as section 15.6's table says.
 
@@ -1309,16 +1338,18 @@ name      = *( unreserved / "!" / "$" / "&" / "'" / "(" / ")" )
 port      = 1*DIGIT
 ```
 
-`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's. An authority that is not of it is no
-host, a userinfo and a colon with no port among them. A target in absolute-form is read when it is
-`http://` or `https://`, its scheme in lower case as HTTP servers read it, then an authority that is
-not empty ([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server
-answers 400, as HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host`
-field line, a target in absolute-form it does not read, or an authority that is no host, before it
-reads anything else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no
-refusal of the transport's own, unmarked. The `Host` beside a target in absolute-form is judged as
-one field line alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of
-a request whose authority is no host, `PROTOCOL_ERROR`, no response written
+`IPv6address`, `IPv4address` and `unreserved` are RFC 3986's, and `DIGIT` is RFC 5234's core rule
+([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)). An authority that is not of
+it is no host, a userinfo and a colon with no port among them. A target in absolute-form is read
+when it is `http://` or `https://`, its scheme in lower case as HTTP servers read it, then an
+authority that is not empty
+([RFC 9110 §4.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-4.2.1)). A server answers 400, as
+HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Host` field line, a
+target in absolute-form it does not read, or an authority that is no host, before it reads anything
+else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
+transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
+alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
+authority is no host, `PROTOCOL_ERROR`, no response written
 ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
 a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over
 HTTP/1.1, with none of the fields every response on the path carries, as an HTTP server writes its
@@ -1441,6 +1472,9 @@ lower          = %x61-7A
 upper          = %x41-5A
 ```
 
+`DIGIT` is RFC 5234's core rule
+([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)).
+
 16.5. A name is read whole, character by character. A character outside these rules is in no name,
 whatever a case mapping or a normalization makes of it: U+212A, the Kelvin sign, is no `K`. A line
 terminator after a name leaves it no name, though a regular expression's `$` may let one by. So
@@ -1548,7 +1582,7 @@ literal. A reader MUST refuse:
    parser bound it. A reader MUST refuse it before it builds anything deeper.
 
 17.6. A reader reads a number as the IEEE 754 double nearest it, a tie to the even, as ECMAScript's
-`JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 may not stay exact,
+`JSON.parse` does: digits past a double's are rounded, an integer past 2⁵³ − 1 might not stay exact,
 and a number whose magnitude is 2⁻¹⁰⁷⁵ or less, half the smallest positive double, 2⁻¹⁰⁷⁴,
 reads as 0. A value that needs more travels as a string, as RFC 7493 §2.2 recommends. A reader
 takes a noncharacter, which RFC 7493 §2.1 refuses and Unicode's Corrigendum #9 lets be

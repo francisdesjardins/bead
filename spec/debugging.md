@@ -1,8 +1,11 @@
 # Bead: debugging
 
-What a side of Bead traces, filters and counts beside the wire, stated once. The key words MUST,
-MUST NOT, SHOULD and MAY are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
-[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), when in capitals.
+What a side of Bead traces, filters and counts beside the wire, stated once. The key words "MUST",
+"MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",
+"NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in
+[BCP 14](https://www.rfc-editor.org/info/bcp14) [[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119)]
+[[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174)] when, and only when, they appear in all
+capitals, as shown here.
 
 This document is the companion of [`spec.md`](spec.md), which states the wire: what it states never
 goes on the wire. Sections 6 to 12 each name the conformance file that checks them; sections 1 to 5
@@ -16,10 +19,10 @@ hold what of them a test can. The why of each rule is in the decisions:
   names it reads (1.2, 6.10, 7.3, 8.3).
 
 **Version: 0.1.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
-its schema in [`schemas/`](schemas/). It moves as `spec.md` moves
+its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
-when an implementation must change to keep passing, the patch when a conforming one passes
-unchanged. **Status: every section is written.**
+when an implementation that conforms to its last version must change to conform to this one, the
+patch when one that conforms passes unchanged. **Status: every section is written.**
 
 ## 1. Conformance
 
@@ -35,8 +38,8 @@ built without the metrics plays `spec/debug-filters.json` alone, one built witho
 `spec/metrics.json` alone.
 
 1.3. This document names the wire's kinds and codes as `spec.md` states them, its kinds by section
-3.1 and its codes by section 8. A code that section 8 gains adds a value to `code` (section 8.4),
-and moves the minor of both documents.
+3.1 and its codes by section 8. A code that `spec.md` section 8 gains adds a value to `code`
+(section 8.4 of this document), and moves the minor of both documents.
 
 ## 2. Beside the wire
 
@@ -167,6 +170,10 @@ first      = %x00-08 / %x0E-1F / %x21-27 / %x2A-2B / %x2E-10FFFF
 character  = first / "-"
 ```
 
+`SP`, `HTAB`, `LF` and `CR` are RFC 5234's core rules
+([Appendix B.1](https://www.rfc-editor.org/rfc/rfc5234#appendix-B.1)), and its terminals Unicode
+scalar values, never a surrogate.
+
 6.2. A separator is a comma or one of the six characters C's `isspace` reads as white space in the C
 locale: space, tab, line feed, vertical tab, form feed and carriage return. Nothing outside ASCII
 parts two words.
@@ -290,8 +297,12 @@ _Metrics: `spec/metrics.json`._
 ([Release Candidate](https://opentelemetry.io/docs/specs/semconv/rpc/rpc-metrics/)), named as a
 Prometheus name is written, `bead` in place of `rpc`; their started counters follow gRPC's
 [A66](https://github.com/grpc/proposal/blob/master/A66-otel-stats.md), and their notifications part
-by role, as OpenTelemetry's messaging conventions do. Each has its type, the unit it counts, its
-labels and its help:
+by role, as OpenTelemetry's messaging conventions do. They part from the RPC conventions in three
+places: their buckets are A66's (section 11.3), their histograms carry no `error.type`, which `code`
+carries on the counters alone (section 8.4), and no family carries `rpc.system.name`. Their
+`_handled_total` families take the shape of grpc-ecosystem's
+[`go-grpc-middleware`](https://github.com/grpc-ecosystem/go-grpc-middleware). Each has its type, the
+unit it counts, its labels and its help:
 
 | Family                              | Type      | Unit          | Labels                                            | Help                                                                                 |
 | ----------------------------------- | --------- | ------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -364,27 +375,27 @@ answered at the gate (`spec.md` 9.6.2), starts and ends in one turn too, under `
 
 9.4. Each call a side answers ends as one of these, the sections `spec.md`'s:
 
-| A call this side answers                                                                                                         | `outcome`   | `code`                                                                                |
-| -------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
-| its result is handed to its transport, whole or by its last chunk (9.3, 12.5)                                                    | `result`    |                                                                                       |
-| its route is refused (9.2, steps 3 and 4)                                                                                        | `failure`   | `DESTINATION_UNKNOWN`, `SERVICE_UNKNOWN`, `PROCEDURE_UNKNOWN`                         |
-| its credential is refused, or its verifier fails, or it would wait past the calls let wait for its issuer (9.2, step 5; 13.8)    | `failure`   | `CREDENTIAL_UNSUPPORTED`, `SESSION_REQUIRED`, `PROCEDURE_FAILED`, `CAPACITY_EXCEEDED` |
-| its admission refuses it, or fails (9.2, step 5)                                                                                 | `failure`   | the refusal's name, of the admission's block; `PROCEDURE_FAILED`                      |
-| its subscription cannot be carried back (9.2, step 6)                                                                            | `failure`   | `SUBSCRIPTION_UNSUPPORTED`                                                            |
-| its payload, or its transfer's total, past its limit, or a transfer its side takes none of (9.2, step 7; 12.3)                   | `failure`   | `PAYLOAD_TOO_LARGE`                                                                   |
-| its transfer's opening refused: no byte of its payload, or its whole total (12.3)                                                | `failure`   | `CHUNK_INVALID`                                                                       |
-| its transfer's opening past the transfers its connection receives at once, or past the budget left (12.3)                        | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
-| its request's transfer ended before its payload is whole: a chunk refused, or nothing came (12.6, 12.7)                          | `failure`   | `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `TRANSFER_STALLED`                                |
-| its header does not read, and it is answered (9.6.2)                                                                             | `failure`   | `ENVELOPE_MALFORMED`, `LAYOUT_UNSUPPORTED`, `ENVELOPE_TOO_LARGE`                      |
-| a payload its procedure cannot read (9.5)                                                                                        | `failure`   | `PAYLOAD_UNDECODABLE`                                                                 |
-| a resolver that fails before it answers, or a result its side cannot send (9.5, 12.1)                                            | `failure`   | `PROCEDURE_FAILED`                                                                    |
-| a procedure's own failure, or a refusal of admission its resolver answers (9.5)                                                  | `failure`   | `application`; the refusal's name                                                     |
-| its subscription's queue past its bounds before its answer (11.10)                                                               | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
-| its result's transfer stalled, nothing coming for `transferInactivityTimeout` before its last chunk (12.7)                       | `failure`   | `TRANSFER_STALLED`                                                                    |
-| a relayed call's answer: its destination's, passed on, or its relay's own (14.3, 14.5)                                           | as answered | as answered                                                                           |
-| its requester cancels it, its credential resolving or not, its transfer under way or not (10.2, 12.7)                            | `cancelled` |                                                                                       |
-| its connection closes, or the side is disposed (9.10, 12.10)                                                                     | `closed`    |                                                                                       |
-| it ends with no answer handed to its transport, its handler failing and its answer as failed unable to go, and is reported (9.0) | `error`     |                                                                                       |
+| A call this side answers                                                                                                            | `outcome`   | `code`                                                                                |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
+| its result is handed to its transport, whole or by its last chunk (9.3, 12.5)                                                       | `result`    |                                                                                       |
+| its route is refused (9.2, steps 3 and 4)                                                                                           | `failure`   | `DESTINATION_UNKNOWN`, `SERVICE_UNKNOWN`, `PROCEDURE_UNKNOWN`                         |
+| its credential is refused, or its verifier fails, or it would wait past the calls let wait for its issuer (9.2, step 5; 13.8, 13.9) | `failure`   | `CREDENTIAL_UNSUPPORTED`, `SESSION_REQUIRED`, `PROCEDURE_FAILED`, `CAPACITY_EXCEEDED` |
+| its admission refuses it, or fails (9.2, step 5)                                                                                    | `failure`   | the refusal's name, of the admission's block; `PROCEDURE_FAILED`                      |
+| its subscription cannot be carried back (9.2, step 6)                                                                               | `failure`   | `SUBSCRIPTION_UNSUPPORTED`                                                            |
+| its payload, or its transfer's total, past its limit, or a transfer its side takes none of (9.2, step 7; 12.3)                      | `failure`   | `PAYLOAD_TOO_LARGE`                                                                   |
+| its transfer's opening refused: no byte of its payload, or its whole total (12.3)                                                   | `failure`   | `CHUNK_INVALID`                                                                       |
+| its transfer's opening past the transfers its connection receives at once, or past the budget left (12.3)                           | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
+| its request's transfer ended before its payload is whole: a chunk refused, or nothing came (12.6, 12.7)                             | `failure`   | `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `TRANSFER_STALLED`                                |
+| its header does not read, and it is answered (9.6.2)                                                                                | `failure`   | `ENVELOPE_MALFORMED`, `LAYOUT_UNSUPPORTED`, `ENVELOPE_TOO_LARGE`                      |
+| a payload its procedure cannot read (9.5)                                                                                           | `failure`   | `PAYLOAD_UNDECODABLE`                                                                 |
+| a resolver that fails before it answers, or a result its side cannot send (9.5, 12.1)                                               | `failure`   | `PROCEDURE_FAILED`                                                                    |
+| a procedure's own failure, or a refusal of admission its resolver answers (9.5)                                                     | `failure`   | `application`; the refusal's name                                                     |
+| its subscription's queue past its bounds before its answer (11.10)                                                                  | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
+| its result's transfer stalled, nothing coming for `transferInactivityTimeout` before its last chunk (12.7)                          | `failure`   | `TRANSFER_STALLED`                                                                    |
+| a relayed call's answer: its destination's, passed on, or its relay's own (14.3, 14.5)                                              | as answered | as answered                                                                           |
+| its requester cancels it, its credential resolving or not, its transfer under way or not (10.2, 12.7)                               | `cancelled` |                                                                                       |
+| its connection closes, or the side is disposed (9.10, 12.10)                                                                        | `closed`    |                                                                                       |
+| it ends with no answer handed to its transport, its handler failing and its answer as failed unable to go, and is reported (9.0)    | `error`     |                                                                                       |
 
 9.5. A call whose result goes as a transfer ends at its last chunk: until then it can still end
 `failure` `TRANSFER_STALLED`, `cancelled` or `closed`, and is counted so. A request that opens a
@@ -436,17 +447,18 @@ one on a call id reserved dropped in silence (`spec.md` 11.7): neither is counte
 10.3. `bead_subscriptions_dropped_total` counts at each end of a subscription, never from a service
 manager's `dropped` event:
 
-| End                    | A subscription dropped                                        | `code`                                           |
-| ---------------------- | ------------------------------------------------------------- | ------------------------------------------------ |
-| the side that notifies | its queue past its bounds once it was answered (11.10)        | `CAPACITY_EXCEEDED`                              |
-| the side that notifies | its session ended (13.6)                                      | `SESSION_REQUIRED`                               |
-| the side that hears    | a failure on its call id once it was answered (11.7, item 2)  | the failure's: its name, `application`, `_OTHER` |
-| either                 | its connection closes, or the side is disposed (11.7, item 3) |                                                  |
-| the side that notifies | a failure its application ends it with (11.7, item 2)         | the failure's: its name, `application`, `_OTHER` |
+| End                    | A subscription dropped                                                  | `code`                                           |
+| ---------------------- | ----------------------------------------------------------------------- | ------------------------------------------------ |
+| the side that notifies | its queue past its bounds once it was answered (`spec.md` 11.10)        | `CAPACITY_EXCEEDED`                              |
+| the side that notifies | its session ended (`spec.md` 13.6)                                      | `SESSION_REQUIRED`                               |
+| the side that hears    | a failure on its call id once it was answered (`spec.md` 11.7, item 2)  | the failure's: its name, `application`, `_OTHER` |
+| either                 | its connection closes, or the side is disposed (`spec.md` 11.7, item 3) |                                                  |
+| the side that notifies | a failure its application ends it with (`spec.md` 11.7, item 2)         | the failure's: its name, `application`, `_OTHER` |
 
 10.4. A client's cancel (`spec.md` 11.7, item 1) drops nothing, at either end. A notification a
-later one of the same key replaces in its queue (11.9), or one its subscription's end leaves queued,
-is neither sent nor failed: that is its pacing, or that end, which the dropped subscriptions count.
+later one of the same key replaces in its queue (`spec.md` 11.9), or one its subscription's end
+leaves queued, is neither sent nor failed: that is its pacing, or that end, which the dropped
+subscriptions count.
 
 ## 11. Durations
 

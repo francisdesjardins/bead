@@ -44,7 +44,7 @@ export const credentialSchemesDetailOf = (schemes: Iterable<number>): string => 
 };
 
 /**
- * The key a session is held under, per connection (spec 11.3, 13.9): `''` for its connection's
+ * The key a session is held under, per connection (spec 11.3, 13.10): `''` for its connection's
  * session, which a call presenting none runs in; for a credential's, its identifier's scheme, claim
  * name and values, written so that two keys are one exactly when the identifiers are one, octet for
  * octet.

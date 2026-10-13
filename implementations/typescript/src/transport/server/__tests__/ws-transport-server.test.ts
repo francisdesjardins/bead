@@ -888,6 +888,7 @@ test.describe('WSTransportServer, its handshake', () => {
     expect(server.clients).toHaveLength(0);
   });
 
+  // spec 15.2.8
   test('refuses an upgrade that comes as it stops, 503 busy, told when to come back', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;

@@ -7,10 +7,11 @@ namespace Bead.Tests;
 
 /// <summary>
 /// <see cref="RouterServer"/>'s credentials: an <c>ELSEWHERE</c> resolved by its verifier from what
-/// its transport carried (spec 13.10), in a later turn, its cancel and its close told by its signal;
-/// a <c>JWT</c> verified against the keys its key set answers (spec 13.8); what a command presents,
-/// failed before it goes when its transport cannot carry it (spec 13.4); and what a side that takes a
-/// <c>JWT</c> is built with: its audience, and limits that hold its header (spec 12.2).
+/// its transport carried (spec 13.11), in a later turn, its cancel and its close told by its
+/// signal; a <c>JWT</c> verified against the keys its key set answers (spec 13.9); what a command
+/// presents, failed before it goes when its transport cannot carry it (spec 13.4); and what a side
+/// that takes a <c>JWT</c> is built with: its audience, and limits that hold its header (spec
+/// 12.2).
 /// </summary>
 public sealed partial class RouterServerTests
 {

@@ -50,14 +50,14 @@ public sealed record JwtKeySet
     /// its ask under way never counted: 64 by default, from 1 to 2³¹ − 1, or an
     /// <see cref="ArgumentOutOfRangeException"/> as the side is built. A call that would wait past
     /// them, as it comes or as an answer moves it there, is refused CAPACITY_EXCEEDED, and not
-    /// reported: it withdraws nothing (spec 8.2, 13.8).
+    /// reported: it withdraws nothing (spec 8.2, 13.9).
     /// </summary>
     public int MaximumWaitingCalls { get; init; } = 64;
 }
 
 /// <summary>
 /// The credential's session an <see cref="CredentialScheme.Elsewhere"/>'s verifier makes of what a
-/// request's transport carried (spec 13.10): its identifier's <see cref="Id"/>, its data, which the
+/// request's transport carried (spec 13.11): its identifier's <see cref="Id"/>, its data, which the
 /// call carries, and its end.
 /// </summary>
 public sealed record ElsewhereSession
@@ -111,7 +111,7 @@ public sealed record Credentials
     /// while none of that issuer's keys serve — none given, none answered yet, or all past their
     /// ten minutes. What an answer gave is held for its issuer, beside <see cref="Keys"/>, in
     /// place of what the last gave, and serves ten minutes from that answer; an ask that fails
-    /// replaces nothing, and fails the calls that wait on it, PROCEDURE_FAILED (spec 13.8). The
+    /// replaces nothing, and fails the calls that wait on it, PROCEDURE_FAILED (spec 13.9). The
     /// application fetches; the side fetches nothing.
     /// </summary>
     public JwtKeySet? KeySet { get; init; }

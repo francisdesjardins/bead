@@ -100,6 +100,14 @@ await client.connect({ host: 'localhost', port });
 await client.send({ data: 'hello' });
 ```
 
+Each listener of a transport's events is called within a guard: what one throws goes to the
+transport's `error`, the next listener is called all the same, and the transport goes on as if it
+returned (spec 15.1). It awaits nothing a listener returns, so a listener's rejection is Node's, as
+what a listener of `error` throws is: an unhandled rejection ends the process, and a listener
+catches its own, as the `reconnect` above does. Neither client reads a `Retry-After`, which a
+server's 503 `busy` carries and spec 15.7 lets a client wait for: a reconnection waits its own
+schedule, whatever the field asks.
+
 What a transport carries, both ways, is a message, `{ data, credential }`: an envelope, and the
 credential the transport carries beside it, which a request presenting `ELSEWHERE` stands for. Over
 HTTP it is the `Authorization` of the `POST` that carries a request — see [HTTP](#http); a WebSocket

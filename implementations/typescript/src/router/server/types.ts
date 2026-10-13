@@ -449,21 +449,22 @@ export interface IRouterServer<
   }): Promise<void>;
   /**
    * Ends a credential's session by its identifier on every connection that keeps it, and nothing
-   * else (spec 13.9): each subscription it bounds ends with SESSION_REQUIRED on its call id, a call
-   * still in flight left to its own answer. Resolves once each failure was tried; one that cannot go
-   * out is reported to `error`. One no connection keeps ends nothing. Ending refuses no credential:
-   * one that still holds opens its session anew.
+   * else (spec 13.10): each subscription it bounds ends with SESSION_REQUIRED on its call id, a
+   * call still in flight left to its own answer. Resolves once each failure was tried; one that
+   * cannot go out is reported to `error`. One no connection keeps ends nothing. Ending refuses no
+   * credential: one that still holds opens its session anew.
    */
   endSession(identifier: SessionIdentifier): Promise<void>;
   /**
    * Ends every credential's session of an issuer by that issuer, as when a key of its leaks, on every
-   * connection that keeps one, and nothing else (spec 13.9): each `JWT`'s session whose identifier's
-   * issuer is `issuer`, octet for octet, whatever its `sid` or `sub`, each subscription it bounds
-   * ending with SESSION_REQUIRED on its call id, a call still in flight left to its own answer; an
-   * `ELSEWHERE`'s identifier names no issuer. Resolves once each failure was tried; one that cannot
-   * go out is reported to `error`. An issuer no connection's session names ends nothing; one that is
-   * no string rejects with a {@link ProgrammerError}. Ending refuses no credential: one that still
-   * holds opens its session anew, a token a leaked key signed among them while that key serves.
+   * connection that keeps one, and nothing else (spec 13.10): each `JWT`'s session whose
+   * identifier's issuer is `issuer`, octet for octet, whatever its `sid` or `sub`, each subscription
+   * it bounds ending with SESSION_REQUIRED on its call id, a call still in flight left to its own
+   * answer; an `ELSEWHERE`'s identifier names no issuer. Resolves once each failure was tried; one
+   * that cannot go out is reported to `error`. An issuer no connection's session names ends nothing;
+   * one that is no string rejects with a {@link ProgrammerError}. Ending refuses no credential: one
+   * that still holds opens its session anew, a token a leaked key signed among them while that key
+   * serves.
    */
   endSessionsOf(issuer: string): Promise<void>;
   emit<K extends ROUTER_SERVER_EVENTS>(event: K, ...params: RouterServerEventMap[K]): boolean;
