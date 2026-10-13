@@ -164,7 +164,7 @@ reads = [
     ('a request to service 0, for routing to refuse', ['4.7'], 'server', 'A1 10 00 03  00 00 00 03  00 00 00 01',
      {'callId': 3, 'kind': 16, 'procedureId': 1, 'serviceId': 0}),
     ('an advisory kind, skipped', ['3.4', '5.1.4'], 'server', 'A1 80 00 02  00 00 00 03', None),
-    ('the last advisory kind, skipped whatever follows', ['3.4', '5.1.4'], 'server', 'A1 FF FF FF  00 00 00 00', None),
+    ('the last advisory kind, skipped whatever follows', ['3.4', '5.1', '5.1.4'], 'server', 'A1 FF FF FF  00 00 00 00', None),
 ]
 
 # the first 8 bytes, read by every layout, even one to come
@@ -184,23 +184,25 @@ prefix_refusals = [
 header_refusals = [
     ('a layout to come, 0xA2', ['2.3', '5.1.3'], 'A2 10 00 03  00 00 00 03  00 02 00 01', LAYOUT_UNSUPPORTED, '0xA1'),
     ('a layout to come, 0xAF', ['2.3', '5.1.3'], 'AF 10 00 03  00 00 00 03  00 02 00 01', LAYOUT_UNSUPPORTED, '0xA1'),
-    # the order a reader checks in: the layout, then the kind, then the call id
-    ('a layout to come, before a kind that is never one and a call id of 0', ['2.3', '5.1.3'], 'A2 00 00 02  00 00 00 00', LAYOUT_UNSUPPORTED, '0xA1'),
-    ('a layout to come, before an advisory kind', ['2.3', '5.1.3'], 'A2 80 00 02  00 00 00 03', LAYOUT_UNSUPPORTED, '0xA1'),
-    ('a kind to come, before a call id of 0', ['3.3', '5.1.6'], 'A1 17 00 02  00 00 00 00', KIND_UNSUPPORTED, None),
+    # the order a reader checks in: the layout, then the kind, then the call id; a vector that fails two
+    # checks, refused by the first, cites 5.1 itself, which states that order
+    ('a layout to come, before a kind that is never one and a call id of 0', ['2.3', '5.1', '5.1.3'], 'A2 00 00 02  00 00 00 00', LAYOUT_UNSUPPORTED, '0xA1'),
+    ('a layout to come, before an advisory kind', ['2.3', '5.1', '5.1.3'], 'A2 80 00 02  00 00 00 03', LAYOUT_UNSUPPORTED, '0xA1'),
+    ('a kind to come, before a call id of 0', ['3.3', '5.1', '5.1.6'], 'A1 17 00 02  00 00 00 00', KIND_UNSUPPORTED, None),
     ('a kind of 0x00, never one', ['3.2', '5.1.5'], 'A1 00 00 02  00 00 00 03', MALFORMED, None),
     ('a kind of 0x0F, never one', ['3.2', '5.1.5'], 'A1 0F 00 02  00 00 00 03', MALFORMED, None),
     ('a kind to come, 0x17', ['3.3', '5.1.6'], 'A1 17 00 02  00 00 00 03', KIND_UNSUPPORTED, None),
     ('a kind to come, 0x7F', ['3.3', '5.1.6'], 'A1 7F 00 02  00 00 00 03', KIND_UNSUPPORTED, None),
     ('a call id of 0', ['3.5', '5.1.7'], 'A1 11 00 02  00 00 00 00', MALFORMED, None),
-    ('the kept bit 0x01 on a request, 16 bytes after its procedure', ['4.1', '4.2.1'], f'A1 10 01 07  00 00 00 03  00 02 00 01  {TOKEN_BYTES}',
+    # a kept bit, which 4.2 refuses on every kind, kept bits included
+    ('the kept bit 0x01 on a request, 16 bytes after its procedure', ['4.1', '4.2', '4.2.1'], f'A1 10 01 07  00 00 00 03  00 02 00 01  {TOKEN_BYTES}',
      MALFORMED, 'a 0x10 envelope carries no flag 0x01'),
-    ('the kept bit 0x01 on a result, 16 bytes after its prefix', ['4.1', '4.2.2'], f'A1 11 01 06  00 00 00 03  {TOKEN_BYTES}',
+    ('the kept bit 0x01 on a result, 16 bytes after its prefix', ['4.1', '4.2', '4.2.2'], f'A1 11 01 06  00 00 00 03  {TOKEN_BYTES}',
      MALFORMED, 'a 0x11 envelope carries no flag 0x01'),
-    ('the kept bit 0x01 on a failure, 16 bytes after its prefix', ['4.1', '4.2.3'], f'A1 12 01 06  00 00 00 03  {TOKEN_BYTES}',
+    ('the kept bit 0x01 on a failure, 16 bytes after its prefix', ['4.1', '4.2', '4.2.3'], f'A1 12 01 06  00 00 00 03  {TOKEN_BYTES}',
      MALFORMED, 'a 0x12 envelope carries no flag 0x01'),
     ('the bit 0x40 on a request', ['4.2.1'], 'A1 10 40 03  00 00 00 03  00 02 00 01', MALFORMED, None),
-    ('the reserved bit 0x80 on a request', ['4.1', '4.2.1'], 'A1 10 80 03  00 00 00 03  00 02 00 01', MALFORMED, None),
+    ('the reserved bit 0x80 on a request', ['4.1', '4.2', '4.2.1'], 'A1 10 80 03  00 00 00 03  00 02 00 01', MALFORMED, None),
     ('a request paced that opens no subscription', ['4.8'], 'A1 10 20 03  00 00 00 03  00 02 00 01', MALFORMED,
      'a request paced opens a subscription'),
     ('a total of 2^53, no safe integer', ['1.2'], 'A1 11 04 04  00 00 00 02  00 20 00 00 00 00 00 00', MALFORMED, None),
@@ -222,7 +224,7 @@ header_refusals = [
      MALFORMED, 'a 0x15 envelope carries no flag 0x08'),
     ('a total on a credit', ['4.2.6'], 'A1 15 04 06  00 00 00 07  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 10', MALFORMED, None),
     ('MORE on a credit', ['4.2.6'], 'A1 15 40 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
-    ('the kept bit 0x01 on a chunk', ['4.1', '4.2.5'], 'A1 14 01 04  00 00 00 07  00 00 00 00 00 00 00 00',
+    ('the kept bit 0x01 on a chunk', ['4.1', '4.2', '4.2.5'], 'A1 14 01 04  00 00 00 07  00 00 00 00 00 00 00 00',
      MALFORMED, 'a 0x14 envelope carries no flag 0x01'),
     ('PACED on a chunk', ['4.2.5'], 'A1 14 20 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
     ('SUBSCRIPTION on a credit', ['4.2.6'], 'A1 15 10 04  00 00 00 07  00 00 00 00 00 00 00 00', MALFORMED, None),
@@ -340,13 +342,14 @@ envelope_refusals = [
     ('a chunk without a byte', ['6.3'], 'A1 14 00 04  00 00 00 07  00 00 00 00 00 00 00 00', None, MALFORMED, 'a chunk carries one byte at least'),
     ('a credit with a byte after its header', ['6.4'], 'A1 15 00 04  00 00 00 07  00 00 00 00 00 00 00 08 | 01', None, MALFORMED,
      'a credit carries no payload, not 1 bytes'),
-    # the bound on a whole envelope, checked once its first byte says it is one, before its layout
+    # the bound on a whole envelope, checked once its first byte says it is one, before its layout; a
+    # vector that fails two checks cites 5.1's order
     ('an envelope past its bound', ['5.1.2', '12.2.1'], f'A1 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, ENVELOPE_TOO_LARGE,
      'an envelope is 13 bytes at most, not 14'),
-    ('a layout to come past the bound, its length checked first', ['5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13,
+    ('a layout to come past the bound, its length checked first', ['5.1', '5.1.2'], f'A2 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13,
      ENVELOPE_TOO_LARGE, None),
-    ('7 bytes past a bound of 4, short of a prefix first', ['5.1.1'], 'A1 10 00 03  00 00 00', 4, MALFORMED, None),
-    ('a first byte no layout is, past the bound', ['5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, MALFORMED, None),
+    ('7 bytes past a bound of 4, short of a prefix first', ['5.1', '5.1.1'], 'A1 10 00 03  00 00 00', 4, MALFORMED, None),
+    ('a first byte no layout is, past the bound', ['5.1', '5.1.1'], f'B0 10 00 03  00 00 00 03  00 02 00 01 | {ascii_hex("hi")}', 13, MALFORMED, None),
 ]
 
 failures = [
@@ -710,6 +713,13 @@ def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
 
 
+
+def step_seven(clauses, code, detail):
+    """A header refused ENVELOPE_MALFORMED whose detail says which check failed plays 5.2 besides its
+    own units: within step 7, the detail says which check refused it."""
+    return [*clauses, '5.2'] if code == MALFORMED and detail is not None else clauses
+
+
 document = {
     '$schema': 'schemas/vectors.schema.json',
     '$comment': [
@@ -729,7 +739,7 @@ document = {
               for name, clauses, side, data, header in reads],
     'prefixes': [entry(name=name, clauses=clauses, bytes=data, prefix=prefix) for name, clauses, data, prefix in prefixes],
     'prefixRefusals': [entry(name=name, clauses=clauses, bytes=data, code=MALFORMED) for name, clauses, data in prefix_refusals],
-    'headerRefusals': [entry(name=name, clauses=clauses, bytes=data, code=code, detail=detail)
+    'headerRefusals': [entry(name=name, clauses=step_seven(clauses, code, detail), bytes=data, code=code, detail=detail)
                        for name, clauses, data, code, detail in header_refusals],
     'envelopes': [entry(name=name, clauses=clauses, bytes=data, envelope=envelope) for name, clauses, data, envelope in envelopes],
     'envelopeRefusals': [entry(name=name, clauses=clauses, bytes=data, maximumEnvelopeBytes=maximum, code=code, detail=detail)

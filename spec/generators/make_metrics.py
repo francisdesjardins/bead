@@ -290,6 +290,13 @@ ANOTHER_NAME, ANOTHER_ADDRESS, ANOTHER_REVISION, PAST_CEILING = '7.3.1', '7.3.2'
 NOTIFIER_DROPS = '10.3.5'
 FAMILY_TABLE, ROLES, LABELED, OUTCOME, UNDER_WAY = '8.1', '8.2', '8.3', '8.4', '8.5'
 DURATION, OBSERVED, BUCKETS = '11.1', '11.2', '11.3'
+# the rows of a table an exposition writes whole: 7.2's items, a declaration's families by its role; 7.6's,
+# the codes of a procedure's families; 8.1's, the nine families, their help and their type; 11.3's, the
+# buckets' bounds, each its le
+AS_RESOLVER, AS_REQUESTER, AS_HEARER = '7.2.1', '7.2.2', '7.2.3'
+CODES_SERVER, CODES_CLIENT, CODES_NOTIFIER, CODES_HEARER = '7.6.1', '7.6.2', '7.6.3', '7.6.4'
+FAMILY_ROWS = [f'{FAMILY_TABLE}.{row}' for row in range(1, 10)]
+BUCKET_ROWS = [f'{BUCKETS}.{row}' for row in range(1, 15)]
 EXPOSED, GROUPED, ORDERED, LABELS, NUMBERS, LINES = '12.1', '12.2', '12.3', '12.4', '12.5', '12.6'
 
 
@@ -384,11 +391,11 @@ EXPOSITIONS = [
     ('a registry given to a client\'s router makes its _OTHER series at 0: request among its client families, command among its server families',
      [MADE_AHEAD, ROLES, LABELED, ORDERED], None, ['client'], [], []),
     ('a resolver declared makes its 61 series at 0, and one whose procedure notifies 27 more, as the side that notifies',
-     [DECLARED, MADE_AHEAD, CODES_OF, SERIES_COUNTS, GROUPED, ORDERED], None, ['server'],
-     [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
+     [DECLARED, AS_RESOLVER, MADE_AHEAD, CODES_OF, CODES_SERVER, CODES_NOTIFIER, SERIES_COUNTS, GROUPED, ORDERED], None,
+     ['server'], [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
     ('a requester declared makes its 74 series at 0, and a notification registered 26, as the side that hears',
-     [DECLARED, MADE_AHEAD, CODES_OF, SERIES_COUNTS, ORDERED], None, ['client'],
-     [requester(SERVER, 1, 1, 'echo'), notification(SERVER, 1, 10, 'ticks')], []),
+     [DECLARED, AS_REQUESTER, AS_HEARER, MADE_AHEAD, CODES_OF, CODES_CLIENT, CODES_HEARER, SERIES_COUNTS, ORDERED], None,
+     ['client'], [requester(SERVER, 1, 1, 'echo'), notification(SERVER, 1, 10, 'ticks')], []),
     ('a resolver declared on a client\'s router counts its commands, and a requester on a server\'s router the commands it makes',
      [DECLARED, ROLES], None, ['client', 'server'],
      [resolver(0, 1, 9, 'clock'), requester(1, 1, 9, 'clock')],
@@ -417,7 +424,7 @@ EXPOSITIONS = [
       made(SERVER, 'failure', APPLICATION, service=1, procedure=1), made(SERVER, 'result', service=1, procedure=1),
       made(SERVER, 'failure', OTHER)]),
     ('a duration falls in every bucket whose bound is it or more: 0 in every one, and each edge in its own',
-     [DURATION, OBSERVED, BUCKETS], None, ['server'], [resolver(SERVER, 1, 1, 'echo')],
+     [DURATION, OBSERVED, BUCKETS, *BUCKET_ROWS], None, ['server'], [resolver(SERVER, 1, 1, 'echo')],
      [answered(SERVER, 'result', microseconds=microseconds, service=1, procedure=1)
       for microseconds in (0, 1, 10, 11, 999_999, 1_000_000, 1_000_001, 100_000_000, 100_000_001)]),
     ('a _sum is whole seconds and the microseconds under one, their trailing zeros dropped, never an exponent, held exactly past 2^53',
@@ -430,7 +437,7 @@ EXPOSITIONS = [
       made(SERVER, 'result', microseconds=3_000_000, service=1, procedure=3),
       *[answered(SERVER, 'result', microseconds=(1 << 52) + 1, service=1, procedure=4)] * 3]),
     ('notifications count by role: sent and failed at the side that notifies, heard at the side that hears, dropped at each end by its code',
-     [DECLARED, MADE_AHEAD, CODES_OF, ORDERED], None, ['client', 'server'],
+     [DECLARED, MADE_AHEAD, CODES_OF, FAMILY_TABLE, *FAMILY_ROWS, ORDERED], None, ['client', 'server'],
      [resolver(1, 1, 10, 'ticks', notifies=True), notification(0, 1, 10, 'ticks')],
      [notified(1, 'sent', 1, 10), notified(1, 'sent', 1, 10), notified(1, 'failed', 1, 10), notified(0, 'heard', 1, 10),
       dropped(1, 'notifies', 1, 10, 'CAPACITY_EXCEEDED'), dropped(0, 'hears', 1, 10, 'CAPACITY_EXCEEDED'),

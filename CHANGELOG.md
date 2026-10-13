@@ -26,6 +26,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `docs/support.md`'s "Leveled down": each place where every side keeps to what one platform can do
   though a standard allows more, with the standard, what forces it, what would lift it and the tests
   that hold it on each side.
+- `spec/units.txt` and `spec/debugging-units.txt`: every unit of each document, its front matter and
+  each section's lead included, whether an entry cites it or why none does, and the sha256 of its
+  text. `spec/check.py` holds each reason by its rule — a `lead` or a `defines` unit carries no key
+  word, a `twins` unit is named by its own number, `spec 15.10`, in a test's title or a comment just
+  above its declaration, on each side, a `builder` unit by beadc's, an `open` one by its document's
+  status line, an `owed` one printed — and fails when a unit's text moved, naming what plays it,
+  until `--write-units` acknowledges that unit by name. Each side's twin tests name the units they
+  hold.
+- The conversation `a cancel that crossed its answer is dropped, nothing reported` (spec 12.9.6).
 
 ### Changed
 
@@ -85,6 +94,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads a head's characters as one octet each, and adds three cases: a listen held, answered the 404
   of its connection's close and told by none, and a field past visible ASCII, over HTTP and at a
   WebSocket's address.
+- The conformance files cite the units they play and left uncited: 4.2 by the vectors of a kept
+  bit, 5.1 by those that fail two checks, 5.2 by the header refusals whose detail says which check
+  failed, 9.6 by the entries of the gate, 12.6 by the transfers placed out of order or delivered
+  whole, 13.9.4, 14.5.3 and 17.2 by the entries that play them; `metrics.json` cites the rows of the
+  companion's 7.2, 7.6, 8.1 and 11.3 its expositions write.
+
+### Removed
+
+- `spec/uncited.txt`, `spec/debugging-uncited.txt` and `--write-uncited`, which the ledgers replace.
 
 ### Security
 

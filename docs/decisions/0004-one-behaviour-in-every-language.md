@@ -19,7 +19,7 @@ copies do.
 ## Decision
 
 **The conformance files are the contract.** [`spec/spec.md`](../../spec/spec.md) states what every
-implementation does, in the RFC 2119 sense. A unit no entry cites, which `spec/uncited.txt` lists,
+implementation does, in the RFC 2119 sense. A unit no entry cites, which `spec/units.txt` lists,
 binds every implementation all the same: the entries say what a side does, and the text states what
 it must. Beside it, `spec/vectors.json` holds the bytes of envelopes and what they say, and what a
 reader refuses with which code; `spec/conversations.json` holds what a server of the interop
@@ -187,14 +187,32 @@ due, and `spec/check.py` refuses one that no `until` a timer armed on it precede
 send, expect or advance; `wall` moves its wall clock alone, which starts where each file says; and
 `spec/clocks.json` holds both sides' test clocks to that one meaning.
 
-**Each entry cites its units, and a list holds what none cites.** A unit is a clause of
-`spec/spec.md`, `"15.5"`, an item of its numbered list, `"9.2.5"`, or a row of its table counted
-from 1, `"15.6.8"`. Every vector, conversation and transport case cites the units it checks, the
-generators writing them, since a generator knows which check each refusal fails. `spec/check.py`
-reads the units out of the spec, refuses a citation to none, and holds `spec/uncited.txt`, the units
-of sections 1 to 15 no entry cites: it fails when that list and the files disagree, a unit newly
-uncited or one listed that an entry now cites. The companion's files cite its own units, which
-`spec/debugging-uncited.txt` lists alike.
+**Each entry cites its units, and a ledger holds every unit.** A unit is a clause of `spec/spec.md`,
+`"15.5"`, an item of its numbered list, `"9.2.5"`, or a row of its table counted from 1, `"15.6.8"`;
+besides, its front matter is unit `0`, and each section's heading and the lines it holds outside
+every clause are its lead, `"15.0"`, so that every line belongs to a unit. Every vector,
+conversation and transport case cites the units it checks, the generators writing them, since a
+generator knows which check each refusal fails. `spec/check.py` reads the units out of the spec,
+refuses a citation to none, and holds `spec/units.txt`. It lists every unit of `spec.md` with one of
+two things: cited, or the reason none cites it, from a closed set, each reason held by a rule the
+check applies. A `lead` unit introduces its items or rows, each cited or held, and a `defines` unit
+defines what the others use: neither carries a key word of BCP 14, and no sentence follows a lead's
+list. A `twins` unit is named by its own number, `spec 15.10`, by a test on each side, in its title
+or a comment just above its declaration, never by its clause's number; a `builder` unit by a test of
+beadc's. An `open` unit is named by its document's status line, and an `owed` one, which nothing
+holds yet, is printed on a line of the check's summary. The ledger also keeps the sha256 of each
+unit's text after its number, white space folded, a table's rule aside, and the version's number
+folded out of unit `0`.
+
+- It fails when the ledger and the files disagree: a unit it lacks or one the document lost, a
+  unit cited that it gives a reason, or one it calls cited that no entry cites.
+- It fails when a unit's text moved since its hash was written, naming what plays the unit — the
+  entries that cite it, its items' or its section's, or the tests that name it — until
+  `--write-units` acknowledges that unit by name in the same diff. This is the suspect link of
+  requirements traceability (DO-178C §5.5 and §6.5, ISO 26262-8 clauses 6 and 8): one unit's text
+  moved leaves its links to be looked at again, and that unit's alone is acknowledged. A
+  renumbered unit moves its key alone, which `--write-units` follows.
+- The companion's files cite its own units, which `spec/debugging-units.txt` keeps alike.
 
 **Every file of entries keeps one frame.** Each file of `spec/` whose entries a side plays, which
 [the README](../../README.md)'s table names:
@@ -314,8 +332,8 @@ to lift when the platform can.
 **What lands with this revision**, in one change: the spec's sections 14 and 15 naming the files
 that check them, section 15's table of the transport's bounds and the forwarded address of section
 15.12; `spec/transports.json`, its schema and `make_transports.py`; the conversations across
-connections, their shape and their generator; the units every entry cites and `spec/uncited.txt`;
-`spec/check.py`'s units, its list, its `differs` and its parts; the interop service's registering of
+connections, their shape and their generator; the units every entry cites and `spec/units.txt`;
+`spec/check.py`'s units, its ledger, its `differs` and its parts; the interop service's registering of
 destinations and its relay's admission; both sides' harnesses, and `hops` named `relays`;
 [0006](0006-a-rule-has-its-gate.md)'s table and `docs/support.md`, the file, its counts and the
 sentence on a client's behaviour.
@@ -323,7 +341,7 @@ sentence on a client's behaviour.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
-in six rounds. Its objections, each with its answer:
+in seven rounds. Its objections, each with its answer:
 
 ### On the files' schemas, their version and their check
 
@@ -439,3 +457,15 @@ own text is in [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.
 | The two sides judge "the connect's own 400" apart: the TypeScript side refuses `Content-Length: 00`, which RFC 9110 §8.6 reads as zero and the C# side draws; the order paragraph misstates three steps                                                                                                                                     | Accepted: the TypeScript side reads the field as its number, a fix on the release branch with a `Fixed` line; 15.4 says what a body is; a generated case draws a connect and holds a listen whose length is `00`, `send()` taking the line as written; 15.6 reads "no type, or another", "is judged by its token" and "a body or its counts", and case 1 gains a connect with no type                                                                                                                                                                                                                                                                                                                                                                                                    |
 | The built path's cost is up to three times, not 1.5; the conversation's validity rests on a comment no tool holds, and another test file in the worker can neutralise it; 0016 announces a report the user has not decided                                                                                                                  | In part: "up to about three times" in [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md), linear and bounded by `maximumBodyBytes`; 0016 states what holds, and announces no report. `make_conversations.py` asserts that no other payload of `spec/*.json` names the shape, and the TypeScript unit test, the proof, draws its name per run. Refused: a check of the TypeScript tests from the spec's tooling, which reads no implementation ([0005](0005-a-toolchain-per-language.md)); and reading a string token by `slice` in 0.3.0, a constant factor no peer can turn into more than linear work, left out of a release branch's fix                                                                                                                            |
 | The upstream reports are imprecise: C#'s tag needs none, protobuf's suite misses point 1 only because its case cuts the submessage at the buffer's end, and the length overflow is a report of its own to protobuf-es                                                                                                                       | Accepted: three reports put to the user, none for Google.Protobuf; the protobuf-es report on points 1 and 2 carries bytes after the submessage and proposes a suite case beside `PrematureEofInSubmessageValue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+
+### On the ledger of units
+
+A ledger of every unit, each cited or held by its reason, with the hash of its text, in place of the
+lists of the units no entry cites; and 13.9.4 cited where it is played.
+
+| Objection                                                                                                                                                                                                                                         | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The `twins` hold ("the matrix names the unit or its clause") fails the first ledger on 15.10 and 12.6.5. It passes units no twin holds, since one mention of a clause excuses all of its items, and `§` is the matrix's notation for RFC sections | Accepted: `twins` holds only when a test of each side names the unit by its own number (`spec 15.10` in its title, or in a comment just above its declaration). Never the unit's clause, and never `§`. `spec/check.py` searches the test trees it already reads for the groups each side plays. A unit named on one side alone fails. Both sides' twins name their units. `builder` holds alike, over beadc's tests                                                                                                                                                      |
+| `lead` and `defines` rebuild M7's blind spot: units called `lead` state requirements of their own, and when one moves, the gate names no entry                                                                                                    | Accepted: `lead` and `defines` are held mechanically. A unit with either status carries no BCP 14 key word, and no sentence follows a `lead` unit's list. 4.2, 5.1, 9.6, 12.6 and 17.2 are `cited`, by the entries that play them, the generators adding those citations; 5.2's SHOULD is cited by the header refusals whose detail says which check failed. 14.5's last sentence, which no conversation reaches, is `twins`. When a `lead` unit moves, the failure names the entries that cite its items; when a `defines` unit moves, the entries that cite its section |
+| The acknowledgement is a blanket `--write-units`, wired into the workflows, so it is a pipeline step and not a person's. Merges are resolved blind, and large units train the reflex                                                              | Accepted: `--write-units` moves a hash only for the units named on its command line, and prints what plays each. Any other moved unit fails. The implementation workflow passes the units its design names. The release workflow acknowledges none, and hands the list to the user. A merge is resolved by taking each side's lines, and the check judges the result. The large units stay as they are. Splitting 13.8 and 15.2 into items is work of its own                                                                                                             |
+| The ledger hashes none of the text that defines conformance itself: the front matter, the key words, the version and status, each section's file line, and the companion's version rule                                                           | Accepted: each document has a unit `0` for its front matter, and each section a unit `N.0` for its heading and the lines it holds outside every clause, both `defines`. The version's number is folded out of `0`'s hash, since `tools/check-versions.mjs` holds it and every release moves it. The text after each unit's number is what is hashed, so a renumber moves the ledger's key alone                                                                                                                                                                           |

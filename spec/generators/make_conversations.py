@@ -679,7 +679,7 @@ def elsewhere_conversations():
             credit_in(1, 100), chunk_out(1, 28, ECHOED[28:76], False), chunk_out(1, 76, ECHOED[76:], True)]),
         # the second comes while its end lies a second ahead, and settles as the wall clock reaches it
         ('an ELSEWHERE whose end the wall clock has reached as its verifier settles does not hold, and one a millisecond short of it holds',
-         ['13.10'], None, [
+         ['13.9.4', '13.10'], None, [
              elsewhere(1, 'whoami', 'null', f'Interop sub=ada, after=1000, end={EPOCH + 1001}'), armed(1000),
              advance(1000), result(1, '"ada"'),
              elsewhere(3, 'whoami', 'null', f'Interop sub=bob, after=1000, end={EPOCH + 2000}'), armed(1000),
@@ -766,7 +766,7 @@ conversations = [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), refusal(2, 7, APPLICATION),
         failure(1, PROCEDURE_FAILED), report(7)]),
     # 9.6, steps 3 and 5: an answer that does not read ends its call, cancelled; a late one is dropped
-    ('an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence', ['9.6.3', '9.6.5'], None, [
+    ('an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence', ['9.6', '9.6.3', '9.6.5'], None, [
         json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION), raw('A1 11 40 02  00 00 00 02'),
         cancelled(2), failure(1, PROCEDURE_FAILED), report(MALFORMED), answer(2, '"late"')]),
     # 10.3: a command past its time is cancelled and its call id reserved as long as the command was
@@ -903,22 +903,24 @@ conversations = [
         json_request(1, 'slow', SLOW), {'close': True}]),
     ('a cancel on the server\'s own parity is reported', ['10.2'], None, [cancel(2), report(MALFORMED)]),
     ('a cancel for no call crossed its answer, and is dropped in silence', ['10.2'], None, [cancel(5)]),
+    ('a cancel that crossed its answer is dropped, nothing reported', ['10.2', '12.9.6'], None, [
+        json_request(1, 'echo', '"x"'), result(1, '"x"'), cancel(1), json_request(3, 'echo', '"y"'), result(3, '"y"')]),
     # 9.6: the gate
-    ('a message shorter than a prefix is reported', ['2.2', '9.6.1'], None, [raw('A1 10 00'), report(MALFORMED)]),
-    ('a first byte no layout is, is reported', ['9.6.1'], None, [
+    ('a message shorter than a prefix is reported', ['2.2', '9.6', '9.6.1'], None, [raw('A1 10 00'), report(MALFORMED)]),
+    ('a first byte no layout is, is reported', ['9.6', '9.6.1'], None, [
         raw('0A 10 00 03  00 00 00 03  00 01 00 01'), report(MALFORMED)]),
-    ('a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id', ['9.6.2'], None, [
+    ('a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id', ['9.6', '9.6.2'], None, [
         raw('A2 10 00 03  00 00 00 07  00 01 00 01'), failure(7, LAYOUT_UNSUPPORTED)]),
-    ('a request of a layout to come, on the server\'s own parity, is reported', ['9.6.6'], None, [
+    ('a request of a layout to come, on the server\'s own parity, is reported', ['9.6', '9.6.6'], None, [
         raw('A2 10 00 03  00 00 00 08  00 01 00 01'), report(LAYOUT_UNSUPPORTED)]),
-    ('a malformed request is answered ENVELOPE_MALFORMED, on its call id', ['9.6.2'], None, [
+    ('a malformed request is answered ENVELOPE_MALFORMED, on its call id', ['9.6', '9.6.2'], None, [
         raw('A1 10 01 03  00 00 00 09  00 01 00 01'), failure(9, MALFORMED)]),
-    ('a malformed request on a call id still open is reported, never answered', ['9.6.6'], None, [
+    ('a malformed request on a call id still open is reported, never answered', ['9.6', '9.6.6'], None, [
         json_request(1, 'slow', SLOW), raw('A1 10 01 03  00 00 00 01  00 01 00 01'), report(MALFORMED),
         cancel(1)]),
-    ('a request past the envelope\'s bound is answered ENVELOPE_TOO_LARGE, on its call id', ['9.6.2'], SMALL, [
+    ('a request past the envelope\'s bound is answered ENVELOPE_TOO_LARGE, on its call id', ['9.6', '9.6.2'], SMALL, [
         json_request(1, 'echo', '"' + 'x' * 60 + '"'), failure(1, TOO_LARGE)]),
-    ('a kind to come is reported KIND_UNSUPPORTED', ['3.3', '9.6.6'], None, [raw('A1 17 00 02  00 00 00 05'), report(KIND_UNSUPPORTED)]),
+    ('a kind to come is reported KIND_UNSUPPORTED', ['3.3', '9.6', '9.6.6'], None, [raw('A1 17 00 02  00 00 00 05'), report(KIND_UNSUPPORTED)]),
     ('an advisory kind is skipped', ['3.4'], None, [raw('A1 80 00 02  00 00 00 03')]),
     ('a result for no call is reported CALL_UNKNOWN', ['9.7'], None, [raw('A1 11 00 02  00 00 00 04'), report(CALL_UNKNOWN)]),
     ('a failure for no call is reported CALL_UNKNOWN', ['9.7'], None, [
@@ -936,12 +938,12 @@ conversations = [
     ('a credit of bytes, for no transfer, is dropped in silence', ['9.8'], None, [
         raw('A1 15 00 04  00 00 00 03  00 00 00 00 00 00 00 10')]),
     # 12: transfers
-    ('a request that comes as a transfer is credited to its total, then answered by a transfer its client credits', ['12.3', '12.4', '12.5'], CHUNKED, [
+    ('a request that comes as a transfer is credited to its total, then answered by a transfer its client credits', ['12.3', '12.4', '12.5', '12.6'], CHUNKED, [
         opening(1, 'echo', ECHOED[:44], 100), credited(1, 100),
         chunk_in(1, 44, ECHOED[44:92], False), chunk_in(1, 92, ECHOED[92:], True),
         result_opening(1, ECHOED[:28], 100),
         credit_in(1, 100), chunk_out(1, 28, ECHOED[28:76], False), chunk_out(1, 76, ECHOED[76:], True)]),
-    ('a transfer is credited a window past the bytes received from the start, once half a window can go', ['12.4'], CHUNKED, [
+    ('a transfer is credited a window past the bytes received from the start, once half a window can go', ['12.4', '12.6'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 44, LONG[44:92], False), chunk_in(1, 92, LONG[92:140], False), credited(1, 268),
         chunk_in(1, 188, LONG[188:236], False), chunk_in(1, 140, LONG[140:188], False), credited(1, 300),
@@ -971,7 +973,7 @@ conversations = [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 44, LONG[44:92], False), chunk_in(1, 44, LONG[44:92], False),
         chunk_in(1, 68, LONG[68:116], False), failure(1, CHUNK_INVALID)]),
-    ('a chunk that does not read ends its transfer as CHUNK_INVALID', ['9.6.4'], CHUNKED, [
+    ('a chunk that does not read ends its transfer as CHUNK_INVALID', ['9.6', '9.6.4'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         raw('A1 14 40 04  00 00 00 01  00 20 00 00 00 00 00 00 | 01'), failure(1, CHUNK_INVALID)]),
     ('an opening that holds its whole total is answered CHUNK_INVALID', ['12.3.3'], CHUNKED, [
@@ -1266,7 +1268,7 @@ def credentials_through_a_relay():
         # bytes of payload, and 4 more without it; leg A's request comes whole, past chunkBytes and
         # within maximumEnvelopeBytes, since the server takes no transfer
         ('leg B\'s header counts its credential, call by call, against the smaller of the two legs\' limits, once its route holds',
-         ['14.3.5', '14.3.6'], {'maximumEnvelopeBytes': 2048, 'chunkBytes': 1024, 'maximumTransfers': 0}, [
+         ['14.3.5', '14.3.6', '14.5.3'], {'maximumEnvelopeBytes': 2048, 'chunkBytes': 1024, 'maximumTransfers': 0}, [
              opened('client'), opened('device'), opened('other'), *logged_in_as_ada(),
              *registered_as(DEVICE, audience), *registered_as(13, other, connection='other'),
              to(3, json_string(fits), jwt(token)),
