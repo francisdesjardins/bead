@@ -1,15 +1,16 @@
 // ── CORS page ─────────────────────────────────────────────────────────────────
 
 // The HTTP client in Chromium, from a page of another origin, against the interop service's HTTP
-// server on each side: what proves a browser reads the CORS answer (spec 15.12; decision 0027), which
-// the conformance cases hold on the wire alone. The C# server is built and started by .NET: where
+// server on each side: what proves a browser reads the CORS answer (spec 15.12; decision 0027), and
+// keeps it for every exchange at the connection's one URL (spec 15.9; decision 0029), which the
+// conformance cases hold on the wire alone. The C# server is built and started by .NET: where
 // .NET is not installed, its half is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`.
 
 // dependencies
 
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { createServer } from 'node:http';
+import { createServer, request as requestHTTP } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -84,6 +85,49 @@ const servePage = async () => {
       server.close();
       server.closeAllConnections();
     },
+    port: (server.address() as AddressInfo).port,
+  };
+};
+
+/**
+ * A proxy on this machine in front of the server at `port`, which notes what it forwards: the
+ * preflights, each listen's `bead-after`, and every target. On a port of its own, it is a URL no
+ * browser cached a preflight for.
+ */
+const startNotingProxy = async (port: number) => {
+  const noted = { afters: [] as unknown[], preflights: 0, targets: new Set<string>() };
+  const server = createServer((request, reply) => {
+    noted.targets.add(request.url ?? '');
+
+    if (request.method === 'OPTIONS') {
+      noted.preflights += 1;
+    } else if (request.method === 'GET') {
+      noted.afters.push(request.headers['bead-after']);
+    }
+
+    const forwarded = requestHTTP(
+      { headers: request.headers, host: HOST, method: request.method, path: request.url, port },
+      (answer) => {
+        reply.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(reply);
+      }
+    );
+
+    forwarded.on('error', () => {
+      reply.destroy();
+    });
+    request.pipe(forwarded);
+  });
+
+  server.listen(0, HOST);
+  await once(server, 'listening');
+
+  return {
+    close: () => {
+      server.close();
+      server.closeAllConnections();
+    },
+    noted,
     port: (server.address() as AddressInfo).port,
   };
 };
@@ -193,6 +237,42 @@ for (const each of SERVERS) {
         refusal: [404, 'connection-unknown'],
         whoami: 'ada',
       });
+    });
+
+    test('a page of another origin listens through a stream of batches on one preflight', async ({
+      page,
+    }) => {
+      const proxy = await startNotingProxy(target.port);
+
+      try {
+        await page.goto(`http://localhost:${String(served?.port)}/`);
+        await page.waitForFunction(() => {
+          return 'listenAcrossOrigins' in globalThis;
+        });
+
+        const report = await page.evaluate(
+          (given) => {
+            const { listenAcrossOrigins } = globalThis as unknown as {
+              listenAcrossOrigins: (
+                on: ICrossOriginTarget,
+                options: { count: number }
+              ) => Promise<unknown>;
+            };
+
+            return listenAcrossOrigins(given, { count: 5 });
+          },
+          { host: HOST, port: proxy.port }
+        );
+
+        // each tick a batch of its own, each listen's cursor past the last, at one URL: the
+        // connect's preflight is the only one, Chromium keeping its answer by that URL. The listen
+        // after the fifth races the disconnect, so the cursors before it are read
+        expect(report).toEqual({ heard: [1, 2, 3, 4, 5] });
+        expect([...new Set(proxy.noted.afters)].slice(0, 5)).toEqual(['0', '1', '2', '3', '4']);
+        expect([proxy.noted.targets, proxy.noted.preflights]).toEqual([new Set(['/bead']), 1]);
+      } finally {
+        proxy.close();
+      }
     });
 
     test('a page of an origin the server does not name connects to nothing', async ({ page }) => {

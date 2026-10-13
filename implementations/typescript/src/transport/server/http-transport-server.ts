@@ -4,6 +4,7 @@
 
 import { isIP } from 'node:net';
 import {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CLOSE_EVENT,
@@ -18,11 +19,13 @@ import {
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
   TRANSPORT_HTTP,
+  WAIT_HEADER,
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
+import { BARE_ITEM_TYPES, type BareItem, parseItem } from '../shared/structured-fields';
 import type { Data } from '../shared/types';
 import {
   assertHosts,
@@ -58,6 +61,7 @@ import type {
 } from './types';
 
 export {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
@@ -65,6 +69,7 @@ export {
   LISTEN_HEADER,
   REFUSAL_HEADER,
   SEQUENCE_HEADER,
+  WAIT_HEADER,
 } from '../shared/constants';
 export type {
   HTTPRequestListener,
@@ -256,17 +261,11 @@ const RESPONSE_HEADERS = Object.freeze({
   'x-content-type-options': 'nosniff',
 });
 
-// a preflight's answer from an origin `origins` names (spec 15.12), whatever it asks for: the
-// browser judges its request against it. `*` is a wildcard for a request without credentials, which
-// every one is, since none is allowed (Fetch §3.3.4); `authorization` named, which no wildcard
-// covers (Fetch §4.8)
-const PREFLIGHT: IEnd = Object.freeze({
-  headers: Object.freeze({
-    'access-control-allow-headers': 'authorization, *',
-    'access-control-allow-methods': 'GET, POST, DELETE',
-    'access-control-max-age': '7200',
-  }),
-  status: 204,
+// what a preflight's answer from an origin `origins` names (spec 15.12) carries whatever method it
+// asks for: the browser judges its request against it
+const PREFLIGHT = Object.freeze({
+  'access-control-allow-methods': 'GET, POST, DELETE',
+  'access-control-max-age': '7200',
 });
 
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
@@ -289,30 +288,12 @@ const headerOf = (request: IHTTPRequestLike, name: string): string | undefined =
   return Array.isArray(value) ? value[0] : value;
 };
 
-// the path a request names, an absolute-form target's among them, and its query, which a listen
-// reads; none for a target HTTP refuses
-const targetOf = (
-  request: IHTTPRequestLike
-): { path: string; query: URLSearchParams } | undefined => {
+// the path a request names, an absolute-form target's among them, its query read by no exchange;
+// none for a target HTTP refuses
+const targetOf = (request: IHTTPRequestLike): { path: string } | undefined => {
   const target = requestTargetOf(request.url);
 
-  return target === undefined
-    ? undefined
-    : { path: target.path, query: new URLSearchParams(target.query) };
-};
-
-// a count a listen gives: absent is 0, and anything but digits is none
-const countOf = (query: URLSearchParams, name: string): number | undefined => {
-  const value = query.get(name) ?? '0';
-
-  return /^\d{1,15}$/u.test(value) ? Number(value) : undefined;
-};
-
-// whether a connect says its client listens: `?1` or `?0`, absent being `?0`; anything else is none
-const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
-  const value = headerOf(request, LISTEN_HEADER) ?? '?0';
-
-  return value === '?1' || (value === '?0' ? false : undefined);
+  return target === undefined ? undefined : { path: target.path };
 };
 
 // the length an envelope goes after in a batch
@@ -346,6 +327,57 @@ const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
   }
 
   return values;
+};
+
+// a field a request carries read as an Item of RFC 9651, its lines joined by `, ` first (§4.2, RFC
+// 9110 §5.3): its bare item, its parameters ignored (§2.3); `null` when the request carries none,
+// `undefined` when it does not parse, two lines of it among them
+const bareItemOf = (request: IHTTPRequestLike, name: string): BareItem | null | undefined => {
+  const lines = linesOf(request, name);
+
+  return lines.length === 0 ? null : parseItem(lines.join(', '))?.bareItem;
+};
+
+// a count a listen gives (spec 15.9): an Integer of 0 or more, anything else none; left out, 0, or
+// none where it `isRequired`
+const countOf = (
+  request: IHTTPRequestLike,
+  name: string,
+  { isRequired = false }: { isRequired?: boolean } = {}
+): number | undefined => {
+  const bareItem = bareItemOf(request, name);
+
+  if (bareItem === null) {
+    return isRequired ? undefined : 0;
+  }
+
+  return bareItem?.type === BARE_ITEM_TYPES.INTEGER && bareItem.value >= 0
+    ? bareItem.value
+    : undefined;
+};
+
+// whether a connect says its client listens: a Boolean, absent being false; anything else is none
+const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
+  const bareItem = bareItemOf(request, LISTEN_HEADER);
+
+  if (bareItem === null) {
+    return false;
+  }
+
+  return bareItem?.type === BARE_ITEM_TYPES.BOOLEAN ? bareItem.value : undefined;
+};
+
+// a preflight's answer (spec 15.12): `authorization`, which no wildcard covers (Fetch §4.8); the
+// names asked, for a browser that caches names and no wildcard; then `*`. No `Vary` names what was
+// asked: no cache stores an answer to `OPTIONS` (RFC 9110 §9.3.7)
+const preflightOf = (request: IHTTPRequestLike): IEnd => {
+  const asked = linesOf(request, 'access-control-request-headers').join(', ');
+  const allowed = ['authorization', ...(asked === '' ? [] : [asked]), '*'];
+
+  return {
+    headers: { ...PREFLIGHT, 'access-control-allow-headers': allowed.join(', ') },
+    status: 204,
+  };
 };
 
 // a request's authority (spec 15.12): over HTTP/2, its `:authority`, else its `host`, judged by
@@ -506,14 +538,15 @@ const sendHead = (response: IHTTPResponseLike): void => {
  *
  * What the server sends of its own reaches a client that said at connect that it listens —
  * `bead-listen: ?1`, which the 201 says back. It waits in the connection's outbox, numbered, until a
- * listen — a `GET` with `after` and `wait` — brings back all that waits, in a batch of
- * `application/prs.bead-batch`, the number of its first in `bead-sequence`; the next listen
- * acknowledges by `after` what its client heard whole, and what it did not comes again. A listen waits up to `wait`, no longer than `maximumWait`, for something
- * to bring back; a second takes the first's place. Each listen held, once past its refusals, emits
- * `listen` with `true`, and its end, while its connection stands, `listen` with `false`: the layers
- * above count no silence meanwhile (spec 13.7). An outbox past `maximumOutboxBytes` closes its
- * connection. A connection whose client does not listen carries answers alone: anything else
- * rejects its `send`.
+ * listen — a `GET` at the connection's URL, its `bead-after` and `bead-wait` — brings back all that
+ * waits, in a batch of `application/prs.bead-batch`, the number of its first in `bead-sequence`;
+ * the next listen acknowledges by `bead-after` what its client heard whole, and what it did not
+ * comes again, and one without it is refused. A listen waits up to `bead-wait` milliseconds, 0 when
+ * left out, no longer than `maximumWait`, for something to bring back; a second takes the first's
+ * place. Each listen held, once past its refusals, emits `listen` with `true`, and its end, while
+ * its connection stands, `listen` with `false`: the layers above count no silence meanwhile (spec
+ * 13.7). An outbox past `maximumOutboxBytes` closes its connection. A connection whose client does
+ * not listen carries answers alone: anything else rejects its `send`.
  *
  * @example
  * const server = createHTTPTransportServer({ createServer: (listener) => createServer(listener) });
@@ -746,9 +779,8 @@ export const createHTTPTransportServer = (
       // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
       const listen = (exchange: IExchangeIn, connection: IDrawn): void => {
         const { request, response } = exchange;
-        const query = targetOf(request)?.query ?? new URLSearchParams();
-        const after = countOf(query, 'after');
-        const wait = countOf(query, 'wait');
+        const after = countOf(request, AFTER_HEADER, { isRequired: true });
+        const wait = countOf(request, WAIT_HEADER);
 
         if (!connection.isListening) {
           return (finish(exchange, { reason: REFUSALS.LISTEN_UNDECLARED, status: 409 }), undefined);
@@ -1165,8 +1197,9 @@ export const createHTTPTransportServer = (
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
 
-        // * a field of a control character but a tab, or of an octet past ASCII, before anything
-        // else: Node's parser answers the first itself, so this meets the second alone
+        // * a field of a control character but a tab, of an octet past ASCII, or padded at either
+        // end, before anything else: Node's parser answers the first itself, and drops a padded one
+        // over HTTP/2 unless `strictFieldWhitespaceValidation` is false
         if (!hasVisibleFields(request.rawHeaders)) {
           return (refuseMalformed(exchange), undefined);
         }
@@ -1212,7 +1245,7 @@ export const createHTTPTransportServer = (
           request.method === 'OPTIONS' &&
           headerOf(request, 'access-control-request-method') !== undefined
         ) {
-          return (endWith(response, PREFLIGHT), undefined);
+          return (endWith(response, preflightOf(request)), undefined);
         }
 
         if (request.method !== 'GET' && request.method !== 'POST' && request.method !== 'DELETE') {

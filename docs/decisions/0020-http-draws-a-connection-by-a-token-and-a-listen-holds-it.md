@@ -35,10 +35,12 @@ refused by a status the transport marks as its own, from one lost after, which a
 an intermediary's may come once the request ran.
 
 **What the server sends of its own waits for a listen.** It waits, numbered, in the connection's
-outbox, for its client to listen: to ask for it by an exchange of its own, which the server holds
-until something comes, long polling as RFC 6202 lays it out rather than a response held open. Each
-listen acknowledges what its client heard whole; what it did not comes again, as a stream's lost
-frames are sent again (RFC 9000 §13.3). The client reads a batch as it comes and bounds each
+outbox, for its client to listen: to ask for it by an exchange of its own, at the connection's one
+URL, its acknowledgement and its wait in fields of its own
+([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)), which the server
+holds until something comes, long polling as RFC 6202 lays it out rather than a response held open.
+Each listen acknowledges what its client heard whole; what it did not comes again, as a stream's
+lost frames are sent again (RFC 9000 §13.3). The client reads a batch as it comes and bounds each
 envelope alone, as HTTP/2 bounds its frames and never its streams (RFC 9113 §4.2).
 
 **A client says at connect, once for the connection's life, whether it listens**, and the server
@@ -87,3 +89,5 @@ keeps, On a WebSocket server's answer to a malformed handshake.
 A stop crossed by an arrival, over HTTP and at a WebSocket's address, met it with a transport's
 listener that throws, whose round
 [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) keeps.
+Where a listen names its acknowledgement and its wait met it with the listen's fields, whose round
+[0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md) keeps.

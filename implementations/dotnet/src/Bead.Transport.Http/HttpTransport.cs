@@ -12,10 +12,25 @@ public static class HttpTransport
     /// <summary>The header a connection's token travels in: the 201 that draws it, and each exchange after.</summary>
     public const string ConnectionTokenHeader = "bead-connection-token";
 
-    /// <summary>The header a client says at connect that it listens in, <c>?1</c>, and the 201 says back.</summary>
+    /// <summary>
+    /// The header a client says at connect that it listens in, <c>?1</c>, and the 201 says back: an
+    /// Item of RFC 9651 whose bare item is a Boolean, its parameters ignored.
+    /// </summary>
     public const string ListenHeader = "bead-listen";
 
-    /// <summary>The header a batch names the number of its first envelope in.</summary>
+    /// <summary>
+    /// The header a listen acknowledges in: the number of the last envelope its client heard whole;
+    /// an Item whose bare item is an Integer of RFC 9651, 0 or more.
+    /// </summary>
+    public const string AfterHeader = "bead-after";
+
+    /// <summary>The header a listen asks the server to hold it in, in milliseconds; 0 when left out.</summary>
+    public const string WaitHeader = "bead-wait";
+
+    /// <summary>
+    /// The header a batch names the number of its first envelope in, the others following one by
+    /// one: an Item of RFC 9651 whose bare item is an Integer, 1 or more.
+    /// </summary>
     public const string SequenceHeader = "bead-sequence";
 
     /// <summary>The header each refusal of the transport's own is marked in.</summary>
@@ -50,7 +65,7 @@ public static class HttpRefusals
     /// <summary>A listen whose client did not say at connect it listens: 409.</summary>
     public const string ListenUndeclared = "listen-undeclared";
 
-    /// <summary>A connect with a body, a token missing or malformed, no envelope, a request on the server's parity, a listen's count that is none: 400.</summary>
+    /// <summary>A connect with a body, a token missing or malformed, no envelope, a request on the server's parity, a listen without <c>bead-after</c>, or a count that is none: 400.</summary>
     public const string Malformed = "malformed";
 
     /// <summary>Neither GET, POST nor DELETE: 405.</summary>

@@ -759,21 +759,21 @@ from one alive, as a WebSocket's heartbeat does: a connection with no exchange u
 minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
 a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
-| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                              |
-| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                 |
-| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                          |
-| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin `origins` names                                                                 |
-| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen's count that is none, or an `after` past what was sent; a WebSocket's upgrade malformed |
-| 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                             |
-| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                              |
-| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                  |
-| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                   |
-| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                  |
-| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                            |
-| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                               |
-| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                               |
-| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                         |
+| Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
+| ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                           |
+| 201    |                                       | a connection drawn, its token in `bead-connection-token`                                                                                                                                                                                                                    |
+| 204    |                                       | handed on, nothing to come back: a cancel, anything but a request, a request held off; a `DELETE` done; a listen that brought nothing; a preflight from an origin `origins` names                                                                                           |
+| 400    | `malformed`                           | a connect with a body, no token or a malformed one, not an envelope, a request on the server's parity, a `POST` with two `Authorization` fields; a listen without `bead-after`, a count that is none, or a `bead-after` past what was sent; a WebSocket's upgrade malformed |
+| 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                       |
+| 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                                                        |
+| 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                            |
+| 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                             |
+| 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
+| 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
+| 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                         |
+| 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                         |
+| 503    | `busy`                                | too many connections — all, or one address's — or bytes of body being read; `Retry-After`                                                                                                                                                                                   |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
 `maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
@@ -790,7 +790,12 @@ unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its 
 `PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and so is a name of
 invalid punycode. So is a request answered whose field holds a control character but a tab, or an
 octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of every field
-defined since, and Node's parser answers the first itself.
+defined since, and Node's parser answers the first itself. So is one whose field value starts or
+ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed over HTTP/2; over HTTP/1.1 the
+parser strips it first (RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value starts or
+ends with a space or a tab, and a control character's, so the request is judged without it; a
+server created with `strictFieldWhitespaceValidation: false` hands the padded value to the
+transport, which resets the stream `PROTOCOL_ERROR`, as the C# side does.
 
 Every server takes `localhost`, a name under `.localhost`, an IPv6 address in brackets and an IPv4
 address, by the request's host, its port aside: no name a browser fetches is written as an IP
@@ -826,9 +831,12 @@ refused. Any other `Origin` is none of its own, whatever host it names: `null`, 
 `blob:` URL's, any scheme but `http` and `https`. So `hosts` is what refuses a page that rebinds its
 name to the server's address, never the origin's test. Over HTTP, the server answers CORS to the
 origins `origins` names and to no other (spec 15.12): their preflight is answered, allowing
-`Authorization` and any other field, and every answer to them names their origin and exposes every
-field, so a page of a listed origin connects, calls, listens and presents `ELSEWHERE` in
-`Authorization`. No answer carries `Access-Control-Allow-Credentials`: no cookie goes across
+`Authorization`, the fields it asks for and any other field — `access-control-allow-headers`
+naming `authorization`, then its `Access-Control-Request-Headers` as they came, then `*`, so a
+browser that caches names and no wildcard keeps the answer too — and every answer to them names
+their origin and exposes every field, so a page of a listed origin connects, calls, listens and
+presents `ELSEWHERE` in `Authorization`. Every exchange of a connection goes to its one URL, which a
+browser's preflight cache keys, so a page preflights its connection's opening and not each listen. No answer carries `Access-Control-Allow-Credentials`: no cookie goes across
 origins, and a `fetch` given to the client must not use `credentials: 'include'`. A gateway in
 front that answers CORS for the path stops, or replaces the fields rather than appends them, once
 the server lists the origin: two `Access-Control-Allow-Origin` fail the browser's check. A page of
@@ -846,17 +854,21 @@ per address counts.
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,
-`bead-listen: ?1` (a boolean of RFC 9651), and the server's 201 says it back when it takes the
+`bead-listen: ?1` (an Item of RFC 9651 whose bare item is a Boolean, its parameters ignored), and
+the server's 201 says it back when it takes the
 listen, as a WebSocket server names the subprotocol it chose: a client whose header something on the
 way dropped never listens where it would be refused. It holds for the connection's life, and
 `isTwoWay` says it of the connection; to a client that does not listen, a request that opens a
 subscription is refused, `SUBSCRIPTION_UNSUPPORTED`, a command rejects, and a relay passes no
-request. The server numbers each such envelope into the connection's outbox. A listen,
-`GET /bead?after=&wait=`, acknowledges what `after` names, which goes, and brings back all that is
-left in a batch of type `application/prs.bead-batch`: each envelope after its length in 4 bytes, the
-number of the first in `bead-sequence`, the others following one by one. Nothing left, the server
-holds the listen up to `wait`, no longer than `maximumWait` — 30 seconds — and ends it 204; a second
-listen takes the first's place. The client reads a batch as it comes and hears each envelope as it
+request. The server numbers each such envelope into the connection's outbox. A listen, a
+`GET /bead` carrying `bead-after` and `bead-wait`, acknowledges what `bead-after` names, which goes,
+and brings back all that is left in a batch of type `application/prs.bead-batch`: each envelope
+after its length in 4 bytes, the number of the first in `bead-sequence`, the others following one
+by one. Nothing left, the server holds the listen up to its `bead-wait` milliseconds, 0 when left
+out, no longer than `maximumWait` — 30 seconds — and ends it 204; a second listen takes the first's
+place. Each count is an Item of RFC 9651 whose bare item is an Integer of 0 or more, its parameters
+ignored; a listen without `bead-after`, or with a count that does not read so, is refused 400
+`malformed`, and no exchange's query is read. The client reads a batch as it comes and hears each envelope as it
 comes whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard

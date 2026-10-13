@@ -476,7 +476,7 @@ test.describe('hosts and origins', () => {
     );
   });
 
-  test('isVisibleField takes HTAB, SP and visible ASCII, and refuses each other control character, DEL and 0x80 to 0xFF', () => {
+  test('isVisibleField takes HTAB, SP and visible ASCII, and refuses each other control character, DEL and 0x80 to 0xFF, none at either end', () => {
     const visible = Array.from({ length: 0x7f - 0x20 }, (_, index) => {
       return String.fromCodePoint(0x20 + index);
     });
@@ -491,8 +491,14 @@ test.describe('hosts and origins', () => {
       }),
     ];
 
-    expect(isVisibleField(`	${visible.join('')}`)).toBe(true);
+    expect(isVisibleField(`a\t${visible.join('')}`)).toBe(true);
     expect(isVisibleField('')).toBe(true);
+    // a space or a tab at either end, which HTTP/2 calls malformed (RFC 9113 §8.2.1)
+    expect(
+      [' x', 'x ', '\tx', 'x\t', ' ', '\t', ' \t '].filter((value) => {
+        return isVisibleField(value);
+      })
+    ).toEqual([]);
     expect(
       others.filter((character) => {
         return isVisibleField(`a${character}b`);
@@ -503,6 +509,7 @@ test.describe('hosts and origins', () => {
     expect(hasVisibleFields(['Host', 'bead.test', 'Origin', 'http://a.example\tb'])).toBe(true);
     expect(hasVisibleFields(['Host', 'bead.test', 'x-other', 'café'])).toBe(false);
     expect(hasVisibleFields(['Host', 'bead.test', 'x-other', 'a\u0007b'])).toBe(false);
+    expect(hasVisibleFields(['Host', 'bead.test', 'bead-after', '0 '])).toBe(false);
   });
 
   test('tells a request’s Origin as it came, its field lines joined by a comma and a space, and none when it sends none', () => {

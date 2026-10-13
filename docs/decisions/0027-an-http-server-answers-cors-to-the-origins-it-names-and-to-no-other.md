@@ -55,9 +55,14 @@ exposing. Its caching note asks for `Vary` when an answer turns on `Origin`
   lost;
 - a preflighted `POST` at another path fails as a network error in every engine, whatever its 404
   carries;
-- Chromium and WebKit keep every method and field an answer lists, so one preflight serves the
-  connect, the send and the `DELETE`; Firefox preflights each new method and field set once; every
-  engine preflights again each listen whose URL moved, since its cursor is in its query;
+- Chromium and WebKit keep one cache entry per origin and URL, replaced by the last answer's lists,
+  and match `*`; Firefox keeps an entry per name, as Fetch §4.8 does, merging the names its answers
+  list, stores `*` as a literal token nothing matches, and preflights its first two exchanges at a
+  URL whatever their methods, then holds the answer. Under `authorization, *`, Firefox preflights
+  every exchange; under `authorization`, the names the preflight asks and `*`, the client's opening
+  (connect, listen, send, listen, send with `Authorization`, listen, send, `DELETE`) costs 1
+  preflight in Chromium and WebKit and 3 in Firefox, then none while the answer holds
+  ([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md));
 - a keepalive `DELETE` fired as its page goes, the cache cold, is preflighted after the page has
   gone, and both reach the server; refused 405, the `DELETE` never follows;
 - Max-Age is capped at 7,200 s by Chromium, 86,400 s by Firefox, 600 s by WebKit.
@@ -114,16 +119,30 @@ grants them everything; HTTP is the transport that carries a bearer beside an en
 in 15.6's order, after HTTP's own refusals, the host, the path and the origin, and before the
 method: from an origin `origins` names, it is answered 204, its body empty,
 `access-control-allow-methods: GET, POST, DELETE`, what `Allow` names;
-`access-control-allow-headers: authorization, *`, the wildcard for a request without credentials and
-`authorization` named, since no wildcard covers it; and `access-control-max-age: 7200`, the longest
-Chromium keeps, a preflight granting nothing the server does not judge again on the exchange. The
-answer is fixed whatever the preflight asks: the browser judges its request against it, and the
-server keeps no state and parses no `Access-Control-Request-Headers`. A preflight is no refusal:
-nothing marks it, nothing tells it, it draws no connection and counts against no bound. A preflight
-from an origin not taken is 403 `origin-refused` as any request is, told, which names the page to
-add. Any other `OPTIONS`, from a listed origin with no `Access-Control-Request-Method`, from the
-server's own origin or from none, is 405 `method-refused` as any method but `GET`, `POST` and
-`DELETE`.
+`access-control-allow-headers` naming `authorization`, then the preflight's
+`Access-Control-Request-Headers`, its lines joined by `", "`, when it asks any, then `*`; and
+`access-control-max-age: 7200`, the longest Chromium keeps, a preflight granting nothing the server
+does not judge again on the exchange. `authorization` is named since no wildcard covers it, and
+Chromium and WebKit replace their entry with the last answer, so a name only reflected would leave
+the entry when a preflight that did not ask it answers last. The names asked are reflected since
+Firefox caches the names an answer lists and never `*`: reflected, it caches every name a page's
+requests carry, a tracing field among them, as ASP.NET Core's `AllowAnyHeader` and Express's `cors`
+answer. `*` stays since Chromium and WebKit cache it, and keep covering every name with it. The
+reflected value has passed the field rule before it is echoed, and grants nothing `*` did not: a
+reflected name is one the browser would send. Joined by `", "` explicitly, both servers write one
+value for one preflight, Node handing two lines as `a, b` and Kestrel's `StringValues.ToString()` as
+`a,b`. No `Vary` names `Access-Control-Request-Headers`: the answer is an `OPTIONS` response, which
+no cache stores ([RFC 9110 §9.3.7](https://www.rfc-editor.org/rfc/rfc9110#section-9.3.7)), and
+`Vary` only selects among stored responses; Express's `Vary` is the precedent not taken. Bead's
+request fields named besides, which save Firefox one preflight of the opening, are not taken: an
+enumeration 15.12, both servers and the generator keep current with every field Bead adds, which
+stale breaks nothing and buys only that preflight. The answer is the same whatever method the
+preflight asks: the browser judges its request against it, and the server keeps no state. A
+preflight is no refusal: nothing marks it, nothing tells it, it draws no connection and counts
+against no bound. A preflight from an origin not taken is 403 `origin-refused` as any request is,
+told, which names the page to add. Any other `OPTIONS`, from a listed origin with no
+`Access-Control-Request-Method`, from the server's own origin or from none, is 405 `method-refused`
+as any method but `GET`, `POST` and `DELETE`.
 
 **Every response written to a request whose `Origin` `origins` names, once that origin is judged,
 whatever its status, carries `access-control-allow-origin`**, the `Origin` as it came, and
@@ -187,16 +206,15 @@ in the engines measured, which their stated intent is to gate; a secure page rea
 private address by a hostname passes `targetAddressSpace: 'local'` through the client's `fetch`
 option.
 
-**A page of another origin pays two round trips per listen batch**, the `OPTIONS` then the `GET`,
-where a same-origin page pays one, and the server answers two requests a batch: a listen's URL
-carries its cursor and its wait (15.9), and every engine keys its preflight cache by URL. A listen
-that brought nothing keeps its URL and hits the cache. The cure is 15.9's cursor and wait in
-request fields, so that `/bead` is one URL and one preflight a Max-Age serves every exchange: a
-round of its own, before 0.4.0.
+**A page of another origin preflights its connection's opening**, once in Chromium and WebKit and
+three times in Firefox (measured), then pays one round trip per exchange until its browser's cached
+answer expires: every exchange of a connection is at one URL
+([0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)), which every engine
+keys its preflight cache by.
 
 **The gate.** `spec/transports.json`'s five CORS cases, played by both sides: a listed origin's
-preflight; every answer to it once judged; a preflight judged as every request before its origin;
-an `OPTIONS` that is no preflight and an exchange from the server's own origin or from none; `null`.
+preflight; every answer to it once judged; a preflight judged as every request before its origin; an
+`OPTIONS` that is no preflight and an exchange from the server's own origin or from none; `null`.
 `unmarked()` holds HTTP's own 400 to none of the path's fields over HTTP and at a WebSocket's
 address, and the WebSocket upgrade from a taken origin to none of CORS's. Twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) hold what no step reaches: the preflight over
@@ -204,13 +222,14 @@ HTTP/2, the fields on each writer, the listed origin's predicate, `isListedOrigi
 `IsListedOrigin`. A Playwright configuration of its own, the TypeScript side's
 `playwright.browser.config.ts`, runs the HTTP client in Chromium from a page of another origin
 against both servers, in CI's .NET job, the one proof that a browser reads the answer; Firefox's and
-WebKit's reading of `authorization, *` and `*` is this record's measurement. `docs/support.md` names
-them.
+WebKit's reading of the answer and of `*`, and their preflight caches, are this record's
+measurement. `docs/support.md` names them.
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-one round. Its objections, each with the answer that holds:
+one round, and its `Access-Control-Allow-Headers` in a second. Its objections, each with the answer
+that holds:
 
 ### On CORS over HTTP
 
@@ -222,3 +241,9 @@ one round. Its objections, each with the answer that holds:
 | The preflight per listen is certain, not "if someone measures it": the client builds each listen's URL from its cursor and Fetch keys the preflight cache by URL, so a page of another origin pays two round trips per batch where a same-origin page pays one. The cure is a 15.9 wire change, cheapest before 1.0, and a decision for the user now                                                                                                                                                                                                                                                  | Accepted. Verified: the URL carries `after` and `wait`, Fetch §4.9 keys an entry by URL, and every engine preflights the listen even under the wildcard answer. This record states the cost as two round trips per batch, a listen that brought nothing hitting the cache. Moving `after` and `wait` into request fields is a 15.9 round of its own, crossing the languages, `Last-Event-ID` the precedent for a cursor in a field and RFC 7240's `Prefer: wait` the standard to weigh; the user puts it before 0.4.0                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | The deployment text is incomplete: a gateway that already answers CORS in front, its origin listed, sends a second `Access-Control-Allow-Origin` and the browser fails; Local Network Access from a private page to the loopback is not gated in the engines, which the text must state as measured; a secure page reaching `http://` on a private address by a hostname is blocked as mixed content unless its `fetch` carries `targetAddressSpace`, which the client's `IFetchInit` lacks                                                                                                           | Accepted, in the text alone. Fetch's CORS check compares the combined field with the origin, so two fail it (§4.10); Spring Cloud Gateway ships a filter for the case. Measured: a page at a private address, not secure, reaches the loopback in Chromium 153, Firefox 155 and WebKit 26.6, granted nothing. Both READMEs and this record say a gateway in front stops answering CORS or replaces the fields once the server lists the origin; the matrix's platform row states LNA as measured, from a public and from a private page, and the mixed-content exemptions, naming the client's `fetch` option as the way to pass `targetAddressSpace`. No code: the member is a Chromium one and no C# client runs in a page                                                                                                                                                                                                                                                                                               |
 | The browser evidence ran a shim that answers a listed preflight at any path and host, before the server judges it, which is not the designed order; and the keepalive transcript was not produced by the script beside it, which leaves the cache cold where the transcript's was warm                                                                                                                                                                                                                                                                                                                | Accepted. The ordered shim answers a preflight at the path alone, after the host, the path and the origin, and gives the same connect, call, listen and disconnect in all three engines; the cold case, the token drawn with no `Origin`, has the page's keepalive `DELETE` preflight after the page has gone, and both reach the server in all three. They stand as the evidence, and this record's context names the cold case, the one a page meets once WebKit's 600 s or Chromium's 7,200 s has expired its cached answer. The conclusions stand                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+### The allow-headers value, revised
+
+The allow-headers value was revised by
+[0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)'s round; its objections
+and answers are kept there.

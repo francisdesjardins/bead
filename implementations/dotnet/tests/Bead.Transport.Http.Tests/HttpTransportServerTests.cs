@@ -322,11 +322,27 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         return RefusalOf(Fetch(request));
     }
 
-    private Task<HttpResponseMessage> ListenOf(string connectionToken, string query)
+    private Task<HttpResponseMessage> ListenOf(string connectionToken, ListenFields? fields = null)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, new Uri($"{Url}?{query}"));
+        return Fetch(ListenRequestOf(connectionToken, fields));
+    }
 
-        return Fetch(With(request, (HttpTransport.ConnectionTokenHeader, connectionToken)));
+    // a listen at the connection's one URL, its counts in their fields as given, each left out when
+    // none (spec 15.9)
+    private HttpRequestMessage ListenRequestOf(string connectionToken, ListenFields? fields = null)
+    {
+        var given = fields ?? new ListenFields();
+        var request = With(new HttpRequestMessage(HttpMethod.Get, Url), (HttpTransport.ConnectionTokenHeader, connectionToken));
+
+        foreach (var (name, value) in new[] { (HttpTransport.AfterHeader, given.After), (HttpTransport.WaitHeader, given.Wait) })
+        {
+            if (value is not null)
+            {
+                request.Headers.TryAddWithoutValidation(name, value);
+            }
+        }
+
+        return request;
     }
 
     /// <summary>Connects: the token the server drew, and the handle it named the connection by.</summary>
@@ -424,6 +440,17 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
     /// <summary>An answer's head: its status, and its headers by their names in lower case.</summary>
     private sealed record Head(int Status, IReadOnlyDictionary<string, string> Headers);
+
+    /// <summary>
+    /// A listen's counts, as its fields carry them (spec 15.9): <c>bead-after</c> 0 unless given,
+    /// <c>bead-wait</c> left out unless given; each left out when none.
+    /// </summary>
+    private sealed record ListenFields
+    {
+        public string? After { get; init; } = "0";
+
+        public string? Wait { get; init; }
+    }
 
     /// <summary>A socket of the tests' own, writing HTTP/1.1 by hand: what HttpClient will not send.</summary>
     private sealed class Wire : IDisposable
@@ -836,7 +863,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Takes_an_Authorization_as_it_came_its_surrounding_spaces_and_tabs_removed_an_empty_one_carrying_none()
+    public async Task Takes_an_Authorization_as_it_came_an_empty_one_carrying_none()
     {
         await Start();
 
@@ -852,11 +879,10 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         foreach (var (callId, field) in new (uint CallId, string Field)[]
         {
-            (1, "Authorization: \tBearer  mF_9.B5f-4.1JqM \t\r\n"),
+            (1, "Authorization: Bearer  mF_9.B5f-4.1JqM\r\n"),
             (3, "Authorization: basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\r\n"),
             (5, "Authorization:\r\n"),
-            (7, "Authorization: \t \r\n"),
-            (9, ""),
+            (7, ""),
         })
         {
             using var wire = await Wire.Open(_port);
@@ -867,7 +893,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             Assert.Equal(200, (await wire.Read()).Head.Status);
         }
 
-        Assert.Equal(["Bearer  mF_9.B5f-4.1JqM", "basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==", null, null, null], taken);
+        Assert.Equal(["Bearer  mF_9.B5f-4.1JqM", "basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==", null, null], taken);
     }
 
     [Fact]
@@ -1273,7 +1299,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
                 await RefusalOf(With(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)), ("content-type", "text/plain"))),
                 await ByHand(connectionToken, "Authorization: Bearer a\r\nAuthorization: Bearer b\r\nContent-Length: 0"),
                 await ByHand(connectionToken, "Content-Length: 2147483648"),
-                await RefusalOf(ListenOf(connectionToken, "after=x")),
+                await RefusalOf(ListenOf(connectionToken, new() { After = "x" })),
             ];
         }
 
@@ -1497,7 +1523,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         for (var connection = 0; connection < 32; connection += 1)
         {
-            held.Add(ListenOf((await Connect(true)).ConnectionToken, "wait=20000"));
+            held.Add(ListenOf((await Connect(true)).ConnectionToken, new() { Wait = "20000" }));
         }
 
         await Until(() =>
@@ -1691,7 +1717,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             answers.Add((preflight.Version, $"{(int)preflight.StatusCode} {(await BytesOf(preflight)).Length} {CorsOf(preflight)}", $"{(int)connect.StatusCode} {CorsOf(connect)}"));
         }
 
-        var answered = $"204 0 {Page} | * | none | GET, POST, DELETE | authorization, * | 7200 | no-store nosniff Origin | unmarked";
+        var answered = $"204 0 {Page} | * | none | GET, POST, DELETE | authorization, bead-listen,content-type,traceparent, * | 7200 | no-store nosniff Origin | unmarked";
         var drawn = $"201 {Page} | * | none | none | none | none | no-store nosniff Origin | unmarked";
 
         Assert.Equal([(HttpVersion.Version20, answered, drawn), (HttpVersion.Version11, answered, drawn)], answers);
@@ -2075,7 +2101,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         async Task<Task<(int Status, string? Reason)>> Held((string ConnectionToken, string ConnectionHandle) connection)
         {
             var listens = Count("listens");
-            var held = RefusalOf(ListenOf(connection.ConnectionToken, "wait=20000"));
+            var held = RefusalOf(ListenOf(connection.ConnectionToken, new() { Wait = "20000" }));
 
             await Until(() =>
             {
@@ -2231,7 +2257,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_holding_a_control_character_but_a_tab_and_Kestrel_ends_the_session_of_an_octet_that_is_no_UTF_8()
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_holding_a_control_character_but_a_tab_or_whose_value_starts_or_ends_with_a_space_or_a_tab_and_Kestrel_ends_the_session_of_an_octet_that_is_no_UTF_8()
     {
         await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
 
@@ -2243,8 +2269,50 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("origin", "http://a.example\u001b[2J")));
         Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("x-other", "a\u0007b")));
 
+        // and a value with a space or a tab at either end (RFC 9113 §8.2.1), which Node's parser
+        // drops alike under its default
+        Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("x-other", " a")));
+        Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(own, bead, ("x-other", "a\t")));
+
         // ! a lone 0xE9, no UTF-8, Kestrel refuses of its own, ending the session, PROTOCOL_ERROR
         Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of(own, bead, ("x-other", "café")));
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+    }
+
+    [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_whose_value_starts_or_ends_with_a_space_or_a_tab_PROTOCOL_ERROR_and_tells_nothing()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, Origins = [Page] });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+        var answers = new List<(string Field, TlsAnswer Answer)>();
+
+        // each field the transport reads, padded: Kestrel hands it on as it came, and the transport
+        // resets its stream before it reads any, PROTOCOL_ERROR (RFC 9113 §8.1.1), nothing written —
+        // a credential never presented, a body never taken, an origin never judged, a count never read
+        foreach (var field in new[]
+        {
+            ("authorization", "  Bearer x "),
+            ("content-type", $"{HttpTransport.MediaType} "),
+            ("origin", $" {Page}"),
+            (HttpTransport.AfterHeader, "\t0"),
+        })
+        {
+            (string, string)[] fields = field.Item1 == "content-type" ? [own, field] : [own, bead, field];
+
+            answers.Add((field.Item1, await Http2Of(fields)));
+        }
+
+        Assert.Equal(
+            [
+                ("authorization", new TlsAnswer(null, null, 0x1)),
+                ("content-type", new TlsAnswer(null, null, 0x1)),
+                ("origin", new TlsAnswer(null, null, 0x1)),
+                (HttpTransport.AfterHeader, new TlsAnswer(null, null, 0x1)),
+            ],
+            answers);
         Assert.Empty(_refusals);
         Assert.Empty(_connections);
     }
@@ -2933,12 +3001,12 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
     // createHTTPTransportServer, CORS
 
     [Fact]
-    public async Task Answers_a_preflight_from_an_origin_it_names_204_naming_it_the_methods_Authorization_and_any_other_field_for_7200_seconds_and_tells_no_refusal()
+    public async Task Answers_a_preflight_from_an_origin_it_names_204_naming_it_the_methods_Authorization_the_fields_it_asks_for_in_its_lines_joined_and_any_other_field_for_7200_seconds_and_tells_no_refusal()
     {
         await Start(new HttpTransportServerOptions { Origins = [Page] });
 
-        // a preflight's answer, whatever it asks for: its status, its body's length, and the fields
-        // of CORS and of the path
+        // a preflight's answer, whatever method it asks for: its status, its body's length, and the
+        // fields of CORS and of the path
         async Task<string> Preflighted((string Method, string? Fields) asked)
         {
             var request = With(With(new HttpRequestMessage(HttpMethod.Options, Url), ("origin", Page)), ("access-control-request-method", asked.Method));
@@ -2947,13 +3015,35 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             return $"{(int)response.StatusCode} {(await BytesOf(response)).Length} {CorsOf(response)}";
         }
 
-        var answer = $"204 0 {Page} | * | none | GET, POST, DELETE | authorization, * | 7200 | no-store nosniff Origin | unmarked";
+        // what it asks in two field lines, by hand: HttpClient writes a field's values in one
+        async Task<string> PreflightedInLines(string method)
+        {
+            using var wire = await Wire.Open(_port);
 
+            await wire.Write($"OPTIONS /bead HTTP/1.1\r\nHost: {Host}\r\nOrigin: {Page}\r\nAccess-Control-Request-Method: {method}\r\nAccess-Control-Request-Headers: bead-after\r\nAccess-Control-Request-Headers: bead-wait\r\n\r\n");
+
+            var (head, body) = await wire.Read();
+
+            return $"{head.Status} {body.Length} {CorsOf(head.Headers)}";
+        }
+
+        string AnswerOf(string allowed)
+        {
+            return $"204 0 {Page} | * | none | GET, POST, DELETE | {allowed} | 7200 | no-store nosniff Origin | unmarked";
+        }
+
+        // Authorization, then what it asks as it came, its lines joined by ", ", then any other
         Assert.Equal(
-            [answer, answer, answer],
+            [
+                AnswerOf("authorization, bead-listen,content-type,traceparent,sentry-trace,baggage, *"),
+                AnswerOf("authorization, bead-after,bead-connection-token,bead-wait, *"),
+                AnswerOf("authorization, bead-after, bead-wait, *"),
+                AnswerOf("authorization, *"),
+            ],
             [
                 await Preflighted(("POST", "bead-listen,content-type,traceparent,sentry-trace,baggage")),
-                await Preflighted(("GET", "bead-connection-token")),
+                await Preflighted(("GET", "bead-after,bead-connection-token,bead-wait")),
+                await PreflightedInLines("GET"),
                 await Preflighted(("PUT", null)),
             ]);
         Assert.Empty(_connections);
@@ -3001,7 +3091,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         HttpRequestMessage ListenAfter(string connectionToken, int after)
         {
-            return With(new HttpRequestMessage(HttpMethod.Get, new Uri($"{Url}?after={after}&wait=0")), (HttpTransport.ConnectionTokenHeader, connectionToken));
+            return ListenRequestOf(connectionToken, new() { After = after.ToString(CultureInfo.InvariantCulture), Wait = "0" });
         }
 
         using var drawn = await Fetch(With(With(PostOf(null, null), (HttpTransport.ListenHeader, "?1")), ("origin", Page)));
@@ -3148,7 +3238,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await _server.Send(new TransportMessage(first, false), connectionHandle).WaitAsync(Patience, Cancelled);
         await _server.Send(new TransportMessage(second, false), connectionHandle).WaitAsync(Patience, Cancelled);
 
-        using var brought = await ListenOf(connectionToken, "after=0&wait=0");
+        using var brought = await ListenOf(connectionToken, new() { After = "0", Wait = "0" });
 
         Assert.Equal(
             (200, HttpTransport.BatchMediaType, "1", "no-store"),
@@ -3156,12 +3246,12 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(BatchOf(first, second), await BytesOf(brought));
 
         // not acknowledged: brought back again
-        using var again = await ListenOf(connectionToken, "after=0");
+        using var again = await ListenOf(connectionToken, new() { After = "0" });
 
         Assert.Equal(BatchOf(first, second), await BytesOf(again));
 
         // acknowledged: gone, and nothing left
-        using var empty = await ListenOf(connectionToken, "after=2&wait=0");
+        using var empty = await ListenOf(connectionToken, new() { After = "2", Wait = "0" });
 
         Assert.Equal((204, 0), ((int)empty.StatusCode, (await BytesOf(empty)).Length));
     }
@@ -3172,7 +3262,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { InactivityTimeout = Timeout.InfiniteTimeSpan, MaximumWait = TimeSpan.FromSeconds(1) });
 
         var (connectionToken, connectionHandle) = await Connect(true);
-        var lapsing = ListenOf(connectionToken, "wait=60000");
+        var lapsing = ListenOf(connectionToken, new() { Wait = "60000" });
 
         // waiting, as long as the server lets it
         await Until(() =>
@@ -3193,7 +3283,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             Assert.Equal(204, (int)lapsed.StatusCode);
         }
 
-        var held = ListenOf(connectionToken, "after=0&wait=500");
+        var held = ListenOf(connectionToken, new() { After = "0", Wait = "500" });
         var envelope = EnvelopeOf(EnvelopeKind.Notification, 1);
 
         await Until(() =>
@@ -3218,7 +3308,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         var (connectionToken, connectionHandle) = await Connect(true);
-        var first = ListenOf(connectionToken, "wait=20000");
+        var first = ListenOf(connectionToken, new() { Wait = "20000" });
 
         await Until(() =>
         {
@@ -3231,7 +3321,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         // to the next
         using (var second = await Wire.Open(_port))
         {
-            await second.Write($"GET /bead?wait=20000 HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n\r\n");
+            await second.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 20000\r\n\r\n");
 
             using var ended = await first;
 
@@ -3240,14 +3330,14 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             second.Reset();
         }
 
-        using var third = await ListenOf(connectionToken, "after=0&wait=0");
+        using var third = await ListenOf(connectionToken, new() { After = "0", Wait = "0" });
 
         Assert.Equal((200, Convert.ToHexString(BatchOf(envelope))), ((int)third.StatusCode, Convert.ToHexString(await BytesOf(third))));
 
         // a listen held, lost: what comes next waits for the one after it
         using (var dropped = await Wire.Open(_port))
         {
-            await dropped.Write($"GET /bead?after=1&wait=20000 HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n\r\n");
+            await dropped.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 1\r\n{HttpTransport.WaitHeader}: 20000\r\n\r\n");
             await Until(() =>
             {
                 return Count("listens") == 1;
@@ -3261,7 +3351,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         });
         await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
 
-        using var next = await ListenOf(connectionToken, "after=1&wait=0");
+        using var next = await ListenOf(connectionToken, new() { After = "1", Wait = "0" });
 
         Assert.Equal((200, "2"), ((int)next.StatusCode, HeaderOf(next, HttpTransport.SequenceHeader)));
         Assert.Empty(_closes);
@@ -3285,8 +3375,8 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         }
 
         // past the body limit together, and one alone: a batch is read as it comes, each bounded alone
-        using var all = await ListenOf(connectionToken, "wait=0");
-        using var rest = await ListenOf(connectionToken, "after=1&wait=0");
+        using var all = await ListenOf(connectionToken, new() { Wait = "0" });
+        using var rest = await ListenOf(connectionToken, new() { After = "1", Wait = "0" });
 
         Assert.Equal(
             (("1", Convert.ToHexString(BatchOf(envelopes))), ("2", Convert.ToHexString(BatchOf(envelopes[1..]))), 4L + 16 + 4 + 40),
@@ -3311,7 +3401,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
             return _server.Send(new TransportMessage(command, false), deaf.ConnectionHandle);
         })).Message);
 
-        using var response = await ListenOf(listening.ConnectionToken, "wait=0");
+        using var response = await ListenOf(listening.ConnectionToken, new() { Wait = "0" });
 
         Assert.Equal(BatchOf(late, command), await BytesOf(response));
         Assert.Equal(
@@ -3326,7 +3416,9 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         var listening = await Connect(true);
         var deaf = await Connect();
-        var withBody = With(new HttpRequestMessage(HttpMethod.Get, Url) { Content = new ByteArrayContent(new byte[8]) }, (HttpTransport.ConnectionTokenHeader, listening.ConnectionToken));
+        var withBody = ListenRequestOf(listening.ConnectionToken);
+
+        withBody.Content = new ByteArrayContent(new byte[8]);
 
         Assert.Equal(
             [
@@ -3339,11 +3431,11 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
                 (400, HttpRefusals.Malformed),
             ],
             [
-                await RefusalOf(ListenOf(deaf.ConnectionToken, "")),
+                await RefusalOf(ListenOf(deaf.ConnectionToken)),
                 await RefusalOf(withBody),
-                await RefusalOf(ListenOf(listening.ConnectionToken, "after=one")),
-                await RefusalOf(ListenOf(listening.ConnectionToken, "wait=-1")),
-                await RefusalOf(ListenOf(listening.ConnectionToken, "after=1")),
+                await RefusalOf(ListenOf(listening.ConnectionToken, new() { After = "one" })),
+                await RefusalOf(ListenOf(listening.ConnectionToken, new() { Wait = "-1" })),
+                await RefusalOf(ListenOf(listening.ConnectionToken, new() { After = "1" })),
                 await RefusalOf(With(PostOf(null, null), (HttpTransport.ListenHeader, "yes"))),
                 await RefusalOf(new HttpRequestMessage(HttpMethod.Get, Url)),
             ]);
@@ -3355,6 +3447,63 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.False(_server.IsTwoWay(_connections.Last()));
     }
 
+    // spec 15.9
+    [Fact]
+    public async Task Reads_a_listen_s_counts_from_bead_after_and_bead_wait_a_field_given_as_several_lines_joined_and_refuses_400_a_listen_without_bead_after_whatever_its_target_holds()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect(true);
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, 1);
+
+        // a listen by hand, its target and its fields as given: its status and its mark
+        async Task<(int Status, string? Reason)> Listened((string Target, string Fields) listen)
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write($"GET {listen.Target} HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{listen.Fields}\r\n");
+
+            var (head, _) = await wire.Read();
+
+            return (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader));
+        }
+
+        await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(
+            [
+                // its lines joined, as RFC 9110 §5.3 combines them, parse as no Item, alike or not
+                (400, HttpRefusals.Malformed),
+                (400, HttpRefusals.Malformed),
+                (400, HttpRefusals.Malformed),
+                // no bead-after, whatever its target holds: the query is never read
+                (400, HttpRefusals.Malformed),
+                (400, HttpRefusals.Malformed),
+                // with it, whatever its query, a bead-wait left out 0: brought back at once
+                (200, null),
+                (200, null),
+                (200, null),
+            ],
+            [
+                await Listened(("/bead", $"{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 0\r\n")),
+                await Listened(("/bead", $"{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 0\r\n{HttpTransport.WaitHeader}: 1\r\n")),
+                await Listened(("/bead", $"{HttpTransport.AfterHeader}: 0, 0\r\n{HttpTransport.WaitHeader}: 0\r\n")),
+                await Listened(("/bead?after=0&wait=0", "")),
+                await Listened(("/bead", $"{HttpTransport.WaitHeader}: 0\r\n")),
+                await Listened(("/bead?after=5&x=1", $"{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 0\r\n")),
+                await Listened(("/bead?", $"{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 0\r\n")),
+                await Listened(("/bead", $"{HttpTransport.AfterHeader}: 0\r\n")),
+            ]);
+        await Until(() =>
+        {
+            return _refusals.Count == 5;
+        });
+
+        // its parameters ignored (RFC 9651 §2.3): what it acknowledges goes, and nothing is left
+        Assert.Equal((204, null), await Listened(("/bead", $"{HttpTransport.AfterHeader}: 1;x=1\r\n{HttpTransport.WaitHeader}: 0;y=\"a;b\"\r\n")));
+        Assert.Empty(_closes);
+    }
+
     [Fact]
     public async Task Stamps_a_connection_s_activity_as_an_exchange_of_an_envelope_or_a_listen_begins_never_at_its_connect_nor_at_a_listen_refused()
     {
@@ -3363,7 +3512,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         var deaf = await Connect();
         var listening = await Connect(true);
 
-        Assert.Equal((409, HttpRefusals.ListenUndeclared), await RefusalOf(ListenOf(deaf.ConnectionToken, "")));
+        Assert.Equal((409, HttpRefusals.ListenUndeclared), await RefusalOf(ListenOf(deaf.ConnectionToken)));
         Assert.Equal([null, null], StampsOf());
 
         // an envelope's, as its exchange begins: not as its body ends
@@ -3389,7 +3538,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         // a listen's, as it is held
         _time.Advance(TimeSpan.FromSeconds(1));
 
-        using var listened = await ListenOf(listening.ConnectionToken, "wait=0");
+        using var listened = await ListenOf(listening.ConnectionToken, new() { Wait = "0" });
 
         Assert.Equal([null, _time.GetUtcNow()], StampsOf());
     }
@@ -3416,9 +3565,9 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(
             [(409, HttpRefusals.ListenUndeclared), (400, HttpRefusals.Malformed), (400, HttpRefusals.Malformed)],
             [
-                await RefusalOf(ListenOf(deaf.ConnectionToken, "")),
-                await RefusalOf(ListenOf(connectionToken, "wait=soon")),
-                await RefusalOf(ListenOf(connectionToken, "after=1")),
+                await RefusalOf(ListenOf(deaf.ConnectionToken)),
+                await RefusalOf(ListenOf(connectionToken, new() { Wait = "soon" })),
+                await RefusalOf(ListenOf(connectionToken, new() { After = "1" })),
             ]);
         Assert.Empty(told);
         Assert.Empty(DelaysSince(before));
@@ -3428,14 +3577,14 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         });
 
         // a second in the place of the first, which ends empty: each tells its own
-        var first = ListenOf(connectionToken, "wait=20000");
+        var first = ListenOf(connectionToken, new() { Wait = "20000" });
 
         await Until(() =>
         {
             return !told.IsEmpty;
         });
 
-        var second = ListenOf(connectionToken, "wait=20000");
+        var second = ListenOf(connectionToken, new() { Wait = "20000" });
 
         using (var ended = await first)
         {
@@ -3476,14 +3625,14 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_closes);
 
         // acknowledged, 10 bytes again; then 30: past it
-        using (var acknowledged = await ListenOf(connectionToken, "after=2&wait=0"))
+        using (var acknowledged = await ListenOf(connectionToken, new() { After = "2", Wait = "0" }))
         {
             Assert.Equal(204, (int)acknowledged.StatusCode);
         }
 
         await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
 
-        var held = ListenOf(connectionToken, "after=3&wait=20000");
+        var held = ListenOf(connectionToken, new() { After = "3", Wait = "20000" });
 
         await Until(() =>
         {
@@ -3503,7 +3652,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         // a listen held as its connection closes learns it is gone
         var other = await Connect(true);
-        var waiting = RefusalOf(ListenOf(other.ConnectionToken, "wait=20000"));
+        var waiting = RefusalOf(ListenOf(other.ConnectionToken, new() { Wait = "20000" }));
 
         await Until(() =>
         {
@@ -3521,7 +3670,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { InactivityTimeout = Timeout.InfiniteTimeSpan });
 
         var (connectionToken, connectionHandle) = await Connect(true);
-        var held = ListenOf(connectionToken, "wait=20000");
+        var held = ListenOf(connectionToken, new() { Wait = "20000" });
         var first = EnvelopeOf(EnvelopeKind.Notification, 1);
         var second = EnvelopeOf(EnvelopeKind.Notification, 3);
         var third = EnvelopeOf(EnvelopeKind.Notification, 5);
@@ -3547,7 +3696,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await _server.Send(new TransportMessage(changing, false), connectionHandle).WaitAsync(Patience, Cancelled);
         Array.Clear(changing);
 
-        using var next = await ListenOf(connectionToken, "after=1&wait=0");
+        using var next = await ListenOf(connectionToken, new() { After = "1", Wait = "0" });
 
         Assert.Equal(BatchOf(second, third), await BytesOf(next));
     }
@@ -3558,7 +3707,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { InactivityTimeout = Timeout.InfiniteTimeSpan });
 
         var (connectionToken, _) = await Connect(true);
-        using var response = await ListenOf(connectionToken, "wait=0");
+        using var response = await ListenOf(connectionToken, new() { Wait = "0" });
 
         Assert.Equal(204, (int)response.StatusCode);
         Assert.Empty(_time.Armed);
@@ -3575,7 +3724,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         await _server.Send(new TransportMessage(notification, false), connectionHandle).WaitAsync(Patience, Cancelled);
 
-        using var response = await ListenOf(connectionToken, "wait=0");
+        using var response = await ListenOf(connectionToken, new() { Wait = "0" });
 
         Assert.Equal(BatchOf(notification), await BytesOf(response));
         Assert.Equal((200, 1), ((int)asking.StatusCode, Count("waitingExchanges")));
@@ -3587,7 +3736,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { InactivityTimeout = TimeSpan.FromSeconds(2) });
 
         var (connectionToken, _) = await Connect(true);
-        var held = ListenOf(connectionToken, "wait=20000");
+        var held = ListenOf(connectionToken, new() { Wait = "20000" });
 
         await Until(() =>
         {
@@ -3619,7 +3768,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         var (connectionToken, connectionHandle) = await Connect(true);
         var before = _time.Armed.Count;
-        var held = ListenOf(connectionToken, "wait=20000");
+        var held = ListenOf(connectionToken, new() { Wait = "20000" });
 
         await Until(() =>
         {
@@ -3662,7 +3811,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         await coming.Write(PostHead(other.ConnectionToken, "Content-Length: 8"));
         await coming.Write([0xA1, 0x10, 0, 0]);
 
-        var held = ListenOf(listening.ConnectionToken, "wait=20000");
+        var held = ListenOf(listening.ConnectionToken, new() { Wait = "20000" });
 
         await Until(() =>
         {
@@ -3722,7 +3871,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         await _server.CloseConnection(connectionHandle).WaitAsync(Patience, Cancelled);
 
-        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(ListenOf(connectionToken, "wait=20000")));
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(ListenOf(connectionToken, new() { Wait = "20000" })));
 
         // closed between its token's lookup and its hold, here as the listen comes: gone all the same,
         // whether its client listens or not
@@ -3736,7 +3885,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal(
             [(404, HttpRefusals.ConnectionUnknown), (404, HttpRefusals.ConnectionUnknown)],
-            [await RefusalOf(ListenOf(listening.ConnectionToken, "wait=20000")), await RefusalOf(ListenOf(deaf.ConnectionToken, "wait=20000"))]);
+            [await RefusalOf(ListenOf(listening.ConnectionToken, new() { Wait = "20000" })), await RefusalOf(ListenOf(deaf.ConnectionToken, new() { Wait = "20000" }))]);
     }
 
     // createTransportServer: what the TypeScript side keeps once, for every transport server, and
@@ -3767,7 +3916,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         var (waitingToken, waitingHandle) = await Connect();
         var (listeningToken, listeningHandle) = await Connect(true);
         using var waiting = await Fetch(PostOf(waitingToken, EnvelopeOf(EnvelopeKind.Request, 1)));
-        var listen = ListenOf(listeningToken, "wait=20000");
+        var listen = ListenOf(listeningToken, new() { Wait = "20000" });
 
         await Until(() =>
         {

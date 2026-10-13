@@ -20,6 +20,7 @@ import {
   timersUntil,
 } from '../../shared/__tests__/fixtures';
 import {
+  AFTER_HEADER,
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   CONNECT_DEFAULTS,
@@ -33,6 +34,7 @@ import {
   RETRY_DELAYS,
   SEQUENCE_HEADER,
   WAIT,
+  WAIT_HEADER,
   type HTTPTransportClient,
   type IHTTPTransportClientOptions,
 } from '../http-transport-client';
@@ -932,13 +934,21 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     expect(fake.calls[0]?.init.headers).toMatchObject({ [LISTEN_HEADER]: '?1' });
     expect([(await callOf(1))?.url, (await callOf(1))?.init]).toMatchObject([
-      `http://${host}:8080/bead?after=0&wait=1000`,
-      { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, method: 'GET', redirect: 'error' },
+      `http://${host}:8080/bead`,
+      {
+        headers: {
+          [AFTER_HEADER]: '0',
+          [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22),
+          [WAIT_HEADER]: '1000',
+        },
+        method: 'GET',
+        redirect: 'error',
+      },
     ]);
 
     (await callOf(1))?.answer(batch(1, first, second));
 
-    expect((await callOf(2))?.url).toContain('?after=2&');
+    expect((await callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '2' });
     expect([heard, credentials]).toEqual([
       [[...first], [...second]],
       [undefined, undefined],
@@ -947,10 +957,93 @@ test.describe('createHTTPTransportClient, listening', () => {
     // nothing, and it listens again at the same point
     (await callOf(2))?.answer({ status: 204 });
 
-    expect((await callOf(3))?.url).toContain('?after=2&');
+    expect((await callOf(3))?.init.headers).toMatchObject({ [AFTER_HEADER]: '2' });
     await client.disconnect({ isQuick: true });
     expect(fake.calls[3]?.init.signal?.aborted).toBe(true);
     expect(WAIT).toBe(25_000);
+  });
+
+  // spec 15.9
+  test('listens at its connection’s URL alone, its cursor in bead-after and its wait in bead-wait', async () => {
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ fetch: fake.fetch, wait: 0 });
+    const connecting = client.connect({ host, pathname: '/api/bead', port: 8_080 });
+    const envelope = envelopeOf(0x13, { callId: 1 });
+
+    fake.calls[0]?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22), [LISTEN_HEADER]: '?1' },
+      status: 201,
+    });
+    await connecting;
+
+    const callOf = async (index: number) => {
+      await expect
+        .poll(() => {
+          return fake.calls.length;
+        })
+        .toBeGreaterThan(index);
+
+      return fake.calls[index];
+    };
+
+    (await callOf(1))?.answer(batch(1, envelope));
+    (await callOf(2))?.answer({ status: 204 });
+    await callOf(3);
+    await client.disconnect({ isQuick: true });
+
+    // the connect, the listens, the DELETE: one URL, which a browser's preflight cache keys
+    expect(
+      new Set(
+        fake.calls.map(({ url }) => {
+          return url;
+        })
+      )
+    ).toEqual(new Set([`http://${host}:8080/api/bead`]));
+    expect(
+      fake.calls.slice(1, 4).map(({ init }) => {
+        return [init.headers[AFTER_HEADER], init.headers[WAIT_HEADER]];
+      })
+    ).toEqual([
+      ['0', '0'],
+      ['1', '0'],
+      ['1', '0'],
+    ]);
+  });
+
+  test('reads the 201’s bead-listen and a batch’s bead-sequence as RFC 9651 Items, their parameters ignored', async () => {
+    const fake = createFakeFetch();
+    const client = createHTTPTransportClient({ fetch: fake.fetch });
+    const connecting = client.connect({ host, port: 8_080 });
+    const heard: number[][] = [];
+    const envelope = envelopeOf(0x13, { callId: 1 });
+
+    fake.calls[0]?.answer({
+      headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22), [LISTEN_HEADER]: '?1;x' },
+      status: 201,
+    });
+    await connecting;
+    client.on('message', ({ data }) => {
+      heard.push([...new Uint8Array(data as ArrayBuffer)]);
+    });
+
+    await expect
+      .poll(() => {
+        return fake.calls.length;
+      })
+      .toBeGreaterThan(1);
+    fake.calls[1]?.answer({
+      ...batch(1, envelope),
+      headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE, [SEQUENCE_HEADER]: '1;x=2' },
+    });
+    await expect
+      .poll(() => {
+        return fake.calls.length;
+      })
+      .toBeGreaterThan(2);
+
+    expect(heard).toEqual([[...envelope]]);
+    expect(fake.calls[2]?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
+    await client.disconnect({ isQuick: true });
   });
 
   test('marks what a listen brings back as what may overtake, and never what a POST’s body brings', async () => {
@@ -1082,7 +1175,7 @@ test.describe('createHTTPTransportClient, listening', () => {
     // what was cut on its way comes whole at last, and is heard once
     (await callOf(12))?.answer(batch(1, envelope));
 
-    expect((await callOf(13))?.url).toContain('?after=1&');
+    expect((await callOf(13))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect(heard).toEqual([[...envelope]]);
     expect(RETRY_DELAYS).toEqual({ ceiling: 30_000, first: 1_000 });
     await client.disconnect({ isQuick: true });
@@ -1229,7 +1322,8 @@ test.describe('createHTTPTransportClient, listening', () => {
       { ...batch(1, envelope), headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE } },
       // numbered other than from the one after the last it heard
       numbered('one'),
-      numbered('01'),
+      numbered('1.0'),
+      numbered('1, 1'),
       numbered('2'),
       { ...batch(1), body: Uint8Array.of(0, 0, 0, 0, ...framed) },
       { ...batch(1), body: new Uint8Array(0) },
@@ -1260,9 +1354,23 @@ test.describe('createHTTPTransportClient, listening', () => {
       );
     }
 
-    expect(told).toEqual([true, true, true, true, true, true, true, true, true, true, true, false]);
+    expect(told).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
     // what came whole before what does not read was heard, as it came
-    expect(heardOf).toEqual([0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0]);
+    expect(heardOf).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0]);
 
     // one of the limit exactly is heard
     const atLimit = await connectListening({ maximumBodyBytes: 24 });
@@ -1270,7 +1378,7 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     (await atLimit.callOf(1))?.answer(batch(1, largest));
 
-    expect((await atLimit.callOf(2))?.url).toContain('?after=1&');
+    expect((await atLimit.callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect(atLimit.heard).toEqual([[...largest]]);
     await atLimit.client.disconnect({ isQuick: true });
   });
@@ -1278,14 +1386,14 @@ test.describe('createHTTPTransportClient, listening', () => {
   test('asks the server to wait its wait held, a fraction rounded to the nearest whole millisecond', async () => {
     const { callOf, client } = await connectListening({ wait: 1.5 });
 
-    expect((await callOf(1))?.url).toMatch(/&wait=2$/u);
+    expect((await callOf(1))?.init.headers).toMatchObject({ [WAIT_HEADER]: '2' });
     await client.disconnect({ isQuick: true });
   });
 
   test('pauses between listens that bring nothing, and listens no more once its connection went', async () => {
     const { callOf, client, fake } = await connectListening({ pause: 60, wait: 0 });
 
-    expect((await callOf(1))?.url).toMatch(/&wait=0$/u);
+    expect((await callOf(1))?.init.headers).toMatchObject({ [WAIT_HEADER]: '0' });
     (await callOf(1))?.answer({ status: 204 });
     await new Promise((resolve) => {
       setTimeout(resolve, 20);
@@ -1375,7 +1483,7 @@ test.describe('createHTTPTransportClient, listening', () => {
     (await callOf(1))?.answer({ status: 502 });
     (await callOf(2))?.answer(batch(1, envelope));
 
-    expect((await callOf(3))?.url).toContain('?after=1&');
+    expect((await callOf(3))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect([heard, client.isOpen()]).toEqual([[[...envelope]], true]);
     await client.disconnect({ isQuick: true });
   });
@@ -1399,7 +1507,7 @@ test.describe('createHTTPTransportClient, listening', () => {
       .toEqual([[...first]]);
 
     // the rest, in the next listen: from the one after the first
-    expect((await callOf(2))?.url).toContain('?after=1&');
+    expect((await callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     (await callOf(2))?.answer({ ...batch(2), pieces: pieces.slice(cut) });
 
     await expect
@@ -1407,7 +1515,7 @@ test.describe('createHTTPTransportClient, listening', () => {
         return heard;
       })
       .toEqual([[...first], [...second]]);
-    expect((await callOf(3))?.url).toContain('?after=2&');
+    expect((await callOf(3))?.init.headers).toMatchObject({ [AFTER_HEADER]: '2' });
     await client.disconnect({ isQuick: true });
   });
 
@@ -1421,12 +1529,12 @@ test.describe('createHTTPTransportClient, listening', () => {
       pieces: [framed.slice(0, 4 + first.length + 2), new TypeError('terminated')],
     });
 
-    expect((await callOf(2))?.url).toContain('?after=1&');
+    expect((await callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
 
     // one loss after it is the first in a row: listened again
     (await callOf(2))?.fail();
 
-    expect((await callOf(3))?.url).toContain('?after=1&');
+    expect((await callOf(3))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect([heard, client.isOpen()]).toEqual([[[...first]], true]);
     await client.disconnect({ isQuick: true });
   });

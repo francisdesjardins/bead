@@ -322,11 +322,17 @@ internal static class HostsAndOrigins
     /// Whether a field's value is one a server reads (spec 15.12): HTAB, SP and visible ASCII alone,
     /// so never a control character but HTAB, DEL among them, which RFC 9110 §5.5 calls invalid, nor
     /// a character past ASCII, which it keeps out of every field defined since, and which no origin
-    /// holds (RFC 6454 §6.2).
+    /// holds (RFC 6454 §6.2); and neither SP nor HTAB at either end, which RFC 9113 §8.2.1 calls
+    /// malformed, and which HTTP/1.1's parser strips before (RFC 9110 §5.5).
     /// </summary>
     public static bool IsVisibleField(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
+
+        if (value.Length > 0 && (FieldWhitespace.Contains(value[0]) || FieldWhitespace.Contains(value[^1])))
+        {
+            return false;
+        }
 
         return value.All((character) =>
         {
