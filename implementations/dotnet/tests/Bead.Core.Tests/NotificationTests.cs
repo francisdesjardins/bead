@@ -29,7 +29,7 @@ public sealed class NotificationTests : IDisposable
     private readonly Server<string> _server;
     private readonly ServiceManager _services;
     private readonly List<IEnvelopeHeader> _sent = [];
-    private readonly List<Exception> _errors = [];
+    private readonly ConcurrentQueue<Exception> _errors = new();
 
     public NotificationTests()
     {
@@ -49,7 +49,7 @@ public sealed class NotificationTests : IDisposable
                 _sent.Add(envelope.Header);
             }
         };
-        _client.Error += _errors.Add;
+        _client.Error += _errors.Enqueue;
     }
 
     // helpers
@@ -400,11 +400,12 @@ public sealed class NotificationTests : IDisposable
 
         // on its call id, what comes finds no subscription, and no callback
         _clientEnd.Deliver(EnvelopeCodec.WriteEnvelope(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = "1"u8.ToArray() }));
-        // ! the manager is told of the drop on the connection's close, which may come after the
-        // registration's failure: wait for it, not for the settling alone
+        // ! the manager is told of the drop on the connection's close, and the client of the
+        // notification no subscription holds, each of which may come after the registration's
+        // failure: wait for both, not for the settling alone
         await SettleUntil(() =>
         {
-            return !dropped.IsEmpty;
+            return !dropped.IsEmpty && !_errors.IsEmpty;
         });
 
         Assert.Equal([null], dropped);
