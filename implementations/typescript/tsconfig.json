@@ -10,9 +10,11 @@
   },
   "include": [
     "src/**/*",
+    "browser/**/*",
     "demo/**/*",
     "devtools/**/*",
     "interop/**/*",
+    "playwright.browser.config.ts",
     "playwright.config.ts",
     "playwright.devtools.config.ts"
   ],

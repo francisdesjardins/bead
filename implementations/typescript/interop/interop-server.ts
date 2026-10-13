@@ -3,9 +3,11 @@
 // The TypeScript server of Bead's interop service, on 127.0.0.1, over WebSocket and over HTTP, each a
 // server of its own: its first line on the standard output says their ports, as
 // {"port":n,"httpPort":m}; it serves until its standard input closes. A port given as its one
-// argument is the WebSocket server's; none, any free one. The HTTP server takes any free one. The C#
-// side's interop server does the same, so each side's client calls the other's server. `serve.ts`
-// bundles it and runs it, as Node runs no import without its extension.
+// argument is the WebSocket server's; none, any free one. The HTTP server takes any free one. Each
+// names the origins `BEAD_INTEROP_ORIGINS` lists, separated by spaces, none when it is not set: a
+// page of another origin calls them so. The C# side's interop server does the same, so each side's
+// client calls the other's server. `serve.ts` bundles it and runs it, as Node runs no import without
+// its extension.
 
 // dependencies
 
@@ -20,15 +22,19 @@ import { offerInterop } from './handlers';
 // definition
 
 const port = Number(process.argv[2] ?? 0);
+const origins = (process.env['BEAD_INTEROP_ORIGINS'] ?? '').split(' ').filter((origin) => {
+  return origin !== '';
+});
 // the interop service's credentials, on the clock both servers run on, the platform's
 const credentials = interopCredentialsOf(PLATFORM_CLOCK);
-const server = createWSServer<string>({ credentials, transport: { WebSocketServer } });
+const server = createWSServer<string>({ credentials, transport: { origins, WebSocketServer } });
 const httpServer = createHTTPServer<string>({
   credentials,
   transport: {
     createServer: (listener) => {
       return createServer(listener);
     },
+    origins,
   },
 });
 
