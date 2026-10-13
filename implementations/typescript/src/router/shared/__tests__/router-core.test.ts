@@ -342,6 +342,7 @@ const headerOf = (callId: number): IRequestHeader => {
 
 test.describe('createRouterCore', () => {
   test.describe('takes what comes in', () => {
+    // debugging 5.2
     test('read, traced, then dispatched; what does not read is reported, not traced', () => {
       const { port, reported, traced } = createPort();
       using core = createRouterCore(port);
@@ -918,8 +919,9 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
+    // debugging 5.2
     test('reports the kinds to come, and skips the advisory ones in silence', async () => {
-      const { port, reported, sent } = createPort();
+      const { port, reported, sent, traced } = createPort();
       using core = createRouterCore(port);
 
       for (const kind of ['17', '7F', '80', 'FF']) {
@@ -933,6 +935,8 @@ test.describe('createRouterCore', () => {
         [ProtocolCode.KIND_UNSUPPORTED, 'a'],
         [ProtocolCode.KIND_UNSUPPORTED, 'a'],
       ]);
+      // none traced: the advisory ones skipped before it, the others reported as they do not read
+      expect(traced).toEqual([]);
     });
 
     test('routes a request that opens a transfer, then refuses it before its resolver', async () => {
@@ -2849,6 +2853,7 @@ test.describe('createRouterCore', () => {
       expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
     });
 
+    // spec 10.4
     test('cancel a call still waiting once: rejected, told, and its call id reserved', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
@@ -3142,6 +3147,7 @@ test.describe('createRouterCore', () => {
   });
 
   test.describe('its limits', () => {
+    // spec 12.3.2
     test('hold a procedure’s payloads to its own limit, within the router’s, both ways, once admitted', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
@@ -3999,6 +4005,7 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
+    // spec 12.10
     test('end the transfers of a connection that goes before their budget grants any credit, and send nothing once disposed', async () => {
       const { port, reported, sent } = createPort();
       const core = createRouterCore(port, { limits: narrow });
@@ -4983,6 +4990,7 @@ test.describe('createRouterCore', () => {
       expect(piecesOf(sent)).toEqual([[EnvelopeKind.NOTIFICATION, 2]]);
     });
 
+    // spec 12.10
     test('end the transfers it sends on a connection that goes, and on a router disposed, sending nothing more', async () => {
       const answering = createAnswering();
       using core = answering.core;
@@ -5023,6 +5031,7 @@ test.describe('createRouterCore', () => {
     const made = lineOf('bead_client_call_', 'service="2",procedure="echo",type="command"');
     const answered = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
 
+    // debugging 9.3, 9.6.3 and 9.6.4
     test('count a call made refused before it goes, no call id free or PAYLOAD_TOO_LARGE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');
@@ -5091,6 +5100,7 @@ test.describe('createRouterCore', () => {
       await Promise.all([tooLarge, noOpening, waiting, noCallId]);
     });
 
+    // debugging 9.2 and 9.4.19
     test('count a call answered whose answer its transport throws on as an error, and one its transport rejects once it has it as answered', async () => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');
@@ -5130,6 +5140,7 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
+    // debugging 3.3 and 3.4
     test('read the monotonic clock twice more for a counted call than for one counted nothing, once at each of its gates, and the wall clock never', async () => {
       // the readings of each kind a call answered, then a call made, take
       const readingsOf = async (isCounted: boolean): Promise<number[][]> => {

@@ -6,7 +6,8 @@ are to be read as in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
 
 Each file of entries is named, on a line of its own, by a section whose clauses it plays, a group
 of [`vectors.json`](vectors.json) by its name, and each entry cites the units it checks:
-[`uncited.txt`](uncited.txt) lists the units no entry cites. The clock cases of
+[`units.txt`](units.txt) lists every unit, whether an entry cites it or why none does, and the hash
+of its text. The clock cases of
 [`clocks.json`](clocks.json) cite none, and no section names them: they hold every side's test clock
 to one meaning of `advance`. The why of each rule is in the decisions:
 

@@ -900,6 +900,7 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_transport.Sent);
     }
 
+    // spec 11.7.3
     [Fact]
     public async Task A_connection_that_closes_is_no_longer_notified_and_one_that_cannot_take_it_keeps_none_from_the_others()
     {
@@ -1657,6 +1658,7 @@ public sealed partial class RouterServerTests : IDisposable
         Assert.Empty(_errors);
     }
 
+    // debugging 5.1
     [Fact]
     public async Task Tells_debug_each_envelope_with_its_connection_and_its_header_without_its_token()
     {

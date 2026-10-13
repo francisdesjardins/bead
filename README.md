@@ -89,8 +89,9 @@ share, above all `spec/`, which both read in their tests.
 
 [`spec/spec.md`](spec/spec.md) states what every implementation does, in the RFC 2119 sense. Each
 file of entries is named by a section whose clauses it plays, and each entry cites the units it
-checks. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a side traces, filters
-and counts beside the wire, under a version of its own. Beside them:
+checks: [`units.txt`](spec/units.txt) lists every unit, whether an entry cites it or why none does,
+and the hash of its text. Its companion, [`spec/debugging.md`](spec/debugging.md), states what a
+side traces, filters and counts beside the wire, under a version of its own. Beside them:
 
 | File                                                    | What it holds                                                                                                                                                                                         |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -126,10 +127,12 @@ git diff --exit-code -- spec
 Each file follows its JSON Schema in [`spec/schemas/`](spec/schemas/), and repeats the version
 `spec.md` states as its `specVersion`, or, for `debug-filters.json` and `metrics.json`, the version
 `debugging.md` states as its `debuggingVersion`. `spec/check.py` holds both, that the spec's sections
-and the groups of vectors name each other, that every unit an entry cites is its document's, and
-that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint is in
-its form and `interop-service.json` states its procedures; then it reports
-which groups and files each side's tests read, and fails on one a side does not. It runs on Python
+and the groups of vectors name each other, that every unit an entry cites is its document's, that
+each ledger gives every unit of its document its status, each reason held by its rule, and the
+hash of its text, which moves only where `python spec/check.py --write-units 15.7` names the unit,
+and that every exposition reads as the Prometheus text format 0.0.4, that the interop's blueprint
+is in its form and `interop-service.json` states its procedures; then it reports which groups and
+files each side's tests read, and fails on one a side does not. It runs on Python
 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
 
 ```sh

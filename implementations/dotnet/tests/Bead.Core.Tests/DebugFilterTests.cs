@@ -195,6 +195,7 @@ public sealed class DebugFilterTests
         Assert.Equal("a debug filter takes a direction among rx, tx, not \"a\\u0001\\ud800\"", RefusalOf("d(a\u0001\ud800)"));
     }
 
+    // debugging 6.8
     [Fact]
     public void Refuses_a_filter_given_whole_in_the_grammar_s_names_as_it_is_made()
     {
@@ -267,6 +268,7 @@ public sealed class DebugFilterTests
         Assert.Equal(["GetTime rx request"], HeardOf("get*, -getstatus", Events));
     }
 
+    // debugging 6.10
     [Fact]
     public void Matches_a_whole_name_and_takes_every_other_character_literally()
     {

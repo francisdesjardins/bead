@@ -472,6 +472,7 @@ public sealed class NotificationTests : IDisposable
     }
 
     // the TypeScript side traces the failure; here the router reports it
+    // spec 17.2.3
     [Fact]
     public async Task A_trigger_never_registered_is_an_invalid_operation_a_payload_that_does_not_decode_a_failure_reported()
     {

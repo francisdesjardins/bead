@@ -81,6 +81,7 @@ test.describe('FailureError', () => {
     expect(error.message).toBe('local client protocol failure 34 PAYLOAD_TOO_LARGE');
   });
 
+  // spec 8.1
   test('says what it is', () => {
     expect(
       new FailureError({

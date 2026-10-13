@@ -57,6 +57,7 @@ public sealed class FailureExceptionTests
         Assert.Equal(FailureOrigin.Peer, exception.Origin);
     }
 
+    // spec 8.1
     [Fact]
     public void Keeps_a_protocol_code_no_name_has_as_a_number()
     {

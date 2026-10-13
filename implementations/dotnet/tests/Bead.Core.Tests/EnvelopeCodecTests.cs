@@ -136,6 +136,7 @@ public sealed class EnvelopeCodecTests
         Assert.Equal(new string('a', 1_021), EnvelopeCodec.ReadFailure(RecordOf(cut), Options).Detail);
     }
 
+    // spec 7.4
     [Theory]
     [InlineData("abcdéf", 5, "abcd")]
     [InlineData("abcdéf", 6, "abcdé")]
@@ -151,6 +152,7 @@ public sealed class EnvelopeCodecTests
         Assert.Equal(RecordOf(expected), record);
     }
 
+    // spec 7.4
     [Fact]
     public void Writes_a_lone_surrogate_as_a_replacement_character()
     {

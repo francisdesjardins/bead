@@ -895,8 +895,10 @@ def value_outcome(encoding, value):
 
 
 def value_entry(name, encoding, clauses, value, excused):
-    return {'name': name, 'encoding': encoding, 'clauses': clauses, 'value': value,
-            **value_outcome(encoding, given(value)),
+    outcome = value_outcome(encoding, given(value))
+    # a value refused plays 17.2 besides its own clause: a writer never writes what a reader refuses
+    cited = ['17.2', *clauses] if 'refused' in outcome else clauses
+    return {'name': name, 'encoding': encoding, 'clauses': cited, 'value': value, **outcome,
             **({'differs': [{'row': NOT_HELD, 'language': excused}]} if excused else {})}
 
 

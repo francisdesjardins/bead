@@ -10,9 +10,11 @@ the companion's, as its debuggingVersion; no group holds two entries of one name
 looking one up by name would never reach; each group of vectors.json is named by a section of the
 spec, which names no other, and each of the companion's files by a line of its own; every unit an
 entry cites is one of its document's — a clause, an item of its numbered list, a row of its table —
-and spec/uncited.txt and spec/debugging-uncited.txt list exactly the units of each that no entry
-cites; an advance follows a timer armed, and in the transports' cases ends on its due at the
-latest; a debug filter keeps fixtures the file has; an exit counts after a step its server takes;
+and spec/units.txt and spec/debugging-units.txt list every unit of each, its front matter and each
+section's lead among them, cited or the reason none cites it, each reason held by its rule, with the
+sha256 of its text, which moves only where --write-units names the unit; an advance follows a timer
+armed, and in the transports' cases ends on its due at the latest; a debug filter keeps fixtures the
+file has; an exit counts after a step its server takes;
 each exposition the metrics pin reads as 0.0.4, its families in the order of their names under the
 companion's help and type, its buckets rising under the companion's bounds, each le OpenMetrics'
 canonical number for its bound, each _count the sum of its handled counts, none started below
@@ -29,13 +31,16 @@ alone reads the file; and no file git lists outside spec/, the tests and the int
 published test key; each blueprint of spec/ is in its form, RFC 8785's member order and string escapes,
 integers alone, laid out two spaces with a final newline; and interop-service.json states the
 interop blueprint's procedures, by name and in their order, what each admits where its admission is not
-none and what it notifies where it notifies.
+none and what it notifies where it notifies, and each code it names a failure of the blueprint's
+catalogue that its procedure lists.
 Exit 1 on any of them.
 
-  python spec/check.py --write-uncited
+  python spec/check.py --write-units [unit…]
 
-writes spec/uncited.txt and spec/debugging-uncited.txt from the files as they stand, for a change
-that cites or leaves a unit.
+writes spec/units.txt and spec/debugging-units.txt: a unit the document gained, with the status ?,
+which its author replaces; a unit renumbered, under its new key; no unit the document lost; and the
+hash of each unit it names, 15.7 for spec.md's, debugging:4.2 for the companion's, and of no other,
+printing what plays each. A unit whose text moved and that it does not name still fails.
 
   python spec/check.py --write-blueprints
 
@@ -73,16 +78,64 @@ WRITE_BLUEPRINTS = '--write-blueprints' in sys.argv[1:]
 # what vectors.json holds beside its groups
 META = {'$schema', '$comment', 'specVersion'}
 
-# the units of each document no entry cites, which only a change to the files or the document moves
-UNCITED = {
-    'spec': (os.path.join(SPEC, 'uncited.txt'),
-             '# The units of spec/spec.md that no vector, conversation, case or place cites, in their order.\n'
-             '# spec/check.py fails when this list and the files disagree; --write-uncited writes it.\n'),
-    'debugging': (os.path.join(SPEC, 'debugging-uncited.txt'),
-                  '# The units of spec/debugging.md that no debug filter, source, exposition or exit cites, in their order.\n'
-                  '# spec/check.py fails when this list and the files disagree; --write-uncited writes it.\n'),
+# each document's ledger: every unit in its order, cited or why no entry cites it, and the sha256 of its
+# text, which moves only as --write-units names the unit: the suspect link of requirements traceability
+# (DO-178C §5.5 and §6.5, ISO 26262-8 clauses 6 and 8), a unit's text moved leaving every entry or test
+# that plays it to be looked at again (0004)
+LEDGERS = {
+    'spec': (os.path.join(SPEC, 'units.txt'), 'spec/spec.md', ''),
+    'debugging': (os.path.join(SPEC, 'debugging-units.txt'), 'spec/debugging.md', 'debugging:'),
 }
-WRITE_UNCITED = '--write-uncited' in sys.argv[1:]
+
+
+def ledger_header(document):
+    path, named, prefix = LEDGERS[document]
+    return (f'# The units of {named}, in their order: each cited, or why no entry cites it, and the sha256 of\n'
+            '# its text after its number, white space folded. spec/check.py fails when a unit\'s text or\n'
+            f'# citation moved; --write-units {prefix}<unit>… acknowledges the units it names, and no other.\n'
+            '# The reasons: lead, defines, twins, builder, open and owed, each held as spec/check.py says;\n'
+            '# a new unit\'s ? until its author gives it one.\n')
+
+
+# the units --write-units acknowledges, by their document: 15.7 is spec.md's, debugging:4.2 the
+# companion's; None when it is not given, an empty set when it names none
+WRITE_UNITS = None
+
+if '--write-units' in sys.argv[1:]:
+    WRITE_UNITS = {'spec': set(), 'debugging': set()}
+
+    for argument in sys.argv[sys.argv.index('--write-units') + 1:]:
+        if argument.startswith('--'):
+            break
+
+        document, _, unit = argument.rpartition(':')
+        WRITE_UNITS.setdefault(document or 'spec', set()).add(unit)
+
+# why no entry cites a unit, each held by a rule below: it leads its items or rows; it defines what the
+# others use; each side's twin tests name it; beadc's tests name it; it is an open point; or nothing
+# holds it yet, which the summary prints
+REASONS = ('lead', 'defines', 'twins', 'builder', 'open', 'owed')
+
+# the key words of BCP 14 (RFC 2119, RFC 8174), which bind only in capitals: a unit led or defining
+# carries none, since it would state a requirement no entry plays
+KEY_WORDS = re.compile(r'\b(?:MUST|SHALL|SHOULD|MAY|REQUIRED|RECOMMENDED|OPTIONAL)\b')
+
+# how a test names a unit it holds, by its own number: spec 15.10, or debugging 4.2 for the
+# companion's; "spec 12.2, 12.6" names both. Never by its clause's number, and never by §, which the
+# matrix keeps for an RFC's sections
+UNIT_NUMBER = r'\d+(?:\.\d+)+(?!\.?\d)'
+NAMING = re.compile(rf'\b(spec|debugging) ({UNIT_NUMBER}(?:(?:,| and) {UNIT_NUMBER})*)')
+
+# where a test names a unit: the line that declares it or its group — a call of test, it or describe
+# on the TypeScript side and beadc's, a [Fact], a [Theory] or a public class, Task or void on the C#
+# side — the title a call opened on the line before, or a comment just above, its attributes between
+DECLARATION = re.compile(r'\b(?:test|it|describe)(?:\.\w+)*\(|^\s*\[(?:Fact|Theory)\b|^\s*public\b.*\b(?:class|Task|void)\b')
+OPENED = re.compile(r'\b(?:test|it|describe)(?:\.\w+)*\(\s*$')
+COMMENT = re.compile(r'\s*(?://|/\*|\*)')
+ATTRIBUTE = re.compile(r'\s*\[')
+
+# beadc's tests, which hold what of the spec the builder alone does
+BUILDER_TESTS = ('builder/src', '.test.ts')
 
 # the files of entries each side's tests read whole, beside the groups of vectors, and their groups
 WHOLE = {
@@ -347,6 +400,42 @@ for entry, declared in zip(prose, api):
     if ('notifies' in entry) != (declared['procedureKind'] == 'notifies'):
         problems.append(f'interop-service.json: {entry["procedureName"]!r} states what it notifies where '
                         f'its kind is not notifies, or does not where it is')
+
+# each code the interop service's prose names is a failure of its blueprint's catalogue, which the
+# conversations' generator takes by its name: one its procedure lists, where a procedure names it
+catalogue = {failure['code']: failure['failureName'] for failure in documents['interop-blueprint']['services'][0]['failures']}
+
+
+def prose_of(value):
+    """Every string of a value, its members' and its items' among them."""
+    if isinstance(value, dict):
+        return [text for member in value.values() for text in prose_of(member)]
+
+    if isinstance(value, list):
+        return [text for item in value for text in prose_of(item)]
+
+    return [value] if isinstance(value, str) else []
+
+
+for entry, declared in zip(prose, api):
+    for code in re.findall(r'\bcode (\d+)', ' '.join(prose_of(entry))):
+        if catalogue.get(int(code)) not in declared['failures']:
+            problems.append(f'interop-service.json: {entry["procedureName"]!r} names code {code}, which is no failure '
+                            f'of interop-blueprint.json\'s catalogue that {entry["procedureName"]} lists')
+
+for code in re.findall(r'\bcode (\d+)', ' '.join(prose_of({key: value for key, value in documents['interop-service'].items()
+                                                         if key not in ('procedures', '$comment')}))):
+    if int(code) not in catalogue:
+        problems.append(f'interop-service.json names code {code}, which is no failure of interop-blueprint.json\'s '
+                        'catalogue')
+
+# the rejection both sides' tests read of the ELSEWHERE verifier is the error its words settle with
+elsewhere = documents['interop-service']['credentials'].get('elsewhere', {})
+rejection = documents['interop-service']['verifiers']['elsewhere']['rejection']
+
+if f'its error "{rejection}"' not in elsewhere.get('settles', ''):
+    problems.append(f'interop-service.json: verifiers.elsewhere rejects with {rejection!r}, which is not the error '
+                    'credentials.elsewhere.settles states')
 
 vectors = documents['vectors']
 groups = [group for group in vectors if group not in META]
@@ -614,47 +703,103 @@ if sorted(stated) != sorted(schema_encodings):
 for encoding in sorted(set(schema_encodings) - played):
     problems.append(f'codecs: no entry plays the encoding {encoding}')
 
-# ── The units each entry cites, and those none cites ────────────────────────────────────────────
+# ── The units of each document, what plays each, and its ledger ──────────────────────────────────
 
 
-def units_of(spec):
-    """The units of spec.md in their order: each clause, each item of its numbered list, and each row
-    of its table, counted from 1; a heading ends a clause, and a block of code holds none."""
-    units = []
-    clause = None
+def units_of(document):
+    """The units of a document in their order, each with its text: unit 0, its front matter, every
+    line before its first section; N.0, a section's lead, its heading and its lines outside every
+    clause, the line naming its file among them, which a clause numbered N.0 takes into its own; each
+    clause, N.M; each item of a clause's numbered list, N.M.K, and each row of its table, counted from
+    1. A clause holds its paragraphs, its table's header and its blocks of code, an item its line and
+    the lines indented under it, a row its line. A unit's text is its lines after its own number, a
+    table's rule left out, since its width follows its widest cell, with white space folded."""
+    units = {}
+    clause = item = None
     items = rows = 0
-    under_header = False
-    in_code = False
+    under_header = in_code = False
 
-    for line in spec.splitlines():
+    def unit(key, kind):
+        units[key] = {'kind': kind, 'lines': [], 'children': [], 'follows': False}
+        return key
+
+    lead = code_owner = unit('0', 'front')
+
+    def clause_line(line):
+        # a line of a clause's own text after its items or rows began is a sentence that follows them
+        if units[clause]['children'] and line.strip():
+            units[clause]['follows'] = True
+
+        units[clause]['lines'].append(line)
+
+    for line in document.splitlines():
         if line.startswith('```'):
+            if not in_code:
+                item = None
+                code_owner = clause or lead
+
+                if clause is not None and units[clause]['children']:
+                    units[clause]['follows'] = True
+
+            units[code_owner]['lines'].append(line)
             in_code = not in_code
         elif in_code:
-            continue
+            units[code_owner]['lines'].append(line)
+        elif found := re.match(r'## (\d+)\. ', line):
+            lead = unit(f'{found.group(1)}.0', 'lead')
+            clause = item = None
+            units[lead]['lines'].append('## ' + line[found.end():])
         elif line.startswith('#'):
-            clause = None
+            # the title, or a heading within a section, which its lead holds
+            clause = item = None
+            units[lead]['lines'].append(line)
         elif found := re.match(r'(\d+)\.(\d+)\. ', line):
             clause = f'{found.group(1)}.{found.group(2)}'
-            units.append(clause)
+
+            if clause == lead:
+                units[clause]['kind'] = 'clause'
+            else:
+                unit(clause, 'clause')
+
+            item = None
             items = rows = 0
             under_header = False
+            units[clause]['lines'].append(line[found.end():])
         elif clause is None:
-            continue
-        elif re.match(r'\d+\. ', line):
+            units[lead]['lines'].append(line)
+        elif found := re.match(r'(\d+)\. ', line):
             items += 1
-            units.append(f'{clause}.{items}')
+            item = unit(f'{clause}.{items}', 'item')
+            units[clause]['children'].append(item)
+            units[item]['lines'].append(line[found.end():])
         elif re.match(r'\|[\s|:-]+\|\s*$', line):
             under_header = True
+            item = None
         elif line.startswith('|') and under_header:
             rows += 1
-            units.append(f'{clause}.{rows}')
+            row = unit(f'{clause}.{rows}', 'row')
+            units[clause]['children'].append(row)
+            units[row]['lines'].append(line)
+            item = None
+        elif item is not None and (line.startswith(' ') or not line.strip()):
+            units[item]['lines'].append(line)
+        else:
+            item = None
+            clause_line(line)
+
+    for each in units.values():
+        each['text'] = ' '.join(' '.join(each['lines']).split())
 
     return units
 
 
-# each document's units, which the files that belong to it cite
+# each document's units, which the files that belong to it cite: a clause, an item or a row, never a
+# front matter or a lead
 units = {'spec': units_of(text), 'debugging': units_of(companion)}
-citing = {'spec': set(), 'debugging': set()}
+citeable = {document: {key for key, each in found.items() if each['kind'] in ('clause', 'item', 'row')}
+            for document, found in units.items()}
+# what cites each unit, by its group and its name, or a place of durations by its id
+citing = {'spec': {}, 'debugging': {}}
 
 # the clock cases cite none: they hold the test clocks to one meaning of advance, which the spec does
 # not state; the companion's groups cite its units, and every other group the spec's
@@ -663,38 +808,285 @@ for group, entries in named.items():
 
     for entry in entries if group != 'clocks' else ():
         for unit in entry['clauses']:
-            if unit not in units[document]:
+            if unit not in citeable[document]:
                 problems.append(f'{group}: {entry["name"]!r} cites {unit}, which {document}.md does not have')
 
-            citing[document].add(unit)
+            citing[document].setdefault(unit, []).append(f'{group} {entry["name"]!r}')
 
 for place in places:
     for unit in place['clauses']:
-        if unit not in units['spec']:
+        if unit not in citeable['spec']:
             problems.append(f'durations: {place["id"]} cites {unit}, which spec.md does not have')
 
-        citing['spec'].add(unit)
+        citing['spec'].setdefault(unit, []).append(f'durations {place["id"]}')
 
-uncited = {document: [unit for unit in units[document] if unit not in citing[document]] for document in units}
 
-for document, (path, header) in UNCITED.items():
+def digest(key, text):
+    """The sha256 of a unit's text: the front matter's with its version's number folded out, which
+    tools/check-versions.mjs holds and every release moves."""
+    if key == '0':
+        text = re.sub(r'\*\*Version: [^*]+\*\*', '**Version: x.y.z**', text)
+
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def key_words(key, text):
+    """The BCP 14 key words a unit's text carries; the front matter's own sentence that names them is
+    exempt by its place."""
+    if key == '0':
+        text = re.sub(r'The key words .*?\.(?= |$)', '', text, count=1)
+
+    return sorted(set(KEY_WORDS.findall(text)))
+
+
+def beside_a_declaration(lines, index):
+    """Whether a line is a test's declaration, its title, or a comment beside one: on the line that
+    declares a test or a group of them, on the title a call opened on the line before, or on the
+    comments just above a declaration, its attributes between them."""
+    if DECLARATION.search(lines[index]):
+        return True
+
+    if index > 0 and OPENED.search(lines[index - 1]):
+        return True
+
+    if not COMMENT.match(lines[index]):
+        return False
+
+    below = index + 1
+
+    while below < len(lines) and (COMMENT.match(lines[below]) or ATTRIBUTE.match(lines[below])):
+        below += 1
+
+    return below < len(lines) and DECLARATION.search(lines[below]) is not None
+
+
+def tests_naming(folder, suffix):
+    """Where each unit is named by the tests under a folder, spec 15.10 or debugging 4.2, by its
+    document and its number, in a test's title or a comment beside its declaration: each place a file
+    and a line."""
+    found = {}
+
+    for directory, children, names in os.walk(os.path.join(ROOT, folder)):
+        children[:] = [child for child in children if child not in ('bin', 'obj', 'node_modules')]
+
+        for name in sorted(names):
+            if not name.endswith(suffix):
+                continue
+
+            path = os.path.relpath(os.path.join(directory, name), ROOT).replace(os.sep, '/')
+
+            with open(os.path.join(directory, name), encoding='utf-8') as file:
+                lines = file.read().splitlines()
+
+            for index, line in enumerate(lines):
+                for match in NAMING.finditer(line):
+                    if not beside_a_declaration(lines, index):
+                        continue
+
+                    for unit in re.findall(UNIT_NUMBER, match.group(2)):
+                        found.setdefault((match.group(1), unit), []).append(f'{path}:{index + 1}')
+
+    return found
+
+
+# the tests of each side, and beadc's, by the units they name
+naming = {side: tests_naming(folder, suffix) for side, (folder, suffix, *_) in SIDES.items()}
+naming['beadc'] = tests_naming(*BUILDER_TESTS)
+
+
+def plays(document, key, status):
+    """What plays a unit, which a change of its text leaves to be looked at again."""
+    if status == 'cited':
+        return 'cited by ' + ', '.join(citing[document].get(key, []))
+
+    if status == 'lead':
+        children = units[document][key]['children']
+        return (f'leading {", ".join(children)}, cited by ' +
+                ', '.join(dict.fromkeys(label for child in children for label in citing[document].get(child, []))))
+
+    if status == 'defines' and key == '0':
+        return 'defining what every entry plays'
+
+    if status == 'defines':
+        section = key.split('.')[0]
+        return (f'defining what section {section} states, cited by ' +
+                ', '.join(dict.fromkeys(label for unit, labels in citing[document].items()
+                                        if unit.split('.')[0] == section for label in labels)))
+
+    if status in ('twins', 'builder'):
+        sides = SIDES if status == 'twins' else ('beadc',)
+        return 'named by ' + ', '.join(place for side in sides for place in naming[side].get((document, key), []))
+
+    return f'nothing plays it: it is {status}'
+
+
+def ledger_of(path, listing):
+    """A ledger's units, each with its status and its hash."""
+    kept = {}
+
+    if not os.path.exists(path):
+        return kept
+
+    with open(path, encoding='utf-8') as file:
+        for number, line in enumerate(file, 1):
+            if not line.strip() or line.startswith('#'):
+                continue
+
+            parts = line.split()
+
+            if len(parts) != 3 or not re.fullmatch(r'[0-9a-f]{64}', parts[2]):
+                problems.append(f'{listing}, line {number}: {line.strip()!r} is no unit, its status and its hash')
+            elif parts[0] in kept:
+                problems.append(f'{listing} lists {parts[0]} twice')
+            else:
+                kept[parts[0]] = (parts[1], parts[2])
+
+    return kept
+
+
+owed = {'spec': [], 'debugging': []}
+reasoned = {'spec': {}, 'debugging': {}}
+
+for document in sorted(set(WRITE_UNITS or ()) - set(LEDGERS)):
+    problems.append(f'--write-units names {", ".join(sorted(WRITE_UNITS[document]))} of {document}, which is no '
+                    'document: debugging:4.2 is the companion\'s, 15.7 the spec\'s')
+
+for document, (path, _, prefix) in LEDGERS.items():
     listing = os.path.basename(path)
+    found = units[document]
+    hashes = {key: digest(key, each['text']) for key, each in found.items()}
+    kept = ledger_of(path, listing)
 
-    if WRITE_UNCITED:
+    # a unit renumbered: its text kept under a key whose own text it no longer is, which the ledger
+    # follows to the new key alone, the number never being hashed
+    stale = {}
+
+    for key, (_, hashed) in kept.items():
+        if hashes.get(key) != hashed:
+            stale.setdefault(hashed, []).append(key)
+
+    moved = [key for key in found if kept.get(key, (None, None))[1] != hashes[key]]
+    # ! a text two units hold alike names neither: one key is followed only to one other
+    renumbered = {key: stale[hashes[key]][0] for key in moved if len(stale.get(hashes[key], [])) == 1
+                  and sum(hashes[other] == hashes[key] for other in moved) == 1}
+    followed = set(renumbered.values())
+
+    if WRITE_UNITS is not None:
+        acknowledged = WRITE_UNITS.get(document, set())
+
+        for key in sorted(acknowledged - set(found)):
+            problems.append(f'--write-units names {prefix}{key}, which {document}.md does not have')
+
+        written = {}
+
+        for key in found:
+            if key in kept and kept[key][1] == hashes[key]:
+                written[key] = kept[key]
+            elif key in renumbered:
+                written[key] = (kept[renumbered[key]][0], hashes[key])
+                print(f'{document}.md {renumbered[key]} is now {key}')
+            elif key in kept and key not in followed:
+                status = kept[key][0]
+                written[key] = (status, hashes[key] if key in acknowledged else kept[key][1])
+
+                if key in acknowledged:
+                    print(f'{document}.md {key}: its text acknowledged, {plays(document, key, status)}')
+            else:
+                written[key] = ('?', hashes[key])
+                print(f'{document}.md {key}: a unit {listing} did not list, ? until its author gives its status')
+
+        for key in kept:
+            if key not in found and key not in followed:
+                print(f'{document}.md {key}: gone, and dropped from {listing}')
+
         with open(path, 'w', encoding='utf-8', newline='\n') as file:
-            file.write(header + ''.join(f'{unit}\n' for unit in uncited[document]))
-    elif not os.path.exists(path):
-        problems.append(f'{listing} is missing: python spec/check.py --write-uncited writes it')
-    else:
-        with open(path, encoding='utf-8') as file:
-            listed = [line.strip() for line in file if line.strip() and not line.startswith('#')]
+            file.write(ledger_header(document) + ''.join(f'{key} {status} {hashed}\n'
+                                                         for key, (status, hashed) in written.items()))
 
-        for unit in sorted(set(uncited[document]) - set(listed), key=units[document].index):
-            problems.append(f'{document}.md {unit}: no entry cites it, and {listing} does not list it')
+        kept, renumbered, followed = written, {}, set()
 
-        for unit in sorted(set(listed) - set(uncited[document])):
-            problems.append(f'{listing} lists {unit}, which ' +
-                            ('an entry cites' if unit in units[document] else f'{document}.md does not have'))
+    if not kept:
+        problems.append(f'{listing} is missing: python spec/check.py --write-units writes it')
+        continue
+
+    for key, each in found.items():
+        if key in renumbered and key not in kept:
+            problems.append(f'{document}.md {key}: {listing} keeps its text under {renumbered[key]}; --write-units '
+                            'follows it to its new number')
+            continue
+
+        if key not in kept:
+            problems.append(f'{document}.md {key}: {listing} does not list it; --write-units writes it, ? for its '
+                            'status')
+            continue
+
+        status, hashed = kept[key]
+        cited = key in citing[document]
+
+        if status == '?':
+            problems.append(f'{document}.md {key}: a new unit, ? in {listing}: cited, or a reason of '
+                            f'{", ".join(REASONS)}')
+        elif status == 'cited' and not cited:
+            problems.append(f'{document}.md {key}: {listing} says an entry cites it, and none does: give the reason '
+                            'none does')
+        elif status != 'cited' and status not in REASONS:
+            problems.append(f'{listing}: {key} is {status}, which is no status: cited, or a reason of '
+                            f'{", ".join(REASONS)}')
+        elif status != 'cited' and cited:
+            problems.append(f'{document}.md {key}: an entry cites it, and {listing} gives it the reason {status}: '
+                            'its status is cited')
+        elif status != 'cited':
+            reasoned[document][key] = status
+            words = key_words(key, each['text'])
+
+            if status == 'owed':
+                owed[document].append(key)
+
+            if status in ('lead', 'defines') and words:
+                problems.append(f'{document}.md {key}: {status}, and it carries {", ".join(words)}, which a unit '
+                                'that states no requirement of its own never does: cited, twins or owed')
+
+            if status == 'lead' and not each['children']:
+                problems.append(f'{document}.md {key}: lead, and it has no item or row to lead')
+
+            if status == 'lead' and each['follows']:
+                problems.append(f'{document}.md {key}: lead, and a sentence follows its last item or row, which none '
+                                'of them holds: cited, twins or owed')
+
+            for child in each['children'] if status == 'lead' else ():
+                if child not in citing[document] and kept.get(child, ('?',))[0] not in REASONS[:-1]:
+                    problems.append(f'{document}.md {key}: lead, and its {child} is neither cited nor held by a '
+                                    'reason other than owed')
+
+            sides = SIDES if status == 'twins' else ('beadc',) if status == 'builder' else ()
+
+            for side in sides:
+                if (document, key) not in naming[side]:
+                    folder = SIDES[side][0] if side in SIDES else BUILDER_TESTS[0]
+                    problems.append(f'{document}.md {key}: {status}, and no test of {side} names it: '
+                                    f'"{document} {key}" in a test\'s title, or in a comment just above its '
+                                    f'declaration, under {folder}')
+
+            if status == 'open':
+                state = re.search(r'\*\*Status: (.*?)\*\*', found['0']['text'])
+
+                if state is None or not re.search(rf'(?<![\d.]){re.escape(key)}(?!\.?\d)', state.group(1)):
+                    problems.append(f'{document}.md {key}: open, and the status line of {document}.md does not name '
+                                    'it')
+
+        if hashed != hashes[key] and key in renumbered:
+            problems.append(f'{document}.md {key}: its text is the one {listing} keeps under {renumbered[key]}; '
+                            '--write-units follows it to its new number')
+        elif hashed != hashes[key] and key in followed:
+            problems.append(f'{document}.md {key}: a unit {listing} does not list, the text it keeps under {key} '
+                            'having moved to another number; --write-units follows that one, and writes this one ?')
+        elif hashed != hashes[key]:
+            problems.append(f'{document}.md {key}: its text moved since {listing} was written; '
+                            f'{plays(document, key, status)}; --write-units {prefix}{key} acknowledges it')
+
+    for key in kept:
+        if key not in found and key not in followed:
+            problems.append(f'{listing} lists {key}, which {document}.md does not have; --write-units drops it')
 
 # ── The expositions read as 0.0.4, under the companion's families and bounds ────────────────────
 
@@ -988,6 +1380,13 @@ for side, (folder, suffix, group_pattern, file_pattern) in SIDES.items():
 if problems:
     report_and_exit()
 
+
+def reasons_of(document):
+    """How many units of a document each reason holds, in the reasons' order."""
+    return ', '.join(f'{sum(status == reason for status in reasoned[document].values())} {reason}'
+                     for reason in REASONS)
+
+
 print(f'spec: {version}, its companion {companion_version}; {len(documents)} files, each under its schema; '
       f'{sum(len(vectors[group]) for group in groups)} vectors in {len(groups)} groups, each named by '
       f'the spec; {len(named["conversations"])} conversations; {len(named["transports"])} transports\' '
@@ -1000,10 +1399,10 @@ print(f'spec: {version}, its companion {companion_version}; {len(documents)} fil
       f'{len(named["procedureKinds"])} procedure kinds, each declared '
       f'{len(documents["identities"]["ways"])} ways, and '
       f'{len(named["folds"])} folds; '
-      f'{len(units["spec"]) - len(uncited["spec"])} of the spec\'s {len(units["spec"])} units cited, the others '
-      f'listed in uncited.txt; {len(units["debugging"]) - len(uncited["debugging"])} of the companion\'s '
-      f'{len(units["debugging"])}, the others in debugging-uncited.txt; {len(TEST_KEYS)} published test keys, '
-      f'which none of the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
+      f'{len(units["spec"])} units of the spec, {len(citing["spec"])} cited and {reasons_of("spec")}, in '
+      f'units.txt; {len(units["debugging"])} of the companion, {len(citing["debugging"])} cited and '
+      f'{reasons_of("debugging")}, in debugging-units.txt; {len(TEST_KEYS)} published test keys, which none of '
+      f'the {len(tracked)} files git lists names outside spec/, the tests and the interop service.')
 
 width = max(len(f'{group} ({len(entries)})') for group, entries in named.items())
 
@@ -1011,3 +1410,8 @@ for group, entries in named.items():
     print(f'  {f"{group} ({len(entries)})":<{width}}  read by {", ".join(SIDES)}')
 
 print(f'  {f"durations ({len(places)})":<{width}}  played by {", ".join(SIDES)}, each in its harness')
+
+# a unit nothing holds yet, each on a line of its own, so a gap is never silent
+for document, keys in owed.items():
+    for key in keys:
+        print(f'  owed: {document}.md {key}, which no entry cites and no test names')

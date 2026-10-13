@@ -1222,6 +1222,7 @@ test.describe('createRouterServer', () => {
       expect(seen).toContain(failure);
     });
 
+    // spec 11.7.3
     test('a connection that closes is no longer notified, and one that cannot take it keeps none from the others', async () => {
       const { close, control, deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
@@ -2131,6 +2132,7 @@ test.describe('createRouterServer', () => {
     expect(errors).toEqual([]);
   });
 
+  // debugging 5.1
   test('tells debug each envelope, with its connection and a copy of its header without its token', async () => {
     const { deliver, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, {
@@ -4296,6 +4298,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(router.notifications.subscriptions()).toEqual([]);
   });
 
+  // spec 11.7.3
   test('lets a queue go with its subscription: unsubscribed, cancelled, its session ended, its connection closed', async () => {
     const { close, deliver, resolver, router } = createPaced();
     const third = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
@@ -4381,6 +4384,7 @@ test.describe('createRouterServer, its metrics', () => {
     };
   };
 
+  // debugging 2.2 and 2.3
   test('a debug listener that throws on an envelope is reported with its connection, and the envelope and its call go on, every listener told', async () => {
     const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport);
@@ -4411,6 +4415,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
+  // debugging 9.7
   test('counts a command to a connection not open as started and closed in the turn it started', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { transport } = createScriptedTransport();
@@ -4431,6 +4436,7 @@ test.describe('createRouterServer, its metrics', () => {
     await expect(asking).rejects.toBeInstanceOf(DisconnectError);
   });
 
+  // debugging 9.2
   test('counts a notification it cannot hand to its transport as failed, and one its transport refuses once it has it as sent', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { control, deliver, open, transport } = createScriptedTransport();
@@ -4468,6 +4474,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
+  // spec 17.2.6
   test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, and reports why once', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, sent, transport } = createScriptedTransport();
@@ -4503,6 +4510,7 @@ test.describe('createRouterServer, its metrics', () => {
     ).toEqual(['bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 2']);
   });
 
+  // debugging 9.4.5
   test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, transport } = createScriptedTransport();
@@ -4699,6 +4707,7 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
+  // spec 16.7
   test('a router refuses a resolver its registry refuses, registering nothing, and a manager a requester, as it is made, its names folded and its service at one revision', () => {
     const { transport } = createScriptedTransport();
     using router = createRouterServer(transport, {

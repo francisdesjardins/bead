@@ -10,7 +10,7 @@
   section 16, whose 16.10 gains a reason and whose 16.11 says what each way of declaring takes, with
   `spec/identities.json`, its schema and its generator; spec section 17's `proto` encoding, with
   `spec/codecs.proto`, `spec/codecs.json`'s `proto` rows, its schema, its generator, `spec/check.py`
-  and `spec/uncited.txt`; both sides' test toolchains, which gain each side's stock protobuf library
+  and `spec/units.txt`; both sides' test toolchains, which gain each side's stock protobuf library
   and generator; the support matrix; [0003](0003-one-word-one-meaning.md)'s sentence on _kind_ and _type_;
   the builder's design; the CHANGELOG
 

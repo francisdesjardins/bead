@@ -47,6 +47,7 @@ public sealed partial class RouterCoreTests
 
     // definition
 
+    // debugging 9.3, 9.6.3 and 9.6.4
     [Fact]
     public async Task Counts_a_call_made_refused_before_it_goes_no_call_id_free_or_PAYLOAD_TOO_LARGE_as_started_and_ended_in_the_turn_it_started_and_a_programmer_s_error_or_an_aborted_signal_as_nothing()
     {
@@ -117,6 +118,7 @@ public sealed partial class RouterCoreTests
         Assert.Contains("bead_client_call_started_total{} 8", MadeOf(registry));
     }
 
+    // debugging 9.2 and 9.4.19
     [Fact]
     public async Task Count_a_call_answered_whose_answer_its_transport_throws_on_as_an_error_and_one_its_transport_rejects_once_it_has_it_as_answered()
     {
@@ -260,6 +262,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal(["bead_client_call_started_total{service=\"_OTHER\",procedure=\"_OTHER\",type=\"command\"} 1"], MetricsTests.CountsOf(registry));
     }
 
+    // debugging 3.3 and 3.4
     [Fact]
     public async Task Reads_the_monotonic_clock_twice_more_for_a_counted_call_than_for_one_counted_nothing_once_at_each_of_its_gates_and_the_wall_clock_never()
     {
@@ -288,6 +291,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal((0, 4), await ReadingsOf(registry));
     }
 
+    // debugging 3.3 and 3.4
     [Fact]
     public async Task Allocates_not_a_byte_more_for_a_call_it_counts_than_for_one_it_does_not()
     {

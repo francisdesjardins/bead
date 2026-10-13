@@ -5,7 +5,7 @@
     "A step is what the test does, or what the server under test does next. send is what the client sends, in hexadecimal as vectors.json writes it; close closes the client's connection.",
     "carried, beside a send, is the credential the client's transport carried beside that envelope, as the transport hands it on: over HTTP, its Authorization's value, its surrounding whitespace removed; beside an expect of a request leg B sends to a destination's connection, what leg B's transport carried beside it. Absent, it carried none.",
     "token, beside an expect whose answer announced OPAQUE, names the token that answer carried, which is random; a later send of the conversation writes that token, its 16 bytes, as its name between angle brackets, <ada>.",
-    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header's, a JWT's token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, its end.",
+    "expect is the next envelope the server sends: its kind, its call id, and its payload or its failure; a request, its flags, its service and its procedure too, and credential, the CREDENTIAL block it presents, as vectors.json writes a header's, a JWT's token a character a byte; none, it presents none. A failure compares its code, its scope and the relays it crossed, and its detail where it gives one, the detail the spec states; elsewhere its detail is informative. credential, on an answer, is the scheme of the CREDENTIAL block it carried, what it announced: OPAQUE for a session's token, which is random, NONE for its end; none, it carried no block. A result that opens a transfer gives its total too; a chunk, its offset, whether it is the last, and its payload; a credit, paced, whether it is PACED, and its end.",
     "report is the next thing the server reports to its application: a protocol code, or exception for an error that carries none.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "A conversation that opens its connections, open, plays them all at once: every other step names its connection, on, but a step that moves time, which is the server's, and each connection has its own expectations; one that opens none plays one connection, opened before its first step. twoWay false beside open declares a connection that carries nothing back, as an HTTP client that does not listen; carries false, one whose transport carries no credential beside an envelope, as a WebSocket's or a listen's batch; secure false, one that reaches off the machine in the clear, neither over TLS nor within the machine. By default a connection carries a credential and is secure. A connection closed and opened again is a new connection under the same name.",
@@ -52,7 +52,8 @@
             "failure": {
               "code": 7,
               "scope": 1,
-              "relays": 0
+              "relays": 0,
+              "detail": "this procedure fails, on purpose"
             }
           }
         }
@@ -141,7 +142,8 @@
             "failure": {
               "code": 33,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "this procedure admits nobody"
             }
           }
         }
@@ -500,7 +502,8 @@
             "failure": {
               "code": 33,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "this procedure admits nobody"
             }
           }
         },
@@ -717,6 +720,7 @@
     {
       "name": "an answer to a command that does not read ends the command and cancels it, and a late one is dropped in silence",
       "clauses": [
+        "9.6",
         "9.6.3",
         "9.6.5"
       ],
@@ -1125,7 +1129,8 @@
             "failure": {
               "code": 7,
               "scope": 1,
-              "relays": 0
+              "relays": 0,
+              "detail": "this procedure fails, on purpose"
             }
           }
         },
@@ -1949,7 +1954,8 @@
             "failure": {
               "code": 33,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": "a call in a credential's session ends no connection's session"
             }
           }
         },
@@ -4206,6 +4212,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 100
           }
         },
@@ -4249,6 +4256,7 @@
     {
       "name": "an ELSEWHERE whose end the wall clock has reached as its verifier settles does not hold, and one a millisecond short of it holds",
       "clauses": [
+        "13.9.4",
         "13.10"
       ],
       "steps": [
@@ -4440,9 +4448,42 @@
       ]
     },
     {
+      "name": "a cancel that crossed its answer is dropped, nothing reported",
+      "clauses": [
+        "10.2",
+        "12.9.6"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 22"
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 79 22"
+          }
+        }
+      ]
+    },
+    {
       "name": "a message shorter than a prefix is reported",
       "clauses": [
         "2.2",
+        "9.6",
         "9.6.1"
       ],
       "steps": [
@@ -4457,6 +4498,7 @@
     {
       "name": "a first byte no layout is, is reported",
       "clauses": [
+        "9.6",
         "9.6.1"
       ],
       "steps": [
@@ -4471,6 +4513,7 @@
     {
       "name": "a request of a layout to come is answered LAYOUT_UNSUPPORTED, on its call id",
       "clauses": [
+        "9.6",
         "9.6.2"
       ],
       "steps": [
@@ -4493,6 +4536,7 @@
     {
       "name": "a request of a layout to come, on the server's own parity, is reported",
       "clauses": [
+        "9.6",
         "9.6.6"
       ],
       "steps": [
@@ -4507,6 +4551,7 @@
     {
       "name": "a malformed request is answered ENVELOPE_MALFORMED, on its call id",
       "clauses": [
+        "9.6",
         "9.6.2"
       ],
       "steps": [
@@ -4529,6 +4574,7 @@
     {
       "name": "a malformed request on a call id still open is reported, never answered",
       "clauses": [
+        "9.6",
         "9.6.6"
       ],
       "steps": [
@@ -4549,6 +4595,7 @@
     {
       "name": "a request past the envelope's bound is answered ENVELOPE_TOO_LARGE, on its call id",
       "clauses": [
+        "9.6",
         "9.6.2"
       ],
       "limits": {
@@ -4577,6 +4624,7 @@
       "name": "a kind to come is reported KIND_UNSUPPORTED",
       "clauses": [
         "3.3",
+        "9.6",
         "9.6.6"
       ],
       "steps": [
@@ -4702,7 +4750,8 @@
       "clauses": [
         "12.3",
         "12.4",
-        "12.5"
+        "12.5",
+        "12.6"
       ],
       "limits": {
         "chunkBytes": 64,
@@ -4716,6 +4765,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 100
           }
         },
@@ -4759,7 +4809,8 @@
     {
       "name": "a transfer is credited a window past the bytes received from the start, once half a window can go",
       "clauses": [
-        "12.4"
+        "12.4",
+        "12.6"
       ],
       "limits": {
         "chunkBytes": 64,
@@ -4773,6 +4824,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -4786,6 +4838,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 268
           }
         },
@@ -4799,6 +4852,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 300
           }
         },
@@ -4879,6 +4933,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -4924,6 +4979,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -4961,6 +5017,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -4998,6 +5055,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 100
           }
         },
@@ -5034,6 +5092,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 100
           }
         },
@@ -5074,6 +5133,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -5102,6 +5162,7 @@
     {
       "name": "a chunk that does not read ends its transfer as CHUNK_INVALID",
       "clauses": [
+        "9.6",
         "9.6.4"
       ],
       "limits": {
@@ -5116,6 +5177,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -5232,6 +5294,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -5272,6 +5335,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -5328,6 +5392,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -5355,6 +5420,7 @@
           "expect": {
             "kind": 21,
             "callId": 3,
+            "paced": false,
             "creditEnd": 172
           }
         }
@@ -5411,6 +5477,7 @@
           "expect": {
             "kind": 21,
             "callId": 1,
+            "paced": false,
             "creditEnd": 172
           }
         },
@@ -5518,6 +5585,7 @@
           "expect": {
             "kind": 21,
             "callId": 2,
+            "paced": false,
             "creditEnd": 156
           }
         },
@@ -6167,7 +6235,8 @@
             "failure": {
               "code": 8,
               "scope": 1,
-              "relays": 0
+              "relays": 0,
+              "detail": "that destination is registered already"
             }
           },
           "on": "device"
@@ -7554,7 +7623,8 @@
       "name": "leg B's header counts its credential, call by call, against the smaller of the two legs' limits, once its route holds",
       "clauses": [
         "14.3.5",
-        "14.3.6"
+        "14.3.6",
+        "14.5.3"
       ],
       "limits": {
         "maximumEnvelopeBytes": 2048,

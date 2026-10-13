@@ -592,6 +592,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
     // createHTTPTransportServer
 
+    // spec 15.12.4
     [Fact]
     public void Keeps_its_constants_in_step_with_the_router_s()
     {
@@ -970,6 +971,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_messages);
     }
 
+    // spec 15.12.4
     [Fact]
     public async Task Bounds_its_connections_and_those_of_one_address_the_requests_one_waits_on_and_the_bytes_of_body_under_way()
     {
@@ -2595,6 +2597,7 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal((HttpRefusals.Malformed, true), (malformed.GetValues(HttpTransport.RefusalHeader).Single(), malformed.ConnectionClose));
     }
 
+    // spec 15.12.4
     [Fact]
     public async Task Reads_a_body_up_to_its_limit_exactly_declared_or_counted_refuses_one_declared_past_it_before_any_of_it_and_gives_back_the_bytes_each_held()
     {

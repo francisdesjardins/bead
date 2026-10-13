@@ -140,6 +140,7 @@ public sealed partial class RouterClientTests
         });
     }
 
+    // spec 17.2.2
     [Fact]
     public async Task Fails_a_result_that_does_not_decode_here_as_undecodable()
     {
@@ -572,6 +573,7 @@ public sealed partial class RouterClientTests
         Assert.Empty(scripted.Transport.Sent);
     }
 
+    // spec 11.7, 12.9.2 and 12.9.3
     [Fact]
     public async Task Keeps_the_call_id_of_a_subscription_let_go_of_a_while_silent_on_what_comes_under_it_then_reports_it()
     {
@@ -718,6 +720,7 @@ public sealed partial class RouterClientTests
         Assert.Equal([5], held.Triggered);
     }
 
+    // spec 11.7 and 12.9.3
     [Fact]
     public async Task Reports_a_notification_under_no_subscription_and_one_whose_callback_throws()
     {
@@ -754,6 +757,7 @@ public sealed partial class RouterClientTests
         });
     }
 
+    // spec 12.9.2
     [Fact]
     public async Task A_failure_after_its_result_ends_the_subscription_no_call_unknown_the_notification_told_the_next_registration_asks_anew()
     {
@@ -856,6 +860,7 @@ public sealed partial class RouterClientTests
         });
     }
 
+    // spec 11.7.3
     [Fact]
     public async Task Forgets_each_notification_when_its_connection_closes_or_it_is_disposed_and_tells_it()
     {
@@ -939,6 +944,7 @@ public sealed partial class RouterClientTests
         Assert.False(router.HasNotification(reregistering));
     }
 
+    // spec 11.11
     [Fact]
     public async Task Opens_its_window_once_subscribed_and_renews_it_once_half_a_window_settled()
     {
@@ -971,6 +977,7 @@ public sealed partial class RouterClientTests
         Assert.Equal([4, 6, 8], transport.Credits);
     }
 
+    // spec 11.11
     [Fact]
     public async Task Credits_a_notification_ahead_of_its_result_and_its_window_after_no_further_than_it_reaches()
     {
@@ -1331,6 +1338,7 @@ public sealed partial class RouterClientTests
         Assert.Contains("not a string", Assert.IsType<FailureException>(scripted.Errors[0]).Detail, StringComparison.Ordinal);
     }
 
+    // debugging 5.1
     [Fact]
     public async Task Tells_each_envelope_out_and_in_with_its_connection_server_its_header_and_never_its_session_token()
     {
@@ -1358,6 +1366,7 @@ public sealed partial class RouterClientTests
             seen);
     }
 
+    // debugging 4.4
     [Fact]
     public async Task Tells_a_call_s_steps_with_the_call_id_its_REQUEST_carries()
     {
@@ -1413,6 +1422,7 @@ public sealed partial class RouterClientTests
             steps);
     }
 
+    // debugging 4.4
     [Fact]
     public async Task Two_calls_to_one_procedure_started_in_one_millisecond_and_answered_in_one_batch_name_each_its_own_call_id()
     {
@@ -1468,6 +1478,7 @@ public sealed partial class RouterClientTests
             Told(DebugDirection.Rx));
     }
 
+    // debugging 4.4
     [Fact]
     public async Task A_subscribing_call_binds_its_subscription_before_debug_hears_its_tx_step()
     {

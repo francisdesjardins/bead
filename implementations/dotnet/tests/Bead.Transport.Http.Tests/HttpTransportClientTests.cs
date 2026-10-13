@@ -1423,6 +1423,7 @@ public sealed class HttpTransportClientTests
 
     // listening
 
+    // spec 15.10
     [Fact]
     public async Task Says_at_connect_that_it_listens_then_listens_a_batch_heard_in_order_acknowledged_by_the_next_listen()
     {
@@ -1490,6 +1491,7 @@ public sealed class HttpTransportClientTests
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 
+    // spec 15.10
     [Fact]
     public async Task Listens_again_from_where_it_was_when_a_listen_is_lost_at_once_then_later_and_later_drawn_apart_and_one_that_reaches_the_server_ends_the_losses()
     {
@@ -1568,6 +1570,7 @@ public sealed class HttpTransportClientTests
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 
+    // spec 15.10
     [Fact]
     public async Task Counts_its_connection_lost_once_its_listens_were_lost_for_its_inactivity_timeout_and_tells_the_server()
     {

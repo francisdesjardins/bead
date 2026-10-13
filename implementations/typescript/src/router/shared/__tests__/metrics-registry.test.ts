@@ -26,6 +26,7 @@ test.describe('createMetricsRegistry', () => {
     );
   });
 
+  // spec 16.7
   test('refuses a declaration as it is made, in sentences that name its address, its names and its reason, declaring nothing', () => {
     const registry = createMetricsRegistry({ maximumProcedures: 1 });
     const metrics = registry.attach('server');
@@ -75,6 +76,7 @@ test.describe('createMetricsRegistry', () => {
     expect(registry.exposition().text).toBe(before);
   });
 
+  // spec 16.7
   test('folds ASCII letters alone as it compares names, a name outside ASCII its own, and takes a name at its address exactly', () => {
     const metrics = createMetricsRegistry().attach('server');
     const resolve = (procedureId: number, procedureName: string) => {

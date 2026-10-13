@@ -126,6 +126,7 @@ test.describe('chunkPayloadBytes', () => {
 });
 
 test.describe('createOutgoingTransfer', () => {
+  // spec 12.11
   test('lays the plan’s 20 MiB out byte by byte: its opening, a credit, a chunk with more, the last', () => {
     const total = 20_971_520;
     const payload = patternOf(total);
@@ -439,6 +440,7 @@ test.describe('createIncomingTransfer', () => {
     expect(incoming.payload()).toEqual(whole);
   });
 
+  // spec 12.6.5
   test('refuses more runs of bytes apart than its bound, one byte at a time', () => {
     const incoming = incomingOf(patternOf(1), { maximumChunkRuns: 3, total: 20, windowBytes: 40 });
 

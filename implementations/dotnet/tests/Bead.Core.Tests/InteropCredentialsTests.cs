@@ -8,14 +8,18 @@ namespace Bead.Tests;
 
 /// <summary>
 /// <see cref="InteropCredentials"/>: the ELSEWHERE verifier of <c>credentials.elsewhere</c>, by its
-/// grammar, on the clock its server is given, by the rows the TypeScript side's verifier answers
-/// alike; and the key set of <c>credentials.jwt</c>, each issuer it names answered as its words say.
+/// grammar, on the clock its server is given, by the verdicts of <c>verifiers.elsewhere</c>, which
+/// the TypeScript side's verifier answers alike; and the key set of <c>credentials.jwt</c>, each
+/// issuer it names answered as its words say.
 /// </summary>
 public sealed class InteropCredentialsTests
 {
     // constants
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    // what both sides' interop tests hold the interop service's own readers to
+    private static readonly JsonElement Verifiers = Load().GetProperty("verifiers");
 
     // helpers
 
@@ -25,6 +29,36 @@ public sealed class InteropCredentialsTests
         {
             return TestContext.Current.CancellationToken;
         }
+    }
+
+    private static JsonElement Load()
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "interop-service.json")));
+
+        return document.RootElement.Clone();
+    }
+
+    // each verdict, written as OutcomeOf writes what a verification settled with, after the
+    // milliseconds it waits when it waits
+    private static TheoryData<string, string> RowsOf(JsonElement elsewhere)
+    {
+        var rejection = elsewhere.GetProperty("rejection").GetString();
+
+        return new TheoryData<string, string>(elsewhere.GetProperty("verdicts").EnumerateArray().Select((verdict) =>
+        {
+            var settled = verdict.GetProperty("verdict").GetString() switch
+            {
+                "holds" => $"holds {verdict.GetProperty("sub").GetString()} as {verdict.GetProperty("sub").GetString()}"
+                    + (verdict.TryGetProperty("end", out var end) ? $" until {end.GetInt64()}" : ""),
+                "rejects" => $"rejects: {rejection}",
+                "none" => "none",
+                var other => throw new InvalidOperationException($"no verdict of this side is {other}"),
+            };
+
+            return (
+                verdict.GetProperty("carried").GetString()!,
+                verdict.TryGetProperty("after", out var after) ? $"{after.GetInt64()} ms on: {settled}" : settled);
+        }));
     }
 
     // what a settled verification says: the sub it holds and its end, none, or that it rejected
@@ -45,36 +79,10 @@ public sealed class InteropCredentialsTests
     // definition
 
     /// <summary>
-    /// Each value a transport carried, and what the verifier settles with: at once, or that many
-    /// milliseconds on, on its clock.
+    /// Each value a transport carried, and what the verifier settles with, as <c>verifiers.elsewhere</c>
+    /// of <c>spec/interop-service.json</c> says: at once, or that many milliseconds on, on its clock.
     /// </summary>
-    public static TheoryData<string, string> Rows { get; } = new()
-    {
-        { "Interop sub=ada", "holds ada as ada" },
-        { "interop sub=ada", "holds ada as ada" },
-        { "INTEROP sub=ada", "holds ada as ada" },
-        { "Interop sub=a", "holds a as a" },
-        { $"Interop sub={new string('a', 32)}", $"holds {new string('a', 32)} as {new string('a', 32)}" },
-        { $"Interop sub={new string('a', 33)}", "none" },
-        { "Interop sub=Ada", "none" },
-        { "Interop  sub=ada", "none" },
-        { "Interop sub=ada,after=1", "none" },
-        { "Interop sub=ada, after=0", "none" },
-        { "Interop sub=ada, after=2147483647", "2147483647 ms on: holds ada as ada" },
-        { "Interop sub=ada, after=2147483648", "none" },
-        { "Interop sub=ada, end=9007199254740991", "holds ada as ada until 9007199254740991" },
-        { "Interop sub=ada, end=9007199254740992", "none" },
-        { "Interop sub=ada, end=1, after=1", "none" },
-        { "Interop sub=ada, SUB=x", "none" },
-        { "Interop fail=true", "rejects: this verifier fails, on purpose" },
-        { "Interop fail=true, after=5", "5 ms on: rejects: this verifier fails, on purpose" },
-        { "Interop fail=TRUE", "none" },
-        { "Interop sub=ada, fail=true", "none" },
-        { "Interop", "none" },
-        { "Interop ", "none" },
-        { "Bearer mF_9.B5f-4.1JqM", "none" },
-        { "Basic YWRh", "none" },
-    };
+    public static TheoryData<string, string> Rows { get; } = RowsOf(Verifiers.GetProperty("elsewhere"));
 
     [Theory]
     [MemberData(nameof(Rows))]

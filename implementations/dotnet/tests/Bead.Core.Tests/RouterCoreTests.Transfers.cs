@@ -550,6 +550,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal(3u, server.Sent[^1].Header.CallId);
     }
 
+    // spec 12.10
     [Fact]
     public async Task Ends_the_transfers_of_a_connection_that_goes_before_their_budget_grants_any_credit_and_sends_nothing_once_disposed()
     {
@@ -760,6 +761,7 @@ public sealed partial class RouterCoreTests
         Assert.Equal(64, EnvelopeCodec.WriteEnvelope(opening).Length);
     }
 
+    // spec 12.10
     [Fact]
     public async Task Ends_the_transfers_it_sends_on_a_connection_that_goes_and_on_a_router_disposed_sending_nothing_more()
     {

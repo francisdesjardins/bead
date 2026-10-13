@@ -20,6 +20,7 @@ public sealed class MetricsRegistryTests
 
     // definition
 
+    // spec 16.7
     [Fact]
     public void Refuses_a_declaration_as_it_is_made_in_sentences_that_name_its_address_its_names_and_its_reason_declaring_nothing()
     {
@@ -60,6 +61,7 @@ public sealed class MetricsRegistryTests
             registry.Exposition().Text.Split('\n'));
     }
 
+    // spec 16.7
     [Fact]
     public void Refuses_a_name_its_service_holds_at_another_address_in_another_case_and_a_service_at_another_revision_declaring_nothing()
     {
@@ -137,6 +139,7 @@ public sealed class MetricsRegistryTests
         Assert.Equal(new MetricsExposition("text/plain; version=0.0.4; charset=utf-8", ""), new MetricsRegistry().Exposition());
     }
 
+    // spec 16.7
     [Fact]
     public void A_router_refuses_a_resolver_its_registry_refuses_registering_nothing_and_a_manager_a_requester_as_it_is_made_its_names_folded_and_its_service_at_one_revision()
     {
