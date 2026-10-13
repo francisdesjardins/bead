@@ -4,12 +4,12 @@ using System.Text;
 namespace Bead;
 
 /// <summary>
-/// The identifier of a credential's session (spec 13.9): the record of its credential scheme and its
-/// claim — a <see cref="CredentialScheme.Jwt"/>'s <see cref="Issuer"/> with its <see cref="Sid"/>,
-/// else with its <see cref="Sub"/>; an <see cref="CredentialScheme.Elsewhere"/>'s verifier's
-/// <see cref="Id"/>. Two are one when their scheme, their claim's name and their values are equal,
-/// octet for octet, as a record compares its strings, ordinally: one <c>sub</c> under two issuers
-/// names two sessions.
+/// The identifier of a credential's session (spec 13.10): the record of its credential scheme and
+/// its claim — a <see cref="CredentialScheme.Jwt"/>'s <see cref="Issuer"/> with its
+/// <see cref="Sid"/>, else with its <see cref="Sub"/>; an
+/// <see cref="CredentialScheme.Elsewhere"/>'s verifier's <see cref="Id"/>. Two are one when their
+/// scheme, their claim's name and their values are equal, octet for octet, as a record compares
+/// its strings, ordinally: one <c>sub</c> under two issuers names two sessions.
 /// </summary>
 public sealed record SessionIdentifier
 {
@@ -50,9 +50,10 @@ public sealed record CallSession
     public SessionIdentifier? Identifier { get; init; }
 
     /// <summary>
-    /// A credential's session's end, in whole milliseconds since the epoch (spec 13.9): the end its
-    /// side keeps for its identifier on its connection, when it keeps one, the later of those
-    /// resolved; its own otherwise. None for a connection's session, and for a session no timer ends.
+    /// A credential's session's end, in whole milliseconds since the epoch (spec 13.10): the end
+    /// its side keeps for its identifier on its connection, when it keeps one, the later of those
+    /// resolved; its own otherwise. None for a connection's session, and for a session no timer
+    /// ends.
     /// </summary>
     public long? End { get; init; }
 

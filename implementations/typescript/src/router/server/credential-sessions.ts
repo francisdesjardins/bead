@@ -14,10 +14,10 @@ import type { INotificationManager, ISubscribingCall } from './types';
 // interfaces
 
 /**
- * A credential's session a connection keeps (spec 13.9): its identifier, its end, the later of those
- * its calls resolved to — none for one without — the timer toward it, how many times it was timed,
- * which an end reached and taken in a later turn holds to, and the subscriptions it holds, by call
- * id.
+ * A credential's session a connection keeps (spec 13.10): its identifier, its end, the later of
+ * those its calls resolved to — none for one without — the timer toward it, how many times it was
+ * timed, which an end reached and taken in a later turn holds to, and the subscriptions it holds, by
+ * call id.
  */
 interface IKept {
   readonly calls: Set<CallId>;

@@ -142,7 +142,7 @@ export const MALFORMED_HANDSHAKE = refused(400, { refusal: WS_REFUSALS.MALFORMED
 
 /**
  * An upgrade the server would take once its stop began, refused 503 `busy`, told when to come back
- * (RFC 9110 §15.6.4, §10.2.3; spec 15.2).
+ * (RFC 9110 §15.6.4, §10.2.3; spec 15.2.8).
  */
 export const BUSY_HANDSHAKE = refused(503, {
   fields: { 'retry-after': '1' },

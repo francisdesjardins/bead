@@ -6505,6 +6505,7 @@
       "name": "a request at a WebSocket's address without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked",
       "clauses": [
         "15.2",
+        "15.2.1",
         "15.12"
       ],
       "transport": "websocket",
@@ -6681,6 +6682,7 @@
       "clauses": [
         "15.1",
         "15.2",
+        "15.2.1",
         "15.12"
       ],
       "transport": "websocket",
@@ -6817,6 +6819,7 @@
       "name": "a request naming a host the server does not take is refused 403, marked, whatever its method, its upgrade or its form",
       "clauses": [
         "15.2",
+        "15.2.2",
         "15.6.5",
         "15.12"
       ],
@@ -6995,6 +6998,7 @@
       "name": "an upgrade from an origin the server does not take is refused 403, marked, before its handshake; one from its own origin, or with none, is taken",
       "clauses": [
         "15.2",
+        "15.2.7",
         "15.6.5",
         "15.12"
       ],
@@ -7144,6 +7148,8 @@
       "name": "an upgrade's host and origin are compared in any ASCII case",
       "clauses": [
         "15.2",
+        "15.2.2",
+        "15.2.7",
         "15.12"
       ],
       "transport": "websocket",
@@ -7191,6 +7197,8 @@
       "name": "an upgrade from a page on an IDN host, its Host and its Origin in punycode, is its own, and one naming a Host of invalid punycode is taken, under hosts *",
       "clauses": [
         "15.2",
+        "15.2.2",
+        "15.2.7",
         "15.12"
       ],
       "transport": "websocket",
@@ -7302,6 +7310,7 @@
       "name": "an upgrade naming an IDN host that hosts names in punycode is taken, and one naming a Host of invalid punycode refused, marked",
       "clauses": [
         "15.2",
+        "15.2.2",
         "15.6.5",
         "15.12"
       ],
@@ -7428,6 +7437,7 @@
       "name": "a WebSocket server given no hosts takes localhost, a name under .localhost and an IP literal, and refuses any other host 403, marked, whatever its method, its upgrade or its form",
       "clauses": [
         "15.2",
+        "15.2.2",
         "15.6.5",
         "15.12"
       ],
@@ -7633,6 +7643,7 @@
       "name": "an upgrade is taken from the hosts listed besides those every server takes, each by its host on any port",
       "clauses": [
         "15.2",
+        "15.2.2",
         "15.6.5",
         "15.12"
       ],
@@ -7723,6 +7734,8 @@
       "name": "a WebSocket server whose hosts is * takes an upgrade naming any host, and judges one naming none by its version",
       "clauses": [
         "15.2",
+        "15.2.2",
+        "15.2.5",
         "15.6.11",
         "15.12"
       ],
@@ -7798,6 +7811,7 @@
       "name": "an upgrade whose target is in absolute-form names its host by the target, its Host ignored",
       "clauses": [
         "15.2",
+        "15.2.2",
         "15.6.5",
         "15.12"
       ],
@@ -7867,6 +7881,7 @@
       "name": "an upgrade with an Origin of null, of a blob: URL, of ws: or with a path, naming the server's host, is refused 403, marked; one from https:// and its Host is taken",
       "clauses": [
         "15.2",
+        "15.2.7",
         "15.6.5",
         "15.12"
       ],
@@ -8014,6 +8029,7 @@
       "name": "an upgrade with an Origin of null is taken when origins names it",
       "clauses": [
         "15.2",
+        "15.2.7",
         "15.12"
       ],
       "transport": "websocket",
@@ -8061,6 +8077,7 @@
       "name": "a request at a WebSocket's address of a method but GET or HEAD is refused 405, its Allow naming GET and HEAD, before its handshake is read",
       "clauses": [
         "15.2",
+        "15.2.3",
         "15.6.7"
       ],
       "transport": "websocket",
@@ -8206,6 +8223,7 @@
       "name": "a request at a WebSocket's address that asks no WebSocket is answered 426, marked, its Upgrade naming websocket",
       "clauses": [
         "15.2",
+        "15.2.4",
         "15.6.11"
       ],
       "transport": "websocket",
@@ -8486,6 +8504,7 @@
       "name": "an upgrade of a version but 13, or of none, is refused 426, marked, naming 13 and websocket, whatever its Origin or its key",
       "clauses": [
         "15.2",
+        "15.2.5",
         "15.6.11"
       ],
       "transport": "websocket",
@@ -8692,6 +8711,8 @@
       "name": "an upgrade whose key is not one field of 16 bytes in base64, whose version comes twice, whose subprotocols are no list of tokens, or that has content, is refused 400, marked, before its origin is judged",
       "clauses": [
         "15.2",
+        "15.2.5",
+        "15.2.6",
         "15.6.4"
       ],
       "transport": "websocket",
@@ -8963,7 +8984,8 @@
     {
       "name": "an upgrade is taken whose Upgrade lists websocket in any case, in one field line or several, whose Connection names upgrade among other tokens, with no content",
       "clauses": [
-        "15.2"
+        "15.2",
+        "15.2.4"
       ],
       "transport": "websocket",
       "steps": [

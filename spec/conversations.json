@@ -1846,7 +1846,7 @@
       "clauses": [
         "9.2.5",
         "13.8.9",
-        "13.9.1"
+        "13.10.1"
       ],
       "steps": [
         {
@@ -1975,7 +1975,7 @@
       "name": "sessions of one connection subscribing to one procedure each hold their own: its connection's, and each credential's",
       "clauses": [
         "11.3",
-        "13.9"
+        "13.10"
       ],
       "steps": [
         {
@@ -2075,7 +2075,7 @@
       "name": "two issuers presenting one sub are two sessions: the second moves nothing of the first's subscription",
       "clauses": [
         "11.3",
-        "13.9"
+        "13.10"
       ],
       "steps": [
         {
@@ -2151,8 +2151,8 @@
       "clauses": [
         "11.3",
         "13.6",
-        "13.9",
-        "13.9.3"
+        "13.10",
+        "13.10.3"
       ],
       "steps": [
         {
@@ -2244,8 +2244,8 @@
     {
       "name": "a credential's session whose end lies past a timer's ceiling is timed in two steps, the wall clock read again at each",
       "clauses": [
-        "13.9",
-        "13.9.3"
+        "13.10",
+        "13.10.3"
       ],
       "steps": [
         {
@@ -2307,8 +2307,8 @@
     {
       "name": "a wall clock set by hand takes effect at the next due: a credential's session's end is read again, never counted down",
       "clauses": [
-        "13.9.2",
-        "13.9.3"
+        "13.10.2",
+        "13.10.3"
       ],
       "steps": [
         {
@@ -2357,7 +2357,7 @@
       "name": "a credential's session ended by its identifier ends on every connection that keeps it, and a credential that still holds opens it anew",
       "clauses": [
         "13.6",
-        "13.9"
+        "13.10"
       ],
       "steps": [
         {
@@ -2511,7 +2511,7 @@
       "name": "every credential's session of an issuer, ended by that issuer, ends on every connection that keeps one, and nothing of another issuer's, whatever its sub",
       "clauses": [
         "13.6",
-        "13.9"
+        "13.10"
       ],
       "steps": [
         {
@@ -2680,8 +2680,11 @@
     {
       "name": "a key set is asked once a minute at most for an issuer: a kid only it names is taken from its answer, then from the keys held; a kid none names within the minute waits for its end and the ask then, no ask going before, and is refused once that ask's answer does not name it",
       "clauses": [
-        "13.8",
-        "13.8.4"
+        "13.8.4",
+        "13.9",
+        "13.9.2",
+        "13.9.4",
+        "13.9.5"
       ],
       "steps": [
         {
@@ -2787,7 +2790,9 @@
       "name": "a call waiting for its issuer's minute to end leaves on its cancel, answered nothing, and no ask goes at a deadline no call waits for",
       "clauses": [
         "10.2",
-        "13.8"
+        "13.9",
+        "13.9.5",
+        "13.9.7"
       ],
       "steps": [
         {
@@ -2899,8 +2904,9 @@
       "name": "a key set is asked for the issuers it names alone: a token of another, whose kid no key names, is refused at once, asking nothing, the application's own issuers among them",
       "clauses": [
         "9.2.5",
-        "13.8",
-        "13.8.4"
+        "13.8.4",
+        "13.9",
+        "13.9.1"
       ],
       "steps": [
         {
@@ -2950,7 +2956,9 @@
       "clauses": [
         "9.2.5",
         "10.2",
-        "13.8"
+        "13.9",
+        "13.9.2",
+        "13.9.3"
       ],
       "steps": [
         {
@@ -3022,8 +3030,9 @@
     {
       "name": "a kid that another issuer's key names asks the key set for the token's own issuer, whose answer verifies it",
       "clauses": [
-        "13.8",
-        "13.8.4"
+        "13.8.4",
+        "13.9",
+        "13.9.5"
       ],
       "steps": [
         {
@@ -3077,8 +3086,10 @@
     {
       "name": "a key set's keys are held ten minutes from its answer, a millisecond either side: past them, a token they would serve waits on a new ask, whose answer replaces them, a key it no longer answers refused",
       "clauses": [
-        "13.8",
-        "13.8.4"
+        "13.8.4",
+        "13.9",
+        "13.9.4",
+        "13.9.5"
       ],
       "steps": [
         {
@@ -3173,8 +3184,10 @@
     {
       "name": "a token without a kid, of an issuer the key set names, waits on that issuer's keys while none of them serve: at a cold start it asks, and once the keys answered are past their ten minutes it asks again",
       "clauses": [
-        "13.8",
-        "13.8.4"
+        "13.8.4",
+        "13.9",
+        "13.9.4",
+        "13.9.5"
       ],
       "steps": [
         {
@@ -3258,7 +3271,8 @@
       "clauses": [
         "8.2",
         "9.2.5",
-        "13.8"
+        "13.9",
+        "13.9.6"
       ],
       "steps": [
         {
@@ -3906,7 +3920,7 @@
       "clauses": [
         "9.2.5",
         "13.1",
-        "13.10",
+        "13.11",
         "15.1"
       ],
       "steps": [
@@ -3954,7 +3968,7 @@
       "clauses": [
         "9.2.5",
         "13.5",
-        "13.10"
+        "13.11"
       ],
       "steps": [
         {
@@ -3995,7 +4009,7 @@
       "name": "an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED",
       "clauses": [
         "9.2.5",
-        "13.10"
+        "13.11"
       ],
       "steps": [
         {
@@ -4023,7 +4037,7 @@
       "clauses": [
         "9.4",
         "10.2",
-        "13.10"
+        "13.11"
       ],
       "steps": [
         {
@@ -4256,8 +4270,8 @@
     {
       "name": "an ELSEWHERE whose end the wall clock has reached as its verifier settles does not hold, and one a millisecond short of it holds",
       "clauses": [
-        "13.9.4",
-        "13.10"
+        "13.10.4",
+        "13.11"
       ],
       "steps": [
         {

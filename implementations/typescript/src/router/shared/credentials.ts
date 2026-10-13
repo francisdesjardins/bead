@@ -215,7 +215,7 @@ export const assertLimitsHoldJwt = ({
  * verified as section 13.8 states, the wall clock read as its signature has verified, its key found
  * among the keys given and those its key set answered while they serve; an `ELSEWHERE` asked of its
  * verifier with what its transport carried, its session's end held rounded up, and one the wall
- * clock reached as it settles not holding (section 13.10).
+ * clock reached as it settles not holding (section 13.11).
  *
  * The key set is asked for the issuers it names alone, once a minute at most for an issuer, on the
  * monotonic reading: an ask sets that issuer's deadline a minute past the reading at which it goes.
@@ -286,9 +286,9 @@ export const createCredentialResolver = (
     return clock.performance.now() < answered + KEY_SET_HOLD;
   };
 
-  // the keys that serve, in the order 13.8's step 4 searches: the application's, held for good, in
-  // the order given, then those each issuer's key set answered, in its answer's order, for their ten
-  // minutes
+  // the keys that serve, in the order 13.8's step 4 searches (13.9.4): the application's, held for
+  // good, in the order given, then those each issuer's key set answered, in its answer's order, for
+  // their ten minutes
   const keysServing = (): readonly IJwtKey[] => {
     return [
       ...keys,
@@ -515,7 +515,7 @@ export const createCredentialResolver = (
     }
   };
 
-  // the wait of a token of an issuer the key set names, in the order 13.8 takes: a deadline the
+  // the wait of a token of an issuer the key set names, in the order 13.9.5 takes: a deadline the
   // reading reached, then whether its key serves, then the bound. None for a token of another issuer,
   // or whose key served when judged; a call that left already reads nothing
   const waitOf = (

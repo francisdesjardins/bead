@@ -71,7 +71,7 @@
       "additionalProperties": false,
       "properties": {
         "jwt": {
-          "description": "A JWT's keys, its audience and its key set (spec 13.8).",
+          "description": "A JWT's keys, its audience and its key set (spec 13.8, 13.9).",
           "type": "object",
           "required": ["keys", "audience", "keySet"],
           "additionalProperties": false,
@@ -103,7 +103,7 @@
               "minLength": 1
             },
             "keySet": {
-              "description": "The key set the server is given, with the issuers it answers for (spec 13.8): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; the most calls that wait for one issuer's deadline at once; and what it does asked for any other issuer.",
+              "description": "The key set the server is given, with the issuers it answers for (spec 13.9): each issuer, the keys it answers, each a JWK with its one algorithm, and what and when it answers; the most calls that wait for one issuer's deadline at once; and what it does asked for any other issuer.",
               "type": "object",
               "required": ["issuers", "maximumWaitingCalls", "answers"],
               "additionalProperties": false,
@@ -144,7 +144,7 @@
                   }
                 },
                 "maximumWaitingCalls": {
-                  "description": "The most calls that wait for one issuer's deadline at once, a call on its ask under way never counted (spec 13.8).",
+                  "description": "The most calls that wait for one issuer's deadline at once, a call on its ask under way never counted (spec 13.9).",
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 2147483647

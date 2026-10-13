@@ -592,7 +592,7 @@ public interface IRouterCorePort
     /// <summary>
     /// A credential's session a request resolved to, while its call is still its own — never once
     /// it ended: the side gives it the end it keeps for its identifier on the connection, the later
-    /// of the two, and so renews it (spec 13.9). As it came by default.
+    /// of the two, and so renews it (spec 13.10). As it came by default.
     /// </summary>
     CallSession OnResolved(CallSession session, string connectionHandle)
     {

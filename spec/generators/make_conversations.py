@@ -249,7 +249,7 @@ LONG = json_string(300).encode('utf-8')
 # result's header and an announcement's 20 bytes
 RESULT_37 = ('"' + 'x' * 35 + '"').encode('utf-8')
 
-# ── 13.8 and 13.9: a JWT's session, its end, and the key set ────────────────────────────────────
+# ── 13.8 to 13.10: a JWT's session, its key set, and its end ────────────────────────────────────
 
 # where the server's wall clock starts, and the second it is
 WALL_CLOCK = '2026-01-01T00:00:00Z'
@@ -271,13 +271,13 @@ KIDLESS_KEY = KIDLESS['keys'][0]['jwk']
 assert ROTATED_KEY['kid'] == SET_KEY['kid'] and ROTATED_KEY['k'] != SET_KEY['k'] and STALLED['keys'] == []
 assert len(KIDLESS['keys']) == 1 and 'kid' not in KIDLESS_KEY
 
-# the most calls that wait for one issuer's deadline at once (13.8): the conversation that passes them
+# the most calls that wait for one issuer's deadline at once (13.9): the conversation that passes them
 # plays two waiting, each on a connection of its own, and a third on another
 WAITING_CALLS = KEY_SET['maximumWaitingCalls']
 assert WAITING_CALLS == 2
 
 # how long the key set takes to answer, on the server's clock, as its words say; an ask's deadline,
-# a minute after it went; and how long the keys an answer gave are held, ten minutes from it (13.8)
+# a minute after it went; and how long the keys an answer gave are held, ten minutes from it (13.9)
 KEY_SET_WAIT = 1_000
 KEY_SET_DEADLINE = 60_000
 KEYS_HELD = 600_000
@@ -408,7 +408,7 @@ def jwt_conversations():
         # its exp at the wall clock's start: it holds 60 s past it, and not a millisecond more; echo admits
         # anyone, so its refusal is the credential's
         ('a JWT holds while the server\'s wall clock is before its exp plus 60 s, a millisecond either side',
-         ['9.2.5', '13.8.9', '13.9.1'], None, [
+         ['9.2.5', '13.8.9', '13.10.1'], None, [
              presenting(1, 'whoami', 'null', jwt(HS_AT_START)), result(1, '"grace"'),
              wall(LEEWAY - 1),
              presenting(3, 'whoami', 'null', jwt(HS_AT_START)), result(3, '"grace"'),
@@ -425,7 +425,7 @@ def jwt_conversations():
         # one subscription per procedure and per session: none, two issuers' sessions, and a later request
         # of one of them, which holds nothing
         ('sessions of one connection subscribing to one procedure each hold their own: its connection\'s, and each credential\'s',
-         ['11.3', '13.9'], None, [
+         ['11.3', '13.10'], None, [
              subscribe(1), result(1, 'null'),
              subscribing(3, jwt(HS_GRACE)), result(3, 'null'),
              subscribing(5, jwt(ES_GRACE)), result(5, 'null'),
@@ -436,7 +436,7 @@ def jwt_conversations():
         # one sub under two issuers names two sessions: the second, ending later, moves nothing of the
         # first's end, and its tick reaches no subscription of the first's
         ('two issuers presenting one sub are two sessions: the second moves nothing of the first\'s subscription',
-         ['11.3', '13.9'], None, [
+         ['11.3', '13.10'], None, [
              subscribing(1, jwt(ES_GRACE)), result(1, 'null'),
              presenting(3, 'whoami', 'null', jwt(HS_RENEWED)), result(3, '"grace"'),
              ticked(5, 1, jwt(HS_RENEWED)), result(5, 'null'),
@@ -445,7 +445,7 @@ def jwt_conversations():
         # renewed by whoami under the same identifier, its end moves to the later token's, its timer armed
         # anew from a fresh reading: the first token no longer holds, and its subscription does
         ('a JWT renewed under a subscription keeps it past the first token\'s end, until the renewed one\'s',
-         ['11.3', '13.6', '13.9', '13.9.3'], None, [
+         ['11.3', '13.6', '13.10', '13.10.3'], None, [
              subscribing(1, jwt(HS_GRACE)), result(1, 'null'),
              armed(HOUR_END),
              presenting(3, 'whoami', 'null', jwt(HS_RENEWED)), result(3, '"grace"'),
@@ -454,14 +454,14 @@ def jwt_conversations():
              ticked(7, 1, jwt(HS_RENEWED)), notification(1, '1'), result(7, 'null'),
              armed(HOUR * 1000), advance(HOUR * 1000), failure(1, SESSION_REQUIRED)]),
         ('a credential\'s session whose end lies past a timer\'s ceiling is timed in two steps, the wall clock read again at each',
-         ['13.9', '13.9.3'], None, [
+         ['13.10', '13.10.3'], None, [
              subscribing(1, jwt(HS_30_DAYS)), result(1, 'null'),
              armed(2 ** 31 - 1), advance(2 ** 31 - 1),
              ticked(3, 1, jwt(HS_30_DAYS)), notification(1, '1'), result(3, 'null'),
              armed(444_576_353), advance(444_576_353), failure(1, SESSION_REQUIRED)]),
         # the wall clock set back takes effect at the next due, which reads it again and arms what is left
         ('a wall clock set by hand takes effect at the next due: a credential\'s session\'s end is read again, never counted down',
-         ['13.9.2', '13.9.3'], None, [
+         ['13.10.2', '13.10.3'], None, [
              subscribing(1, jwt(HS_GRACE)), result(1, 'null'),
              armed(HOUR_END), wall(-1_000_000), advance(HOUR_END),
              armed(1_000_000), advance(1_000_000), failure(1, SESSION_REQUIRED)]),
@@ -469,7 +469,7 @@ def jwt_conversations():
         # connections that keep it, and nothing of the ES256 issuer's; the token still holds, and opens
         # it anew, since ending a session refuses no credential
         ('a credential\'s session ended by its identifier ends on every connection that keeps it, and a credential that still holds opens it anew',
-         ['13.6', '13.9'], None, [
+         ['13.6', '13.10'], None, [
              opened('client'), opened('other'), opened('admin'),
              on(subscribing(1, jwt(HS_GRACE)), 'client'), on(result(1, 'null'), 'client'),
              on(subscribing(3, jwt(ES_GRACE)), 'client'), on(result(3, 'null'), 'client'),
@@ -484,7 +484,7 @@ def jwt_conversations():
         # connection that keeps one, grace's and carol's, and nothing of the ES256 issuer's under the
         # same sub; grace's token still holds, and its tick runs in a session no longer kept
         ('every credential\'s session of an issuer, ended by that issuer, ends on every connection that keeps one, and nothing of another issuer\'s, whatever its sub',
-         ['13.6', '13.9'], None, [
+         ['13.6', '13.10'], None, [
              opened('client'), opened('other'), opened('admin'),
              on(subscribing(1, jwt(HS_GRACE)), 'client'), on(result(1, 'null'), 'client'),
              on(subscribing(3, jwt(ES_GRACE)), 'client'), on(result(3, 'null'), 'client'),
@@ -505,7 +505,7 @@ def jwt_conversations():
         # kid none names, a second after the first ask answered, waits for that ask's deadline, 59 s
         # on, then for the ask that goes then, its own
         ('a key set is asked once a minute at most for an issuer: a kid only it names is taken from its answer, then from the keys held; a kid none names within the minute waits for its end and the ask then, no ask going before, and is refused once that ask\'s answer does not name it',
-         ['13.8', '13.8.4'], None, [
+         ['13.8.4', '13.9', '13.9.2', '13.9.4', '13.9.5'], None, [
              presenting(1, 'whoami', 'null', jwt(ROTATED_GRACE)),
              json_request(3, 'echo', '"x"'), result(3, '"x"'),
              armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
@@ -523,7 +523,7 @@ def jwt_conversations():
         # came, and hold it for the next deadline; one that asked within the minute would leave call 7
         # no key
         ('a call waiting for its issuer\'s minute to end leaves on its cancel, answered nothing, and no ask goes at a deadline no call waits for',
-         ['10.2', '13.8'], None, [
+         ['10.2', '13.9', '13.9.5', '13.9.7'], None, [
              presenting(1, 'whoami', 'null', jwt(ROTATED_GRACE)),
              json_request(3, 'echo', '"x"'), result(3, '"x"'),
              armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
@@ -538,7 +538,7 @@ def jwt_conversations():
         # the key set fails at once when asked for an issuer it does not name, so an ask would show as
         # PROCEDURE_FAILED; none goes, and nothing waits on the server's clock
         ('a key set is asked for the issuers it names alone: a token of another, whose kid no key names, is refused at once, asking nothing, the application\'s own issuers among them',
-         ['9.2.5', '13.8', '13.8.4'], None, [
+         ['9.2.5', '13.8.4', '13.9', '13.9.1'], None, [
              presenting(1, 'echo', '"x"', jwt(UNNAMED_GRACE)), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
              presenting(3, 'echo', '"y"', jwt(HS_UNNAMED)), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
              presenting(5, 'whoami', 'null', jwt(HS_GRACE)), result(5, '"grace"')]),
@@ -546,7 +546,7 @@ def jwt_conversations():
         # it; a call that came meanwhile and cancelled left its own wait alone; past the deadline, the
         # next ask goes at once, with a deadline of its own
         ('a key set\'s ask that never settles fails at its deadline, a minute after it went, for the calls that wait on it, and the next ask goes',
-         ['9.2.5', '10.2', '13.8'], None, [
+         ['9.2.5', '10.2', '13.9', '13.9.2', '13.9.3'], None, [
              presenting(1, 'whoami', 'null', jwt(STALLED_GRACE)), armed(KEY_SET_DEADLINE), advance(KEY_SET_DEADLINE // 2),
              presenting(3, 'whoami', 'null', jwt(STALLED_GRACE)), cancel(3),
              armed(KEY_SET_DEADLINE // 2), advance(KEY_SET_DEADLINE // 2),
@@ -556,7 +556,7 @@ def jwt_conversations():
         # the rotated issuer's kid is the first issuer's too: its ask goes all the same, and its key
         # is held beside the first issuer's, which still serves
         ('a kid that another issuer\'s key names asks the key set for the token\'s own issuer, whose answer verifies it',
-         ['13.8', '13.8.4'], None, [
+         ['13.8.4', '13.9', '13.9.5'], None, [
              presenting(1, 'whoami', 'null', jwt(SET_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
              presenting(3, 'whoami', 'null', jwt(ROTATED_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(3, '"grace"'),
              presenting(5, 'whoami', 'null', jwt(SET_GRACE)), result(5, '"grace"')]),
@@ -564,7 +564,7 @@ def jwt_conversations():
         # it serves until ten minutes past that answer, and a millisecond short of them; at them, the
         # token waits on a new ask, whose answer no longer names its kid
         ('a key set\'s keys are held ten minutes from its answer, a millisecond either side: past them, a token they would serve waits on a new ask, whose answer replaces them, a key it no longer answers refused',
-         ['13.8', '13.8.4'], None, [
+         ['13.8.4', '13.9', '13.9.4', '13.9.5'], None, [
              presenting(1, 'whoami', 'null', jwt(ROTATED_GRACE)), armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
              *slow(3, KEYS_HELD - 1),
              presenting(5, 'whoami', 'null', jwt(ROTATED_GRACE)), result(5, '"grace"'),
@@ -575,7 +575,7 @@ def jwt_conversations():
         # so its token asks, and is verified by the answer; held ten minutes from it, a second in, they
         # serve until then, and past them the token asks again
         ('a token without a kid, of an issuer the key set names, waits on that issuer\'s keys while none of them serve: at a cold start it asks, and once the keys answered are past their ten minutes it asks again',
-         ['13.8', '13.8.4'], None, [
+         ['13.8.4', '13.9', '13.9.4', '13.9.5'], None, [
              presenting(1, 'whoami', 'null', jwt(KIDLESS_GRACE)),
              json_request(3, 'echo', '"x"'), result(3, '"x"'),
              armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
@@ -593,7 +593,7 @@ def jwt_conversations():
         # answered at one instant are each on a connection of their own, so that each is expected on
         # its own
         ('a key set lets maximumWaitingCalls calls wait for an issuer\'s deadline at once, a call that waits on its ask never counted: however many wait on an ask, none is refused; one more for the deadline is refused CAPACITY_EXCEEDED at once, and one an answer moves onto a deadline that holds them as it moves, neither reported, while a call whose key serves and a call that comes once one left are not',
-         ['8.2', '9.2.5', '13.8'], None, [
+         ['8.2', '9.2.5', '13.9', '13.9.6'], None, [
              opened('a'), opened('b'), opened('c'), opened('d'),
              on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'a'), armed(KEY_SET_WAIT),
              on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'b'),
@@ -655,23 +655,23 @@ def elsewhere_conversations():
         # an auth-scheme is compared case-insensitively (RFC 9110 §11.1), and a call presenting none
         # runs in its connection's session, whatever its transport carried
         ('an ELSEWHERE is resolved by the server\'s verifier from what its transport carried, and its call runs in that credential\'s session, never announced: whoami answers the sub it names',
-         ['9.2.5', '13.1', '13.10', '15.1'], None, [
+         ['9.2.5', '13.1', '13.11', '15.1'], None, [
              elsewhere(1, 'whoami', 'null', 'Interop sub=ada'), result(1, '"ada"'),
              elsewhere(3, 'whoami', 'null', 'interop sub=bob'), result(3, '"bob"'),
              carrying(json_request(5, 'whoami', 'null'), 'Interop sub=ada'), failure(5, SESSION_REQUIRED)]),
         # echo admits anyone: a credential that does not hold is refused all the same. The first is a
         # bearer token, RFC 6750's own example, of which the verifier's grammar holds nothing
         ('an ELSEWHERE its verifier does not hold is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying the credential does not hold',
-         ['9.2.5', '13.5', '13.10'], None, [
+         ['9.2.5', '13.5', '13.11'], None, [
              elsewhere(1, 'echo', '"x"', 'Bearer mF_9.B5f-4.1JqM'), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
              elsewhere(3, 'echo', '"y"', 'Interop sub=Ada'), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
         ('an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED',
-         ['9.2.5', '13.10'], None, [
+         ['9.2.5', '13.11'], None, [
              elsewhere(1, 'whoami', 'null', 'Interop fail=true'), failure(1, PROCEDURE_FAILED), report('exception')]),
         # the first timer is armed before the cancel goes, so its verifier was asked; the second call on
         # call id 1 still resolves when the first one's settling comes, which must not answer it
         ('a verifier that settles late, its call cancelled meanwhile: the call is answered nothing, its call id is free again at once, and the late settling is dropped in silence',
-         ['9.4', '10.2', '13.10'], None, [
+         ['9.4', '10.2', '13.11'], None, [
              elsewhere(1, 'whoami', 'null', 'Interop sub=ada, after=1000'), armed(1000), cancel(1),
              elsewhere(1, 'whoami', 'null', 'Interop sub=bob, after=2000'), armed(2000), advance(1000),
              armed(1000), advance(1000), result(1, '"bob"')]),
@@ -699,7 +699,7 @@ def elsewhere_conversations():
             credit_in(1, 100), chunk_out(1, 28, ECHOED[28:76], False), chunk_out(1, 76, ECHOED[76:], True)]),
         # the second comes while its end lies a second ahead, and settles as the wall clock reaches it
         ('an ELSEWHERE whose end the wall clock has reached as its verifier settles does not hold, and one a millisecond short of it holds',
-         ['13.9.4', '13.10'], None, [
+         ['13.10.4', '13.11'], None, [
              elsewhere(1, 'whoami', 'null', f'Interop sub=ada, after=1000, end={EPOCH + 1001}'), armed(1000),
              advance(1000), result(1, '"ada"'),
              elsewhere(3, 'whoami', 'null', f'Interop sub=bob, after=1000, end={EPOCH + 2000}'), armed(1000),
@@ -855,7 +855,7 @@ conversations = [
         login(1, 'ada'), result(1, '"ada"', OPENED), subscribe(3), result(3, 'null'),
         json_request(5, 'logout', 'null'), failure(3, SESSION_REQUIRED, credential=ENDED), result(5, 'null'),
         tick(7, 1), result(7, 'null')]),
-    # 13.8 and 13.9: a JWT's session, kept while it bounds a subscription, and its end
+    # 13.8 and 13.10: a JWT's session, kept while it bounds a subscription, and its end
     *jwt_conversations(),
     # 9.2, step 5: a request's credential resolves to its call's session, which its admission reads
     ('a request presenting its connection\'s OPAQUE is taken, and runs in that session', ['9.2.5', '13.1', '13.4'], None, [
