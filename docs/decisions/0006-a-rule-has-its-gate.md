@@ -65,7 +65,7 @@ with exit code 8, and Playwright one that found no test; `BEAD_INTEROP_REQUIRED=
 that would skip into one that fails, `BEADC_PROTOC_REQUIRED=1` a builder test that would skip
 without protoc, `BEADC_WRAPPERS_REQUIRED=1` a wrapper's test that would skip without bash,
 PowerShell 7.6 or, on Windows, the right to make a symbolic link, and `BEADC_IMAGE_REQUIRED=1` one that would skip without beadc's image;
-`tools/check-versions.mjs` fails where no `v*` is reached and where a released section of the CHANGELOG has no tag, and a document none of whose files repeats its version; the `beadc breaking` step fails where the last `v*` is 0.3.0 or later and carries no blueprint. A floor is passed by a wide margin and fails only when code really went away, which is
+`tools/check-versions.mjs` fails where no `v*` is reached and where a released section of the CHANGELOG has no tag, and a document none of whose files repeats its version; the `beadc breaking` step compares against the newest `vX.Y.Z` whose commit is not HEAD's, read by the tag's commit and never by ancestry, so a release's own commit holds against the release before it, and fails where that tag is 0.3.0 or later and carries no blueprint, and on every warning, a waiver that waived nothing among them; a branch behind a release's merge-back merges `develop` first. A floor is passed by a wide margin and fails only when code really went away, which is
 worth being told.
 
 **A ceiling is a policy, and is chosen as one.** The comment budget's, 50 words to a comment and 120

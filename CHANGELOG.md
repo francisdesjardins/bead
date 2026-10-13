@@ -26,6 +26,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `docs/support.md`'s "Leveled down": each place where every side keeps to what one platform can do
   though a standard allows more, with the standard, what forces it, what would lift it and the tests
   that hold it on each side.
+- beadc marks a deprecated procedure, service and failure at compile time, in both targets alike:
+  JSDoc's `@deprecated` and C#'s `[Obsolete]` with `DiagnosticId` `BEAD0001`, on every declaration
+  each target writes for it, with the blueprint's deprecation message or "No replacement is named.";
+  in TypeScript, a deprecated name passed to `on`, `of` or `is` is marked by its own overload.
+- A failure's deprecation in the blueprint, from protobuf's `deprecated` on its enum value.
+- `PROTO_FILE`: `beadc check` refuses a `proto` path off its form (`..`, an absolute path, a
+  backslash) or one `proto.files` does not list, and a service's `proto` in a blueprint with no
+  `proto`.
+- `beadc breaking` names each finding's subject, its entity by ids (`service:1/procedure:4`), in
+  text, `json` and `github`; `WAIVER_UNUSED`, a warning, says a waiver that waived nothing.
+- `AGAINST_BLUEPRINT`, a warning: an earlier's committed blueprint that its `.proto` contradicts, or
+  one named and missing.
+- `clean` in `beadc.yaml`, buf's opt-in removal of what `generate` no longer writes.
 
 ### Changed
 
@@ -85,6 +98,43 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads a head's characters as one octet each, and adds three cases: a listen held, answered the 404
   of its connection's close and told by none, and a field past visible ASCII, over HTTP and at a
   WebSocket's address.
+- `--except <RULE>@<scope>` names a finding's subject of the rule's kind; a pointer is refused, and
+  so is `--except WAIVER_UNUSED`. `SERVICE_SAME_HOOKS` finds once a hook, and `RESERVED_NO_DELETE`'s
+  subject is the earlier's range, whatever part of it the current released.
+- `generate` removes nothing unless `clean` is set; with it, a file of a kind beadc writes, read by
+  its header in both targets, and prints each.
+- Every C# file beadc writes opens with `#pragma warning disable CS0612, CS0618, BEAD0001`, and a
+  TypeScript file that marks a declaration or names a deprecated message with `/* eslint-disable */`.
+- The TypeScript side's service layer keeps each mapped member linked to its descriptor, so a
+  deprecation reaches a notification, a command, a notifier, a resolver's key and a window.
+- A `SERVICE_REVISION` reads a file's syntax, edition, features and `csharp_namespace`, and no other
+  language's option.
+- The blueprint schema holds `services[].proto.file` and `proto.messages[].file` to the path form of
+  `proto.files[].path`.
+- `init` takes buf's lower snake case alone, and writes `clean: true`.
+- CI's `beadc breaking` step compares against the newest `vX.Y.Z` whose commit is not HEAD's, and
+  fails on every warning; `tools/release.mjs tag` writes `ci.yml` without the waivers the release
+  makes moot, and `prepare` on a hotfix without every waiver.
+
+### Fixed
+
+- A `.proto` message marked `deprecated` no longer fails a C# consumer's build through beadc's file,
+  nor a TypeScript consumer's lint.
+- beadc makes its temporary folders, `breaking`'s and protoc's, under the project's `.beadc/` where a
+  `beadc.yaml` is read, which `init`'s `.gitignore` and the repository's ignore.
+- An earlier's root that holds no `.proto` is refused, named as its `beadc.yaml` names it, `git
+archive` writing a submodule as an empty folder.
+- An archive's pax `size` overrides its ustar size, as GNU tar and bsdtar read it; an empty or NUL
+  path, and an entry over an earlier one, are refused.
+- buf's finding on a deleted file is placed at the earlier's path, and a `buf:` waiver is held to the
+  rules its category runs.
+- `check` reads an extension's field, of a file or a message, nested or not, and names a map's field
+  by its own name; a blueprint with no service, or a service with no procedure, is said in its words.
+- A file-system error is one line, exit 2; a write makes its folder, and one that fails leaves no
+  `.tmp` behind.
+- `--against-ref`, given to beadc on Node, is refused, naming the pipe that does its work.
+- `init` names the cause of a file Windows PowerShell's `>` wrote, and the README labels its pwsh
+  block.
 
 ### Security
 
