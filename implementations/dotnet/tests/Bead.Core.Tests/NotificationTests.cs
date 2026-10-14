@@ -28,7 +28,8 @@ public sealed class NotificationTests : IDisposable
     private readonly RouterClient _client;
     private readonly Server<string> _server;
     private readonly ServiceManager _services;
-    private readonly List<IEnvelopeHeader> _sent = [];
+    // written on the router's scheduler, read on the test's thread
+    private readonly ConcurrentQueue<IEnvelopeHeader> _sent = new();
     private readonly ConcurrentQueue<Exception> _errors = new();
 
     public NotificationTests()
@@ -46,7 +47,7 @@ public sealed class NotificationTests : IDisposable
         {
             if (direction == DebugDirection.Tx)
             {
-                _sent.Add(envelope.Header);
+                _sent.Enqueue(envelope.Header);
             }
         };
         _client.Error += _errors.Enqueue;

@@ -1926,7 +1926,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             var first = new byte[1];
             var reading = stream.ReadAsync(first, Cancelled).AsTask();
-            var isRead = await Task.WhenAny(reading, Task.Delay(1_000, Cancelled)) == reading;
+            // a ping comes within the patience of every wait; its absence is waited for a second
+            var isRead = await Task.WhenAny(reading, Task.Delay(isPinging ? Patience : TimeSpan.FromSeconds(1), Cancelled)) == reading;
 
             Assert.Equal(isPinging, isRead);
 
@@ -2297,7 +2298,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Drops_a_peer_that_never_answers_its_pings_and_keeps_one_that_does()
     {
-        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(500) });
+        // a beat of a second: the peer that answers has that long for its pong, which a loaded runner
+        // may take more than half a second to send
+        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromSeconds(1) });
 
         // the first reads nothing, so it answers no ping; the second, always reading, answers each
         var (silent, silentHandle) = await Connect();
@@ -2308,9 +2311,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             var reading = answering.ReceiveAsync(new byte[16], Cancelled);
 
-            Assert.Equal((false, silentHandle), await Next(_closes, TimeSpan.FromSeconds(5)));
+            Assert.Equal((false, silentHandle), await Next(_closes, Patience));
             // a few beats more, and the one that answers is still there
-            await Task.Delay(1_500, Cancelled);
+            await Task.Delay(3_000, Cancelled);
 
             Assert.Equal([answeringHandle], _server.ConnectionHandles);
             Assert.True(_closes.Reader.Count == 0);

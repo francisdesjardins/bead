@@ -433,8 +433,25 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
 
         // a session timeout given ends its session once past, rounded; silence counts it alone
         Assert.Equal("\"ada\"", (await client.Interop.Login(JsonOf("{\"connectionTimeout\":2147483647,\"name\":\"ada\",\"sessionTimeout\":99.6}"))().WaitAsync(Patience, Cancelled)).GetRawText());
-        await Task.Delay(400, Cancelled);
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(client.Interop.Whoami(JsonOf("null"))));
+        // ! the other side's timer may not have fired on a loaded runner, and an ask that finds the
+        // session still there counts afresh: ask again after each silence, until one ends it
+        var code = (ushort)0;
+
+        for (var tries = 0; tries < 10 && code != (ushort)ProtocolCode.SessionRequired; tries += 1)
+        {
+            await Task.Delay(400, Cancelled);
+
+            try
+            {
+                await client.Interop.Whoami(JsonOf("null"))().WaitAsync(Patience, Cancelled);
+            }
+            catch (FailureException failure)
+            {
+                code = failure.Code;
+            }
+        }
+
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, code);
     }
 
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]

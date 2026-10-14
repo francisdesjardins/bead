@@ -1374,11 +1374,12 @@ public sealed class HttpTransportClientTests
     {
         var time = new FakeTimeProvider();
         await using var waiting = await ConnectFake(NotListening with { Clock = time }, new Fetch { IsDeleteHeld = true });
+        // ! taken before the DELETE goes, whose bound starts with it: a resumption late after its call
+        // would otherwise shorten what is measured
+        var started = TimeProvider.System.GetTimestamp();
         var unanswered = waiting.Client.CloseConnection();
 
         await waiting.Fetch.CallOf(1);
-
-        var started = TimeProvider.System.GetTimestamp();
 
         time.Advance(TimeSpan.FromDays(1));
         await Task.Delay(100, Cancelled);
