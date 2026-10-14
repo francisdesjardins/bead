@@ -90,9 +90,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // what sends every client's opening handshake: the platform's handler for a socket with no
     // proxy, cookie, credential or certificate of its own, as a ClientWebSocket builds it, but for
     // its connect, which races the address families of a name, as RFC 8305 asks, where the
-    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows
+    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows.
+    // ! It follows no redirect (spec 15.6): a 3xx answered to the upgrade fails the connect, its
+    // status named, as a page's WebSocket fails; followed, it would carry the upgrade where its
+    // credential and its security were never judged
     private static readonly HttpMessageInvoker Racing = new(new SocketsHttpHandler
     {
+        AllowAutoRedirect = false,
         ConnectCallback = HappyEyeballs.ConnectCallback,
         PooledConnectionLifetime = TimeSpan.Zero,
         UseCookies = false,

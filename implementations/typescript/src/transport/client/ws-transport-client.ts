@@ -188,6 +188,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
 
                 let socket: IWebSocketLike;
 
+                // ! no `followRedirects`: a 3xx answered to the upgrade fails it, its status named,
+                // since a redirect would carry it where its security was not judged (spec 15.6)
                 try {
                   socket = opened = client.socket = new WebSocket(url, protocols, { maxPayload });
                 } catch (reason) {

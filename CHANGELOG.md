@@ -42,6 +42,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection's close awaits `CancelAsync`, and the C# README names the analyzer for an
   application's own listeners.
 
+### Fixed
+
+- The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one and
+  both HTTP clients: a 3xx fails its connect, its status named (spec 15.6).
+
 ## [0.4.1] - 2026-10-13
 
 ### Added

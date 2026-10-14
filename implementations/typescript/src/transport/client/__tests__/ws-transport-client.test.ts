@@ -1215,6 +1215,41 @@ test.describe('WSTransportClient, an upgrade refused', () => {
     );
     expect(client.isClosed()).toBe(true);
   });
+
+  // spec 15.6
+  test('fails its connect on a redirect answered to its upgrade, naming its status', async () => {
+    // to a server that would take the upgrade: followed, the connect would open there
+    await using taking = await startRefusing();
+    let upgrades = 0;
+
+    taking.upgrading.on('connection', () => {
+      upgrades += 1;
+    });
+
+    await using redirecting = await startRefusing(
+      `HTTP/1.1 302 Found\r\nLocation: ws://${host}:${String(taking.port)}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`
+    );
+
+    for (const [Constructor, message] of [
+      [TrackedWs as unknown as IWebSocketConstructor, 'the server refused the upgrade: 302'],
+      [TrackedGlobal, '1006'],
+    ] as const) {
+      const client = createWSTransportClient({ WebSocket: Constructor });
+      const reason: unknown = await client
+        .connect({ host, port: redirecting.port })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      expect([reason instanceof ConnectError, (reason as ConnectError).message]).toEqual([
+        true,
+        message,
+      ]);
+      expect(client.isClosed()).toBe(true);
+    }
+
+    expect(upgrades).toBe(0);
+  });
 });
 
 test.describe('WSTransportClient, by a name', () => {

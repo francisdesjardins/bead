@@ -1543,6 +1543,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Fails_its_connect_on_a_redirect_answered_to_its_upgrade_naming_its_status()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, _) = await listener.Next();
+
+        // to a server that would take the upgrade: followed, the connect would open there
+        using (peer)
+        {
+            await peer.GetStream().WriteAsync(
+                Encoding.ASCII.GetBytes($"HTTP/1.1 302 Found\r\nLocation: ws://{Host}:{_port}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                Cancelled);
+
+            var thrown = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal("the server refused the upgrade: 302", thrown.Message);
+        }
+
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.Empty(_server.ConnectionHandles);
+    }
+
+    [Fact]
     public async Task Connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alone_whichever_it_is()
     {
         var connects = new List<(string Address, TimeSpan Took)>();
