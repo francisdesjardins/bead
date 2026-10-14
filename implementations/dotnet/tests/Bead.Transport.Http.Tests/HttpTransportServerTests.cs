@@ -1068,9 +1068,11 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(HttpRefusals.Busy, HeaderOf(response, HttpTransport.RefusalHeader));
 
         using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
-        var crowded = await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
         // a cancel takes no place: it is never refused for the requests waiting
+        // ! before the request refused, whose exchange is counted until after its 429 is read, and
+        // whose socket it closes: on the cancel's, which it keeps, the two come one after the other
         using var cancel = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 9)));
+        var crowded = await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
 
         Assert.Equal((200, (429, HttpRefusals.Busy), 204), ((int)waiting.StatusCode, crowded, (int)cancel.StatusCode));
         await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), connectionHandle).WaitAsync(Patience, Cancelled);
@@ -2829,7 +2831,13 @@ public sealed class HttpTransportServerTests : IAsyncLifetime
 
         await declared.Write(EnvelopeOf(EnvelopeKind.Request, (1, 8)));
 
-        // counted, with no length declared: its 16 bytes, once the first 16 were given back
+        // counted, with no length declared: its 16 bytes, once the first 16 were given back, which
+        // they are before the envelope is handed on
+        await Until(() =>
+        {
+            return _messages.Count == 1;
+        });
+
         using var counted = await Wire.Open(_port);
 
         await counted.Write(PostHead(connectionToken, "Transfer-Encoding: chunked"));
