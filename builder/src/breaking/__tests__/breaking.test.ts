@@ -96,7 +96,36 @@ test('a scoped waiver waives its subject and no other, each finding its own', ()
   expect(
     linesFor(['PROCEDURE_SAME_NAME@service:1/procedure:11', 'NAME_NO_DELETE@service:1/procedure:2'])
   ).toEqual(['PROCEDURE_SAME_NAME service:1/procedure:2', 'NAME_NO_DELETE service:1/procedure:11']);
-  expect(linesFor(['PROCEDURE_SAME_NAME', 'NAME_NO_DELETE'])).toEqual([]);
+  expect(
+    linesFor([
+      'PROCEDURE_SAME_NAME@service:1/procedure:2',
+      'PROCEDURE_SAME_NAME@service:1/procedure:11',
+      'NAME_NO_DELETE@service:1/procedure:2',
+      'NAME_NO_DELETE@service:1/procedure:11',
+    ])
+  ).toEqual([]);
+});
+
+test("a bare waiver of a breaking rule is refused, naming its subject's form: it would waive a later change's finding too", () => {
+  for (const [given, form] of [
+    ['PROCEDURE_SAME_NAME', 'PROCEDURE_SAME_NAME@service:<id>/procedure:<id>'],
+    ['SERVICE_REVISION', 'SERVICE_REVISION@service:<id>'],
+    [
+      'NAME_NO_DELETE',
+      'NAME_NO_DELETE@service:<id> or NAME_NO_DELETE@service:<id>/procedure:<id> or NAME_NO_DELETE@service:<id>/failure:<code>',
+    ],
+  ] as const) {
+    expect(() => {
+      return waiversOf([given], { category: Category.API });
+    }).toThrow(
+      `--except ${given}: waives every finding of ${given}, a later change's too: name its subject, ${form}`
+    );
+  }
+
+  // * a warning of check's finds no subject, and is waived by its name
+  expect(waiversOf(['NOTIFICATION_RESULT'], { category: Category.API })).toEqual([
+    { given: 'NOTIFICATION_RESULT', rule: 'NOTIFICATION_RESULT' },
+  ]);
 });
 
 test('a waiver by subject waives its entity alone, a deletion before it shifting nothing', () => {
@@ -126,7 +155,10 @@ test('a waiver by subject waives its entity alone, a deletion before it shifting
     {
       against: INTEROP,
       category: Category.API,
-      except: ['PROCEDURE_SAME_NAME@service:1/procedure:4', 'PROCEDURE_NO_DELETE'],
+      except: [
+        'PROCEDURE_SAME_NAME@service:1/procedure:4',
+        'PROCEDURE_NO_DELETE@service:1/procedure:2',
+      ],
     }
   );
 
@@ -212,7 +244,7 @@ test("a reserved range is waived by the earlier's range, whatever part the curre
       'SERVICE_REVISION service:1',
     ]);
     expect(
-      runWith(['RESERVED_NO_DELETE@service:1/procedure:19-21', 'SERVICE_REVISION']),
+      runWith(['RESERVED_NO_DELETE@service:1/procedure:19-21', 'SERVICE_REVISION@service:1']),
       name
     ).toEqual([]);
   }
@@ -252,8 +284,10 @@ test('a subject neither side holds is WAIVER_UNUSED, its message saying so', () 
       against: INTEROP,
       category: Category.API,
       except: [
-        'PROCEDURE_SAME_NAME',
-        'NAME_NO_DELETE',
+        'PROCEDURE_SAME_NAME@service:1/procedure:2',
+        'PROCEDURE_SAME_NAME@service:1/procedure:11',
+        'NAME_NO_DELETE@service:1/procedure:2',
+        'NAME_NO_DELETE@service:1/procedure:11',
         'PROCEDURE_SAME_NAME@service:1/procedure:40',
         'PROCEDURE_SAME_KIND@service:1/procedure:4',
       ],
@@ -277,17 +311,13 @@ test('a subject neither side holds is WAIVER_UNUSED, its message saying so', () 
   ]);
 });
 
-test('a waiver that waived nothing is WAIVER_UNUSED, a warning, over a bare, a scoped and a buf: waiver', () => {
+test("a waiver that waived nothing is WAIVER_UNUSED, a warning, over a warning's and a scoped one", () => {
   const run = breaking(
     { blueprint: INTEROP },
     {
       against: INTEROP,
       category: Category.API,
-      except: [
-        'NOTIFICATION_RESULT',
-        'PROCEDURE_SAME_NAME@service:1/procedure:4',
-        'buf:FIELD_SAME_TYPE',
-      ],
+      except: ['NOTIFICATION_RESULT', 'PROCEDURE_SAME_NAME@service:1/procedure:4'],
     }
   );
 
@@ -296,7 +326,6 @@ test('a waiver that waived nothing is WAIVER_UNUSED, a warning, over a bare, a s
   expect(linesOf(run.diagnostics)).toEqual([
     'WAIVER_UNUSED --except NOTIFICATION_RESULT waived nothing: take it out',
     'WAIVER_UNUSED --except PROCEDURE_SAME_NAME@service:1/procedure:4 waived nothing: take it out',
-    'WAIVER_UNUSED --except buf:FIELD_SAME_TYPE waived nothing: take it out',
   ]);
 });
 

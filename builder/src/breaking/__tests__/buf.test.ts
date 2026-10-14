@@ -179,9 +179,17 @@ test("a buf: waiver waives under its file or its folder, as buf's ignore_only ma
   }).toThrow(InputError);
   // a rule buf's FILE runs, which WIRE does not
   expect(() => {
-    return waiversOf(['buf:FILE_SAME_GO_PACKAGE'], { category: Category.WIRE });
-  }).toThrow("--except buf:FILE_SAME_GO_PACKAGE: a rule buf's WIRE does not run");
-  expect(waiversOf(['buf:FILE_SAME_GO_PACKAGE'], { category: Category.API })).toHaveLength(1);
+    return waiversOf(['buf:FILE_SAME_GO_PACKAGE@parcel'], { category: Category.WIRE });
+  }).toThrow("--except buf:FILE_SAME_GO_PACKAGE@parcel: a rule buf's WIRE does not run");
+  expect(waiversOf(['buf:FILE_SAME_GO_PACKAGE@parcel'], { category: Category.API })).toHaveLength(
+    1
+  );
+  // ! bare, it would waive a later change's finding too, under any file
+  expect(() => {
+    return waiversOf(['buf:FIELD_SAME_TYPE'], { category: Category.API });
+  }).toThrow(
+    "--except buf:FIELD_SAME_TYPE: waives every finding of FIELD_SAME_TYPE, a later change's too: name a .proto file or folder, buf:FIELD_SAME_TYPE@<path>"
+  );
 });
 
 test("a file the current lost is placed at the earlier's path, which a buf: scope names", () => {

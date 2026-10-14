@@ -15,6 +15,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   point under what was measured and rises with `--raise`, never down but by a decision (decision
   0006). The C# side is measured over the whole solution, its six test projects.
 
+### Changed
+
+- `beadc breaking` refuses a bare waiver of a breaking rule, `--except PROCEDURE_SAME_NAME`, and of
+  buf's, `--except buf:FIELD_SAME_TYPE`, exit 2, naming the subject's form or a path: kept in a CI,
+  it would waive a later change's finding too. A waiver names its subject or its `.proto` path, as
+  buf's `ignore_only` does; a warning of `check`'s, which finds no subject, is still waived by its
+  name (decision 0022).
+- Without `clean`, `beadc generate --check` fails on a `_bead.ts` or a `*Bead.cs` under beadc's own
+  header that the source no longer gives, and `generate` names it and leaves it: nothing but beadc
+  writes one, so a service a source dropped no longer ships in silence. Under `clean`, `generate`
+  still takes it out.
+
 ## [0.4.1] - 2026-10-13
 
 ### Added

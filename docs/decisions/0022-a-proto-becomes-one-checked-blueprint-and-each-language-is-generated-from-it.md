@@ -288,8 +288,10 @@ finding is placed by its pointer, where a reviewer reads it, and names its subje
 ids: AIP-122's hierarchy of kinds and ids, `service:1/procedure:4`, written `kind:id` so that it
 never reads as the index pointer it replaces, which AIP-122's `services/1/procedures/4` would match
 once its slash is dropped. A finding is waived by its rule's name, scoped to its subject, by ids,
-which no shift of an array moves, or to its file; a scope that is a pointer, or no subject of its
-rule's kind, is refused, and a waiver that waived nothing is `WAIVER_UNUSED`'s warning.
+which no shift of an array moves, or to its file; a waiver of a breaking rule or of buf's that names
+neither, which would waive a later change's finding too, is refused, as ESLint's
+`no-unlimited-disable` refuses a disable that names no rule, and so are a scope that is a pointer
+and no subject of its rule's kind; a waiver that waived nothing is `WAIVER_UNUSED`'s warning.
 
 **The interop's API is its blueprint, and its behaviour `interop-service.json`'s.**
 `spec/interop-blueprint.json` is written by hand, in the blueprint's form, under `specVersion`: the

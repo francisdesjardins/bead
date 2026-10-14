@@ -10,11 +10,12 @@
 // named: in both targets by its first lines, beadc's header, or, where messages are generated,
 // protoc-gen-es's on a `_pb.ts` or protoc's on a `.cs` at the path protoc gives its source, since
 // protoc's file names carry no mark and gRPC's C# plugin opens its files with the same lines; a
-// file another tool wrote or a person did stays. The walk of an output's folder never enters a
-// build's or a package manager's folders, `bin/`, `obj/` and `node_modules/`. With `--check`,
-// beadc writes nothing and names each difference, each file missing and, under `clean`, each such
-// file left over, as `buf format --exit-code` holds a file to its form; CRLF is read as LF, as git
-// may check a file out. The editor's copy is git's to ignore, and never compared.
+// file another tool wrote or a person did stays. Without `clean`, nothing is taken out, and a file
+// under beadc's own header it would not write now is named, left: nothing but beadc writes one. The
+// walk of an output's folder never enters a build's or a package manager's folders, `bin/`, `obj/`
+// and `node_modules/`. With `--check`, beadc writes nothing and names each difference, each file
+// missing and each such file left over, as `buf format --exit-code` holds a file to its form; CRLF
+// is read as LF, as git may check a file out. The editor's copy is git's to ignore, and never compared.
 //
 // `cli.ts` loads this module only for `generate`: the targets load protoplugin, which loads a
 // TypeScript compiler, which `check`, `blueprint` and `version` never need.
@@ -72,16 +73,23 @@ export interface IFileDifference {
   readonly message: string;
 }
 
-/** A file `generate` takes out under `clean`: where, and the source its header names. */
+/**
+ * A file `generate` no longer writes: taken out under `clean`, left and named without it. Where it
+ * is, and the source its header names.
+ */
 export interface IStaleFile {
   readonly path: string;
   readonly source: string;
 }
 
-/** What `generate` gives: the files it writes, and those of its kinds it takes out. */
+/**
+ * What `generate` gives: the files it writes, those of its kinds it takes out under `clean`, and,
+ * without it, those under beadc's own header it leaves.
+ */
 export interface IPlan {
   readonly files: readonly IPlannedFile[];
   readonly stale: readonly IStaleFile[];
+  readonly left: readonly IStaleFile[];
 }
 
 // constants
@@ -243,6 +251,18 @@ const isBeadcs = (
   return slashed(output.out, path) === csharpPathOf(source, namespace);
 };
 
+// a file of an output's folder under beadc's own header, of its target's kind: beadc's alone, with
+// `clean` or without
+const isBeadcsOwn = (path: string, details: { readonly output: Output }) => {
+  const { output } = details;
+
+  if (output.language === 'typescript' ? !SERVICES.test(path) : !CSHARP.test(path)) {
+    return false;
+  }
+
+  return readFileSync(path, 'utf8').replaceAll('\r\n', '\n').startsWith(BEADC_HEADER);
+};
+
 // the files of `files` at one path, as a system that folds case compares paths: the first two
 const samePathOf = (
   files: readonly IPlannedFile[]
@@ -328,6 +348,7 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
       ? []
       : [{ path: config.blueprint, content: formOf(blueprint), source: configSource }];
   const stale: IStaleFile[] = [];
+  const left: IStaleFile[] = [];
 
   for (const output of config.outputs ?? []) {
     const messages = input.set !== undefined && output.messages === Messages.GENERATE;
@@ -360,24 +381,38 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
 
     files.push(...written);
 
-    // * buf's opt-in: off, nothing is taken out, and nothing is named as left over
+    const staleOf = (path: string): IStaleFile => {
+      const source = sourceOf(readFileSync(path, 'utf8').replaceAll('\r\n', '\n'));
+
+      return {
+        path,
+        source:
+          source === undefined
+            ? configSource
+            : (('proto' in sources ? sources.proto.get(source) : undefined) ?? source),
+      };
+    };
+    const unwritten = filesUnder(output.out).filter((path) => {
+      return !paths.has(path);
+    });
+
+    // * buf's opt-in: off, nothing is taken out; a file under beadc's own header is still named,
+    // since nothing but beadc writes one, while protoc's are a project's own as much as beadc's
     if (config.clean === true) {
       stale.push(
-        ...filesUnder(output.out)
+        ...unwritten
           .filter((path) => {
-            return !paths.has(path) && isBeadcs(path, { output, messages });
+            return isBeadcs(path, { output, messages });
           })
-          .map((path) => {
-            const source = sourceOf(readFileSync(path, 'utf8').replaceAll('\r\n', '\n'));
-
-            return {
-              path,
-              source:
-                source === undefined
-                  ? configSource
-                  : (('proto' in sources ? sources.proto.get(source) : undefined) ?? source),
-            };
+          .map(staleOf)
+      );
+    } else {
+      left.push(
+        ...unwritten
+          .filter((path) => {
+            return isBeadcsOwn(path, { output });
           })
+          .map(staleOf)
       );
     }
   }
@@ -392,7 +427,7 @@ export const planOf = (config: IConfig, checked: IChecked): IPlan => {
     );
   }
 
-  return { files, stale };
+  return { files, left, stale };
 };
 
 /** What differs between `plan` and the files on disk: a file off, missing, or left over. */
@@ -422,6 +457,13 @@ export const differencesOf = (plan: IPlan): IFileDifference[] => {
     differences.push({
       path,
       message: `${source} no longer gives it: beadc generate takes it out, under clean`,
+    });
+  }
+
+  for (const { path, source } of plan.left) {
+    differences.push({
+      path,
+      message: `${source} no longer gives it: take it out, or set clean: true, under which beadc generate does`,
     });
   }
 

@@ -308,7 +308,7 @@ test('breaking exits 0 against itself, 1 on a finding, 0 once a scoped --except 
   expect(beadc(['breaking', limited, '--against', INTEROP, '--category', 'WIRE']).status).toBe(1);
 });
 
-test('breaking refuses --against missing, --category other than WIRE or API, --except of a rule it does not run and buf:<RULE> buf does not know, exit 2', () => {
+test("breaking refuses --against missing, --category other than WIRE or API, --except of a rule it does not run, buf:<RULE> buf does not know, and a breaking rule's or buf's bare, exit 2", () => {
   const refused = [
     ['breaking', INTEROP],
     ['breaking', INTEROP, '--against', INTEROP, '--category', 'FILE'],
@@ -330,6 +330,8 @@ test('breaking refuses --against missing, --category other than WIRE or API, --e
     ['breaking', INTEROP, '--against', INTEROP, '--except', 'PROCEDURE_SAME_NAME@/services/0'],
     ['breaking', INTEROP, '--against', INTEROP, '--except', 'PROCEDURE_SAME_NAME@service:1'],
     ['breaking', INTEROP, '--against', INTEROP, '--except', 'WAIVER_UNUSED'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'PROCEDURE_SAME_NAME'],
+    ['breaking', INTEROP, '--against', INTEROP, '--except', 'buf:FIELD_SAME_TYPE'],
     ['breaking', INTEROP, '--against', 'no-such-earlier'],
     ['check', INTEROP, '--against', INTEROP],
     ['check', INTEROP, '--category', 'WIRE'],
@@ -342,9 +344,9 @@ test('breaking refuses --against missing, --category other than WIRE or API, --e
     expect(run.stderr, args.join(' ')).toMatch(/^beadc: /u);
   }
 
-  // a warning of check's, or a rule of buf's it runs, is no refusal: each waives nothing here,
-  // which WAIVER_UNUSED says, a warning that --fail-on-warning refuses
-  for (const except of ['SPEC_VERSION_NEWER', 'buf:FIELD_SAME_TYPE']) {
+  // a warning of check's is no refusal: it waives nothing here, which WAIVER_UNUSED says, a
+  // warning that --fail-on-warning refuses
+  for (const except of ['SPEC_VERSION_NEWER']) {
     const unused = beadc(['breaking', INTEROP, '--against', INTEROP, '--except', except]);
 
     expect(unused.status, except).toBe(0);

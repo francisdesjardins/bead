@@ -256,7 +256,11 @@ test("a committed blueprint its .proto contradicts, or one named and missing, is
     {
       against: project('run', { config: WITH_BLUEPRINT, committed: committedBlueprint() }),
       category: Category.API,
-      except: ['PROCEDURE_SAME_NAME', 'NAME_NO_DELETE', 'SERVICE_REVISION'],
+      except: [
+        'PROCEDURE_SAME_NAME@service:1/procedure:1',
+        'NAME_NO_DELETE@service:1/procedure:1',
+        'SERVICE_REVISION@service:1',
+      ],
     }
   );
 
