@@ -123,7 +123,10 @@ TypeScript side, `ws` takes no upgrade once closed, and the guard is reached by 
 [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md) takes for a debug listener. A throw
 ends neither process. A listener's rejection is its platform's: Node's unhandled rejection ends its
 process, and an async listener of a C# event is `async void`, whose exception ends its process. So a
-listener catches its own. A listener of Bead's own that throws, its router's or its server's, is
+listener catches its own. On the C# side, the threading analyzers' VSTHRD100 and VSTHRD101 find
+such a listener at build: Bead's own projects are held to them
+([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)), and an application's may be,
+as the C# README says. A listener of Bead's own that throws, its router's or its server's, is
 reported the same way, and a connection it leaves untracked lives until its transport closes it,
 over HTTP at its `inactivityTimeout`.
 

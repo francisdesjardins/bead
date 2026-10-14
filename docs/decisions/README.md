@@ -75,13 +75,29 @@ not hold:
   and polls deadlines on a 1 kHz loop
   ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
-Ahead besides, each by a decision of its own that meets the Tenth Man: what
-[0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md) names, from
-`Forwarded` to a per-address value fit for a NAT; a hook that verifies a WebSocket's credential at
-its upgrade, and a credential replaced in place on a live connection
-([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)); and
-a bound of the protocol's on the calls a peer holds open over a transport that keeps its
-connection, a WebSocket or a Web Worker (spec 8.3).
+Ahead besides, each by a decision of its own that meets the Tenth Man:
+
+- **the bounds a server keeps against a peer that holds it**: a bound of the protocol's on the
+  calls a peer holds open over a transport that keeps its connection, a WebSocket or a Web Worker,
+  the open point of spec 8.3; a WebSocket server's connections, in all and per address, which an
+  HTTP server bounds (spec 15.12); what a WebSocket server queues for a client that no longer reads,
+  which an HTTP connection's outbox bounds (spec 15.9); and a request whose headers or body trickle
+  in, the support matrix's open row on a slow request body;
+- **a security event for a credential refused**, its scheme and its verdict's reason, never its
+  bytes, beside the refusals a server tells
+  ([0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)), as
+  nothing a side reports carries a credential
+  ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
+- **each side's parsers fuzzed**, guided by coverage — the envelope, a `json` payload, RFC 9651's
+  Items, `X-Forwarded-For`, a WebSocket's handshake — and both sides held to read one corpus alike,
+  as `tools/protobuf-conformance.mjs differential` holds a `proto` payload
+  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+- what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
+  names: `Forwarded`, once a proxy that writes it alone is met, an IPv6 client keyed by its prefix,
+  and a per-address value fit for a NAT;
+- a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
+  credential replaced in place on a live connection
+  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.

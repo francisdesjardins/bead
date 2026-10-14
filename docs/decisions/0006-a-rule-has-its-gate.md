@@ -86,6 +86,20 @@ suite's skips not 909, and a testee answers a binary request for a message it la
 error, never a skip, but the unstable edition's, which no stock generator compiles. A floor is
 passed by a wide margin and fails only when code really went away, which is worth being told.
 
+**What comes from another's hands is held where it comes in.** An action runs by its commit's full
+sha, its version in a comment beside it, since a tag moves and a moved tag runs another's code in
+CI, as GitHub's security hardening guidance for Actions advises; a step fails any `uses:` pinned
+otherwise. OSV-Scanner reads every lockfile against the advisories OSV knows, and NuGetAudit, at
+`NuGetAuditMode` `all` and `NuGetAuditLevel` `low` in `Directory.Build.props`, every C# package
+restored, direct or transitive, against those NuGet knows: a known advisory of any severity fails
+the run, NuGet's as a warning the build makes an error. Semgrep runs its community rules for
+TypeScript, C#, GitHub Actions and secrets, the generated folders and the goldens left out; its
+rules are its registry's, fetched at each run, so a rule added there may fail a commit that changed
+nothing, which is read as a finding, never as a flake, as `ci.yml` warns where the step stands.
+Each scanner runs from its image at its digest, as shellcheck does, so a scanner changes by a change
+of its pin. CodeQL is not taken: its code scanning, on a private repository, needs GitHub Advanced
+Security.
+
 **Coverage holds a floor of another kind, set close by design: a ratchet.** What each side's tests
 run, lines and branches, is held to the side's floor in
 [`tools/coverage-floors.json`](../../tools/coverage-floors.json), which `tools/coverage-report.mjs`
@@ -108,8 +122,10 @@ exceptions it lists, the events of three values among them, with the one optiona
 both sides and the C# side's classes without a base
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); git-flow's branch names and
 the CHANGELOG's entries; whether a document's move is its minor or its patch, past the floor
-`tools/check-versions.mjs` holds
-([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); a row of the support matrix
+`tools/check-versions.mjs` holds, and whether the product's is, a break its minor while its major is
+0 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); each Yarn project's
+`enableScripts: false`, the scripts its `dependenciesMeta` lets run alone
+([0005](0005-a-toolchain-per-language.md)); a row of the support matrix
 for every difference between languages ([0004](0004-one-behaviour-in-every-language.md)); what a
 call allocates for debugging on the TypeScript side, which no test reads
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)); the two house styles kept alike

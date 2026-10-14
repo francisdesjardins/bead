@@ -716,10 +716,10 @@ a Web Worker, whose messages carry an envelope alone, a server's over HTTP or ov
 (sections 15.9, 15.2) — and for one that presents a `JWT` or an `ELSEWHERE` over a transport that
 leaves the machine in the clear, since a bearer credential crosses only TLS off the machine
 ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged by
-what it is given, never by what a name resolves to. It is secure under TLS,
-its scheme `wss` or `https`; on the loopback: a client by the host it names in its URL — `localhost`
-or a name that ends in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8,
-or the IPv6 loopback, `[::1]` in a URL — as the
+what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
+`https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
+in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
+`[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
@@ -1023,12 +1023,11 @@ resolving as section 9.2 says:
    the token; with `verifies`, the `aud` verified at step 1 — or to a destination registered with
    none; an `ELSEWHERE` to a destination registered with no audience, or over a leg B whose
    transport cannot carry it (section 13.4): a WebSocket's, whose upgrade carried the relay's own
-   credential or none, never leg A's; a `JWT` or an `ELSEWHERE`
-   over a leg B that reaches off the machine in the clear, neither over TLS — `wss`, `https` — nor
-   within the machine — the loopback, a Web Worker, a router called in process — since a bearer
-   credential crosses only TLS off the machine
-   ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender holds:
-   `DESTINATION_UNREACHABLE`, since nothing was tried;
+   credential or none, never leg A's; a `JWT` or an `ELSEWHERE` over a leg B that reaches off the
+   machine in the clear, neither over TLS — `wss`, `https` — nor within the machine — the loopback,
+   a Web Worker, a router called in process — since a bearer credential crosses only TLS off the
+   machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender
+   holds: `DESTINATION_UNREACHABLE`, since nothing was tried;
 6. a payload, or a transfer's total, past the smaller of the two legs' limits, leg B's header
    counted with its credential, call by call — a destination that takes no transfer takes what one
    of its envelopes holds behind that header: `PAYLOAD_TOO_LARGE`.
@@ -1445,8 +1444,8 @@ An HTTP server answers the CORS protocol
 names, and to no other. Once a request's origin is taken (section 15.6's order), every response it
 writes to a request whose `Origin` `origins` names, whatever its status, carries
 `access-control-allow-origin`, that `Origin` as it came, and `access-control-expose-headers: *`; a
-refusal judged before the origin carries neither, since a browser reads no answer to a preflight that is not ok
-([Fetch §4.8](https://fetch.spec.whatwg.org/#cors-preflight-fetch)). None carries
+refusal judged before the origin carries neither, since a browser reads no answer to a preflight
+that is not ok ([Fetch §4.8](https://fetch.spec.whatwg.org/#cors-preflight-fetch)). None carries
 `access-control-allow-credentials`: Bead's credential is no cookie but the request's own (section
 15.5), so every request to it is one without credentials, for which the Fetch Standard reads `*` as
 a wildcard ([§3.3.4](https://fetch.spec.whatwg.org/#http-new-header-syntax)). A preflight is an
@@ -1477,15 +1476,14 @@ written as one, nor to a localhost name where its resolver answers it with the l
 servers; a user agent that sends one on to a resolver that does not is the residual. `hosts` takes
 those it lists besides, each a host without its port, none when it lists none or is not given, and
 `*`, alone in it, takes every host, an empty one and none, and makes none of their origins its own.
-Any other host, an empty one and none
-are refused 403, `host-refused` (section 15.6). A server is refused as it is built a `hosts` entry
-with a port, an empty one, one that is no host, or `*` beside another; and an `origins` entry that
-is `*` or `null`, or not an origin as
+Any other host, an empty one and none are refused 403, `host-refused` (section 15.6). A server is
+refused as it is built a `hosts` entry with a port, an empty one, one that is no host, or `*` beside
+another; and an `origins` entry that is `*` or `null`, or not an origin as
 [RFC 6454 §6.2](https://www.rfc-editor.org/rfc/rfc6454#section-6.2) serializes it. Since a page
 that rebinds its name to the server's address names its own `Host`, `hosts` is what refuses it,
 and, under `*`, the origin's test, which takes no origin as the server's own by a host it did not
-name: a server a browser reaches by a name names it in `hosts`. A WebSocket
-server takes both alike on an upgrade (section 15.2).
+name: a server a browser reaches by a name names it in `hosts`. A WebSocket server takes both alike
+on an upgrade (section 15.2).
 
 A client's address is its socket's, an IPv4 address an IPv6 socket carries mapped read as that IPv4
 address ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)). A server,

@@ -89,8 +89,8 @@ handle carry the ordinal, so twin tests read one form.
 
 **No conformance case holds it.** No step of `spec/transports.json` names the address or the port a
 socket opens from or connects to, and one that did would bind to a platform's socket options: Node
-on Windows cannot open the second socket, macOS has no `127.0.0.2`. What the handle changes is not on
-the wire; the crossing of sessions it caused is, and twin tests hold it, by the same sentence
+on Windows cannot open the second socket, macOS has no `127.0.0.2`. The handle is not on the wire;
+the crossing of sessions a handle given twice brings is, and twin tests hold it, by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)), which `docs/support.md` names among what no entry
 plays: each WebSocket transport server's
 `names each connection by its peer's port and the rank it came at, two sockets from one address and port among them, and gives no handle twice`

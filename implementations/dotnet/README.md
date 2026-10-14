@@ -142,10 +142,11 @@ share.
   alone. Under `FindOpenPort` the port is drawn on `127.0.0.1`; a port another socket holds on
   either loopback fails the start, and a drawn one is drawn again, eight times at most. Where the
   IPv6 loopback is absent — a container with IPv6 off — it listens on `127.0.0.1` alone and reports
-  `127.0.0.1`. An `Address` given is an IP address written bare, RFC 3986's grammar and not the
-  platform's parser's, which it listens on alone: a container, or any server another machine
-  reaches, says `0.0.0.0` or `::`, and names its hosts; any other name — `LOCALHOST`, `localhost.`,
-  `a.localhost` — `[::1]`, `127.1` or `0` is an `ArgumentException` as it starts. On the loopback
+  `127.0.0.1`. An `Address` given is `localhost`, both loopbacks as above, or an IP address written
+  bare, RFC 3986's grammar and not the platform's parser's, which it listens on alone: a container,
+  or any server another machine reaches, says `0.0.0.0` or `::`, and names its hosts; any other
+  name — `LOCALHOST`, `localhost.`, `a.localhost` — `[::1]`, `127.1` or `0` is an
+  `ArgumentException` as it starts. On the loopback
   it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
   clear, it says `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a

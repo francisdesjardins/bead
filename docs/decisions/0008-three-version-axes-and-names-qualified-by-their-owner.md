@@ -62,7 +62,13 @@ promise to be decided at once, on the day of the first release.
 3. **The product**: each implementation's releases and the builder's, under Semantic Versioning, at
    `0.x`, tagged `v*`, one version in the TypeScript side's and the builder's `package.json` and in
    `Directory.Build.props`, cut from a `release/*` branch
-   ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)).
+   ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)). While its major is 0, a
+   release that breaks what a consumer calls, reads or builds moves the minor, and a release of
+   fixes alone the patch. npm's caret range and NuGet's floating minor read a `0.y` version as they
+   read a major, and Semantic Versioning 2.0.0 §4 owes no stability under `0.y.z`, so a break in a
+   patch would reach every consumer who asked for fixes alone
+   ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s round on the footguns gives the
+   same reason). The CHANGELOG says what broke, and the record that decided it says why.
 
 **A name is qualified by its owner.** The TypeScript package is `@francisdesjardins/bead` on npm.
 The C# packages are `FrancisDesjardins.Bead.*` on NuGet, which has no scopes, while their assemblies
@@ -94,11 +100,10 @@ Versions stay at `0.x`, and the CHANGELOG is kept current. The TypeScript manife
 - `spec-v*` and `v*` share the repository's tags, and their prefixes keep them apart. A language
   whose packaging asks for tags of another form, as a Go module under a subfolder does, settles that
   when it joins.
-- At `0.x`, Semantic Versioning lets a minor release break; the CHANGELOG says what broke, and the
-  record that decided it says why.
 - Past the floor the gate holds, whether a document's move is its minor or its patch is the
-  maintainer's to say; the gate holds that it moves by one step when its files changed, and not
-  otherwise.
+  maintainer's to say, as whether a release of the product breaks; the gate holds that a document
+  moves by one step when its files changed, and not otherwise, and the product by one step at each
+  release.
 - A name costs more the further it travels: a rename at `0.x` costs every side's call sites, a line
   in the CHANGELOG and the Tenth Man; after a publication, it costs every consumer besides.
 - The C# the builder generates is longer for its `global::` prefixes, and never ambiguous.

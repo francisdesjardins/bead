@@ -25,8 +25,15 @@ judges every file, and a version is held once.
 - **TypeScript**, in `implementations/typescript`: Node 24.9 or later, as `engines` declares, and CI
   runs it on the current line and on that floor, 24.9; Yarn, vendored under `.yarn/releases/`
   and pointed at by `yarnPath`, so every `yarn` there runs that file whatever the machine has; one
-  `yarn.lock`, installed `--immutable` in CI; oxlint, its type-aware half on tsgolint, and oxfmt;
-  TypeScript for the types; Playwright's runner for the tests, and c8 for their coverage.
+  `yarn.lock`, installed `--immutable` in CI; `enableScripts: false` in `.yarnrc.yml`, so no
+  dependency runs a script as it installs but those `package.json` names in `dependenciesMeta`,
+  buf's and esbuild's, each checking its platform's binary and fetching it when the package that
+  carries it was not installed; oxlint, its type-aware half on tsgolint, and oxfmt; TypeScript for
+  the types; Playwright's runner for the tests, and c8 for their coverage. An install script is code
+  of a dependency's author, run on every machine and every runner that installs, so every Yarn
+  project of the repository sets the same line, the builder's naming buf's alone and an example's
+  TypeScript half buf's and esbuild's; no tool fails when the line goes, so review holds it
+  ([0006](0006-a-rule-has-its-gate.md)).
 - **C#**, in `implementations/dotnet`: `net10.0`; `global.json` pins the SDK and the test runner,
   Microsoft.Testing.Platform; `Directory.Build.props` holds every project to one set of rules
   ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); `Directory.Packages.props`
@@ -75,8 +82,9 @@ the spec is placed by a decision of its own, as the builder and the examples are
   to their generators, and the interop's blueprint to `spec/check.py`, which holds its form
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)).
 - Coverage is measured by each side's own tool, c8's istanbul report and `dotnet test --coverage`'s
-  cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either; it is a
-  local command, not a CI job.
+  cobertura, and read by one root script, `tools/coverage-report.mjs`, which merges either. CI's
+  `typescript` and `dotnet` jobs run it after their tests, each side held to its floor
+  ([0006](0006-a-rule-has-its-gate.md)), and a clone runs the same commands.
 - Three lockfile formats: a `yarn.lock` for the TypeScript side, one for the builder and one for
   each example's TypeScript half, at the TypeScript side's pins and locked versions where they share
   a package, a `packages.lock.json` per C# project, an example's among them, and

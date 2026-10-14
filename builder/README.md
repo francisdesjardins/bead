@@ -138,9 +138,10 @@ that reads it runs after `generate`.
 
 **`clean`** is buf.gen.yaml's opt-in: protoc never removes a file, and buf removes one only under
 `clean: true`. Off, the default, `generate` takes out nothing; a `_bead.ts` or a `*Bead.cs` under
-beadc's own header that it no longer writes, which nothing but beadc writes, it names and leaves, and
-`--check` fails on it, so a service a source dropped never ships in silence. On, `generate` takes out of each output's folder a file of a kind it writes that this run
-does not, in both targets by its first lines: a `_bead.ts` or a `*Bead.cs` under beadc's header;
+beadc's own header that it no longer writes, which nothing but beadc writes, it names and leaves,
+and `--check` fails on it, so a service a source dropped never ships in silence. On, `generate`
+takes out of each output's folder a file of a kind it writes that this run does not, in both
+targets by its first lines: a `_bead.ts` or a `*Bead.cs` under beadc's header;
 where messages are generated, a `_pb.ts` under protoc-gen-es's, or a `.cs` under protoc's at the
 path protoc gives its source; and prints each. Where buf's `clean` empties the folder, beadc takes
 out only by kind and header, since an output's folder may hold a project's own files: under
@@ -150,10 +151,11 @@ another run left there is taken out and printed, while a `legacy_bead.ts` a pers
 being beadc's own.
 
 **What beadc makes for a run**, protoc's output and the tree `--against -` extracts, it makes under
-`.beadc/` beside `beadc.yaml`, which `init`'s `.gitignore` ignores, and takes out after; with no
-`beadc.yaml`, under the system's temporary folder. buf builds the roots and beadc's options as one
-module, under the folder that holds them all, so a root on another drive than beadc's options is
-refused: on Node from a clone, keep the project on the clone's drive; the image has one.
+`.beadc/` beside the `beadc.yaml` it reads, which `init`'s `.gitignore` ignores, and takes out
+after; where it reads none, under the system's temporary folder. buf builds the roots and beadc's
+options as one module, under the folder that holds them all, so a root on another drive than
+beadc's options is refused: on Node from a clone, keep the project on the clone's drive; the image
+has one.
 
 ## The image and its wrappers
 
@@ -221,15 +223,17 @@ bash, by `pwsh -File` and inside a pwsh session, to one engine call, one output 
   arguments, once, never beside `--against`: with git on the host, inside a work tree, `<ref>`
   naming a commit that holds the project's folder, the wrapper pipes
   `git -C <folder> archive --format=tar <ref>`, the project's folder at that ref rooted at it, into
-  the engine call, which gains `-i` and, after the arguments, `--against -`. Nothing lands on the
-  host: the archive goes to the container's `/tmp` and leaves with it, less what the ref's
-  `.gitattributes` marks `export-ignore`. `--against-ref:<ref>`, which `pwsh -File` would split, is
-  refused. Inside a pwsh session, `--against-ref`'s run writes the engine's bytes to the process's
-  own streams, past the session's `>` and `2>`, since `beadc.ps1` pipes the archive between two
-  processes to keep the engine's exit. `--against -` given by hand passes `-i` too:
-  `git archive v0.3.0 | ./beadc.sh breaking --against -`; with a terminal as its standard input it
-  is refused, and so is an archive piped into `beadc.ps1` inside a session, which PowerShell hands
-  the script as objects: `--against-ref` names the ref instead.
+  the engine call, which gains `-i` and, after the arguments, `--against -`. The archive holds the
+  tree less what the ref's `.gitattributes` marks `export-ignore`. beadc extracts it under the
+  `.beadc/` beside the `beadc.yaml` it reads, which `init`'s `.gitignore` ignores, so on the host,
+  in the project's folder the wrapper mounts, or, where it reads none, under the container's
+  `/tmp`, which leaves with the container; and takes it out once read. `--against-ref:<ref>`, which
+  `pwsh -File` would split, is refused. Inside a pwsh session, `--against-ref`'s run writes the
+  engine's bytes to the process's own streams, past the session's `>` and `2>`, since `beadc.ps1`
+  pipes the archive between two processes to keep the engine's exit. `--against -` given by hand
+  passes `-i` too: `git archive v0.3.0 | ./beadc.sh breaking --against -`; with a terminal as its
+  standard input it is refused, and so is an archive piped into `beadc.ps1` inside a session, which
+  PowerShell hands the script as objects: `--against-ref` names the ref instead.
 
 | Exit     | From a wrapper                                                                                                                                                                                                                                                                                                                               |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -693,10 +697,11 @@ description.
 
 **A waiver.** A finding is waived by `--except`, in the call a reviewer reads:
 
-- `--except <RULE>` leaves out a warning of `check`'s, which finds no subject. A breaking rule is
-  never waived bare, which would waive a later change's finding too, in the CI that keeps the call:
-  `--except PROCEDURE_SAME_NAME` is refused, exit 2, naming the subject's form, as ESLint's
-  `no-unlimited-disable` refuses a disable that names no rule;
+- `--except <RULE>` leaves out a warning that finds no subject, `check`'s or the run's own,
+  `PROTO_SKIPPED` or `AGAINST_BLUEPRINT`. A breaking rule is never waived bare, which would waive
+  a later change's finding too, in the CI that keeps the call: `--except PROCEDURE_SAME_NAME` is
+  refused, exit 2, naming the subject's form, as ESLint's `no-unlimited-disable` refuses a disable
+  that names no rule;
 - `--except <RULE>@<subject>` waives that rule's finding whose subject is that subject, exactly,
   as its line prints it: `PROCEDURE_NO_DELETE@service:1/procedure:8` waives the one procedure and
   no other, wherever a deletion or an addition before it moves it in the array. A scope is a

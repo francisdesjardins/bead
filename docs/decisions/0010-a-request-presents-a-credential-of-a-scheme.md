@@ -172,10 +172,13 @@ presented. The client's side keeps that from refusing the calls that renew a cre
   answer in a listen's batch, which marks it, `mayOvertake`;
 - a client fails a call before it goes, and a server a command alike, with
   `DESTINATION_UNREACHABLE`, as a relay refuses a call its leg B cannot carry, when it presents
-  `ELSEWHERE` over a transport that carries none, or `JWT` or `ELSEWHERE` in the clear off the
-  machine, judged by its transport's scheme (`wss`, `https`), a loopback host, as the WHATWG URL
-  Standard's host parser reads it on every side, or a transport that never leaves the machine, a Web
-  Worker or a router called in process: nothing was tried, and the credential stays.
+  `ELSEWHERE` over a transport that cannot carry the credential it presents — a WebSocket whose
+  upgrade carried other bytes, or none, a Web Worker, a server's over HTTP or over a WebSocket
+  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)) —
+  or `JWT` or `ELSEWHERE` in the clear off the machine, judged by its transport's scheme (`wss`,
+  `https`), a loopback host, as the WHATWG URL Standard's host parser reads it on every side, or a
+  transport that never leaves the machine, a Web Worker or a router called in process: nothing was
+  tried, and the credential stays.
 
 A client that receives a command resolves the command's credential the same way, the session it
 learned standing for its connection's.
@@ -455,10 +458,13 @@ from `DESTINATION_UNKNOWN` which destinations exist: that step's promise, that a
 admitted learns only whether the relay has any destination, holds for a call presenting none or
 `OPAQUE` alone, unless the relay `verifies`.
 
-**A page presents `ELSEWHERE` to its own origin, or to one `origins` names.** `Authorization` is
-not a header CORS lets through without a preflight, which an HTTP server answers to the origins it
-names alone, and no cookie goes with it
-([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)).
+**A page presents `ELSEWHERE` over HTTP, to its own origin or to one `origins` names, and a `JWT`
+over a WebSocket.** `Authorization` is not a header CORS lets through without a preflight, which an
+HTTP server answers to the origins it names alone, and no cookie goes with it
+([0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)). An upgrade
+from a page carries no credential, whatever its `Authorization`, since its browser writes its
+user's own on every upgrade it opens, whatever the page's origin
+([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
 
 **A page of another origin reaches a WebSocket server only when the server takes it.** Its upgrade
 is refused 403 otherwise, as an HTTP exchange is, since no same-origin policy guards it and a server
