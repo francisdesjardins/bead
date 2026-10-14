@@ -84,7 +84,13 @@ public sealed class TrustedProxiesTests
     // the client's address behind the socket's, the field as it came, past the proxies named
     private static string ClientOf(IPAddress remote, (string? Forwarded, string[] Proxies) given)
     {
-        return TrustedProxies.ClientAddressOf(remote, (given.Forwarded, TrustedProxies.NetworksOf(given.Proxies, "TrustedProxies")));
+        return TrustedProxies.ClientAddressOf(remote, (given.Forwarded, TrustOf(given.Proxies, 0)));
+    }
+
+    // a server's trust: the proxies it names, and how many it counts that they do not
+    private static ProxyTrust TrustOf(string[] named, int unnamed)
+    {
+        return TrustedProxies.TrustOf((named, "TrustedProxies"), (unnamed, "UnnamedProxies"));
     }
 
     // definition
@@ -126,6 +132,80 @@ public sealed class TrustedProxiesTests
         {
             TrustedProxies.Assert(["[::1]"], "TrustedProxies");
         }).Message, StringComparison.Ordinal);
+    }
+
+    // spec 15.12
+    [Fact]
+    public void Refuses_an_unnamedProxies_that_is_not_a_whole_number_from_0_to_8_Infinity_among_it_as_the_server_is_built()
+    {
+        // an int holds no fraction, no NaN and no Infinity: its largest stands for the count of every hop
+        foreach (var count in new[] { -1, 9, int.MaxValue, int.MinValue })
+        {
+            var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return TrustOf([], count);
+            });
+
+            Assert.Equal("UnnamedProxies", refused.ParamName);
+            Assert.StartsWith(
+                $"UnnamedProxies is a whole number of proxies from 0 to 8, those TrustedProxies does not name: not {count.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                refused.Message,
+                StringComparison.Ordinal);
+        }
+
+        Assert.Equal(8, TrustedProxies.MaximumUnnamedProxies);
+
+        foreach (var count in new[] { 0, 1, 3, 8 })
+        {
+            Assert.Equal(count, TrustOf([], count).Unnamed);
+        }
+    }
+
+    // spec 15.12
+    [Fact]
+    public void Spends_unnamedProxies_on_each_address_trustedProxies_does_not_hold_none_on_one_it_holds_and_stops_at_the_first_past_the_count()
+    {
+        string Walked((string[] Named, int Unnamed) trust, (string Forwarded, string Remote) request)
+        {
+            return TrustedProxies.ClientAddressOf(IPAddress.Parse(request.Remote), (request.Forwarded, TrustOf(trust.Named, trust.Unnamed)));
+        }
+
+        Assert.Equal(
+            [
+                // a count alone: that many hops from the socket, whatever their address
+                "192.0.2.1",
+                "198.51.100.7",
+
+                // a named hop passes free, wherever it stands: before the unnamed one or after it
+                "198.51.100.7",
+                "198.51.100.8",
+                "203.0.113.9",
+
+                // past the count, the first address none holds is the client: what it wrote left is not read
+                "198.51.100.7",
+
+                // a proxy both named and counted gives the client an entry it wrote
+                "192.0.2.66",
+
+                // an entry that is no address ends the walk within the count, and so does the field's end
+                "192.0.2.1",
+                "192.0.2.1",
+
+                // 0 counts none: an unnamed socket's field is not read
+                "127.0.0.1",
+            ],
+            [
+                Walked(([], 1), ("198.51.100.7, 192.0.2.1", "127.0.0.1")),
+                Walked(([], 2), ("203.0.113.9, 198.51.100.7, 192.0.2.1", "127.0.0.1")),
+                Walked((["10.0.0.0/8"], 1), ("198.51.100.7, 10.0.0.5", "127.0.0.1")),
+                Walked((["10.0.0.0/8"], 1), ("198.51.100.8, 10.0.0.6, 10.0.0.5", "127.0.0.1")),
+                Walked((["10.0.0.0/8"], 1), ("203.0.113.9, 10.0.0.5, 198.51.100.7", "10.0.0.1")),
+                Walked((["10.0.0.0/8"], 1), ("203.0.113.9, 198.51.100.7", "127.0.0.1")),
+                Walked((["127.0.0.1/32"], 2), ("192.0.2.66, 203.0.113.1, 198.51.100.7", "127.0.0.1")),
+                Walked(([], 3), ("unknown, 192.0.2.1", "127.0.0.1")),
+                Walked(([], 3), ("192.0.2.1", "127.0.0.1")),
+                Walked(([], 0), ("192.0.2.1", "127.0.0.1")),
+            ]);
     }
 
     // spec 15.12

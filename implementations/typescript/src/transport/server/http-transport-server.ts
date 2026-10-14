@@ -31,6 +31,7 @@ import {
   assertListeningAddress,
   assertOrigins,
   authorityOf,
+  credentialOf,
   hasVisibleFields,
   HOST_REFUSAL,
   isAuthority,
@@ -43,7 +44,13 @@ import {
   ownAuthorityOf,
   requestTargetOf,
 } from './hosts-and-origins';
-import { createTransportServer, generateHandle } from './transport-server';
+import {
+  createTransportServer,
+  generateHandle,
+  type ITransportServerBound,
+  LOCALHOST,
+  listenOn,
+} from './transport-server';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
   HTTPRequestListener,
@@ -194,7 +201,7 @@ export const PATHNAME = '/bead';
 
 /** What an omitted start option resolves to. */
 export const START_DEFAULTS = Object.freeze({
-  address: '127.0.0.1',
+  address: LOCALHOST,
   findOpenPort: false,
   port: 80,
 } satisfies ITransportServerStartOptions);
@@ -392,27 +399,6 @@ const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefined => 
   });
 };
 
-// the credential a field carries: its value whole, without the spaces and tabs around it (RFC 9110
-// §5.5); none when nothing is left
-const credentialOf = (value: string | undefined): string | undefined => {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  let start = 0;
-  let end = value.length;
-
-  while (start < end && (value[start] === ' ' || value[start] === '\t')) {
-    start += 1;
-  }
-
-  while (end > start && (value[end - 1] === ' ' || value[end - 1] === '\t')) {
-    end -= 1;
-  }
-
-  return start === end ? undefined : value.slice(start, end);
-};
-
 // a body of Bead's media type, parameters aside, sent as it is
 const isBeadBody = (request: IHTTPRequestLike): boolean => {
   const type = headerOf(request, 'content-type')?.split(';')[0]?.trim().toLowerCase();
@@ -570,6 +556,7 @@ export const createHTTPTransportServer = (
     pathname = PATHNAME,
     secure,
     trustedProxies,
+    unnamedProxies,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
@@ -583,14 +570,16 @@ export const createHTTPTransportServer = (
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
   assertHosts(hosts);
   assertOrigins(origins);
-  const proxies = trustedProxiesOf(trustedProxies);
+  const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
 
   // what the transport keeps of each connection, by handle
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
 
   const transport = createTransportServer<IDrawnConnection, IDrawingRequest>(
     (server, connections, { isHeard, tell }) => {
-      let httpServer: IHTTPServerLike | undefined;
+      // the servers the start under way, or the last, built and keeps: one an address bound, each
+      // by the application's `createServer`, configured alike
+      const httpServers = new Set<IHTTPServerLike>();
       let ordinal = 0;
       // the bytes of body the exchanges under way hold, all together, counted as they come
       let bodyBytes = 0;
@@ -605,8 +594,8 @@ export const createHTTPTransportServer = (
         return perAddress.get(address) ?? 0;
       };
 
-      // the client's address: the socket's, in the one form, or, behind proxies the transport
-      // trusts, the rightmost `X-Forwarded-For` entry none of them holds (spec 15.12)
+      // the client's address: the socket's, in the one form, or, behind the proxies the transport
+      // names and counts, the `X-Forwarded-For` entry the walk reaches (spec 15.12)
       const addressOf = (request: IHTTPRequestLike): string | undefined => {
         const { remoteAddress } = request.socket;
         const lines = linesOf(request, 'x-forwarded-for');
@@ -1143,7 +1132,7 @@ export const createHTTPTransportServer = (
 
           // a request is handed on with the credential its exchange carried; no other envelope is
           if (kind === ENVELOPE_KINDS.REQUEST) {
-            const credential = credentialOf(authorizations[0]);
+            const credential = credentialOf(authorizations);
 
             state.isDelivered = true;
             tell(MESSAGE_EVENT, [{ credential, data: envelope }, connectionHandle]);
@@ -1295,11 +1284,12 @@ export const createHTTPTransportServer = (
       return {
         clock,
         defaults: START_DEFAULTS,
-        // a server under TLS has its contexts, as Node's https and its HTTP/2 secure server do
+        // a server under TLS has its contexts, as Node's https and its HTTP/2 secure server do; each
+        // the application builds is built alike, so the first stands for every one
         get isSecure() {
-          return (
-            typeof (httpServer as { addContext?: unknown } | undefined)?.addContext === 'function'
-          );
+          const [first] = httpServers;
+
+          return typeof (first as { addContext?: unknown } | undefined)?.addContext === 'function';
         },
         secure,
         type: TRANSPORT_HTTP,
@@ -1307,61 +1297,100 @@ export const createHTTPTransportServer = (
         start: async ({ address, findOpenPort, port, signal }) => {
           assertListeningAddress(address);
 
-          let opened: IHTTPServerLike | undefined;
-          let isListening = false;
+          // each address bound has its server, built once, and what its `error` is told to: a port
+          // drawn again listens again on the servers built, never asking the application for another
+          const built = new Map<
+            string,
+            { instance: IHTTPServerLike; onError: (error: Error) => void }
+          >();
+
+          const builtOn = (host: string) => {
+            const known = built.get(host);
+
+            if (known !== undefined) {
+              return known;
+            }
+
+            const entry = {
+              instance: createServer(onExchange, { address: host }),
+              onError: (error: Error): void => {
+                server.emit(ERROR_EVENT, error, '');
+              },
+            };
+
+            built.set(host, entry);
+            entry.instance.on(ERROR_EVENT, (error) => {
+              entry.onError(error);
+            });
+            entry.instance.on('session', (session) => {
+              sessions.add(session);
+              session.once('close', () => {
+                sessions.delete(session);
+              });
+            });
+
+            return entry;
+          };
+
+          const bind = (host: string, given: number): Promise<ITransportServerBound> => {
+            return createPromise((resolve, reject) => {
+              const entry = builtOn(host);
+              const { instance } = entry;
+
+              const release = (): void => {
+                httpServers.delete(instance);
+                instance.close();
+              };
+
+              httpServers.add(instance);
+
+              // an error before it listens fails the bind; after, the server reports it
+              entry.onError = (error) => {
+                release();
+                reject(error);
+              };
+
+              instance.listen(given, host, () => {
+                const addressInfo = instance.address();
+
+                entry.onError = (error) => {
+                  server.emit(ERROR_EVENT, error, '');
+                };
+
+                resolve({
+                  close: release,
+                  port:
+                    typeof addressInfo === 'object' && addressInfo !== null
+                      ? addressInfo.port
+                      : port,
+                });
+              });
+            });
+          };
 
           try {
             return await createPromise<ITransportServerAddress>(
               (resolve, reject) => {
-                const instance = createServer(onExchange);
-
-                opened = instance;
-
-                instance.on(ERROR_EVENT, (error) => {
-                  if (isListening) {
-                    return (server.emit(ERROR_EVENT, error, ''), undefined);
-                  }
-
-                  return (reject(error), undefined);
-                });
-
-                instance.on('session', (session) => {
-                  sessions.add(session);
-                  session.once('close', () => {
-                    sessions.delete(session);
-                  });
-                });
-
-                instance.listen(findOpenPort ? 0 : port, address, () => {
-                  const addressInfo = instance.address();
-
-                  isListening = true;
-                  httpServer = instance;
-
-                  resolve({
-                    address,
-                    port:
-                      typeof addressInfo === 'object' && addressInfo !== null
-                        ? addressInfo.port
-                        : port,
-                  });
-                });
+                listenOn(bind, { address, findOpenPort, port, signal }).then(resolve, reject);
               },
               { signal }
             );
           } catch (reason) {
             // an error before listening, or an abort: close what was opened, listening or not
-            httpServer = undefined;
-            opened?.close();
+            for (const instance of httpServers) {
+              instance.close();
+            }
+
+            httpServers.clear();
 
             throw reason;
           }
         },
 
         stop: () => {
-          const instance = httpServer;
+          const stopped = [...httpServers];
 
-          httpServer = undefined;
+          httpServers.clear();
 
           for (const connection of drawn.values()) {
             closeDrawn(connection, false);
@@ -1369,8 +1398,10 @@ export const createHTTPTransportServer = (
 
           // the port is free once `close` returns; its callback, which waits on keep-alive sockets
           // and HTTP/2 sessions, is not awaited, and those are ended where the server can
-          instance?.close();
-          instance?.closeAllConnections?.();
+          for (const instance of stopped) {
+            instance.close();
+            instance.closeAllConnections?.();
+          }
 
           for (const session of sessions) {
             session.close();

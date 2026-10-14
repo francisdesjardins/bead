@@ -162,12 +162,14 @@ export const isIPAddress = (value: string): boolean => {
 };
 
 /**
- * Refuses, with a {@link ProgrammerError} naming it, an address a server cannot listen on: any
- * that {@link isIPAddress} does not take, a name among them, which another host would resolve
- * otherwise. A bracketed IPv6 address is told how to write itself.
+ * Refuses, with a {@link ProgrammerError} naming it, an address a server cannot listen on (spec
+ * 15.12): any that {@link isIPAddress} does not take but `localhost`, exactly, the keyword for both
+ * loopbacks, never resolved; any other name among them, `LOCALHOST`, `localhost.` and a name under
+ * `.localhost` too, which another host would resolve otherwise. A bracketed IPv6 address is told how
+ * to write itself.
  */
 export const assertListeningAddress = (address: string): void => {
-  if (isIPAddress(address)) {
+  if (address === 'localhost' || isIPAddress(address)) {
     return;
   }
 
@@ -175,7 +177,9 @@ export const assertListeningAddress = (address: string): void => {
   const hint =
     literal !== undefined && isIPAddress(literal) ? `: write ${literal}, not ${address}` : '';
 
-  throw new ProgrammerError(`a server listens on an IP address, not "${address}"${hint}`);
+  throw new ProgrammerError(
+    `a server listens on an IP address, or on localhost, both loopbacks, not "${address}"${hint}`
+  );
 };
 
 /**
@@ -187,6 +191,28 @@ export const assertListeningAddress = (address: string): void => {
  */
 export const isVisibleField = (value: string): boolean => {
   return VISIBLE_FIELD.test(value);
+};
+
+/**
+ * The credential an `Authorization` carries (spec 15.1), over HTTP a `POST`'s and over a WebSocket
+ * its upgrade's: its first line's value whole, its auth-scheme included, without the spaces and tabs
+ * around it (RFC 9110 §5.5); none when it has no line, or when nothing is left. Two lines are
+ * refused before it is read, as no list to combine (RFC 9110 §5.3).
+ */
+export const credentialOf = (lines: readonly string[]): string | undefined => {
+  const [value = ''] = lines;
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && (value[start] === ' ' || value[start] === '	')) {
+    start += 1;
+  }
+
+  while (end > start && (value[end - 1] === ' ' || value[end - 1] === '	')) {
+    end -= 1;
+  }
+
+  return start === end ? undefined : value.slice(start, end);
 };
 
 /**

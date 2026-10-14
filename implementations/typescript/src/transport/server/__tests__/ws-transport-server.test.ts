@@ -4,7 +4,7 @@ import { Server } from 'node:http';
 import { connect as connectTcp, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { WebSocketServer } from 'ws';
+import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import type {
   TRANSPORT_CLIENT_EVENTS,
   TransportClientEventMap,
@@ -31,15 +31,22 @@ import {
   MAXIMUM_MESSAGE_BYTES,
   START_DEFAULTS,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
-  type IIncomingMessageLike,
+  type IDrawingRequest,
   type IServerSocketLike,
   type IWSTransportServerOptions,
   type WSTransportServer,
 } from '../ws-transport-server';
-import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
+import {
+  bindError,
+  holdIPv6Loopback,
+  isFreeOn,
+  LISTENING_ADDRESSES,
+  LISTENING_NAMES,
+  NO_LISTENING_ADDRESSES,
+} from './addresses';
 import { createFakeSocket, createFakeWebSocketServer } from './fake-websocket-server';
 
-type ServerEvents = TransportServerEventMap<IServerSocketLike, IIncomingMessageLike>;
+type ServerEvents = TransportServerEventMap<IServerSocketLike, IDrawingRequest>;
 
 const nextServerEvent = <K extends TRANSPORT_SERVER_EVENTS>(
   server: WSTransportServer,
@@ -424,21 +431,6 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(await received).toEqual([{ credential: undefined, data: 'hello' }]);
       });
 
-      test('carries no credential, either way', async () => {
-        await connectClient(client);
-        const taken = nextServerEvent(server, 'message');
-        const received = nextClientEvent(client, 'message');
-
-        await client.send({ credential: 'Bearer mF_9.B5f-4.1JqM', data: 'up' });
-        expect((await taken)[0]).toEqual({ credential: undefined, data: 'up' });
-
-        await server.send(
-          { credential: 'Bearer mF_9.B5f-4.1JqM', data: 'down' },
-          server.clients[0]!.connectionHandle
-        );
-        expect(await received).toEqual([{ credential: undefined, data: 'down' }]);
-      });
-
       test('resolves for a handle nobody holds', async () => {
         await connectClient(client);
         await expect(
@@ -644,8 +636,9 @@ test.describe('WSTransportServer, on the wire', () => {
 
       const [, request, connectionHandle] = await connection;
 
-      // the socket's own address, IPv4 mapped into IPv6, read as the IPv4 address it carries
-      expect(request.socket.remoteAddress).toBe('::ffff:127.0.0.1');
+      // the socket's own address, IPv4 mapped into IPv6, read as the IPv4 address it carries, as
+      // the upgrade shown to a listener names it
+      expect(request.remoteAddress).toBe('127.0.0.1');
       expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=1$/u);
       expect(dualStack.clients).toMatchObject([{ address: '127.0.0.1', connectionHandle }]);
     } finally {
@@ -671,6 +664,134 @@ test.describe('WSTransportServer, on the wire', () => {
     const text = nextServerEvent(server, 'message');
     socket.send('text');
     expect((await text)[0].data).toBe('text');
+
+    socket.close();
+  });
+});
+
+test.describe('WSTransportServer, the credential its upgrade carries', () => {
+  const BEARER = 'Bearer mF_9.B5f-4.1JqM';
+
+  // a socket of `ws`'s on `port`, its upgrade carrying `headers`, open
+  const openWith = async (port: number, headers: Record<string, string>) => {
+    const [, TrackedWs] = IMPLEMENTATIONS[1];
+    const socket: WsWebSocket = new TrackedWs(`ws://${host}:${String(port)}`, { headers });
+
+    await once(socket, 'open');
+
+    return socket;
+  };
+
+  // spec 15.1 and 15.2
+  test('hands every envelope of a connection its upgrade’s Authorization, as it came and trimmed, and carries none toward its client', async () => {
+    await using started = await startDated({});
+    const { port, server } = started;
+    const messages: unknown[] = [];
+
+    server.on('message', (message) => {
+      messages.push(message);
+    });
+
+    // a client of Bead's, given the credential at its connect, and one whose upgrade pads it
+    const client = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+    await client.connect({ credential: BEARER, host, port });
+
+    const received = nextClientEvent(client, 'message');
+
+    await client.send({ data: 'one' });
+    await client.send({ credential: 'Bearer another', data: 'two' });
+    await expect
+      .poll(() => {
+        return messages.length;
+      })
+      .toBe(2);
+
+    // nothing toward its client, whatever a send is given
+    await server.send({ credential: BEARER, data: 'down' }, server.clients[0]!.connectionHandle);
+    expect(await received).toEqual([{ credential: undefined, data: 'down' }]);
+
+    const padded = await openWith(port, { authorization: ' \tInterop sub=bob\t ' });
+
+    padded.send('three');
+
+    // none, nor from an empty one
+    const bare = await openWith(port, {});
+    const empty = await openWith(port, { authorization: '' });
+
+    bare.send('four');
+    empty.send('five');
+
+    await expect
+      .poll(() => {
+        return messages.length;
+      })
+      .toBe(5);
+    expect(messages).toEqual([
+      { credential: BEARER, data: 'one' },
+      { credential: BEARER, data: 'two' },
+      { credential: 'Interop sub=bob', data: 'three' },
+      { credential: undefined, data: 'four' },
+      { credential: undefined, data: 'five' },
+    ]);
+
+    await client.disconnect();
+
+    for (const socket of [padded, bare, empty]) {
+      socket.close();
+    }
+  });
+
+  // spec 15.2, Fetch's credentials mode include
+  test('carries no credential from an upgrade that carries an Origin, its own or one it takes, whatever its Authorization', async () => {
+    await using started = await startDated({ origins: ['https://bead.test'] });
+    const { port, server } = started;
+    const messages: unknown[] = [];
+
+    server.on('message', (message) => {
+      messages.push(message);
+    });
+
+    const sockets = [
+      await openWith(port, { authorization: BEARER, origin: 'https://bead.test' }),
+      await openWith(port, { authorization: BEARER, origin: `http://${host}:${String(port)}` }),
+      await openWith(port, { authorization: BEARER }),
+    ];
+
+    for (const [index, socket] of sockets.entries()) {
+      socket.send(String(index));
+      await expect
+        .poll(() => {
+          return messages.length;
+        })
+        .toBe(index + 1);
+    }
+
+    expect(messages).toEqual([
+      { credential: undefined, data: '0' },
+      { credential: undefined, data: '1' },
+      { credential: BEARER, data: '2' },
+    ]);
+
+    for (const socket of sockets) {
+      socket.close();
+    }
+  });
+
+  // spec 15.1: no event carries the credential
+  test('shows a connection’s upgrade to its listeners headers aside', async () => {
+    await using started = await startDated({});
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const socket = await openWith(port, { authorization: BEARER });
+    const [, upgrade, connectionHandle] = await connection;
+
+    expect([Object.isFrozen(upgrade), upgrade]).toEqual([
+      true,
+      { method: 'GET', remoteAddress: '127.0.0.1', remotePort: expect.any(Number), url: '/' },
+    ]);
+    expect(JSON.stringify(upgrade)).not.toContain(BEARER);
+    expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=1$/u);
 
     socket.close();
   });
@@ -809,10 +930,10 @@ test.describe('WSTransportServer, its hosts and origins', () => {
   });
 
   // spec 15.12
-  test('refuses as it is built a trustedProxies entry that is a name or a network of prefix 0', () => {
-    const built = (trustedProxies: readonly string[]) => {
+  test('refuses as it is built a trustedProxies entry that is a name or a network of prefix 0, or an unnamedProxies past 8', () => {
+    const built = (trustedProxies: readonly string[], unnamedProxies?: number) => {
       return () => {
-        return createWSTransportServer({ trustedProxies, WebSocketServer });
+        return createWSTransportServer({ trustedProxies, unnamedProxies, WebSocketServer });
       };
     };
 
@@ -822,6 +943,10 @@ test.describe('WSTransportServer, its hosts and origins', () => {
       expect(built([everyone]), everyone).toThrow('it would trust what every client writes');
     }
     expect(built(['127.0.0.1', '10.0.0.0/8', '::1', 'fd00::/8'])).not.toThrow();
+    // the proxies it counts, those the list does not name, 8 at most
+    expect(built([], 9)).toThrow(ProgrammerError);
+    expect(built([], Infinity)).toThrow('it would trust what every client writes');
+    expect(built(['10.0.0.0/8'], 8)).not.toThrow();
   });
 });
 
@@ -1875,20 +2000,20 @@ test.describe('WSTransportServer, the refusals it tells', () => {
 });
 
 test.describe('WSTransportServer, the address it listens on', () => {
-  test('listens on 127.0.0.1, port 80, and beats every 30 seconds when told nothing', async () => {
+  test('listens on localhost, port 80, and beats every 30 seconds when told nothing', async () => {
     using timers = spyIntervals();
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
 
     expect([server.address, server.port, START_DEFAULTS]).toEqual([
-      '127.0.0.1',
+      'localhost',
       80,
-      { address: '127.0.0.1', findOpenPort: false, port: 80 },
+      { address: 'localhost', findOpenPort: false, port: 80 },
     ]);
 
     const starting = server.start({ findOpenPort: true });
 
-    fake.instances[0]?.emit('listening');
+    await fake.listenEach(2);
     await starting;
     fake.connect(createFakeSocket(), { server });
 
@@ -1897,21 +2022,21 @@ test.describe('WSTransportServer, the address it listens on', () => {
       timers.armed.map(({ delay }) => {
         return delay;
       }),
-    ]).toEqual(['127.0.0.1', [30_000]]);
+    ]).toEqual(['localhost', [30_000]]);
 
     await server.stop();
   });
 
-  test('listens on the loopback when given no address, reached by 127.0.0.1 and by localhost, and is secure there', async () => {
+  test('listens on localhost when given no address, both loopbacks on one port, reached by 127.0.0.1, by [::1] and by localhost, reports localhost, and is secure there', async () => {
     const server = createWSTransportServer({ WebSocketServer });
     const clients: WSTransportClient[] = [];
 
     try {
       const { address, port } = await server.start({ findOpenPort: true });
 
-      expect(address).toBe('127.0.0.1');
+      expect([address, server.address]).toEqual(['localhost', 'localhost']);
 
-      for (const name of [host, 'localhost']) {
+      for (const name of [host, '::1', 'localhost']) {
         const client = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
 
         clients.push(client);
@@ -1924,7 +2049,8 @@ test.describe('WSTransportServer, the address it listens on', () => {
         })
       ).toEqual([
         ['127.0.0.1', true],
-        ['127.0.0.1', true],
+        ['::1', true],
+        [expect.stringMatching(/^(?:127\.0\.0\.1|::1)$/u), true],
       ]);
     } finally {
       for (const client of clients) {
@@ -1934,17 +2060,92 @@ test.describe('WSTransportServer, the address it listens on', () => {
       await server.stop();
       await allClosed();
     }
+
+    // both let go
+    expect(await isFreeOn('::1', server.port)).toBe(true);
+  });
+
+  test('refuses to start on localhost when another socket holds the other loopback’s port, ending closed', async () => {
+    await using held = await holdIPv6Loopback();
+    const server = createWSTransportServer({ WebSocketServer });
+
+    await expect(server.start({ port: held.port })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    // the IPv4 loopback's port let go
+    expect([server.isClosed(), await isFreeOn(host, held.port)]).toEqual([true, true]);
+  });
+
+  test('draws a port on localhost again when the IPv6 loopback holds the one drawn on IPv4', async () => {
+    const fake = createFakeWebSocketServer();
+    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = server.start({ findOpenPort: true });
+
+    // the port drawn on 127.0.0.1 is held on ::1: both let go, and a pair bound again
+    await fake.listenEach(1);
+    (await fake.builtAt(1))?.emit('error', bindError('EADDRINUSE'));
+    await fake.listenEach(2, 2);
+
+    expect(await starting).toEqual({ address: 'localhost', port: 50_000 });
+    expect(
+      fake.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual([1, 1, 0, 0]);
+    await server.stop();
+
+    // eight draws at most, then the last error
+    const held = createFakeWebSocketServer();
+    const refused = createWSTransportServer({ WebSocketServer: held.FakeWebSocketServer });
+    const refusing = refused.start({ findOpenPort: true });
+
+    for (let draw = 0; draw < 8; draw += 1) {
+      await held.listenEach(1, draw * 2);
+      (await held.builtAt(draw * 2 + 1))?.emit('error', bindError('EADDRINUSE'));
+    }
+
+    await expect(refusing).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect([refused.isClosed(), held.instances.length]).toEqual([true, 16]);
+
+    // a port it was given is never drawn again
+    const given = createFakeWebSocketServer();
+    const fixed = createWSTransportServer({ WebSocketServer: given.FakeWebSocketServer });
+    const fixing = fixed.start({ port: 4_321 });
+
+    await given.listenEach(1);
+    (await given.builtAt(1))?.emit('error', bindError('EADDRINUSE'));
+
+    await expect(fixing).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect([fixed.isClosed(), given.instances.length]).toEqual([true, 2]);
+  });
+
+  test('listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1', async () => {
+    for (const code of ['EADDRNOTAVAIL', 'EAFNOSUPPORT']) {
+      const fake = createFakeWebSocketServer();
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const starting = server.start({ findOpenPort: true });
+
+      await fake.listenEach(1);
+      (await fake.builtAt(1))?.emit('error', bindError(code));
+
+      expect([code, await starting, server.address]).toEqual([
+        code,
+        { address: '127.0.0.1', port: 50_000 },
+        '127.0.0.1',
+      ]);
+      // the IPv6 one let go, the IPv4 one serving, secure there
+      expect([
+        fake.instances[0]?.closeCount,
+        fake.instances[1]?.closeCount,
+        server.isSecure(fake.connect(createFakeSocket(), { server })),
+      ]).toEqual([0, 1, true]);
+      await server.stop();
+    }
   });
 
   test('refuses to start on an address that is no bare IP address, ending closed', async () => {
     const startedOn = async (address: string) => {
       const fake = createFakeWebSocketServer({ address: { address, port: 4_321 } });
       const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
-      const starting = server.start({ address, findOpenPort: true });
-
-      fake.instances[0]?.emit('listening');
-
-      const outcome = await starting.then(
+      const outcome = server.start({ address, findOpenPort: true }).then(
         () => {
           return 'listening';
         },
@@ -1953,10 +2154,17 @@ test.describe('WSTransportServer, the address it listens on', () => {
         }
       );
 
+      // localhost binds both loopbacks
+      if (server.isConnecting()) {
+        await fake.listenEach(LISTENING_NAMES.includes(address) ? 2 : 1);
+      }
+
+      const told = await outcome;
+
       await server.stop();
 
       // a server refused opened nothing
-      return [address, outcome, server.isClosed(), fake.instances.length];
+      return [address, told, server.isClosed(), fake.instances.length];
     };
 
     expect(await Promise.all(LISTENING_ADDRESSES.map(startedOn))).toEqual(
@@ -1964,13 +2172,18 @@ test.describe('WSTransportServer, the address it listens on', () => {
         return [address, 'listening', true, 1];
       })
     );
+    expect(await Promise.all(LISTENING_NAMES.map(startedOn))).toEqual(
+      LISTENING_NAMES.map((address) => {
+        return [address, 'listening', true, 2];
+      })
+    );
     expect(await Promise.all(NO_LISTENING_ADDRESSES.map(startedOn))).toEqual(
       NO_LISTENING_ADDRESSES.map((address) => {
         return [
           address,
           address === '[::1]'
-            ? 'a server listens on an IP address, not "[::1]": write ::1, not [::1]'
-            : `a server listens on an IP address, not "${address}"`,
+            ? 'a server listens on an IP address, or on localhost, both loopbacks, not "[::1]": write ::1, not [::1]'
+            : `a server listens on an IP address, or on localhost, both loopbacks, not "${address}"`,
           true,
           0,
         ];

@@ -3396,24 +3396,27 @@ test.describe('createRouterServer, relaying', () => {
   };
 
   /**
-   * A relay on the scripted transport — leg A, `first` open — relaying as `relay` says, every request
-   * by default, with the device behind it at destination 7; what the relay reports is recorded.
+   * A relay on the scripted transport — leg A, `first` open, under `limits` — relaying as `relay`
+   * says, every request by default, with the device behind it at destination 7; what the relay
+   * reports is recorded.
    */
   const createRelayed = ({
     clock,
     deviceLimits,
     isDeferred,
+    limits,
     relay = admitting,
     sessionOf,
   }: {
     clock?: TestClock;
     deviceLimits?: RouterLimitsOptions;
     isDeferred?: boolean;
+    limits?: RouterLimitsOptions;
     relay?: IRelayOptions;
     sessionOf?: SessionOf<Handle>;
   } = {}) => {
     const legA = createScriptedTransport();
-    const router = createRouterServer(legA.transport, { clock, relay, sessionOf });
+    const router = createRouterServer(legA.transport, { clock, limits, relay, sessionOf });
     const { [Symbol.dispose]: disposeDevice, ...behind } = createDevice({
       clock,
       isDeferred,
@@ -3844,6 +3847,47 @@ test.describe('createRouterServer, relaying', () => {
       ['the connection closed before the answer', first],
       [`${device} is not open`, first],
     ]);
+  });
+
+  // spec 14.5: an answer that did not go out goes nowhere again
+  test('hands leg A’s transport the relayed result once, answers nothing after it refuses it, and reports why with leg A’s connection', async () => {
+    using relayed = createRelayed();
+    const { control, deliver, errors, sent } = relayed;
+
+    control.sendErrors.set(first, new Error('this transport refuses, once it has it'));
+    deliver(first, requestOf(1, { destinationId: 7, payload: text.encode('hi') }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([[first, 'result', 1, 'HI']]);
+    expect(reportedOf(errors)).toEqual([['this transport refuses, once it has it', first]]);
+  });
+
+  // spec 9.0, 12.1, 14.5: a result goes back counted with the 20 bytes of an announcement, so 8 + 36
+  // + 20 fill an envelope of 64, and one byte more needs a transfer, which leg A sends none of
+  test('answers a relayed result past leg A’s limit PROCEDURE_FAILED with no detail, and reports PAYLOAD_TOO_LARGE with leg A’s connection', async () => {
+    using relayed = createRelayed({
+      limits: { chunkBytes: 64, maximumTransfers: 0, windowBytes: 128 },
+    });
+    const { deliver, errors, sent } = relayed;
+
+    deliver(first, requestOf(1, { destinationId: 7, payload: text.encode('x'.repeat(36)) }));
+    await sleep(0);
+    deliver(first, requestOf(3, { destinationId: 7, payload: text.encode('x'.repeat(37)) }));
+    await sleep(0);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'X'.repeat(36)],
+      [first, 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+    ]);
+    expect(sent[1]?.envelope).toMatchObject({
+      failure: {
+        code: ProtocolCode.PROCEDURE_FAILED,
+        detail: '',
+        relays: 0,
+        scope: FailureScope.PROTOCOL,
+      },
+    });
+    expect(reportedOf(errors)).toEqual([[ProtocolCode.PAYLOAD_TOO_LARGE, first]]);
   });
 
   test('ends leg B past the relay’s timeout, cancelling it at the target, and answers lost; no timer without one', async () => {

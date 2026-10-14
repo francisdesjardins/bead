@@ -95,8 +95,8 @@ const USAGE = [
   '  version                       beadc, its tools, the format, the spec and the options',
   'flags: --error-format text|json|github, --fail-on-warning, --except <RULE> (a warning),',
   '       --descriptor-set-out <file> (blueprint, from a .proto),',
-  '       --category WIRE|API (breaking, API by default), --except <RULE>[@<subject>] or',
-  '       buf:<RULE>[@<path>] (breaking, any finding: a subject as its line prints it)',
+  '       --category WIRE|API (breaking, API by default), --except <RULE>@<subject> or',
+  '       buf:<RULE>@<path> (breaking, any finding: a subject as its line prints it)',
   '       --language typescript|csharp (init, repeated; both when none is named)',
 ].join('\n');
 
@@ -312,6 +312,12 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
 
     for (const { path, source } of plan.stale) {
       print(`beadc: generate takes out ${displayOf(path)}: ${source} no longer gives it`);
+    }
+
+    for (const { path, source } of plan.left) {
+      print(
+        `beadc: generate leaves ${displayOf(path)}: ${source} no longer gives it; take it out, or set clean: true`
+      );
     }
 
     return Exit.DONE;

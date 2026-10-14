@@ -1,0 +1,12 @@
+{
+  "csharp": {
+    "title": "the C# side",
+    "branches": 94.9,
+    "lines": 97.7
+  },
+  "typescript": {
+    "title": "the TypeScript side",
+    "branches": 97.8,
+    "lines": 99.1
+  }
+}

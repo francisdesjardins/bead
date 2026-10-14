@@ -13,9 +13,10 @@ public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool 
 {
     /// <summary>
     /// The credential carried beside the envelope: over HTTP, the <c>Authorization</c> field of the
-    /// <c>POST /bead</c> that carries a request, as it came, its surrounding whitespace removed; none
-    /// when nothing was carried, an empty field among them. A WebSocket carries none, nor does an
-    /// answer or what a listen brings back.
+    /// <c>POST /bead</c> that carries a request; over a WebSocket, that of its connection's upgrade
+    /// when the upgrade carries no <c>Origin</c> (spec 15.2); each as it came, its surrounding
+    /// whitespace removed; none when nothing was carried, an empty field among them. Nothing is
+    /// carried toward a client: neither an answer nor what a listen brings back carries one.
     /// </summary>
     public string? Credential { get; init; }
 
@@ -1047,7 +1048,9 @@ public sealed class RouterServer : IRouterLike, IDisposable
             return server.Transport.IsTwoWay(connectionHandle);
         }
 
-        public bool CarriesCredential(string connectionHandle)
+        // no server's transport carries a credential toward its client but as it says, whatever the
+        // credential
+        public bool Carries(string credential, string connectionHandle)
         {
             return server.Transport.CarriesCredential(connectionHandle);
         }

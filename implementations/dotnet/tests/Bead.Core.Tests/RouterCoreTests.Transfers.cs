@@ -1104,6 +1104,9 @@ public sealed partial class RouterCoreTests
 
         public List<Exception> Reports { get; } = [];
 
+        // the connection each report came with, in order
+        public List<string?> ReportedOn { get; } = [];
+
         public List<RouterActivity> Activities { get; } = [];
 
         public int BeforeAnswers { get; private set; }
@@ -1217,9 +1220,10 @@ public sealed partial class RouterCoreTests
         public void Report(Exception reason, string? connectionHandle)
         {
             Reports.Add(reason);
+            ReportedOn.Add(connectionHandle);
         }
 
-        public bool CarriesCredential(string connectionHandle)
+        public bool Carries(string credential, string connectionHandle)
         {
             return IsCarrying;
         }

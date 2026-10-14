@@ -43,6 +43,7 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | The TypeScript side's interop calls its generated server and client, never a service manager's accessor ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                                                                                                                                                                                     | `typescript`                                                                  |
 | The C# side's layout, code style, analyzers and doc comments                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | `dotnet`                                                                      |
 | The C# side's interop calls its generated server and client, never a service manager's accessor, and the builder's C# goldens build under this side's gates ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                                                                                                                                 | `dotnet`                                                                      |
+| What each side's tests run, lines and branches each, holds the side's floor in `tools/coverage-floors.json`                                                                                                                                                                                                                                                                                                                                                                                                                                                | `typescript`, `dotnet`                                                        |
 | `bead/options.proto` and the builder's fixtures keep buf's lint and format, and the options' generated code is what protoc-gen-es writes ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                                                                                                                                                    | `builder`                                                                     |
 | The builder's tests on Linux and on Windows; its types, lint and format on Linux                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `builder`                                                                     |
 | The interop's `.proto` gives the interop's blueprint, its projection byte for byte, in either line ending, on Linux and on Windows ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))                                                                                                                                                                                                                                                                                                                          | `builder`                                                                     |
@@ -61,6 +62,9 @@ comment in [`ci.yml`](../../.github/workflows/ci.yml) says what it runs:
 | Each version agrees with itself, the C# lock files' project ranges included, and a released section of the CHANGELOG stays as its tag shipped it                                                                                                                                                                                                                                                                                                                                                                                                           | `commits`                                                                     |
 | A release moves each version its changes owe, one step past its last release, at least its minor where a file, a key or a property was added; it dates its CHANGELOG section and links it; each document's tag sits at the first `v*` that gives its version, stated or its own ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md))                                                                                                                                                                                                    | `commits`                                                                     |
 | The root's tools do what their tests say                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `commits`                                                                     |
+| Every action CI runs is pinned by its commit's full sha                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | `commits`                                                                     |
+| No dependency of any lockfile, the C# side's, the three `yarn.lock` and the spec's `requirements.txt`, is under an advisory OSV knows; no C# package restored, direct or transitive, under one NuGet knows                                                                                                                                                                                                                                                                                                                                                 | `commits`, `dotnet`                                                           |
+| No code is under a blocking rule of Semgrep's community sets for TypeScript, C#, GitHub Actions and secrets                                                                                                                                                                                                                                                                                                                                                                                                                                                | `commits`                                                                     |
 
 **A gate guards itself against finding nothing.** A floor says what it must have found: the comment
 budget fails under 40 blocks in 10 files; Microsoft.Testing.Platform fails a run where no test ran,
@@ -82,6 +86,29 @@ suite's skips not 909, and a testee answers a binary request for a message it la
 error, never a skip, but the unstable edition's, which no stock generator compiles. A floor is
 passed by a wide margin and fails only when code really went away, which is worth being told.
 
+**What comes from another's hands is held where it comes in.** An action runs by its commit's full
+sha, its version in a comment beside it, since a tag moves and a moved tag runs another's code in
+CI, as GitHub's security hardening guidance for Actions advises; a step fails any `uses:` pinned
+otherwise. OSV-Scanner reads every lockfile against the advisories OSV knows, and NuGetAudit, at
+`NuGetAuditMode` `all` and `NuGetAuditLevel` `low` in `Directory.Build.props`, every C# package
+restored, direct or transitive, against those NuGet knows: a known advisory of any severity fails
+the run, NuGet's as a warning the build makes an error. Semgrep runs its community rules for
+TypeScript, C#, GitHub Actions and secrets, the generated folders and the goldens left out; its
+rules are its registry's, fetched at each run, so a rule added there may fail a commit that changed
+nothing, which is read as a finding, never as a flake, as `ci.yml` warns where the step stands.
+Each scanner runs from its image at its digest, as shellcheck does, so a scanner changes by a change
+of its pin. CodeQL is not taken: its code scanning, on a private repository, needs GitHub Advanced
+Security.
+
+**Coverage holds a floor of another kind, set close by design: a ratchet.** What each side's tests
+run, lines and branches, is held to the side's floor in
+[`tools/coverage-floors.json`](../../tools/coverage-floors.json), which `tools/coverage-report.mjs`
+compares unrounded and which fails where nothing was measured. A floor sits half a point under what
+was measured, so an async path that a run may or may not take fails no push; `--raise` moves it up
+to what a run measured, less that half point, at a release or whenever the tests gain, never down,
+and a floor lowered is a decision, with its reason. The two sides' floors differ, a measure of each
+side's code and not a behaviour, so no row of `docs/support.md` holds them.
+
 **A ceiling is a policy, and is chosen as one.** The comment budget's, 50 words to a comment and 120
 to an internal JSDoc, is a decision about what a reader's attention is worth, never a snapshot of
 what the code weighs today.
@@ -95,8 +122,10 @@ exceptions it lists, the events of three values among them, with the one optiona
 both sides and the C# side's classes without a base
 ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)); git-flow's branch names and
 the CHANGELOG's entries; whether a document's move is its minor or its patch, past the floor
-`tools/check-versions.mjs` holds
-([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); a row of the support matrix
+`tools/check-versions.mjs` holds, and whether the product's is, a break its minor while its major is
+0 ([0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)); each Yarn project's
+`enableScripts: false`, the scripts its `dependenciesMeta` lets run alone
+([0005](0005-a-toolchain-per-language.md)); a row of the support matrix
 for every difference between languages ([0004](0004-one-behaviour-in-every-language.md)); what a
 call allocates for debugging on the TypeScript side, which no test reads
 ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)); the two house styles kept alike

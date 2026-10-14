@@ -168,7 +168,8 @@ const isProtocolList = (lines: readonly string[]): boolean => {
   );
 };
 
-// a version 13 upgrade's form beside its version: one key, its subprotocols, and no content
+// a version 13 upgrade's form beside its version: one key, its subprotocols, an `Authorization`
+// at most, which is no list to combine (RFC 9110 §5.3), and no content
 const isWellFormed = (request: IHandshakeRequestLike): boolean => {
   const keys = linesOf(request, 'sec-websocket-key');
   const protocols = linesOf(request, 'sec-websocket-protocol');
@@ -177,6 +178,7 @@ const isWellFormed = (request: IHandshakeRequestLike): boolean => {
     keys.length === 1 &&
     KEY.test(keys[0] ?? '') &&
     (protocols.length === 0 || isProtocolList(protocols)) &&
+    linesOf(request, 'authorization').length <= 1 &&
     linesOf(request, 'content-length').every((length) => {
       return NO_CONTENT.test(length);
     }) &&
@@ -222,8 +224,9 @@ export const toldOfHandshake = (
  *    `websocket` or a `Connection` listing no `upgrade`, in any ASCII case — 426 `upgrade-required`;
  * 5. a `Sec-WebSocket-Version` in two lines, 400 `malformed`; any but 13, or none, 426
  *    `version-refused`, naming 13;
- * 6. a key not one line of 16 bytes in base64, subprotocols no list of distinct tokens, or content,
- *    400 `malformed`;
+ * 6. a key not one line of 16 bytes in base64, subprotocols no list of distinct tokens, more than
+ *    one `Authorization` line, which is no list to combine (RFC 9110 §5.3), or content, 400
+ *    `malformed`;
  * 7. an `Origin` neither the server's own, by the request's authority, nor among `origins`, 403
  *    `origin-refused`.
  *

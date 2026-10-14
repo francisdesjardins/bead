@@ -952,15 +952,16 @@ public sealed class WebSocketServerTests
             .WaitAsync(Patience, Cancelled));
 
         // silent past its connection timeout, the client is closed, and its session goes with it
+        // ! the client's router forgets its token a turn after its transport reads closed: wait for
+        // both, not for the state alone
         Assert.True(await Eventually(() =>
         {
-            return ends.Client.Transport.ReadyState == ReadyState.Closed;
+            return ends.Client.Transport.ReadyState == ReadyState.Closed && ends.Client.Router.SessionToken is null;
         }));
         Assert.True(await Eventually(() =>
         {
             return server.Sessions.GetAll().Count == 0;
         }));
-        Assert.Null(ends.Client.Router.SessionToken);
     }
 
     [Fact]
@@ -1138,7 +1139,9 @@ public sealed class WebSocketServerTests
             server.Sessions.Set(server.Sessions.Create(request.ConnectionHandle) with
             {
                 ConnectionInactivityTimeout = Timeout.InfiniteTimeSpan,
-                SessionInactivityTimeout = TimeSpan.FromMilliseconds(80),
+                // ! on the real clock: the registration must reach the server inside it, which a
+                // loaded runner takes far more than a few milliseconds to do
+                SessionInactivityTimeout = TimeSpan.FromSeconds(1),
             });
 
             return response.Answer("");
@@ -1270,6 +1273,13 @@ public sealed class WebSocketServerTests
             await alice.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port }, Cancelled);
             await alice.Services.GetRequest(OpenSession, TextAsked)("alice")().WaitAsync(Patience, Cancelled);
             await other.Connect(new WebSocketConnectOptions { Host = "127.0.0.2", Port = port }, Cancelled);
+
+            // ! the client's connect settles on the 101, which the server writes before it keeps the
+            // connection: wait for it to hold both
+            Assert.True(await Eventually(() =>
+            {
+                return server.Transport.Clients.Count == 2;
+            }));
 
             // one address and one port, two connections: the second is in no session of the first's
             var clients = server.Transport.Clients;

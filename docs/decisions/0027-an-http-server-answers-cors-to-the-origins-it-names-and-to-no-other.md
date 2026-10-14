@@ -24,7 +24,9 @@ browser sends without a preflight, does nothing: a `POST` of `text/plain` is 415
 bare `GET` 400 `malformed`. So CORS for Bead is the preflight and the fields after it.
 
 **The other way, a page of another origin on the WebSocket transport alone**, costs it its one
-bearer path: `ELSEWHERE` rides `Authorization` (15.5), which a page cannot set on an upgrade.
+bearer path: `ELSEWHERE` rides `Authorization` (15.5), which a page cannot set on an upgrade, and
+an upgrade from a page carries no credential, whatever its browser writes there
+([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
 
 **The Fetch Standard.** [§3.3](https://fetch.spec.whatwg.org/#http-cors-protocol): a preflight is an
 `OPTIONS` carrying `Access-Control-Request-Method`, answered with an ok status;

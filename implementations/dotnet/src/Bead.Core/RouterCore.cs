@@ -607,7 +607,11 @@ public sealed class RouterCore : IDisposable
         var known = asked is { Scheme: CredentialScheme.Opaque, SessionToken: null } ? _port.KnownSessionTokenOf(connectionHandle) : null;
         var (presented, carried, refusal) = CallSession.PresentedCredentialOf(asked, known);
 
-        refusal ??= CallSession.UncarriedOf(presented, (_port.CarriesCredential(connectionHandle), _port.IsSecure(connectionHandle)));
+        // * what the call presents, against what the connection carries: over a WebSocket, the bytes
+        // its upgrade carried alone (spec 13.4)
+        var carries = carried is { } bytes && _port.Carries(bytes, connectionHandle);
+
+        refusal ??= CallSession.UncarriedOf(presented, (carries, _port.IsSecure(connectionHandle)));
 
         if (refusal is not null)
         {
@@ -1287,10 +1291,10 @@ public sealed class RouterCore : IDisposable
     }
 
     // what did not read: a request of the peer's on a free call id is answered; an answer of this
-    // layout ends the call it is for; anything else is reported, or dropped when late
-    private void Gate(FailureException failure, (string ConnectionHandle, EnvelopePrefix Prefix) received)
+    // layout ends the call it is for; anything else is reported, once, or dropped when late
+    private void Gate(FailureException failure, (string ConnectionHandle, EnvelopePrefix Prefix, bool IsReported) received)
     {
-        var (connectionHandle, (callId, kind, layout)) = received;
+        var (connectionHandle, (callId, kind, layout), isReported) = received;
         var isThisLayout = layout == (byte)EnvelopeLayout.First;
 
         // a request of the peer's, on a call id free?
@@ -1304,7 +1308,7 @@ public sealed class RouterCore : IDisposable
         // a chunk of this layout, of a transfer this side receives?
         if (kind == (byte)EnvelopeKind.Chunk && isThisLayout)
         {
-            GateChunk(failure, new CallAddress(callId, connectionHandle));
+            GateChunk(failure, (new CallAddress(callId, connectionHandle), isReported));
 
             return;
         }
@@ -1322,7 +1326,10 @@ public sealed class RouterCore : IDisposable
                 return;
             }
 
-            _port.Report(failure, connectionHandle);
+            if (!isReported)
+            {
+                _port.Report(failure, connectionHandle);
+            }
 
             return;
         }
@@ -1370,9 +1377,10 @@ public sealed class RouterCore : IDisposable
 
     // a chunk that did not read ends the transfer it was for, as invalid — unless its payload came
     // whole already; on a call id reserved or abandoned, it is late, and dropped in silence; anywhere
-    // else, it is reported
-    private void GateChunk(FailureException failure, CallAddress call)
+    // else, it is reported, once
+    private void GateChunk(FailureException failure, (CallAddress Call, bool IsReported) gated)
     {
+        var (call, isReported) = gated;
         var invalid = ProtocolFailureOf(ProtocolCode.ChunkInvalid, failure.Failure.Detail);
 
         if (CallIds.SideOf(call.CallId) == _side)
@@ -1415,7 +1423,10 @@ public sealed class RouterCore : IDisposable
             }
         }
 
-        _port.Report(failure, call.ConnectionHandle);
+        if (!isReported)
+        {
+            _port.Report(failure, call.ConnectionHandle);
+        }
     }
 
     // a cancel from the peer ends a call it opened: forgotten first, so an answer from what hears the
@@ -1692,7 +1703,7 @@ public sealed class RouterCore : IDisposable
         var dispatched = (target, answering);
 
         // routed, it is asked its admission, on its header and its call's session
-        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session }) is { } refusal)
+        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session, TransportCredential = answering.TransportCredential }) is { } refusal)
         {
             Refuse(refusal, dispatched);
 
@@ -2054,6 +2065,17 @@ public sealed class RouterCore : IDisposable
 
             return;
         }
+        catch (Exception reason)
+        {
+            // as ENVELOPE_MALFORMED, its words with it, with the connection it came on
+            var raised = new FailureException.Raised(FailureOrigin.Local, _side);
+
+            _port.Report(
+                new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), (raised, reason)),
+                connectionHandle);
+
+            return;
+        }
 
         Envelope? envelope;
 
@@ -2070,7 +2092,21 @@ public sealed class RouterCore : IDisposable
         }
         catch (FailureException reason)
         {
-            Gate(reason, (connectionHandle, prefix));
+            Gate(reason, (connectionHandle, prefix, false));
+
+            return;
+        }
+        catch (Exception reason)
+        {
+            // ! a codec that throws other than a refusal throws an error of this side's own: reported,
+            // its words with it, while what answers or ends a call for it is ENVELOPE_MALFORMED with
+            // none of them, which a peer's bytes could reach (spec 9.0)
+            var raised = new FailureException.Raised(FailureOrigin.Local, _side);
+
+            _port.Report(
+                new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), (raised, reason)),
+                connectionHandle);
+            Gate(new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed), (raised, reason)), (connectionHandle, prefix, true));
 
             return;
         }

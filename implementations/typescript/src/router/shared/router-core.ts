@@ -193,7 +193,10 @@ const MAY_BE_NONE: ReadonlySet<keyof IRouterLimits> = new Set([
 
 // helpers
 
-/** `reason` as the failure it is, or as an envelope malformed in a way the codec did not name. */
+/**
+ * `reason` as the failure it is, or as an envelope malformed in a way the codec did not name, its
+ * words for the side's report alone (spec 9.0).
+ */
 const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMalformed'>) => {
   return reason instanceof FailureError
     ? reason
@@ -1168,8 +1171,15 @@ export const createRouterCore = <Handle extends string>(
   // a chunk that did not read ends the transfer it was for, as invalid — unless its payload came
   // whole already; on a call id reserved or abandoned, it is late, and dropped in silence; anywhere
   // else, it is reported
-  const gateChunk = (failure: FailureError, call: ICallAddress<Handle>): void => {
-    const { callId, connectionHandle } = call;
+  const gateChunk = (
+    failure: FailureError,
+    {
+      callId,
+      connectionHandle,
+      isReported = false,
+    }: ICallAddress<Handle> & { isReported?: boolean }
+  ): void => {
+    const call = { callId, connectionHandle };
     const invalid = { ...failures.chunkInvalid, detail: failure.detail };
 
     if (sideOfCallId(callId) === failures.side) {
@@ -1197,14 +1207,20 @@ export const createRouterCore = <Handle extends string>(
       }
     }
 
-    return (port.report(failure, connectionHandle), undefined);
+    if (!isReported) {
+      port.report(failure, connectionHandle);
+    }
   };
 
   // what did not read: a request of the peer's on a free call id is answered; a response or a chunk
-  // of this layout ends the call or the transfer it is for; anything else is reported
+  // of this layout ends the call or the transfer it is for; anything else is reported, once
   const gate = (
     failure: FailureError,
-    { connectionHandle, prefix }: { connectionHandle: Handle; prefix: IEnvelopePrefix }
+    {
+      connectionHandle,
+      isReported = false,
+      prefix,
+    }: { connectionHandle: Handle; isReported?: boolean; prefix: IEnvelopePrefix }
   ): void => {
     const { callId, kind, layout } = prefix;
 
@@ -1221,7 +1237,7 @@ export const createRouterCore = <Handle extends string>(
 
     // a chunk of this layout, of a transfer this side receives?
     if (kind === EnvelopeKind.CHUNK && layout === EnvelopeLayout.FIRST) {
-      return (gateChunk(failure, { callId, connectionHandle }), undefined);
+      return (gateChunk(failure, { callId, connectionHandle, isReported }), undefined);
     }
 
     // an answer of this layout, to a call waiting?
@@ -1242,7 +1258,11 @@ export const createRouterCore = <Handle extends string>(
         return;
       }
 
-      return (port.report(failure, connectionHandle), undefined);
+      if (!isReported) {
+        port.report(failure, connectionHandle);
+      }
+
+      return;
     }
 
     const { destinationId, procedureAddress } = pendingRequest;
@@ -1283,7 +1303,17 @@ export const createRouterCore = <Handle extends string>(
   const admitRouted = ({ dispatched, payload, resolver }: IRouted<Handle>): void => {
     const { connectionHandle, header, session } = dispatched;
     const { callId, total } = header;
-    const refusal = refusalOf(resolver, { connectionHandle, header, session });
+    // what its transport carried stands for ELSEWHERE alone, as its resolver is handed it
+    const transportCredential =
+      header.credential?.scheme === CredentialScheme.ELSEWHERE
+        ? dispatched.transportCredential
+        : undefined;
+    const refusal = refusalOf(resolver, {
+      connectionHandle,
+      header,
+      session,
+      ...(transportCredential === undefined ? {} : { transportCredential }),
+    });
 
     if (refusal !== undefined) {
       return (refuse(refusal, dispatched), undefined);
@@ -1845,7 +1875,18 @@ export const createRouterCore = <Handle extends string>(
         maximumEnvelopeBytes: limits.maximumEnvelopeBytes,
       });
     } catch (reason) {
-      return (gate(failureOf(reason, failures), { connectionHandle, prefix }), undefined);
+      if (reason instanceof FailureError) {
+        return (gate(reason, { connectionHandle, prefix }), undefined);
+      }
+
+      // ! a codec that throws other than a refusal throws an error of this side's own: reported, its
+      // words with it, while what answers or ends a call for it is ENVELOPE_MALFORMED with none of
+      // them, which a peer's bytes could reach (spec 9.0)
+      port.report(failureOf(reason, failures), connectionHandle);
+
+      const failure = new FailureError(failures.envelopeMalformed, { cause: reason });
+
+      return (gate(failure, { connectionHandle, isReported: true, prefix }), undefined);
     }
 
     // an advisory kind is skipped

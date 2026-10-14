@@ -78,7 +78,7 @@ internal sealed class WebSocketConnection
         }
         else
         {
-            elapsed.Cancel();
+            await elapsed.CancelAsync();
         }
     }
 

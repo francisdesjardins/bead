@@ -56,11 +56,21 @@ interface's, takes what it takes.
 **Every warning is an error, and the analyzers run at `latest-recommended`.**
 `Directory.Build.props` holds every project to `net10.0`, the latest language version, nullable
 references, implicit usings, `AnalysisLevel` at `latest-recommended`, the code style enforced in the
-build, a documentation file, and `TreatWarningsAsErrors`. **Every public member has its doc
-comment**: the build fails on one that has none (CS1591). A test project is exempt, and so are
-underscores in a test's name (CA1707): a test says what it shows by its name. An analyzer is
-overruled only on the type it would wrongly refuse, with its reason where it stands: CA1711, on
-`EnvelopeFlags` ([0003](0003-one-word-one-meaning.md)).
+build, a documentation file, and `TreatWarningsAsErrors`, which makes NuGetAudit's warning on a
+package under a known advisory an error ([0006](0006-a-rule-has-its-gate.md)). **Every public
+member has its doc comment**: the build fails on one that has none (CS1591). A test project is
+exempt, and so are underscores in a test's name (CA1707): a test says what it shows by its name.
+An analyzer is
+overruled only on the member it would wrongly refuse, with its reason where it stands: CA1711, on
+`EnvelopeFlags`, the flags as the spec names them, and CA1716, on `IServerTransport.Error`, the
+error as every side names it ([0003](0003-one-word-one-meaning.md)); in the tests, CA5350, on the
+SHA-1 of a WebSocket's handshake, which RFC 6455 names and on which nothing secret rests, and
+VSTHRD103, on one relay test whose `Cancel` must run its callbacks before the call settles, which
+`CancelAsync` would run later. **No `async void`**: the threading analyzers'
+VSTHRD100 and VSTHRD101 fail the build on one, an `async` lambda given to an event among them,
+whose exception ends the process; their rules that read this side's design as a fault — a result
+read once its task completed, a task posted to the router's scheduler, an `Async` suffix — are
+off, each with its reason, in `.editorconfig`.
 
 **One solution, `Bead.slnx`**, laid out as the C# side's
 [README](../../implementations/dotnet/README.md) says: a transport that needs a framework has a
@@ -108,12 +118,12 @@ delegate or an interface: a request is made in three calls, as on the TypeScript
 no body limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the
 marked 503; a refusal of HTTP/1 whose body it does not read says `connection: close`;
 `x-forwarded-for` is read by one rule of its own
-([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)).
 
 **The gate is two commands, from `implementations/dotnet`**:
 `dotnet format Bead.slnx --verify-no-changes`, then `dotnet test --solution Bead.slnx`, which
-builds, and fails a run where no test ran. CI's `dotnet` job runs both, then the interop
-([0006](0006-a-rule-has-its-gate.md)).
+builds, and fails a run where no test ran. CI's `dotnet` job runs both, the tests under coverage
+held to the side's floor, then the interop ([0006](0006-a-rule-has-its-gate.md)).
 
 ## Consequences
 

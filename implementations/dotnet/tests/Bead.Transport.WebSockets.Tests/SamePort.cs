@@ -34,6 +34,8 @@ internal sealed class SamePort : IDisposable
 
         Invoker = new HttpMessageInvoker(new SocketsHttpHandler
         {
+            // as the client's own: no redirect followed
+            AllowAutoRedirect = false,
             ConnectCallback = async (context, cancellationToken) =>
             {
                 var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);

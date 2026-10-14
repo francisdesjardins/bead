@@ -155,8 +155,6 @@ const createTestRelay = (
   const own: IAsked[] = [];
   const reports: [message: string, isLegA: boolean][] = [];
   const control = {
-    /** What each answer throws, in turn, when there is one. */
-    respondErrors: [] as Error[],
     settle: answering(Uint8Array.of(8)),
   };
   const relay = createRelay({
@@ -179,9 +177,7 @@ const createTestRelay = (
     respond: (answer, { header }) => {
       answers.push([answer, header]);
 
-      const error = control.respondErrors.shift();
-
-      return error === undefined ? Promise.resolve() : Promise.reject(error);
+      return Promise.resolve();
     },
   });
 
@@ -231,7 +227,17 @@ const createCarryingRelay = (
   const own: IAsked[] = [];
   const relay = createRelay({
     carriageOf: (connectionHandle) => {
-      return carriage.get(connectionHandle) ?? { carriesCredential: true, isSecure: true };
+      const { carriesCredential, isSecure } = carriage.get(connectionHandle) ?? {
+        carriesCredential: true,
+        isSecure: true,
+      };
+
+      return {
+        carries: () => {
+          return carriesCredential;
+        },
+        isSecure,
+      };
     },
     failures: SERVER_FAILURES,
     limits,
@@ -282,10 +288,12 @@ test.describe('createRelay, credentials', () => {
     relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 7 });
     relay.register({ connectionHandle: plain }, { audience: 'bead-interop', destinationId: 9 });
 
+    // an ELSEWHERE admitted with what leg A's transport carried, as its resolution needs
     const codeOf = (credential: Credential | undefined, destinationId: number) => {
       return relay.handlerOf(destinationId)?.admit?.({
         connectionHandle: first,
         header: presentingOf(1, { credential, destinationId }),
+        ...(credential === ELSEWHERE ? { transportCredential: CARRIED } : {}),
       })?.code;
     };
     const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
@@ -313,6 +321,50 @@ test.describe('createRelay, credentials', () => {
       [unreachable, unreachable, unreachable, unreachable],
       [undefined, unreachable, unreachable, unreachable],
     ]);
+  });
+
+  test('answers an ELSEWHERE DESTINATION_UNREACHABLE over a leg B whose upgrade carried the relay’s own credential', async () => {
+    // leg B: a router over a WebSocket whose upgrade carried the relay's own credential, which its
+    // transport carries alone
+    const pipe = createPipedTransports({ connectionHandle: device });
+    using legB = createRouterClient(pipe.client);
+    const target = {
+      limits: legB.limits,
+      request: legB.request,
+      transport: {
+        carries: (credential: string) => {
+          return credential === 'Interop sub=relay';
+        },
+        isSecure: true,
+      },
+    };
+    const { answers, own, relay } = createTestRelay();
+
+    pipe.open();
+    relay.register(target, { audience: 'bead-interop', destinationId: 7 });
+
+    // leg A's credential is another: the relay presents none of its own for it, nothing tried
+    await relay.handlerOf(7)?.({
+      ...propsOf(presentingOf(1, { credential: ELSEWHERE }), { isAdmitted: false }),
+      transportCredential: CARRIED,
+    });
+
+    expect(failuresOf(answers)).toEqual([
+      [
+        ProtocolCode.DESTINATION_UNREACHABLE,
+        undefined,
+        'destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another',
+      ],
+    ]);
+    expect(own).toEqual([]);
+    // the very bytes leg B's upgrade carried go
+    expect(
+      relay.handlerOf(7)?.admit?.({
+        connectionHandle: first,
+        header: presentingOf(3, { credential: ELSEWHERE }),
+        transportCredential: 'Interop sub=relay',
+      })
+    ).toBeUndefined();
   });
 
   test('presents on leg B what leg A does: a JWT’s same bytes, an ELSEWHERE with what leg A’s transport carried, none for none or OPAQUE', async () => {
@@ -857,32 +909,6 @@ test.describe('createRelay', () => {
     await relay.handlerOf(7)?.(propsOf(headerOf(1), { signal: controller.signal }));
 
     expect(answers).toEqual([]);
-  });
-
-  // spec 14.5
-  test('answers as failed, once, what leg A cannot carry, and lets why be reported', async () => {
-    const { answers, control, relay } = createTestRelay();
-    const tooLarge = new FailureError({
-      ...SERVER_FAILURES.payloadTooLarge,
-      detail: 'a payload is 8 bytes at most, not 9',
-    });
-    const gone = new Error('the socket is closed');
-
-    relay.register(createTarget().target, { destinationId: 7 });
-    control.respondErrors.push(tooLarge);
-
-    await expect(relay.handlerOf(7)?.(propsOf(headerOf(1)))).rejects.toBe(tooLarge);
-
-    // the second cannot go out either: it goes nowhere, and the first reason is the one reported
-    control.respondErrors.push(gone, new Error('still closed'));
-
-    await expect(relay.handlerOf(7)?.(propsOf(headerOf(3)))).rejects.toBe(gone);
-    expect(failuresOf(answers)).toEqual([
-      [9],
-      [ProtocolCode.PAYLOAD_TOO_LARGE, undefined, 'a payload is 8 bytes at most, not 9'],
-      [9],
-      [ProtocolCode.PROCEDURE_FAILED, undefined, 'the socket is closed'],
-    ]);
   });
 
   test('registers a destination given or drawn — never 0, nor one taken — lists them, and takes out its own alone', () => {

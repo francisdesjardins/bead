@@ -108,6 +108,21 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         return closes;
     }
 
+    // the Authorization lines of a request's head, their values as they came
+    private static List<string> AuthorizationsOf(byte[] head)
+    {
+        return [.. Encoding.ASCII.GetString(head)
+            .Split("\r\n")
+            .Where((line) =>
+            {
+                return line.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase);
+            })
+            .Select((line) =>
+            {
+                return line["Authorization:".Length..].Trim(' ', '\t');
+            })];
+    }
+
     // a connect the listener refuses: it fails, and its target is the one a reconnection takes
     private static async Task ConnectRefused(WebSocketTransportClient client, Listener listener)
     {
@@ -298,16 +313,16 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Carries_no_credential_beside_an_envelope_and_is_secure_under_wss_or_to_a_loopback_host_judged_by_the_URL_it_was_given()
+    public async Task Carries_no_credential_its_upgrade_did_not_carry_and_is_secure_under_wss_or_to_a_loopback_host_judged_by_the_URL_it_was_given()
     {
         await using var faraway = new WebSocketTransportClient();
         await using var secured = new WebSocketTransportClient();
         var instant = TimeSpan.FromMilliseconds(1);
 
         // judged from what it connects with, before its first connect from nothing
-        Assert.Equal((false, false), (_client.CarriesCredential, _client.IsSecure));
+        Assert.Equal((false, false), (_client.Carries(Bearer), _client.IsSecure));
         await _client.Connect(Target, Cancelled);
-        Assert.Equal((false, true), (_client.CarriesCredential, _client.IsSecure));
+        Assert.Equal((false, true), (_client.Carries(Bearer), _client.IsSecure));
 
         // off the machine, in the clear or under TLS, whether its connect went through or not
         await Assert.ThrowsAnyAsync<Exception>(() =>
@@ -784,23 +799,224 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Carries_no_credential_the_envelope_alone_goes()
+    public async Task Writes_the_credential_it_is_given_on_its_upgrade_and_carries_those_bytes_alone()
     {
         using var listener = new Listener(IPAddress.Loopback);
-        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Credential = Bearer }, Cancelled);
         var (peer, head) = await listener.Next();
 
         using (peer)
         using (var server = await Listener.Answer(peer, head))
         {
             await connecting.WaitAsync(Patience, Cancelled);
+
+            // its Authorization, one line, as given
+            Assert.Equal([Bearer], AuthorizationsOf(head));
+
+            // those bytes alone, none a byte off, longer or shorter, nor trimmed of what a field
+            // cannot hold
+            Assert.True(_client.Carries(Bearer));
+            Assert.All(new[] { "Bearer mF_9.B5f-4.1JqN", $"{Bearer}x", Bearer[..^1], $" {Bearer}", "", "Bearer mF_9.B5f-4.1Jq?" }, (other) =>
+            {
+                Assert.False(_client.Carries(other), other);
+            });
+
+            // the envelope alone goes: a credential a message is given is not sent beside it
             await _client.Send(new TransportMessage("hello"u8.ToArray(), false) { Credential = Bearer }).WaitAsync(Patience, Cancelled);
 
             var buffer = new byte[16];
             var received = await server.ReceiveAsync(buffer, Cancelled).WaitAsync(Patience, Cancelled);
 
             Assert.Equal((WebSocketMessageType.Binary, "hello"), (received.MessageType, Encoding.ASCII.GetString(buffer, 0, received.Count)));
+            await _client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
         }
+
+        // none once its connection is gone, and none on an upgrade given none, an empty one among them
+        Assert.False(_client.Carries(Bearer));
+
+        foreach (var given in new[] { null, "" })
+        {
+            await using var client = new WebSocketTransportClient();
+            var bare = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Credential = given }, Cancelled);
+            var (other, otherHead) = await listener.Next();
+
+            using (other)
+            using (await Listener.Answer(other, otherHead))
+            {
+                await bare.WaitAsync(Patience, Cancelled);
+                Assert.Empty(AuthorizationsOf(otherHead));
+                Assert.False(client.Carries(""));
+                Assert.False(client.Carries(Bearer));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Calls_its_credential_provider_at_each_attempt_a_reconnection_s_included_and_carries_the_bytes_it_handed()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var tokens = new List<CancellationToken>();
+        var handed = 0;
+        await using var client = new WebSocketTransportClient();
+        var target = new WebSocketConnectOptions
+        {
+            Host = Host,
+            Port = listener.Port,
+            CredentialProvider = (token) =>
+            {
+                tokens.Add(token);
+                handed += 1;
+
+                // * its second call throws: that attempt fails, its throw the cause, and the next calls it again
+                return handed == 2 ? throw new InvalidOperationException("the token store is away") : ValueTask.FromResult($"Bearer token-{handed}");
+            },
+        };
+        var connecting = client.Connect(target, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            Assert.Equal(["Bearer token-1"], AuthorizationsOf(head));
+            Assert.Equal((true, 1), (client.Carries("Bearer token-1"), handed));
+
+            var reconnecting = client.Reconnect(new TransportReconnectOptions { Delay = DelayOf(TimeSpan.Zero), MaximumAttempts = 2 });
+            var (again, againHead) = await listener.Next();
+
+            using (again)
+            using (await Listener.Answer(again, againHead))
+            {
+                await reconnecting.WaitAsync(Patience, Cancelled);
+
+                // the failed attempt went nowhere: the next one carries what the provider handed it
+                Assert.Equal(["Bearer token-3"], AuthorizationsOf(againHead));
+                Assert.Equal((false, true, 3), (client.Carries("Bearer token-1"), client.Carries("Bearer token-3"), handed));
+                // each told when its attempt is over
+                Assert.All(tokens, (token) =>
+                {
+                    Assert.True(token.IsCancellationRequested);
+                });
+                Assert.Equal(3, tokens.Count);
+                await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            }
+        }
+
+        // a provider's throw fails the connect, its cause
+        await using var failing = new WebSocketTransportClient();
+        var away = new InvalidOperationException("the token store is away");
+        var thrown = await Assert.ThrowsAsync<WebSocketException>(() =>
+        {
+            return failing.Connect(
+                target with
+                {
+                    CredentialProvider = (_) =>
+                    {
+                        throw away;
+                    },
+                },
+                Cancelled);
+        });
+
+        Assert.Equal(("the credential provider failed", away, ReadyState.Closed), (thrown.Message, thrown.InnerException, failing.ReadyState));
+        Assert.False(listener.IsPending);
+    }
+
+    [Fact]
+    public async Task Refuses_a_credential_that_is_no_field_value_a_space_or_a_tab_first_or_last_among_them_or_over_a_URL_in_the_clear_off_the_loopback_before_its_upgrade_goes()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var target = new WebSocketConnectOptions { Host = Host, Port = listener.Port };
+
+        foreach (var credential in new[] { $" {Bearer}", $"{Bearer} ", $"\t{Bearer}", $"{Bearer}\t", "Bearer a\r\nb", "Bearer é", "Bearer \0" })
+        {
+            Assert.Equal(
+                "a credential holds visible ASCII, spaces and tabs alone, none first or last (Parameter 'credential')",
+                (await Assert.ThrowsAsync<ArgumentException>(() =>
+                {
+                    return _client.Connect(target with { Credential = credential }, Cancelled);
+                })).Message);
+        }
+
+        // the upgrade itself would carry it in the clear, a provider's alike, which is never called
+        var called = 0;
+
+        var provider = (CancellationToken _) =>
+        {
+            called += 1;
+
+            return ValueTask.FromResult(Bearer);
+        };
+
+        foreach (var faraway in new[] { target with { Host = "192.0.2.1", Credential = Bearer }, target with { Host = "example.com", CredentialProvider = provider } })
+        {
+            Assert.Equal(
+                "a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback (Parameter 'options')",
+                (await Assert.ThrowsAsync<ArgumentException>(() =>
+                {
+                    return _client.Connect(faraway, Cancelled);
+                })).Message);
+        }
+
+        // nothing moved: no state, no target a reconnection replays, no upgrade sent
+        Assert.Equal(0, called);
+        Assert.Equal(ReadyState.Uninitialized, _client.ReadyState);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return _client.Reconnect();
+        });
+        Assert.False(listener.IsPending);
+
+        // a provider's value, held alike once handed: the connect fails, and a reconnection does not
+        // try again what no attempt would mend
+        await using var client = new WebSocketTransportClient();
+        var handed = Bearer;
+        var connecting = client.Connect(
+            target with
+            {
+                CredentialProvider = (_) =>
+                {
+                    return ValueTask.FromResult(handed);
+                },
+            },
+            Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+            handed = $"{Bearer} ";
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return client.Reconnect(new TransportReconnectOptions { Delay = DelayOf(TimeSpan.Zero), MaximumAttempts = 3 }).WaitAsync(Patience, Cancelled);
+            });
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+
+        Assert.False(listener.IsPending);
+    }
+
+    [Fact]
+    public async Task Refuses_a_credential_and_a_credential_provider_given_together()
+    {
+        var both = Target with
+        {
+            Credential = Bearer,
+            CredentialProvider = (_) =>
+            {
+                return ValueTask.FromResult(Bearer);
+            },
+        };
+
+        Assert.Equal(
+            "a connect takes a credential or a credential provider, not both (Parameter 'options')",
+            (await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return _client.Connect(both, Cancelled);
+            })).Message);
+        Assert.Equal(ReadyState.Uninitialized, _client.ReadyState);
     }
 
     [Fact]
@@ -963,7 +1179,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
                 var first = new byte[1];
                 var reading = peer.GetStream().ReadAsync(first, Cancelled).AsTask();
-                var isRead = await Task.WhenAny(reading, Task.Delay(1_000, Cancelled)) == reading;
+                // a ping comes within the patience of every wait; its absence is waited for a second
+                var isRead = await Task.WhenAny(reading, Task.Delay(isPinging ? Patience : TimeSpan.FromSeconds(1), Cancelled)) == reading;
 
                 Assert.Equal(isPinging, isRead);
 
@@ -1539,6 +1756,32 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 ("the server refused the upgrade: 502", WebSocketError.NotAWebSocket, typeof(WebSocketException)),
             ],
             failures);
+    }
+
+    [Fact]
+    public async Task Fails_its_connect_on_a_redirect_answered_to_its_upgrade_naming_its_status()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, _) = await listener.Next();
+
+        // to a server that would take the upgrade: followed, the connect would open there
+        using (peer)
+        {
+            await peer.GetStream().WriteAsync(
+                Encoding.ASCII.GetBytes($"HTTP/1.1 302 Found\r\nLocation: ws://{Host}:{_port}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                Cancelled);
+
+            var thrown = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return connecting.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal("the server refused the upgrade: 302", thrown.Message);
+        }
+
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.Empty(_server.ConnectionHandles);
     }
 
     [Fact]

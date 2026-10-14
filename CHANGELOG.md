@@ -7,6 +7,97 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-14
+
+### Added
+
+- `beadc check` refuses, `CSHARP_NAMESPACE`, a `csharp_namespace` that is no C# namespace,
+  identifiers of ASCII letters, digits and `_` by dots: the C# target writes it as it is, so
+  anything else would be code of the `.proto`'s author in every consumer's build.
+- CI holds the supply chain: every action pinned by its commit's full sha, its version beside it;
+  OSV-Scanner over every lockfile and NuGetAudit over every C# package, direct or transitive, a
+  known advisory failing the run; Semgrep's community rules for TypeScript, C#, GitHub Actions and
+  secrets over the code. No dependency runs a script as it installs, but buf's and esbuild's,
+  named in each `package.json` (decision 0006).
+
+- Each side's tests run under coverage in CI, and what they run, lines and branches each, holds the
+  side's floor in `tools/coverage-floors.json`: `tools/coverage-report.mjs --floor` fails under it,
+  or where nothing was measured, and writes the report into the run's summary. A floor sits half a
+  point under what was measured and rises with `--raise`, never down but by a decision (decision
+  0006). The C# side is measured over the whole solution, its six test projects.
+- A WebSocket upgrade that carries no `Origin` carries its `Authorization` beside every envelope
+  of its connection, which a request presenting `ELSEWHERE` stands for, resolved per request by the
+  verifier as over HTTP; one that carries an `Origin` carries none, a page's browser writing its own
+  authentication on it. A client writes the credential its connect is given, `credential` or
+  `credentialProvider`, `Credential` or `CredentialProvider`, a string or a provider called at each
+  attempt, a reconnection's included; it is refused over a URL in the clear off the loopback and, on
+  the TypeScript side, over a `WebSocket` constructor without `ws`'s shape; and an upgrade with two
+  `Authorization` fields is refused 400 (spec 15.2; decision 0032).
+- A server counts the proxies on every path to it that `trustedProxies` does not name,
+  `unnamedProxies`, `UnnamedProxies`, 0 to 8, over HTTP and over WebSocket: one whose address the
+  list holds costs none, any other one of the count, so a router whose addresses its platform does
+  not publish is passed, and a count past 8 is refused as built; a platform that publishes its
+  ranges is named in the list (spec 15.12; decision 0030).
+
+### Changed
+
+- The spec moves to 0.6.0 (`spec-v0.6.0`), and its companion, `spec/debugging.md`, to 0.2.1
+  (`debugging-v0.2.1`).
+- `beadc breaking` refuses a bare waiver of a breaking rule, `--except PROCEDURE_SAME_NAME`, and of
+  buf's, `--except buf:FIELD_SAME_TYPE`, exit 2, naming the subject's form or a path: kept in a CI,
+  it would waive a later change's finding too. A waiver names its subject or its `.proto` path, as
+  buf's `ignore_only` does; a warning of `check`'s, which finds no subject, is still waived by its
+  name (decision 0022).
+- Without `clean`, `beadc generate --check` fails on a `_bead.ts` or a `*Bead.cs` under beadc's own
+  header that the source no longer gives, and `generate` names it and leaves it: nothing but beadc
+  writes one, so a service a source dropped no longer ships in silence. Under `clean`, `generate`
+  still takes it out.
+- The DevTools extension's hook and bridge post to the page's own origin, `'/'`, never `'*'`, which
+  would reach a document the window navigated to.
+- The C# side's projects build under the threading analyzers' VSTHRD100 and VSTHRD101: an
+  `async void`, an `async` lambda given to an event among them, fails the build. The WebSocket
+  connection's close awaits `CancelAsync`, and the C# README names the analyzer for an
+  application's own listeners.
+- A client transport's `carriesCredential` is `carries(credential)`, `Carries`, on both sides: a
+  WebSocket carries the bytes its upgrade carried alone, compared in constant time. A client refuses a credential with a space or a tab first or last,
+  which no field value holds (spec 15.5). The TypeScript WebSocket server's `connection` event shows
+  the upgrade headers aside, as the HTTP server's shows a connect (decision 0032).
+- A server given no address listens on `localhost`, both loopbacks, `127.0.0.1` and `::1` on one
+  port, as Kestrel's `ListenLocalhost`: no other process can answer a client that reaches it by
+  `localhost` on the other family. `localhost` is the one name an address takes; a port taken on
+  either family fails the start, a drawn one is drawn again; where the IPv6 loopback is absent it
+  listens on `127.0.0.1` and reports it (spec 15.12; decision 0024).
+- The TypeScript HTTP transport's `createServer` is called once per address bound, told it as
+  `{ address }`: an application that configures its server after building it configures each.
+- Decision 0030 is renamed for the count it holds, "A server believes `X-Forwarded-For` from the
+  proxies it names and as many unnamed ones as it counts", its file with it; every citation moves.
+- A relay answers a result leg A cannot carry, one past leg A's limit, `PROCEDURE_FAILED` with no
+  detail, whatever refused it, `PAYLOAD_TOO_LARGE` among them, as a server answers a result its side
+  cannot send, and reports why it did not go out with leg A's connection; an answer leg A's
+  transport did not take goes nowhere again, and is reported. 34 would say the request was refused
+  at its admission, though the destination's procedure ran (spec 14.5; decision 0019).
+- A failure a side answers for an error of its own, a resolver that throws, a verifier or an
+  admission that fails, a result it cannot send, an answer leg A cannot carry, a codec that throws
+  other than a refusal, carries no detail of that error, never an exception's message, which is
+  reported; `PROCEDURE_FAILED` so answered carries none, as OWASP ASVS 5.0's 16.5.1 returns a
+  generic message to the consumer of an unexpected error (spec 9.0; decision 0001).
+- The documents are brought to 0.5.0: the records, the spec in form alone, the READMEs and the
+  support matrix state what it carries as what holds, and what is ahead, the bounds a server keeps
+  against a peer, a security event for a refused credential and the parsers fuzzed, where Bead goes;
+  the broker as a transport moves to 0.6.0. No record changes its number or its file.
+
+### Fixed
+
+- The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one does:
+  a 3xx fails its connect, its status named (spec 15.6; decision 0032).
+- The TypeScript side puts nothing of an error its envelope codec throws, other than a refusal, in
+  the failure it answers: the exception's message, which a peer's bytes could reach, is reported,
+  never sent (spec 9.0).
+- The C# side answers a request its envelope codec throws on, other than a refusal,
+  `ENVELOPE_MALFORMED` with no detail, where it answered nothing and the call waited out its
+  timeout; such an error, at the prefix or past it, is reported once, with its connection
+  (spec 9.0).
+
 ## [0.4.1] - 2026-10-13
 
 ### Added
@@ -1254,7 +1345,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.1...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.5.0...develop
+[0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0

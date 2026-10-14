@@ -95,7 +95,6 @@ export const createWorkerTransportClient = ({
       };
 
       return {
-        carriesCredential: false,
         clock,
         isSecure: true,
 

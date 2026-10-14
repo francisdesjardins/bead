@@ -4,9 +4,10 @@
 // first, as `generate` checks it, an error ending the run with `check`'s findings; then the earlier
 // read; then Bead's rules over the two blueprints, and buf's over the two images where both sides
 // compiled, `PROTO_SKIPPED` where a side's `.proto` goes uncompared; then the waivers (decision
-// 0022). A waiver names a rule, scoped or not to a subject, an entity by its ids as a finding's line
-// prints it, which no shift moves, or buf's rule, scoped or not to a file or a folder; a scope off
-// its form, a pointer among them, is refused. A waiver that waived nothing is WAIVER_UNUSED's
+// 0022). A waiver names a rule scoped to a subject, an entity by its ids as a finding's line prints
+// it, which no shift moves, or buf's rule scoped to a file or a folder; bare, only a rule that finds
+// no subject, since a bare waiver of one that does would waive a later change's finding too, in the
+// CI that keeps it. A scope off its form, a pointer among them, is refused. A waiver that waived nothing is WAIVER_UNUSED's
 // warning, as a linter says of a suppression no finding used: a mistyped subject, or a change a
 // release has taken, is said, never kept in silence.
 
@@ -329,10 +330,11 @@ const waives = (waiver: IWaiver, finding: IBufFinding): boolean => {
 // definition
 
 /**
- * Parses each `--except` of a `breaking` call under `category`: `<RULE>`, a rule it runs or one of
- * check's warnings; `<RULE>@<subject>`, a breaking rule at one subject of its kind; `buf:<RULE>` and
- * `buf:<RULE>@<path>`, a rule buf's category runs and beadc does not except already. Throws an
- * {@link InputError} for any other, and for WAIVER_UNUSED, which nothing waives.
+ * Parses each `--except` of a `breaking` call under `category`: `<RULE>`, a rule it runs that finds
+ * no subject or one of check's warnings; `<RULE>@<subject>`, a breaking rule at one subject of its
+ * kind; `buf:<RULE>@<path>`, a rule buf's category runs and beadc does not except already. Throws an
+ * {@link InputError} for any other, a bare waiver of a rule that finds subjects or of buf's among
+ * them, which would waive a later change's finding too, and for WAIVER_UNUSED, which nothing waives.
  */
 export const waiversOf = (
   except: readonly string[],
@@ -364,11 +366,19 @@ export const waiversOf = (
         );
       }
 
+      // ! bare, it would waive every finding of the rule, a later change's too, in a CI that keeps
+      // it: buf's ignore_only names its paths alike
+      if (scope === undefined) {
+        throw new InputError(
+          `--except ${given}: waives every finding of ${rule}, a later change's too: name a .proto file or folder, buf:${rule}@<path>`
+        );
+      }
+
       if (scope === '') {
         throw new InputError(`--except ${given}: a scope names a .proto file or folder`);
       }
 
-      return { given, rule: name, ...(scope === undefined ? {} : { path: scope }) };
+      return { given, rule: name, path: scope };
     }
 
     if (!isRuleName(name)) {
@@ -389,12 +399,23 @@ export const waiversOf = (
       );
     }
 
-    if (scope === undefined) {
-      return { given, rule: name };
-    }
-
     // * a scope is a subject, of the rule's own kind: a pointer is a place, which a shift moves
     const shapes = SHAPES_OF_RULE[name];
+
+    if (scope === undefined) {
+      // ! a rule that finds subjects, waived bare, would waive a later change's finding too
+      if (shapes !== undefined) {
+        throw new InputError(
+          `--except ${given}: waives every finding of ${name}, a later change's too: name its subject, ${shapes
+            .map((shape) => {
+              return `${name}@${SHAPES[shape].form}`;
+            })
+            .join(' or ')}`
+        );
+      }
+
+      return { given, rule: name };
+    }
 
     if (shapes === undefined) {
       throw new InputError(

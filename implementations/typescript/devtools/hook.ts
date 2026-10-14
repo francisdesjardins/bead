@@ -55,7 +55,9 @@ let batch: ReturnType<typeof setTimeout> | undefined;
 const post = (message: PageMessage): void => {
   const data: IWindowMessage = { channel: CHANNEL, from: 'hook', message };
 
-  window.postMessage(data, '*');
+  // the page's own window, at its own origin: '/' names it, an opaque one included, where '*'
+  // would reach a document the window navigated to
+  window.postMessage(data, '/');
 };
 
 const postSources = (): void => {

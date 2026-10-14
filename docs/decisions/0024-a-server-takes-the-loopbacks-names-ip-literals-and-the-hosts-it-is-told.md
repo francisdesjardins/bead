@@ -6,9 +6,10 @@
   authority (an absolute-form target's, HTTP/2's `:authority`, the `Host`), the grammar of a host
   and what answers one that is none on each version of HTTP, `hosts`, the hosts every server takes,
   their comparison and `*`, and the refusal of a `hosts` or an `origins` entry as a server is built;
-  the host's place in 15.2's order; the address a server listens on by default, and its form, which
-  13.4's server half reads; the C# clients' race of a name's address families. What `origins`
-  takes, and a client's loopback (13.4), are
+  the host's place in 15.2's order; the address a server listens on by default, `localhost`, both
+  loopbacks, its form, which 13.4's server half reads, and what it reports; the TypeScript HTTP
+  transport's `createServer`, called once per address bound; the C# clients' race of a name's
+  address families. What `origins` takes, and a client's loopback (13.4), are
   [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; a connection's handle is
   [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)'s; the refusal a
   server tells, and a request's fields,
@@ -101,7 +102,28 @@ Windows 11, Node's `http.request`, `fetch`, `ws` and global `WebSocket` connect 
 2012–2054 ms, against 0–81 ms by `127.0.0.1`: .NET tries `::1` first and waits out Windows'
 refusal. The same holds against `0.0.0.0`, and none against `::`. A server on `127.0.0.1:p` and
 another process on `[::1]:p`: `fetch`, `ws` and `HttpClient` by `localhost` all reach the other
-process.
+process on Windows; in a Linux container, whose resolver orders `127.0.0.1` first, ours.
+
+**Both loopbacks, measured** on Windows 11 and in Linux containers, IPv6 on and off, with Node 26.5
+and .NET 10. A port drawn on `127.0.0.1`, then bound on `::1` with `ipv6Only`: in 3,000 pairs on
+each, the IPv6 bind never found the port taken. With both bound, another process binding
+`[::1]:p` is refused `EADDRINUSE` on both, and on Linux so is every wildcard, `[::]:p` and
+`0.0.0.0:p`; on Windows a wildcard binds, and `localhost`, `127.0.0.1` and `[::1]` still reach the
+server, the more specific socket taking the loopback's connections; and on Windows, under
+`SO_REUSEADDR`, a bind of either loopback by another process of the same user is refused
+`WSAEACCES`. Where IPv6 is off, a container with `disable_ipv6` set, Node's `::1` bind is
+`EADDRNOTAVAIL` and `localhost` resolves to `127.0.0.1` alone; .NET's is `AddressNotAvailable`, and
+`Socket.OSSupportsIPv6` still says `True`, so nothing but the bind detects it; a kernel booted
+without IPv6 answers `EAFNOSUPPORT`, `AddressFamilyNotSupported`. Kestrel's `ListenLocalhost(0)`
+throws as it is built; two `Listen` on one port bind both, reported
+`http://127.0.0.1:p, http://[::1]:p`; with `[::1]:p` held by another socket, `ListenLocalhost(p)`
+and the two `Listen`s fail, `AddressInUseException`, no fallback on a port taken; with IPv6 off,
+`ListenLocalhost(p)` logs at Information that it is "Unable to bind to http://localhost:p on the
+IPv6 loopback interface", starts on `127.0.0.1` alone and still reports `http://localhost:p`, where
+two `Listen`s fail. Node serves both families from one `node:http`, `node:https` or `node:http2`
+instance fed by two `net.Server`s, the HTTP/2 instances' `session` firing for each; but a fed
+`node:http` instance never told `listening` answers no 408 to slow headers, its connection tracking
+starting on its own `listening`.
 
 The options weighed:
 
@@ -127,11 +149,36 @@ The options weighed:
   rebinds to.
 - **`127.0.0.1` by default**: an IP literal, which 13.4 judges by itself and both sides bind alike;
   every client reaches it by `localhost` once it races; another process may listen on `[::1]` on
-  the same port and answer a client that tries that family first.
+  the same port and answer a client that tries that family first, on Windows every one by
+  `localhost`.
 - **Both loopbacks**, Kestrel's `localhost`: no capture and no wait for any client, at the cost of
-  two listeners per transport on the TypeScript side, `127.0.0.1:0` then `::1` on the port drawn,
-  drawn again when taken there, a start on one family where IPv6 is off, and an `address` that
-  reports one of two.
+  two listeners per transport, a port drawn again when the other family holds it, and a start on
+  one family where IPv6 is off. Taken, as the next options settle it.
+- **What it is called and what it reports**: `localhost`, a keyword the start takes and never
+  resolves, reported `localhost` when both are bound and `127.0.0.1` when the IPv6 loopback is
+  absent, the report being what was bound: taken. No address by default, reported `127.0.0.1`, is
+  one of two; a list, `addresses`, changes every transport's address for a value no caller needs.
+  Kestrel's `ListenLocalhost` refuses a drawn port and misreports its fallback, so the C# side binds
+  the two endpoints itself.
+- **A port drawn**: refusing `findOpenPort` with both refuses how every test and README example
+  starts; `127.0.0.1:0` bound first, then `::1` on its port, drawn again when the other family holds
+  it, eight attempts, then the last error: taken. Kestrel cannot add an endpoint once started, so
+  the C# side draws the port by a socket bound to `127.0.0.1:0` and closed, then binds both, a port
+  taken in that gap drawn again within the same eight.
+- **The IPv6 loopback absent**, `EADDRNOTAVAIL` or `EAFNOSUPPORT`, `AddressNotAvailable` or
+  `AddressFamilyNotSupported`: listening on `127.0.0.1` alone and reporting it, since no process can
+  take `::1` there either — a container with IPv6 off being where Bead's CI replays and where a
+  sidecar on the loopback starts with its defaults — as Kestrel's `ListenLocalhost` falls back:
+  taken. Refusing to start fails every default start in such a container, for a capture that cannot
+  happen there. A port taken on `::1` is never a fallback: it is the capture itself, and the start
+  fails, as Kestrel's does.
+- **The TypeScript mechanism**: one instance fed by two `net.Server`s loses `node:http`'s guard
+  against slow headers unless `listening` is emitted by hand, an internal the transport would lean
+  on; two instances, each listening on one family itself, rely on no internals of Node. The HTTP
+  transport's `createServer` is the application's, so calling it twice is a contract the option
+  states: called once per address bound, told it as `{ address }`, every instance configured
+  alike. The WebSocket transport's two `http.Server`s are its own, each with its
+  `WebSocketServer`.
 - **`::1` by default**: not reached by `127.0.0.1`, which the interop, the examples and every
   runner connect by, and no start where IPv6 is off.
 - **An address required**: meets CWE-1327 too, but every other start option has a default, and
@@ -219,29 +266,43 @@ The host is judged first, over HTTP before the path and at a WebSocket's address
 own 400, before the method; the origin after. `origins` never widens `hosts`: a page named in
 `origins` still asks the server by a host it takes.
 
-**A server listens on `127.0.0.1` unless it is given an address** (spec 15.12), on both transports
-of both sides: an IP literal, bound alike by both and judged by 13.4 by itself, which every example,
-the interop and the demo set. One loopback family or both is no standard's and no record's to
-settle, and the practice is split: `127.0.0.1` alone, the residual named, both loopbacks the
-difference that would close it. The address keeps the network out, and `hosts` a page on the
-server's own machine that rebinds its name to `127.0.0.1`, which the address cannot; neither stands
-for the other. A server the network reaches is one its application opened, `0.0.0.0` or `::`, and
-names its hosts.
+**A server listens on `localhost`, both loopbacks, unless it is given an address** (spec 15.12),
+on both transports of both sides, as Kestrel's `ListenLocalhost` does: `127.0.0.1` and `::1` on one
+port, `localhost` a keyword the start takes and never resolves, as 13.4 takes it. It binds
+`127.0.0.1` first, on the port it is given or on one drawn there, then `::1` on that port, IPv6
+alone; a port another socket holds on either family fails the start, and a port drawn is drawn
+again, eight times at most. **Where the IPv6 loopback is absent**, its bind refused for want of the
+address or of the family, it listens on `127.0.0.1` alone **and reports `127.0.0.1`**, where Kestrel
+reports `localhost`: told, never silent. Both loopbacks leave the capture by the other family no
+address. The TypeScript HTTP transport calls the application's
+`createServer(listener, { address })` once per address it binds, `127.0.0.1` then `::1`, and a port
+drawn again listens again on the instances built; every instance is to be configured alike — a
+certificate rotated, an SNI context added, a timeout, a `tlsClientError` listener — since an
+application that keeps "the" server would reach one family. The C# side binds `IPAddress.Loopback`
+and `IPAddress.IPv6Loopback` itself in one Kestrel application, its port drawn by a socket when
+`FindOpenPort`, its fallback by rebuilding the application on `127.0.0.1` alone; never
+`ListenLocalhost`. A listener that couples transports, should a decision ever bring one, binds the
+pair once for those it serves, by this rule. The address keeps the network out, and `hosts` a page
+on the server's own machine that rebinds its name to the loopback, which the address cannot; neither
+stands for the other. A server the network reaches is one its application opened, `0.0.0.0` or
+`::`, and names its hosts.
 
-**An address given is an IP address, by RFC 3986's grammar**: an `IPv4address` or an `IPv6address`
-of [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), written bare, no
-brackets and no zone, and not IPv4-mapped, an IPv4 node's address being written as one
-([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)). Both sides test it
-with the matchers this decision writes for a host, extracted to a bare form, `isIPAddress` and
-`IsIpAddress`, never `isIP` nor `TryParse` alone, so that `0` binds no interface on either. Any other
-is refused as the start begins, `ProgrammerError` and `ArgumentException`, "a server listens on an
-IP address, not …", "write ::1, not [::1]" for a bracketed one, the transport ending closed as a
-failed start does. The wildcards are IP addresses, and taken.
+**An address given is `localhost` or an IP address, by RFC 3986's grammar**: `localhost`, exactly,
+no other case, no `localhost.` and no name under `.localhost`; or an `IPv4address` or an
+`IPv6address` of [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), written
+bare, no brackets and no zone, and not IPv4-mapped, an IPv4 node's address being written as one
+([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)), which it listens on
+alone. Both sides test an IP address with the matchers this decision writes for a host, extracted
+to a bare form, `isIPAddress` and `IsIpAddress`, which stay predicates of IP literals, never `isIP`
+nor `TryParse` alone, so that `0` binds no interface on either. Any other is refused as the start
+begins, `ProgrammerError` and `ArgumentException`, "a server listens on an IP address, or on
+localhost, both loopbacks, not …", "write ::1, not [::1]" for a bracketed one, the transport ending
+closed as a failed start does. The wildcards are IP addresses, and taken.
 
 **13.4's server half reads that address alone**: a server is on the loopback when its address is in
-127.0.0.0/8 or is `::1`. The forms the URL parser normalizes, `127.1`, `127.0.0.1.` and the
-localhost names, stay what a client's URL may name; an IPv4-mapped address is refused, so 13.4 meets
-none.
+127.0.0.0/8, is `::1`, or is `localhost`, both. The forms the URL parser normalizes, `127.1`,
+`127.0.0.1.` and the localhost names, stay what a client's URL may name; an IPv4-mapped address is
+refused, so 13.4 meets none.
 
 **Both C# clients race the address families of a name**, as RFC 8305 asks and as Node's clients and
 the browsers do: one connect resolves the name in the platform's order (RFC 6724), interleaves the
@@ -276,7 +337,7 @@ writes none (spec 15.2, 15.5). The residual of a `.localhost` name a user agent 
 resolver that does not keep it local stays, stated in 15.12.
 
 **A container, or any server another machine reaches, says `0.0.0.0` or `::`**, and names its hosts:
-a container's loopback is its own, which a published port never reaches. A deployment that relied on
+a container's loopback is its own, which a published port never reaches. A deployment that relies on
 listening on every interface without saying it meets a refused or reset connection from outside,
 never a Bead refusal, since no socket opens: both READMEs say it where they say how to start a
 server.
@@ -287,14 +348,23 @@ behind any server it reaches on the loopback.
 
 **An address that is a name, or a form outside the grammar, fails the start**, on both sides.
 
-**`localhost` may be captured by the other family**: another process listening on `[::1]`, on the
-same port as a server on `127.0.0.1`, answers every client by `localhost` that tries `::1` first, a
-bearer credential presented there by default since 13.4 judges `ws://localhost` secure. Any server
-given one family keeps it, whatever the default; 15.12 names it, and both loopbacks are what would
-close it.
+**A server on its defaults leaves no loopback port to another process**: no other process binds
+`[::1]:p` beside it, on Windows or Linux, under `SO_REUSEADDR` on Windows too, nor any wildcard on
+Linux, and on Windows a wildcard binds but takes no loopback client. **A server given one loopback
+keeps the residual**: another process listening on the other family's loopback, on the same port,
+answers every client by `localhost` that tries that family first, a bearer credential presented
+there by default since 13.4 judges `ws://localhost` secure; 15.12 names it.
+
+**Where the IPv6 loopback is absent**, a container with IPv6 off, a server on its defaults listens
+on `127.0.0.1` alone and reports it, and no process can take `::1` there either.
+
+**An application that configures the TypeScript HTTP transport's server after building it
+configures each instance** its `createServer` is called for, `{ address }` telling them apart; a
+factory that ignores the argument builds them alike.
 
 **A client of another library that does not race** pays Windows' refusal of `::1`, about two
-seconds a connect by `localhost`; every Bead client and every browser races.
+seconds a connect by `localhost`, against a server given `127.0.0.1` alone; every Bead client and
+every browser races.
 
 **The gate.** The cases of `spec/transports.json` that cite 15.12, played by both sides: the hosts
 every server takes, a list adding to them, `[]`, `*` and the origins it makes none of its own, an
@@ -304,24 +374,32 @@ sentence ([0004](0004-one-behaviour-in-every-language.md)), each side's `hosts a
 for the predicate, the grammar and the build refusals, and the HTTP transport servers' tests over
 TLS for HTTP/2's `:authority` and its reset, which `docs/support.md` names among what no entry
 plays. The listening address has no step, every runner starting on `127.0.0.1`: twins hold it, each
-transport server's `listens on the loopback when given no address, reached by 127.0.0.1 and by
-localhost, and is secure there`, `refuses to start on an address that is no bare IP address, ending
-closed` over the table of forms above, and `is secure on the IPv6 loopback or an address in
-127.0.0.0/8, and not on a wildcard`; each side's `isIPAddress` and `IsIpAddress` over that table;
-each client's `connects by a name to a server that listens on one loopback family alone, whichever
-it is`; and the C# side's race, `HappyEyeballsTests`.
+transport server's `listens on localhost when given no address, both loopbacks on one port, reached
+by 127.0.0.1, by [::1] and by localhost, reports localhost, and is secure there`, `refuses to start
+on localhost when another socket holds the other loopback's port, ending closed`, `draws a port on
+localhost again when the IPv6 loopback holds the one drawn on IPv4`, `listens on 127.0.0.1 alone
+where the IPv6 loopback is absent, and reports 127.0.0.1`, `refuses to start on an address that is
+no bare IP address, ending closed` over the table of forms above, `localhost` taken, and `is secure
+on the IPv6 loopback or an address in 127.0.0.0/8, and not on a wildcard`; the TypeScript HTTP
+transport's `calls the application's createServer once per address it binds, 127.0.0.1 then ::1 on
+localhost, each told its address`, held on the C# side, which builds no server of the
+application's, by `serves every address it binds by one configuration`; each side's `isIPAddress`
+and `IsIpAddress` over that table; each client's `connects by a name to a server that listens on
+one loopback family alone, whichever it is`; and the C# side's race, `HappyEyeballsTests`.
 
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-three rounds: the first below, which
+four rounds: the first below, which
 [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md) shares; the one on
 the address a server listens on, which
 [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) keeps, On
-a refusal told and the default listening address; and the one on the footguns before 0.4.0, whose
-row on a server's hosts and origins is kept below, the round told in
-[0010](0010-a-request-presents-a-credential-of-a-scheme.md). Each objection, with the answer that
-holds:
+a refusal told and the default listening address; the one on the footguns before 0.4.0, whose row
+on a server's hosts and origins is kept below, the round told in
+[0010](0010-a-request-presents-a-credential-of-a-scheme.md); and the one on an upgrade's
+credential, both loopbacks and the proxies a server counts, told in
+[0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md), whose
+row on both loopbacks is kept below. Each objection, with the answer that holds:
 
 ### On a server's hosts and a connection's handle
 
@@ -340,3 +418,9 @@ holds:
 | Objection                                                                                                                                                                                                                                                                                    | Answer                                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Under `*`, the own-origin rule refuses a non-browser client that writes its target as its `Origin` by a name `hosts` does not list — Python's `websocket-client` does by default — while the spec never says what a Bead client writes, so a third language would break under `*` alone (T6) | Accepted: the own-origin rule stays; 15.2 and 15.5 state that a client writes no `Origin`, a page's browser writing its own, which both sides already do and a twin per client transport holds; units 15.2 and 15.5 are acknowledged. The cost under `*` is named in the Consequences and both READMEs: list the name in `hosts`, or have the client write no `Origin`. |
+
+### On both loopbacks
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| On `localhost` the TypeScript HTTP transport calls the application's `createServer` twice, unsaid: an application that keeps "the" server rotates one family's certificate, adds one family's SNI context, sets one family's timeouts. And the draft's reason against one instance fed by two listeners is wrong: the feed reaches an `http2` server's sessions (measured); its trap is that `node:http` starts its slow-headers guard only on its own `listening` (O8) | Accepted: two instances stay, relying on no internals of Node, and the contract is stated: `createServer(listener, { address })`, called once per address bound, `127.0.0.1` then `::1`, every instance configured alike; a port drawn again listens again on the instances built. A twin counts the calls; the C# side, one Kestrel application binding both, holds `serves every address it binds by one configuration`. The reason against one instance fed by two listeners is the measured one, which holds as well against one `WebSocketServer` fed by both. |

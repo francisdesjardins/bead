@@ -28,7 +28,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandArgumentPassing = 'Standard'
 $PSNativeCommandUseErrorActionPreference = $false
 
-$image = 'ghcr.io/francisdesjardins/beadc:0.4.1'
+$image = 'ghcr.io/francisdesjardins/beadc:0.5.0'
 if ($env:BEADC_IMAGE) {
   $image = $env:BEADC_IMAGE
 }

@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -55,6 +57,49 @@ public sealed partial class RouterCoreTests
         return new Envelope { Header = new ResultHeader { CallId = callId }, Payload = new byte[] { 1 } };
     }
 
+    // bytes that give their span as many times as told, then throw what is no refusal: as a codec
+    // that breaks reading them would, at their prefix or past it
+    private sealed class BreakingBytes(byte[] bytes, (Exception Thrown, int Spans) breaking) : MemoryManager<byte>
+    {
+        private int _given;
+
+        // its memory, made without asking for its span, as Memory asks
+        public ReadOnlyMemory<byte> Bytes
+        {
+            get
+            {
+                return CreateMemory(bytes.Length);
+            }
+        }
+
+        public override Span<byte> GetSpan()
+        {
+            if (_given == breaking.Spans)
+            {
+                throw breaking.Thrown;
+            }
+
+            _given++;
+
+            return bytes;
+        }
+
+        public override MemoryHandle Pin(int elementIndex = 0)
+        {
+            throw new NotSupportedException();
+        }
+
+        public override void Unpin()
+        {
+            throw new NotSupportedException();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            // nothing held: its bytes are an array's
+        }
+    }
+
     // definition
 
     // debugging 5.2
@@ -67,9 +112,53 @@ public sealed partial class RouterCoreTests
         await server.Deliver("A1 10");
         Assert.Single(server.Reports);
         Assert.Empty(server.Traces);
+
+        // what throws other than a refusal before its prefix reads is reported malformed, its cause
+        // kept, with its connection: its TypeScript twin is handed text
+        var thrown = new InvalidOperationException("no span");
+        using var broken = new BreakingBytes(new byte[] { 0xA1 }, (thrown, 0));
+
+        server.Core.Receive(broken.Bytes, Handle);
+        await server.Settle();
+
+        Assert.Equal(2, server.Reports.Count);
+
+        var reported = Assert.IsType<FailureException>(server.Reports[^1]);
+
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.EnvelopeMalformed, thrown.Message), reported.Failure);
+        Assert.Same(thrown, reported.InnerException);
+        Assert.Equal(Handle, server.ReportedOn[^1]);
+        Assert.Empty(server.Traces);
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
         Assert.Equal(DebugDirection.Rx, Assert.Single(server.Traces).Direction);
         Assert.True(Assert.Single(resolver.Requests).IsAdmitted);
+    }
+
+    // spec 9.0
+    [Fact]
+    public async Task Answers_a_request_its_codec_throws_on_other_than_a_refusal_ENVELOPE_MALFORMED_with_no_detail_and_reports_the_error_with_its_connection()
+    {
+        var server = new Peer(RouterSide.Server);
+        var thrown = new InvalidOperationException("internal: 10.0.0.5:8443");
+
+        // its TypeScript twin breaks its codec where it reads a JWT as text; this side's codec throws
+        // its refusals alone, so the bytes it reads break past their prefix instead
+        using var bytes = new BreakingBytes(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } }), (thrown, 1));
+
+        server.Core.Receive(bytes.Bytes, Handle);
+        await server.Settle();
+
+        var answer = Assert.Single(server.Sent);
+
+        Assert.Equal(1u, answer.Header.CallId);
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.EnvelopeMalformed), answer.Failure);
+
+        // the error's words reach the side's report alone, with its connection
+        var reported = Assert.IsType<FailureException>(Assert.Single(server.Reports));
+
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.EnvelopeMalformed, thrown.Message), reported.Failure);
+        Assert.Same(thrown, reported.InnerException);
+        Assert.Equal([Handle], server.ReportedOn);
     }
 
     // debugging 5.2

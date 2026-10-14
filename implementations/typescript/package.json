@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/bead",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP and a Web Worker transport, each a client and a server, a client and a server router with the service, session and notification managers, and the client and server over them.",
   "license": "Apache-2.0",
@@ -75,6 +75,14 @@
     "oxlint-tsgolint": "7.0.2003",
     "typescript-7": "npm:typescript@7.0.2",
     "ws": "^8.22.0"
+  },
+  "dependenciesMeta": {
+    "@bufbuild/buf": {
+      "built": true
+    },
+    "esbuild": {
+      "built": true
+    }
   },
   "peerDependencies": {
     "@bufbuild/protobuf": "^2.13.0"

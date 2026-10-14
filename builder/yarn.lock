@@ -155,6 +155,9 @@ __metadata:
     oxlint-tsgolint: "npm:7.0.2003"
     typescript-7: "npm:typescript@7.0.2"
     yaml: "npm:2.9.1"
+  dependenciesMeta:
+    "@bufbuild/buf":
+      built: true
   languageName: unknown
   linkType: soft
 

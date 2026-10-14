@@ -77,11 +77,6 @@ export interface ITransportClient<
   Socket extends object = object,
   ConnectOptions extends ITransportClientConnectOptions = ITransportClientAddressOptions,
 > extends IReadyStateMethods {
-  /**
-   * Whether it carries a credential beside an envelope it sends: over HTTP, in its `POST`'s
-   * `Authorization`; a WebSocket and a worker carry none (spec 15.1).
-   */
-  readonly carriesCredential: boolean;
   /** The clock it runs on, which a layer built on it runs on too. */
   readonly clock: IClock;
   /**
@@ -94,8 +89,18 @@ export interface ITransportClient<
   socket: Socket | null;
 
   /**
+   * Whether it carries `credential` beside an envelope it sends (spec 15.1): over HTTP, any field
+   * value, in each `POST`'s `Authorization`; over a WebSocket, the bytes its open connection's
+   * upgrade carried alone, compared in constant time, and none while it is not open; over a worker,
+   * none. A call presenting `ELSEWHERE` with a credential it does not carry fails before it
+   * goes, DESTINATION_UNREACHABLE (spec 13.4).
+   */
+  carries(credential: string): boolean;
+  /**
    * Opens the connection. Refused with a {@link ProgrammerError} for a timeout `timeout` does not
-   * take, which leaves the state, and the target a reconnection replays, as they were; with a {@link ProgrammerError} unless UNINITIALIZED or CLOSED; and with a
+   * take, or an option its transport does not, which leaves the state, and the target a
+   * reconnection replays, as they were; with a {@link ProgrammerError} unless UNINITIALIZED or
+   * CLOSED; and with a
    * {@link CancelError}, nothing changed, when its signal is aborted already. Then it rejects with a
    * {@link ConnectError} when it cannot open, a {@link TimeoutError}, or a {@link CancelError}.
    */
@@ -132,7 +137,8 @@ export interface ITransportClient<
    * a `close`. Attempts that run out end CLOSED without a `close`; a cancel after a successful
    * attempt disconnects, which emits one; a misuse or an already aborted signal leaves the state as it
    * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError};
-   * an error thrown by `tap` passes through.
+   * an error thrown by `tap` passes through, and so does a {@link ProgrammerError} an attempt
+   * rejects with, which the next would meet again.
    */
   reconnect(options?: ITransportClientReconnectOptions): Promise<void>;
   removeAllListeners(event?: TRANSPORT_CLIENT_EVENTS): this;
@@ -141,8 +147,8 @@ export interface ITransportClient<
    * socket has accepted it; over HTTP, on the head of its exchange's answer — the server had it — or
    * on its exchange lost, which closes the connection. Rejects with a {@link ReadyStateError} unless
    * OPEN, and over HTTP with a {@link GenericError} on a refusal the server marked, nothing tried; the
-   * socket's own error passes through. Its credential goes over HTTP alone, in the `Authorization` of
-   * its `POST`; a socket and a worker carry none.
+   * socket's own error passes through. Its credential goes over HTTP in the `Authorization` of its
+   * `POST`, over a WebSocket in its upgrade's, which its connect is given; a worker carries none.
    */
   send(message: ITransportMessage): Promise<void>;
   /**
@@ -177,8 +183,13 @@ export interface ITransportClientInternal<
 export interface ITransportClientImplementation<
   ConnectOptions extends ITransportClientConnectOptions,
 > {
-  /** Whether it carries a credential beside an envelope it sends; none, without it. */
-  readonly carriesCredential?: boolean | undefined;
+  /**
+   * Refuses, by throwing, what a connect is given that it cannot take, before the state moves and
+   * before the target a reconnection replays is kept: as a timeout refused is.
+   */
+  assertConnect?(options: ConnectOptions): void;
+  /** Whether it carries `credential` beside an envelope it sends; none, without it. */
+  carries?(credential: string): boolean;
   /** The clock it runs on, which the shared half waits on too; the platform's when none. */
   readonly clock?: IClock | undefined;
   /** Whether it is secure, as its last connect was given; not, without it. */
@@ -300,17 +311,40 @@ export interface IWebSocketLike {
 
 /** `CONNECTING` and `OPEN` are read from the injected constructor, so `ws` and the global agree. */
 export interface IWebSocketConstructor {
-  /** `options` is `ws`'s alone; the global `WebSocket` takes two parameters, and still meets it. */
+  /**
+   * `options` is `ws`'s alone, its `headers` written on the upgrade; the global `WebSocket` takes
+   * two parameters, and still meets it.
+   */
   new (
     url: string,
     protocols?: string | string[],
-    options?: { maxPayload?: number }
+    options?: { headers?: Record<string, string>; maxPayload?: number }
   ): IWebSocketLike;
   readonly CONNECTING: number;
   readonly OPEN: number;
 }
 
 export interface IWSTransportClientConnectOptions extends ITransportClientAddressOptions {
+  /**
+   * The credential its upgrade carries, in its `Authorization`, as given (spec 15.2): what a call
+   * presenting `ELSEWHERE` over it stands for at its server, resolved per request; a reconnection
+   * writes it again. Refused with a {@link ProgrammerError}, the state untouched, beside a
+   * `credentialProvider`; when it is no field value — anything but visible ASCII, spaces and tabs,
+   * or a space or a tab first or last (RFC 9110 §5.5); over a URL that leaves the machine in the
+   * clear, `ws://` off the loopback (spec 13.4), the upgrade being where it would cross; and over a
+   * `WebSocket` constructor without `ws`'s shape — a page's, Node's global — which writes no field
+   * of its caller's choosing: a page presents a `JWT`.
+   */
+  credential?: string | undefined;
+  /**
+   * What hands the credential its upgrade carries, called at each attempt, the first connect's and
+   * every reconnection's, before its upgrade goes, with the attempt's `signal`: where a credential
+   * past its end is renewed, as SignalR's `accessTokenFactory` is. Refused as `credential` is, and
+   * beside it. What it throws fails that attempt, its cause, which a reconnection counts as a refused
+   * connect; a value it hands that is no field value fails it with a {@link ProgrammerError}, which
+   * a reconnection does not try again.
+   */
+  credentialProvider?: ((options: { signal: AbortSignal }) => string | Promise<string>) | undefined;
   /** Prefixed with a single leading slash. */
   pathname?: string | undefined;
   /** The subprotocols offered in the handshake. */
@@ -341,7 +375,10 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    * `createWSClient` does.
    */
   maxPayload?: number | undefined;
-  /** Defaults to the global `WebSocket`; pass `ws`'s where there is none. */
+  /**
+   * Defaults to the global `WebSocket`; pass `ws`'s where there is none, and where a connect gives a
+   * credential, which `ws` alone writes on the upgrade.
+   */
   WebSocket?: IWebSocketConstructor | undefined;
 }
 

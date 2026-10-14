@@ -23,9 +23,15 @@ import {
 } from '../shared/ready-state';
 import type { Data } from '../shared/types';
 import { dispose } from './symbols';
-import { createTransportClient, DEFAULTS, DISCONNECT_DEFAULTS } from './transport-client';
+import {
+  createTransportClient,
+  DEFAULTS,
+  DISCONNECT_DEFAULTS,
+  isFieldValue,
+} from './transport-client';
 import type {
   IUpgradeResponseLike,
+  IWebSocketConstructor,
   IWebSocketLike,
   IWSTransportClientConnectOptions,
   IWSTransportClientOptions,
@@ -66,6 +72,48 @@ const errorOf = (event: unknown): unknown => {
   return typeof event === 'object' && event !== null && 'error' in event ? event.error : undefined;
 };
 
+/**
+ * Whether `presented` is the credential `carried`, compared in constant time (spec 15.1): every
+ * character of `carried` is read, wherever the two differ, so time tells at most its length.
+ */
+const isCarried = (presented: string, carried: string): boolean => {
+  let difference = presented.length ^ carried.length;
+
+  for (let index = 0; index < carried.length; index += 1) {
+    // ! past the end of `presented`, NaN reads as 0, and its length already differs
+    difference |= presented.charCodeAt(index) ^ carried.charCodeAt(index);
+  }
+
+  return difference === 0;
+};
+
+/**
+ * Whether a `WebSocket` constructor has `ws`'s shape, the one that writes a field of its caller's
+ * choosing on its upgrade: its sockets ping, terminate and listen by `on`, as a heartbeat reads a
+ * socket. A page's, a wrapper or a subclass of it, and Node's global have none of it.
+ */
+const isWsShaped = (WebSocket: IWebSocketConstructor): boolean => {
+  const prototype = (WebSocket as { prototype?: Partial<IWebSocketLike> }).prototype;
+
+  return (
+    typeof prototype?.ping === 'function' &&
+    typeof prototype.terminate === 'function' &&
+    typeof prototype.on === 'function'
+  );
+};
+
+/** The URL a connect reaches, an IPv6 literal bracketed, or its colons would read as the port's. */
+const urlOf = ({
+  host,
+  pathname = CONNECT_DEFAULTS.pathname,
+  port,
+  secured = CONNECT_DEFAULTS.secured,
+}: IWSTransportClientConnectOptions): string => {
+  const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+
+  return `${secured ? 'wss' : 'ws'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/, '/$1')}`;
+};
+
 /** A refused upgrade's status, and the reason it was marked with when it was (spec 15.6). */
 const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
   const mark = headers[REFUSAL_HEADER];
@@ -79,10 +127,13 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
 /**
  * A transport client over one WebSocket. Over `ws`, it pings the server every `heartbeat`, and
  * closes when a ping went unanswered: a server gone without a word ends in a `close` rather than
- * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it. A
- * WebSocket carries no credential beside an envelope: one given to `send` is not carried, and its
- * router fails a call that presents an `ELSEWHERE` before it goes. It is secure under `wss`, or to a
- * loopback host. Over `ws`, a message is an envelope at most by default,
+ * never. A browser's socket cannot ping; the server's pings, which it answers, stand for it. Its
+ * connect's `credential`, or what its `credentialProvider` hands at each attempt, goes in its
+ * upgrade's `Authorization`, over `ws` alone, and is what it carries beside every envelope of that
+ * connection, compared in constant time: one given to `send` is not carried, and its router fails a
+ * call presenting an `ELSEWHERE` it does not carry before it goes (spec 15.2). It follows no
+ * redirect: a 3xx answered to its upgrade fails its connect, its status named (spec 15.6). It is
+ * secure under `wss`, or to a loopback host. Over `ws`, a message is an envelope at most by default,
  * {@link MAXIMUM_MESSAGE_BYTES}, and a larger one closes the connection with 1009; over the global
  * `WebSocket`, its platform's bound applies. Over `ws`, an upgrade refused fails the connect with
  * its status and its reason, "the server refused the upgrade: 403 host-refused"; the global
@@ -120,6 +171,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       let beating: IHeartbeat | undefined;
       // whether the URL of the last connect is secure
       let isSecure = false;
+      // the credential the upgrade of the current connection carried; none before it opens
+      let carried: string | undefined;
 
       // a drop closes as a network does, and the open socket's `onclose` reports it
       const beatOf = (socket: IWebSocketLike): IHeartbeat | undefined => {
@@ -155,29 +208,65 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
       };
 
       return {
-        carriesCredential: false,
         clock,
         get isSecure() {
           return isSecure;
         },
 
+        // * a credential crosses the upgrade, so one the upgrade cannot carry as given is refused
+        // before anything moves
+        assertConnect: (connectOptions) => {
+          const { credential, credentialProvider } = connectOptions;
+
+          if (credential === undefined && credentialProvider === undefined) {
+            return;
+          }
+
+          if (credential !== undefined && credentialProvider !== undefined) {
+            throw new ProgrammerError(
+              'a connect takes a credential or a credential provider, not both'
+            );
+          }
+
+          if (credential !== undefined && !isFieldValue(credential)) {
+            throw new ProgrammerError(
+              'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+            );
+          }
+
+          if (!isSecureUrl(urlOf({ ...CONNECT_DEFAULTS, ...connectOptions }))) {
+            throw new ProgrammerError(
+              'a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback'
+            );
+          }
+
+          if (!isWsShaped(WebSocket)) {
+            throw new ProgrammerError(
+              "a credential is written on its upgrade by ws's WebSocket alone: a page's, and Node's global, write no field of their caller's choosing, so present a JWT in the envelope"
+            );
+          }
+        },
+
+        // none once its connection is gone, whatever it carried
+        carries: (credential) => {
+          return client.isOpen() && carried !== undefined && isCarried(credential, carried);
+        },
+
         connect: async (connectOptions) => {
           const {
-            host,
-            pathname = CONNECT_DEFAULTS.pathname,
-            port,
+            credential,
+            credentialProvider,
             protocols,
-            secured = CONNECT_DEFAULTS.secured,
             signal,
             timeout = CONNECT_DEFAULTS.timeout,
           } = { ...CONNECT_DEFAULTS, ...connectOptions };
-
-          // an IPv6 literal is bracketed, or its colons would read as the port's
-          const authority = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-          const url = `${secured ? 'wss' : 'ws'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/, '/$1')}`;
+          const url = urlOf({ ...CONNECT_DEFAULTS, ...connectOptions });
+          // what the attempt's credential provider is told to give up by: the attempt settled
+          const attempt = new AbortController();
           let opened: IWebSocketLike | undefined;
 
           isSecure = isSecureUrl(url);
+          carried = undefined;
 
           try {
             await createPromise(
@@ -186,73 +275,121 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   setReadyStateConnecting(client);
                 }
 
-                let socket: IWebSocketLike;
-
-                try {
-                  socket = opened = client.socket = new WebSocket(url, protocols, { maxPayload });
-                } catch (reason) {
-                  return (reject(wrapReason(ConnectError, reason)), undefined);
-                }
-
-                let lastError: unknown;
-                // the status and the mark of an upgrade the server refused, where it can be read
-                let refused: string | undefined;
-
                 rejectConnect = reject;
 
-                // ! ended by `terminate`: a request destroyed leaves the socket connecting for ever
-                socket.on?.('unexpected-response', (_request, response) => {
-                  refused = refusalOf(response);
-                  response.resume?.();
-                  socket.terminate?.();
-                });
+                // ! no `followRedirects`: a 3xx answered to the upgrade fails it, its status named,
+                // since a redirect would carry it where its credential and its security were not
+                // judged (spec 15.6); an empty credential is none, as the server reads an empty field
+                const open = (given: string | undefined): void => {
+                  const written = given === '' ? undefined : given;
+                  let socket: IWebSocketLike;
 
-                socket.binaryType = binaryType;
+                  try {
+                    socket =
+                      opened =
+                      client.socket =
+                        new WebSocket(url, protocols, {
+                          maxPayload,
+                          ...(written === undefined ? {} : { headers: { authorization: written } }),
+                        });
+                  } catch (reason) {
+                    return (reject(wrapReason(ConnectError, reason)), undefined);
+                  }
 
-                socket.onerror = (event) => {
-                  lastError = errorOf(event);
-                };
-                socket.onclose = (closeEvent) => {
-                  const closed = closeEvent.reason
-                    ? `${closeEvent.reason} (${String(closeEvent.code)})`
-                    : String(closeEvent.code);
-                  const message =
-                    refused === undefined ? closed : `the server refused the upgrade: ${refused}`;
+                  let lastError: unknown;
+                  // the status and the mark of an upgrade the server refused, where it can be read
+                  let refused: string | undefined;
 
-                  reject(
-                    new ConnectError(
-                      message,
-                      lastError === undefined ? undefined : { cause: lastError }
-                    )
-                  );
-                };
-                socket.onopen = () => {
-                  // an error is always followed by its close, and once open the close is what reports it
-                  socket.onerror = noop;
-                  socket.onmessage = ({ data }) => {
-                    if (client.isClosing()) {
-                      return undefined;
-                    }
+                  // ! ended by `terminate`: a request destroyed leaves the socket connecting for ever
+                  socket.on?.('unexpected-response', (_request, response) => {
+                    refused = refusalOf(response);
+                    response.resume?.();
+                    socket.terminate?.();
+                  });
 
-                    return (
-                      tell(MESSAGE_EVENT, [{ credential: undefined, data: data as Data }]),
-                      undefined
+                  socket.binaryType = binaryType;
+
+                  socket.onerror = (event) => {
+                    lastError = errorOf(event);
+                  };
+                  socket.onclose = (closeEvent) => {
+                    const closed = closeEvent.reason
+                      ? `${closeEvent.reason} (${String(closeEvent.code)})`
+                      : String(closeEvent.code);
+                    const message =
+                      refused === undefined ? closed : `the server refused the upgrade: ${refused}`;
+
+                    reject(
+                      new ConnectError(
+                        message,
+                        lastError === undefined ? undefined : { cause: lastError }
+                      )
                     );
                   };
+                  socket.onopen = () => {
+                    // an error is always followed by its close, and once open the close is what reports it
+                    socket.onerror = noop;
+                    socket.onmessage = ({ data }) => {
+                      if (client.isClosing()) {
+                        return undefined;
+                      }
 
-                  socket.onclose = () => {
-                    stopBeating();
+                      return (
+                        tell(MESSAGE_EVENT, [{ credential: undefined, data: data as Data }]),
+                        undefined
+                      );
+                    };
 
-                    if (!client.isReconnecting()) {
-                      setReadyStateClosed(client);
+                    socket.onclose = () => {
+                      stopBeating();
 
-                      tell(CLOSE_EVENT, [false, false]);
-                    }
+                      if (!client.isReconnecting()) {
+                        setReadyStateClosed(client);
+
+                        tell(CLOSE_EVENT, [false, false]);
+                      }
+                    };
+
+                    beating = beatOf(socket);
+                    carried = written;
+                    resolve();
                   };
 
-                  beating = beatOf(socket);
-                  resolve();
+                  return undefined;
                 };
+
+                if (credentialProvider === undefined) {
+                  return (open(credential), undefined);
+                }
+
+                // called at each attempt, before its upgrade goes: what it hands is written once
+                // held, what it throws fails the attempt, its cause
+                Promise.resolve()
+                  .then(() => {
+                    return credentialProvider({ signal: attempt.signal });
+                  })
+                  .then(
+                    (provided) => {
+                      if (attempt.signal.aborted) {
+                        return;
+                      }
+
+                      if (typeof provided !== 'string' || !isFieldValue(provided)) {
+                        reject(
+                          new ProgrammerError(
+                            'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+                          )
+                        );
+
+                        return;
+                      }
+
+                      open(provided);
+                    },
+                    (reason: unknown) => {
+                      reject(new ConnectError('the credential provider failed', { cause: reason }));
+                    }
+                  );
 
                 return undefined;
               },
@@ -276,6 +413,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
             throw reason;
           } finally {
             rejectConnect = undefined;
+            attempt.abort();
           }
 
           setReadyStateOpen(client);
@@ -351,8 +489,8 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
           }
         },
 
-        // a credential given here is not carried: the client fails a call that presents one its
-        // transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+        // a credential given here is not carried: its upgrade's is, and the client fails a call
+        // that presents another before it goes, DESTINATION_UNREACHABLE (decision 0032)
         send: ({ data }) => {
           return createPromise((resolve, reject) => {
             const { socket } = client;

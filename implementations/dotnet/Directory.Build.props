@@ -6,7 +6,7 @@
   -->
   <PropertyGroup>
     <!-- the TypeScript side's version too: one version for Bead, moved by each release -->
-    <Version>0.4.1</Version>
+    <Version>0.5.0</Version>
     <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -20,5 +20,16 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- in CI, a restore that would change a lock file fails, as Yarn's immutable install does -->
     <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <!-- every package restored, direct or transitive, against the advisories NuGet knows: one of any
+         severity is a warning, so an error, and the build stops on it -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- an async lambda given where a void delegate goes, an event's listener among them, is an
+         async void whose exception ends the process: VSTHRD100 and VSTHRD101, .editorconfig says
+         which of the others are off and why -->
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
 </Project>

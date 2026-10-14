@@ -102,6 +102,7 @@ public sealed partial class RouterServerTests
         Start(new RouterServerOptions
         {
             Relay = given.Relay,
+            Limits = given.Limits,
             Clock = given.Clock,
             SessionOf = given.SessionOf,
             CredentialSchemes = given.CredentialSchemes,
@@ -503,6 +504,40 @@ public sealed partial class RouterServerTests
         Assert.Equal(["the connection closed before the answer first", $"{DeviceHandle} is not open first"], Reported());
     }
 
+    // spec 14.5
+    [Fact]
+    public async Task Hands_leg_A_s_transport_the_relayed_result_once_answers_nothing_after_it_refuses_it_and_reports_why_with_leg_A_s_connection()
+    {
+        using var device = StartRelayed();
+
+        _transport.SendErrors[First] = new IOException("the socket is closed");
+        Deliver(First, To(7, RequestOf(1, payload: "hi")));
+        await Settle();
+        _transport.SendErrors.Clear();
+
+        // its call was answered once the transport had the result: a second answer goes nowhere
+        Assert.Equal(["first result 1 HI"], SentSince());
+        Assert.Equal(["the socket is closed first"], Reported());
+    }
+
+    // spec 14.5
+    [Fact]
+    public async Task Answers_a_relayed_result_past_leg_A_s_limit_PROCEDURE_FAILED_with_no_detail_and_reports_PAYLOAD_TOO_LARGE_with_leg_A_s_connection()
+    {
+        // 8 bytes of prefix, 20 of an announcement and 36 of payload fill leg A's chunk of 64; one more
+        // would need a transfer, which this relay sends none of
+        using var device = StartRelayed(new Setup { Limits = new RouterLimits { ChunkBytes = 64, WindowBytes = 128, MaximumTransfers = 0 } });
+
+        Deliver(First, To(7, RequestOf(1, payload: new string('x', 36))));
+        await Settle();
+        Deliver(First, To(7, RequestOf(3, payload: new string('y', 37))));
+        await Settle();
+
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.ProcedureFailed), _transport.Sent[^1].Envelope.Failure);
+        Assert.Equal([$"first result 1 {new string('X', 36)}", "first failure 3 ProcedureFailed"], SentSince());
+        Assert.Equal(["PayloadTooLarge first"], Reported());
+    }
+
     [Fact]
     public async Task Ends_leg_B_past_the_relay_s_timeout_cancelling_it_at_the_target_and_answers_lost_no_timer_without_one()
     {
@@ -709,6 +744,9 @@ public sealed partial class RouterServerTests
     private sealed record Setup
     {
         public RelayOptions Relay { get; init; } = Admitting;
+
+        // the relay's own, leg A's: the default when none
+        public RouterLimits? Limits { get; init; }
 
         public RouterLimits? DeviceLimits { get; init; }
 

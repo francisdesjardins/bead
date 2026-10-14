@@ -43,8 +43,8 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.14'
       - run: python spec/generators/make_vectors.py
@@ -67,8 +67,9 @@ jobs:
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
   # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
-  # then its tests. The interop against the C# server runs in the .NET job. On the current line and
-  # on the floor `engines.node` declares, so the floor holds by a run.
+  # then its tests, on the current line under coverage, held to the side's floor. The interop
+  # against the C# server runs in the .NET job. On the current line and on the floor
+  # `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
     runs-on: ubuntu-26.04
@@ -81,15 +82,15 @@ jobs:
       run:
         working-directory: implementations/typescript
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
       - name: Locate the Yarn cache
         id: yarn-cache
         run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
       # The download cache, not `node_modules`: cache what was downloaded, always install.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('implementations/typescript/yarn.lock') }}
@@ -97,7 +98,18 @@ jobs:
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
       - run: $YARN check
-      - run: $YARN test --grep-invert "the C# server of the interop service"
+      - if: matrix.node != '26'
+        run: $YARN test --grep-invert "the C# server of the interop service"
+      # On the current line, the same tests under c8, then what they ran held to the TypeScript
+      # side's floor in tools/coverage-floors.json, the report in the run's summary.
+      - if: matrix.node == '26'
+        run: $YARN test:coverage --grep-invert "the C# server of the interop service"
+      - if: matrix.node == '26'
+        name: Coverage, held to its floor
+        working-directory: .
+        run: >-
+          node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json
+          --under implementations/typescript/src --floor typescript --summary "$GITHUB_STEP_SUMMARY"
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
@@ -117,11 +129,12 @@ jobs:
   # The C# side's gate — `dotnet format --verify-no-changes` holds the layout, the code style and
   # the analyzers, the generated folders left to their generator; `dotnet build` builds every
   # project with every warning an error, the builder's C# goldens among them, which `Bead.Goldens`
-  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests — and
-  # the interop, both ways: the C# client against the TypeScript server, which `dotnet test` starts
-  # with Node, then the TypeScript client against the C# server; then a page of another origin in
-  # Chromium against both sides' HTTP servers, what proves a browser reads their CORS answer. Only
-  # the TypeScript side is installed, for its interop server and its page, and Chromium.
+  # compiles under this side's rules as a consumer compiles them; `dotnet test` runs the tests under
+  # coverage, held to the side's floor — and the interop, both ways: the C# client against the
+  # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
+  # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
+  # proves a browser reads their CORS answer. Only the TypeScript side is installed, for its interop
+  # server and its page, and Chromium.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -139,13 +152,13 @@ jobs:
       run:
         working-directory: implementations/dotnet
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: implementations/dotnet/global.json
           cache: true
           cache-dependency-path: implementations/dotnet/**/packages.lock.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - run: $YARN install --immutable
@@ -153,7 +166,15 @@ jobs:
       - run: dotnet format Bead.slnx --verify-no-changes --exclude ../../builder/test/golden/csharp interop/Bead.Interop/Generated
       # every project, which `dotnet test` does not: it builds the test projects alone
       - run: dotnet build Bead.slnx
-      - run: dotnet test --solution Bead.slnx
+      # the tests under coverage, one cobertura report per test project, then what they ran held to
+      # the C# side's floor in tools/coverage-floors.json, the report in the run's summary
+      - run: >-
+          dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura
+          --results-directory TestResults/coverage
+      - name: Coverage, held to its floor
+        run: >-
+          node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml
+          --under implementations/dotnet/src --floor csharp --summary "$GITHUB_STEP_SUMMARY"
       - run: $YARN test:interop
         working-directory: implementations/typescript
       - run: $YARN playwright install --with-deps chromium
@@ -214,15 +235,15 @@ jobs:
         # Git Bash on Windows, so `$YARN` and every step read alike on both
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
       - name: Locate the Yarn cache
         id: yarn-cache
         run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
       # The download cache, not `node_modules`: cache what was downloaded, always install.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: builder-yarn-cache-${{ runner.os }}-${{ runner.arch }}-node${{ matrix.node }}-${{ hashFiles('builder/yarn.lock') }}
@@ -230,7 +251,7 @@ jobs:
       # `--immutable` fails if `yarn.lock` would change.
       - run: $YARN install --immutable
       # protoc's archive, extracted, by the pin it was checked against
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: builder/.protoc
           key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
@@ -319,11 +340,11 @@ jobs:
       matrix:
         node: ['26', '24.9']
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: examples/hello/dotnet/global.json
           cache: true
@@ -335,12 +356,12 @@ jobs:
         working-directory: builder
         run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
       # The download cache, not `node_modules`: cache what was downloaded, always install.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: examples-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('builder/yarn.lock', 'examples/*/typescript/yarn.lock') }}
           restore-keys: examples-yarn-cache-${{ runner.os }}-node${{ matrix.node }}-
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: builder/.protoc
           key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
@@ -398,11 +419,11 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: implementations/dotnet/global.json
           cache: true
@@ -412,7 +433,7 @@ jobs:
         working-directory: builder
         run: echo "dir=$($YARN config get cacheFolder)" >> "$GITHUB_OUTPUT"
       # The download cache, not `node_modules`: cache what was downloaded, always install.
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.yarn-cache.outputs.dir }}
           key: protobuf-conformance-yarn-cache-${{ runner.os }}-${{ hashFiles('builder/yarn.lock', 'implementations/typescript/yarn.lock') }}
@@ -422,7 +443,7 @@ jobs:
         working-directory: implementations/typescript
       - run: $YARN install --immutable
         working-directory: builder
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: builder/.protoc
           key: protoc-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('builder/protoc.json') }}
@@ -433,7 +454,7 @@ jobs:
           protoc="$(node tools/fetch-protoc.mjs)"
           echo "BEADC_PROTOC=$protoc" >> "$GITHUB_ENV"
       # the runner's package, unpacked, by the pin it was checked against
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: tools/protobuf-conformance/.runner
           key: protobuf-conformance-${{ runner.os }}-${{ hashFiles('tools/protobuf-conformance/runner.json') }}
@@ -451,18 +472,19 @@ jobs:
   # Every commit subject the push or the pull request brings is a Conventional Commit; merges are
   # left out, git-flow writes them. Then every relative link of the repository's Markdown, and its
   # anchor, resolves; every version agrees with itself, and a release moves each as its changes owe;
-  # and the root's tools pass their own tests: here, since the job runs once, on the Node it already
-  # has. `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
+  # the root's tools pass their own tests: here, since the job runs once, on the Node it already
+  # has; and the supply chain holds: every action pinned by its commit, no dependency under a known
+  # advisory, no code under a blocking rule of Semgrep's. `fetch-depth: 0` brings the whole history and every tag, which the subjects' range and each
   # version's last release are read from: a clone without its tags fails the versions' floors.
   commits:
     name: Commits
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Check the subjects
@@ -500,6 +522,33 @@ jobs:
       # The root's tools, by their own tests, in Node's runner: no dependency.
       - name: Test the root's tools
         run: node --test "tools/__tests__/*.test.mjs"
+      # Every action this repository runs, pinned by its commit, its version beside it: a tag
+      # moves, and a moved tag runs another's code here.
+      - name: Every action pinned by its commit
+        run: |
+          if grep -rnE '^\s*(-\s*)?uses:\s*[^@]+@' .github/workflows | grep -vE '@[0-9a-f]{40}( #|$)'; then
+            echo "::error title=actions::an action above is not pinned by a commit's full sha"
+            exit 1
+          fi
+      # Every dependency of every lockfile, the three yarn.lock, the C# side's packages.lock.json
+      # and the spec's requirements.txt, against the advisories OSV knows, the scanner at its
+      # digest. A known vulnerability fails the job.
+      - name: The dependencies, against the known advisories
+        run: >-
+          docker run --rm -v "$PWD:/src:ro"
+          ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+          scan source --recursive /src
+      # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
+      # its digest, the generated folders and the goldens left out: a blocking finding fails the
+      # job. ! The rules are the registry's, fetched at the run: a rule added there may fail a
+      # commit that changed nothing, which is read as a finding, never as a flake.
+      - name: The code, under Semgrep's community rules
+        run: >-
+          docker run --rm -v "$PWD:/src:ro" -w /src
+          semgrep/semgrep:1.178.0@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+          semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
+          --metrics=off --error --exclude node_modules --exclude builder/test/golden
+          --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
 
   # ── CI ok ────────────────────────────────────────────────────────────────────
   # The one check that stands for every job: green when every job above passed, red otherwise,

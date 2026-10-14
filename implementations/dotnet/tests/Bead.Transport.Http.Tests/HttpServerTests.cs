@@ -157,6 +157,11 @@ public sealed class HttpServerTests
         {
             var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            lock (aborted)
+            {
+                aborted.Add("started");
+            }
+
             await using (request.Signal.Register(() =>
             {
                 lock (aborted)
@@ -281,15 +286,32 @@ public sealed class HttpServerTests
     {
         await using var connected = await ConnectHttp();
 
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-        {
-            return TextRequester(connected.Client.Services, Slow)("wait")(new RequestOptions { Timeout = TimeSpan.FromMilliseconds(100) }).WaitAsync(Patience, Cancelled);
-        });
+        // ! a client of its own, on the test's clock: its timeout passes once the server's resolver
+        // runs, never before the request reached it, which the cancel would then overtake
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        await using var client = new BeadHttpClient(new BeadHttpClientOptions { Transport = new HttpTransportClientOptions { Clock = time } });
+
+        await client.Connect(new HttpConnectOptions { Host = Host, Port = connected.Port }, Cancelled);
+
+        var slow = TextRequester(client.Services, Slow)("wait")(new RequestOptions { Timeout = TimeSpan.FromMilliseconds(100) });
+
         await Eventually(() =>
         {
             lock (connected.Aborted)
             {
                 return connected.Aborted.Count == 1;
+            }
+        });
+        time.Advance(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return slow.WaitAsync(Patience, Cancelled);
+        });
+        await Eventually(() =>
+        {
+            lock (connected.Aborted)
+            {
+                return connected.Aborted.SequenceEqual(["started", "cancelled"]);
             }
         });
     }
@@ -333,7 +355,12 @@ public sealed class HttpServerTests
             };
 
             // the connection is gone: the next exchange learns it, and the client closes
-            await Task.Delay(120, Cancelled);
+            // ! the server's timer runs on the system's clock, and a request before it fires arms it
+            // afresh: wait for the server to have closed it
+            await Eventually(() =>
+            {
+                return connected.Server.Transport.ConnectionHandles.Count == 0;
+            });
             await Record.ExceptionAsync(() =>
             {
                 return TextRequester(connected.Client.Services, Read)("0")().WaitAsync(Patience, Cancelled);

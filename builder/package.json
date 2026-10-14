@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/beadc",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "beadc, Bead's builder: compiles a .proto with buf into a blueprint, bead-blueprint/1, and checks a .proto or a blueprint by rule name.",
   "license": "Apache-2.0",
@@ -43,6 +43,11 @@
     "oxlint": "^1.86.0",
     "oxlint-tsgolint": "7.0.2003",
     "typescript-7": "npm:typescript@7.0.2"
+  },
+  "dependenciesMeta": {
+    "@bufbuild/buf": {
+      "built": true
+    }
   },
   "engines": {
     "node": ">=24.9"

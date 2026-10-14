@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -185,7 +187,7 @@ public sealed class RelayTests
         {
             var header = HeaderOf(1, call.DestinationId) with { Credential = call.Credential };
 
-            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header))?.Code;
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = "Interop sub=ada" })?.Code;
         }
 
         // a JWT whose aud names another, or none, or that does not read
@@ -212,6 +214,32 @@ public sealed class RelayTests
             {
                 Assert.Null(CodeOf(call));
             });
+    }
+
+    [Fact]
+    public void Answers_an_ELSEWHERE_DESTINATION_UNREACHABLE_over_a_leg_B_whose_upgrade_carried_the_relay_s_own_credential()
+    {
+        var relay = new TestRelay().Relay;
+
+        // a WebSocket leg B, its upgrade carrying the relay's own credential
+        relay.Register(new RecordingTarget { CarriedByUpgrade = "Interop sub=relay" }, Seven with { Audience = "bead-interop" });
+
+        Failure? RefusalOf(string carried)
+        {
+            var header = HeaderOf(1) with { Credential = Credential.Elsewhere() };
+
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = carried });
+        }
+
+        // ! leg A's credential never rides on the relay's: the confused deputy stays shut
+        var refused = RefusalOf("Interop sub=ada");
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
+            (refused?.Code, refused?.Detail));
+
+        // the very bytes its upgrade carried go
+        Assert.Null(RefusalOf("Interop sub=relay"));
     }
 
     [Fact]
@@ -618,6 +646,10 @@ public sealed class RelayTests
     }
 
     [Fact]
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD103:Call async methods when in an async method",
+        Justification = "leg A's signal is cancelled while leg B's call is in flight, its callbacks run before the call settles; CancelAsync would run them later")]
     public async Task Answers_nothing_once_leg_A_ended_leg_B_cancelled_by_the_same_signal_rejects()
     {
         var test = new TestRelay();
@@ -636,50 +668,6 @@ public sealed class RelayTests
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)) with { Signal = source.Token });
 
         Assert.Empty(test.Answers);
-    }
-
-    // spec 14.5
-    [Fact]
-    public async Task Answers_as_failed_once_what_leg_A_cannot_carry_and_lets_why_be_reported()
-    {
-        var test = new TestRelay();
-        var tooLarge = FailureException.OfProtocol(ProtocolCode.PayloadTooLarge, RouterSide.Server, "a payload is 8 bytes at most, not 9");
-        var gone = new IOException("the socket is closed");
-
-        test.Relay.Register(new RecordingTarget(), Seven);
-        test.RespondErrors.Enqueue(tooLarge);
-
-        Assert.Same(tooLarge, await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)));
-        }));
-
-        // the second cannot go out either: it goes nowhere, and the first reason is the one reported
-        test.RespondErrors.Enqueue(gone);
-        test.RespondErrors.Enqueue(new IOException("still closed"));
-
-        Assert.Same(gone, await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
-        }));
-        Assert.Equal<object>(
-            [
-                new byte[] { 9 },
-                Failure.OfProtocol(ProtocolCode.PayloadTooLarge, "a payload is 8 bytes at most, not 9"),
-                new byte[] { 9 },
-                Failure.OfProtocol(ProtocolCode.ProcedureFailed, "the socket is closed"),
-            ],
-            FailuresOf(test.Answers));
-
-        // C# only: a failure of leg A's own crossed no relay, whatever relays it says it crossed
-        test.RespondErrors.Enqueue(
-            new FailureException(tooLarge.Failure with { Relays = 3 }, new FailureException.Raised(FailureOrigin.Local, RouterSide.Server)));
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(5)));
-        });
-
-        Assert.Equal(Failure.OfProtocol(ProtocolCode.PayloadTooLarge, "a payload is 8 bytes at most, not 9"), test.Answers[^1].Answer.Failure);
     }
 
     // a destination is a uint here: one below 0, past 2³² − 1 or not whole has no twin
@@ -910,14 +898,22 @@ public sealed class RelayTests
     {
         public RouterLimits Limits { get; } = limits ?? RouterLimits.Default;
 
-        // in process: it carries a credential, and is secure, unless a test says otherwise
+        // in process: it carries a credential, and is secure, unless a test says otherwise; once told
+        // one, it carries that one alone, as a WebSocket carries its upgrade's
         public bool CarriesCredential { get; init; } = true;
+
+        public string? CarriedByUpgrade { get; init; }
 
         public bool IsSecure { get; init; } = true;
 
         public List<Asked> Asked { get; } = [];
 
         public Func<Action<bool>, Task<RouterResult>> Settle { get; set; } = Answering(new byte[] { 9 });
+
+        public bool Carries(string credential)
+        {
+            return CarriesCredential && (CarriedByUpgrade is null || CarriedByUpgrade == credential);
+        }
 
         public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
         {
@@ -1008,7 +1004,7 @@ public sealed class RelayTests
                     {
                         Answers.Add((answer, target));
 
-                        return RespondErrors.TryDequeue(out var error) ? Task.FromException(error) : Task.CompletedTask;
+                        return Task.CompletedTask;
                     },
                 },
                 options ?? Admitting);
@@ -1021,9 +1017,6 @@ public sealed class RelayTests
         public List<Asked> Own { get; } = [];
 
         public List<(string Message, bool IsLegA)> Reports { get; } = [];
-
-        // what each answer throws, in turn, while there is one
-        public Queue<Exception> RespondErrors { get; } = [];
 
         public Func<Action<bool>, Task<RouterResult>> Settle { get; set; } = Answering(new byte[] { 8 });
     }

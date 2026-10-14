@@ -653,7 +653,8 @@ export const createRouterClient = <Transport extends IRouterClientTransportLike>
       // a credential its transport cannot carry fails the call before it goes: nothing was tried,
       // and the default stays
       const uncarried = uncarriedOf(credential, {
-        carriesCredential: transport.carriesCredential === true,
+        carried,
+        carries: transport.carries?.bind(transport),
         failures: CLIENT_FAILURES,
         isSecure: transport.isSecure === true,
       });

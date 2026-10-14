@@ -36,7 +36,12 @@ import {
   setReadyStateOpen,
 } from '../shared/ready-state';
 import { dispose } from './symbols';
-import { createTransportClient, DEFAULTS, DISCONNECT_DEFAULTS } from './transport-client';
+import {
+  createTransportClient,
+  DEFAULTS,
+  DISCONNECT_DEFAULTS,
+  isFieldValue,
+} from './transport-client';
 import type {
   FetchLike,
   HTTPTransportClient,
@@ -123,10 +128,6 @@ export const WAIT = 25_000;
 
 // the length before each envelope of a batch
 const LENGTH_BYTES = 4;
-
-// what a field's value holds, and so a credential the `Authorization` field carries: visible ASCII,
-// spaces and tabs (RFC 9110 §5.5)
-const FIELD_VALUE = /^[\t\x20-\x7e]*$/u;
 
 // helpers
 
@@ -525,7 +526,8 @@ export const createHTTPTransportClient = (
       };
 
       return {
-        carriesCredential: true,
+        // * any field value, in each `POST`'s `Authorization`
+        carries: isFieldValue,
         clock,
         get isSecure() {
           return isSecure;
@@ -677,10 +679,13 @@ export const createHTTPTransportClient = (
             return Promise.reject(new ReadyStateError(getReadyState(client), ReadyState.OPEN));
           }
 
-          // refused before it goes, the connection kept: a field could not carry it as it is
-          if (credential !== undefined && !FIELD_VALUE.test(credential)) {
+          // refused before it goes, the connection kept: a field could not carry it as it is, and
+          // one with a space or a tab first or last the server would read trimmed
+          if (credential !== undefined && !isFieldValue(credential)) {
             return Promise.reject(
-              new ProgrammerError('a credential holds visible ASCII, spaces and tabs alone')
+              new ProgrammerError(
+                'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+              )
             );
           }
 

@@ -333,6 +333,12 @@ export interface IAdmissionRequest<Handle extends string = ConnectionHandle> {
   header: Readonly<IRequestHeader>;
   /** The call's session, its credential resolved (spec 13.1); none when the call runs in none. */
   session?: ICallSession | undefined;
+  /**
+   * What its transport carried beside it, for a request presenting `ELSEWHERE`, which a relay asks
+   * leg B's transport whether it carries (spec 14.3, step 5); none for any other, and none when
+   * nothing was carried. Never handed to a `beforeRequest` or a `beforeRoute`.
+   */
+  transportCredential?: string | undefined;
 }
 
 /**
@@ -919,7 +925,8 @@ export interface ISessionRequest<Handle extends string = ConnectionHandle> {
   header: Readonly<IRequestHeader>;
   /**
    * What its transport carried beside it, which an `ELSEWHERE` stands for (spec 15.1): over HTTP,
-   * its `POST`'s `Authorization`, as it came; none when nothing was carried.
+   * its `POST`'s `Authorization`, over a WebSocket, its upgrade's, as it came; none when nothing was
+   * carried.
    */
   transportCredential?: string | undefined;
 }

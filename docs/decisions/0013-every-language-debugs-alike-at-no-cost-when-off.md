@@ -269,9 +269,10 @@ has its reason:
 **Nothing is paid while nobody listens and no registry is given** (debugging 3). One check a call,
 one an envelope, is the whole cost. A side that counts reads the monotonic clock twice a call, at
 its router's gates, never the wall clock, and adds to series it reaches through what it holds
-already, with no lookup of its own and no allocation. A latency bench measures what a counted call
-costs against one not counted, on each side, and gates nothing: what the clause bounds, the readings
-and the allocations, its gates hold.
+already, with no lookup of its own and no allocation. A latency bench, where Bead goes
+([the index](README.md#where-bead-goes)), measures what a counted call costs against one not
+counted, on each side, and gates nothing: what the clause bounds, the readings and the allocations,
+its gates hold.
 
 - **Its gates** ([0006](0006-a-rule-has-its-gate.md)): each side's test clock counts its readings;
   twin tests over a manager on a fake router show a call made, a request answered, a notification

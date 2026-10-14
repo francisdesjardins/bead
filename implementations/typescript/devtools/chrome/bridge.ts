@@ -41,7 +41,9 @@ const connect = (): void => {
       message: message as PanelMessage,
     };
 
-    window.postMessage(data, '*');
+    // the page's own window, at its own origin: '/' names it, an opaque one included, where '*'
+    // would reach a document the window navigated to
+    window.postMessage(data, '/');
   });
   // a background that stopped, as a service worker does, is reached again
   opened.onDisconnect.addListener(() => {

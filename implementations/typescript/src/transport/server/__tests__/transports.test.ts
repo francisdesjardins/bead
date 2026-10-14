@@ -384,8 +384,8 @@ const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
  * case's options on the transport and its limits on the router, every layer on the transport's
  * `clock`, given the interop service's credentials. Over HTTP, its transport is given them as they
  * are, `maximumBodyBytes` among them, which `createHTTPServer` sets itself; its server layer, its own
- * connection timeout. Over WebSocket, its transport takes the `hosts`, `origins` and
- * `trustedProxies` alike.
+ * connection timeout. Over WebSocket, its transport takes the `hosts`, `origins`, `trustedProxies`
+ * and `unnamedProxies` alike.
  */
 const serverOf = (
   { limits, options = {}, transport }: ICase,
@@ -404,6 +404,7 @@ const serverOf = (
         maxPayload: maximumMessageBytes,
         origins: bounds.origins,
         trustedProxies: bounds.trustedProxies,
+        unnamedProxies: bounds.unnamedProxies,
         WebSocketServer,
       },
     });
@@ -596,7 +597,7 @@ test.describe('the transports', () => {
     // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
     const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
-    const starting = wsTransport.start({ port: 4_321 });
+    const starting = wsTransport.start({ address: HOST, port: 4_321 });
 
     fake.instances[0]?.emit('listening');
     await starting;

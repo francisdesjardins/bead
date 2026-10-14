@@ -48,21 +48,30 @@ platform's bound applies. A WebSocket server judges a request at its address in 
 ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
 403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
 request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
-13, the one it speaks; 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among
-`origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it would take once its stop began. Each
-refusal but HTTP's own is marked, its body empty, closes its connection, and is
-told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
-[HTTP](#http).
+13, the one it speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an
+`Origin` neither its own nor among `origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it
+would take once its stop began. Each refusal but HTTP's own is marked, its body empty, closes its
+connection, and is told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken
+— see [HTTP](#http).
 
-A server listens on `127.0.0.1` unless `start` is given an `address`, an IP address written bare, as
-RFC 3986 writes one: a container, or any server another machine reaches, says `0.0.0.0` or `::`, and
-names its hosts. A name, `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
+A server listens on `localhost` unless `start` is given an `address`: both loopbacks, `127.0.0.1`
+and `::1`, on one port, as Kestrel's `ListenLocalhost` does, so no other process can answer a client
+that reaches it by `localhost` on the family it tries first (spec 15.12). `127.0.0.1` binds first,
+on the port given or one drawn there, then `::1` on that port; a port another socket holds on either
+fails the start, and a drawn one is drawn again, eight times at most. Where the IPv6 loopback is
+absent — a container with IPv6 off — it listens on `127.0.0.1` alone and reports `127.0.0.1`, its
+`address` and its `start`'s, where Kestrel would say `localhost`. An `address` given is
+`localhost`, both loopbacks as above, or an IP address written bare, as RFC 3986 writes one, which
+it listens on alone: a container, or any server another machine reaches, says `0.0.0.0` or `::`,
+and names its hosts. Any other name — `LOCALHOST`,
+`localhost.`, `a.localhost` — `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
 loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
 clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
-tries first, Node's and the browsers' racing them (RFC 8305); another process that listens on `::1`,
-on the same port, answers a client that tries that family first. A server meant for other machines
-and given no address is refused there by the network, its connection reset or refused, never by a
-Bead refusal: no socket opens, so nothing is told.
+tries first, Node's and the browsers' racing them (RFC 8305); a server given one loopback,
+`127.0.0.1` or `::1`, leaves the other's port to any process that listens there, which then answers
+a client that tries that family first. A server meant for other machines and given no address is
+refused there by the network, its connection reset or refused, never by a Bead refusal: no socket
+opens, so nothing is told.
 
 Each refusal a server judges of its own it tells, `refusal`, once written: its status, its reason,
 the request's authority and its `Origin` as they came, and the client's address and port — never
@@ -111,17 +120,71 @@ schedule, whatever the field asks.
 
 What a transport carries, both ways, is a message, `{ data, credential }`: an envelope, and the
 credential the transport carries beside it, which a request presenting `ELSEWHERE` stands for. Over
-HTTP it is the `Authorization` of the `POST` that carries a request — see [HTTP](#http); a WebSocket
-and a Web Worker carry none, either way. Each end says what it can carry, so its router fails before
-it goes a call whose credential it cannot: `carriesCredential`, and `isSecure`, judged by what the
-end was given, never by what a name resolves to — a client by the URL of its connect, under TLS
-(`wss`, `https`) or to a loopback host (`localhost`, a name in `.localhost`, 127.0.0.0/8, `::1`, the
-host as the WHATWG URL Standard's host parser reads it: `127.0.0.1.` is on the loopback, a host
-followed by a space is not); a server, per connection, by what it listens on — an address in
-127.0.0.0/8 or `::1`, or, over HTTP, a server under TLS — unless its application tells it what stands in front of it,
-`secure`: `true` for TLS terminated before it, which makes each connection secure, `false` for a
-proxy that serves the network in the clear, which leaves each in the clear; a worker always, since
-it never leaves the machine.
+HTTP it is the `Authorization` of the `POST` that carries a request — see [HTTP](#http); over a
+WebSocket, the `Authorization` of an upgrade that carries no `Origin`, beside every envelope of its
+connection, toward its server alone — see below; a Web Worker carries none, either way. Each end
+says what it can carry, so its router fails before it goes a call whose credential it cannot: a
+client's `carries(credential)` — over HTTP any field value, over a WebSocket the bytes its upgrade
+carried alone, compared in constant time — a server's `carriesCredential(connectionHandle)`, none
+toward a client, and `isSecure`, judged by what the end was given, never by what a name resolves to
+— a client by the URL of its connect, under TLS (`wss`, `https`) or to a loopback host (`localhost`,
+a name in `.localhost`, 127.0.0.0/8, `::1`, the host as the WHATWG URL Standard's host parser reads
+it: `127.0.0.1.` is on the loopback, a host followed by a space is not); a server, per connection,
+by what it listens on — an address in 127.0.0.0/8, `::1` or `localhost`, or, over HTTP, a server
+under TLS — unless its application tells it what stands in front of it, `secure`: `true` for TLS
+terminated before it, which makes each connection secure, `false` for a proxy that serves the
+network in the clear, which leaves each in the clear; a worker always, since it never leaves the
+machine.
+
+A WebSocket client writes the credential its connect is given in its upgrade's `Authorization`: a
+string, `credential`, or `credentialProvider`, a function called at each attempt, a reconnection's
+included, with the attempt's `signal` — where a credential past its end is renewed, as SignalR's
+`accessTokenFactory` is (spec 15.2, decision 0032). The server hands it beside every envelope of
+that connection, as it came, trimmed, so a request presenting `ELSEWHERE` stands for it, resolved
+per request by the verifier, as over HTTP: one that no longer holds, or whose end has come, is
+refused on the request that presents it, and the connection stays. One connection carries one
+credential: a client presents another by connecting again, its provider handing the new one, and
+gives its router's default `ELSEWHERE` the same bytes, from one source; between the two, a call
+fails before it goes, `DESTINATION_UNREACHABLE`. A connect refuses, a `ProgrammerError`, nothing
+moved: a credential and a provider together; one that is no field value — anything but visible
+ASCII, spaces and tabs, or a space or a tab first or last; one over `ws://` off the loopback, its
+upgrade crossing in the clear; and one over a `WebSocket` without `ws`'s shape — a page's, Node's
+global — which writes no field of its caller's choosing: a page presents a `JWT`, in the envelope. A
+value the provider hands that is no field value fails its attempt the same way, which a reconnection
+does not try again; what it throws fails that attempt, its cause. An upgrade that carries an
+`Origin` carries none, whatever its `Authorization`: a page's browser writes its own authentication
+on it, as it sends its cookies, so any page the server takes would present its user's credential.
+Two `Authorization` lines on an upgrade are refused 400, `malformed`. No client follows a redirect:
+a 3xx answered to an upgrade fails its connect, its status named over `ws`, "the server refused the
+upgrade: 302". The `connection` event shows an upgrade as the HTTP server shows a connect, headers
+aside — its method, its target and its peer — so no event carries its credential.
+
+```ts
+import { WebSocket } from 'ws';
+
+// one source for the upgrade's credential and the router's default, renewed together
+let token = await signIn();
+const elsewhere = () => {
+  return { carried: `Bearer ${token}`, scheme: CredentialScheme.ELSEWHERE } as const;
+};
+const client = createWSClient({ credential: elsewhere(), transport: { WebSocket } });
+
+client.router.on('credentialWithdrawn', () => {
+  void signIn().then(async (renewed) => {
+    token = renewed;
+    client.router.credential = elsewhere();
+    // a new connection, whose upgrade the provider gives the new credential
+    await client.reconnect();
+  });
+});
+await client.connect({
+  credentialProvider: () => {
+    return elsewhere().carried;
+  },
+  host: 'localhost',
+  port,
+});
+```
 
 Each end takes its time from a `clock`: the part of the globals Bead calls — `setTimeout`,
 `clearTimeout`, `setInterval`, `clearInterval`, `Date.now` and `performance.now` — in their own
@@ -214,7 +277,7 @@ far a request went:
 | 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                      |
 | 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                        |
 | 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                |
-| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, or its admission threw                                                                                                                            |
+| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries         |
 | 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                    |
 
 A requester catches a `FailureError`: `isProtocol(codes, side?)` for the protocol's codes,
@@ -240,16 +303,17 @@ A default is withdrawn once a call that presented it is refused `SESSION_REQUIRE
 the refusal crossed: the router emits `credentialWithdrawn` with the credential's scheme alone,
 never its bytes, so the application renews it, and from then on, until the application gives it a
 default again — a credential, or `undefined`, which says "anonymous" in writing — every call that
-would present it fails before it goes, `SESSION_REQUIRED`, nothing sent and nothing withdrawn, so
-no call falls to its connection's session, or to none, in silence; `isCredentialWithdrawn` says
-so. A call that gives its own credential, `{ scheme: CredentialScheme.NONE }` among them, goes: a
-call that needs no identity presents none, and so does the call that renews. A refusal withdraws only the credential its
-call presented, never a default given anew since, and a failure that ends a subscription its server
-had answered withdraws nothing, over HTTP even when it overtakes that answer in a listen's batch,
-which the failure says, `mayOvertake`. A call whose credential its transport cannot carry fails
-before it goes, `DESTINATION_UNREACHABLE`, nothing tried and its credential kept: an `ELSEWHERE`
-over a transport that carries none, a `JWT` or an `ELSEWHERE` over one that is not secure, since a
-bearer credential crosses only TLS off the machine (RFC 6750 §5.3).
+would present it fails before it goes, `SESSION_REQUIRED`, nothing sent and nothing withdrawn, so no
+call falls to its connection's session, or to none, in silence; `isCredentialWithdrawn` says so. A
+call that gives its own credential, `{ scheme: CredentialScheme.NONE }` among them, goes: a call
+that needs no identity presents none, and so does the call that renews. A refusal withdraws only the
+credential its call presented, never a default given anew since, and a failure that ends a
+subscription its server had answered withdraws nothing, over HTTP even when it overtakes that answer
+in a listen's batch, which the failure says, `mayOvertake`. A call whose credential its transport
+cannot carry fails before it goes, `DESTINATION_UNREACHABLE`, nothing tried and its credential kept:
+an `ELSEWHERE` over a transport that carries none, or, over a WebSocket, other bytes than its
+upgrade carried, a `JWT` or an `ELSEWHERE` over one that is not secure, since a bearer credential
+crosses only TLS off the machine (RFC 6750 §5.3).
 
 ```ts
 const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
@@ -691,7 +755,7 @@ bearer credential, which the relay forwards and its destination verifies:
 | -------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session       | none: it runs in leg B's session at the target                                                      |
 | `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless the relay verifies | the same bytes                                                                                      |
-| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries a credential      | `ELSEWHERE`, what leg A's transport carried moved to leg B's as it came: over HTTP, `Authorization` |
+| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries its bytes         | `ELSEWHERE`, what leg A's transport carried moved to leg B's as it came: over HTTP, `Authorization` |
 
 A request is taken in this order, on its opening. Its credential first: a scheme the relay neither
 resolves nor forwards is refused `CREDENTIAL_UNSUPPORTED`, and an `OPAQUE` that does not hold, or an
@@ -703,19 +767,20 @@ and the call's session: a server's `requireCredential` by default, which admits 
 `JWT` or an `ELSEWHERE`, by its scheme alone unless the relay verifies, and refuses any other — one
 that presents none or `OPAQUE`, in leg A's connection's session or in none — `ACCESS_DENIED`, its
 detail `a relay admits by default only a credential it forwards`, since leg A's session opens
-nothing at the destination; `requireSession` in its place refuses, `ACCESS_DENIED`, every
-credential the relay forwards without verifying, and a router's relay admits nobody without one.
-Then its destination is looked up. Then
-its credential is held to what leg B carries: a `JWT` whose `aud` does not name its destination's
-audience, a destination registered with none, an `ELSEWHERE` over a leg B that carries no
-credential, a `JWT` or an `ELSEWHERE` over a leg B that leaves the machine in the clear, each
-refused `DESTINATION_UNREACHABLE`, nothing tried. Then it is held to the smaller of the two legs'
-limits, leg B's header counted with its credential, call by call. Every refusal falls on the
-opening. A requester presenting none or `OPAQUE` that is not admitted learns only whether the relay
-has any destination; a `JWT` passes the default admission of a relay that does not verify on its
-scheme alone, whatever its bytes. A cancel on leg A, or its connection gone, cancels leg B, which
-waits as long as its destination says, the relay's `timeout` at most — by default, on: the
-requester's own timeout governs, end to end, by its cancel.
+nothing at the destination; `requireSession` in its place refuses, `ACCESS_DENIED`, every credential
+the relay forwards without verifying, and a router's relay admits nobody without one. Then its
+destination is looked up. Then its credential is held to what leg B carries: a `JWT` whose `aud`
+does not name its destination's audience, a destination registered with none, an `ELSEWHERE` over a
+leg B that cannot carry what leg A's transport carried — one that carries none, or a WebSocket whose
+upgrade carried the relay's own credential, which it never presents for a requester's — a `JWT` or
+an `ELSEWHERE` over a leg B that leaves the machine in the clear, each refused
+`DESTINATION_UNREACHABLE`, nothing tried. Then it is held to the smaller of the two legs' limits,
+leg B's header counted with its credential, call by call. Every refusal falls on the opening. A
+requester presenting none or `OPAQUE` that is not admitted learns only whether the relay has any
+destination; a `JWT` passes the default admission of a relay that does not verify on its scheme
+alone, whatever its bytes. A cancel on leg A, or its connection gone, cancels leg B, which waits as
+long as its destination says, the relay's `timeout` at most — by default, on: the requester's own
+timeout governs, end to end, by its cancel.
 
 | Leg B                                                                        | Leg A answers                                  |
 | ---------------------------------------------------------------------------- | ---------------------------------------------- |
@@ -772,11 +837,14 @@ exchange after presents that token, and a `DELETE` ends the connection. The rout
 the relays see a connection, as over a socket. The connection's token names the connection and
 nothing else — no session, no credential — and is a secret that enters no handle —
 `type=HTTP;ip=…;ordinal=…` names the connection by the rank it was drawn at, as
-`type=WS;ip=…;port=…;ordinal=…` names a WebSocket's by its peer's port and the rank it was taken
-at, so no two connections share a handle — no event and no report.
-`createHTTPTransportServer({ createServer })` takes the server's factory — `node:http`'s,
-`node:https`'s, or `node:http2`'s with `allowHTTP1` — as the WebSocket one takes `WebSocketServer`,
-and the application sets its timeouts.
+`type=WS;ip=…;port=…;ordinal=…` names a WebSocket's by its peer's port and the rank it was taken at,
+so no two connections share a handle — no event and no report. `createHTTPTransportServer({
+createServer })` takes the server's factory — `node:http`'s, `node:https`'s, or `node:http2`'s with
+`allowHTTP1` — as the WebSocket one takes `WebSocketServer`, and the application sets its timeouts.
+It is called once per address bound, told it, `createServer(listener, { address })`: on `localhost`,
+twice, `127.0.0.1` then `::1`, so an application that configures its server after building it — a
+certificate rotated by `setSecureContext`, an SNI context added, a timeout — configures each; a port
+drawn again listens again on the servers built.
 
 Each `POST` carries one envelope, of type `application/prs.bead`, and its answer comes back in the
 body of a 200 — a FAILURE too, since a failure travels once, in its envelope. The transport reads
@@ -790,18 +858,19 @@ while its upload is still coming ends that exchange empty once its body is in, n
 
 A request's credential crosses in the `Authorization` of the `POST` that carries it (RFC 9110
 §11.6.2). The client writes the credential its router gives, as it is given, and refuses before it
-goes one no field can carry — anything but visible ASCII, spaces and tabs — its connection kept. The
-server hands the router the field's value with the request, as it came, whole, its auth-scheme
-included and its surrounding spaces and tabs removed; an empty field carries none. No other
-exchange's is read, so two calls of one connection may present two credentials, and a token is
-renewed without connecting again; a `POST` with two `Authorization` fields is refused 400,
-`malformed`, before its body is read, since the field is no list to combine (RFC 9110 §5.3). An
-answer, and what a listen brings back, carry none: a server's command presenting `ELSEWHERE` fails
-before it goes. A relay that calls a destination through an HTTP client writes in its `POST`, for a
-request presenting `ELSEWHERE`, the `Authorization` leg A carried, as it came; what came beside any
-other request stays at the relay. The client is secure under `https` or to a loopback host, by the
-URL of its connect; the server under TLS — built on `node:https`'s server, or `node:http2`'s
-`createSecureServer` — or on a loopback address it listens on.
+goes one that is no field value — anything but visible ASCII, spaces and tabs, or a space or a tab
+first or last, which the server would read trimmed — its connection kept. The server hands the
+router the field's value with the request, as it came, whole, its auth-scheme included and its
+surrounding spaces and tabs removed; an empty field carries none. No other exchange's is read, so
+two calls of one connection may present two credentials, and a token is renewed without connecting
+again; a `POST` with two `Authorization` fields is refused 400, `malformed`, before its body is
+read, since the field is no list to combine (RFC 9110 §5.3). An answer, and what a listen brings
+back, carry none: a server's command presenting `ELSEWHERE` fails before it goes. A relay that calls
+a destination through an HTTP client writes in its `POST`, for a request presenting `ELSEWHERE`, the
+`Authorization` leg A carried, as it came; what came beside any other request stays at the relay.
+The client is secure under `https` or to a loopback host, by the URL of its connect; the server
+under TLS — built on `node:https`'s server, or `node:http2`'s `createSecureServer` — or on a
+loopback address it listens on.
 
 A client's `send` settles on the head of its answer, so a caller — a relay, say — knows whether the
 server had the envelope: a 2xx resolves, the server sending its head as it hands the request on.
@@ -913,26 +982,46 @@ it would let any site drive the server and read every answer; serve the page fro
 development server's or the Bead server's own, and name that one.
 
 Behind a proxy, a server, over HTTP or over WebSocket alike, believes `X-Forwarded-For` — at a
-WebSocket's address, its upgrade's — from the proxies `trustedProxies` names alone, each an IP
-address or a network, `10.0.0.0/8` say, or the compose network's: while the address reached is one
-they hold, the field's next entry from the right is the client's, so what a client wrote to the left
-of the first address none of them holds is never read. An entry is read in RFC 7239's node forms,
-`192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or `[2001:db8::1]:443`, its port dropped, and held in
-one form, IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it; any other, `unknown` or a zone among
-them, ends the walk at the proxy that wrote it. None trusts no proxy, the loopback among them; a
-name, a network whose bits past its prefix are set, and a network of prefix 0, which would trust
-what every client writes, throw a `ProgrammerError` as the transport is built. `Forwarded` is never
-read. The address reached is what a connection's handle and `clients` name and what a refusal tells;
-its port stays the socket's. A proxy not listed is a client as any other: every client behind it is
-its address. Over HTTP, `maximumConnectionsPerAddress` counts it, so a told `busy` whose `address`
-is your proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list;
-a WebSocket server bounds no address, so there it costs nothing but the address its handles and
-refusals name. A deployment whose proxies' addresses it cannot name, a platform's router or a cloud
-load balancer on public addresses, counts one address per proxy, a hop bound for such proxies
-being ahead
-([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+WebSocket's address, its upgrade's — from the proxies `trustedProxies` names, each an IP address or
+a network, `10.0.0.0/8` say, or the compose network's, and as many more as `unnamedProxies` counts:
+while the address reached is one they hold, or one they do not while fewer than `unnamedProxies`
+such addresses were passed, the field's next entry from the right is the client's, so what a client
+wrote to the left of the first address past the count that none of them holds is never read. An
+entry is read in RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`, `2001:db8::1` or
+`[2001:db8::1]:443`, its port dropped, and held in one form, IPv4-mapped as IPv4 and IPv6 as RFC
+5952 writes it; any other, `unknown` or a zone among them, ends the walk at the proxy that wrote it.
+None trusts no proxy, the loopback among them; a name, a network whose bits past its prefix are set,
+and a network of prefix 0, which would trust what every client writes, throw a `ProgrammerError` as
+the transport is built. `Forwarded` is never read. The address reached is what a connection's handle
+and `clients` name and what a refusal tells; its port stays the socket's. A proxy neither listed nor
+counted is a client as any other: every client behind it is its address. Over HTTP,
+`maximumConnectionsPerAddress` counts it, so a told `busy` whose `address` is your proxy's, or a
+`largestAddressConnections` near its ceiling on `/health`, is a proxy to list; a WebSocket server
+bounds no address, so there it costs nothing but the address its handles and refusals name. A proxy
+whose platform publishes its addresses is listed: Google Cloud's global load balancer by
+`130.211.0.0/22`, `35.191.0.0/16` and the forwarding rule's own address, Cloudflare by its ranges,
+an AWS ALB by its VPC's network. One whose addresses its platform does not publish — Heroku's
+router, a serverless backend behind a load balancer — is counted, `unnamedProxies`, one each, from 0
+to 8, 0 by default: a listed proxy costs none of the count, wherever it stands, so a count is of the
+proxies the list does not name alone, unlike Envoy's `xff_num_trusted_hops` and Express's `trust
+proxy` n, which count every hop — a proxy both listed and counted hands the client an entry it
+wrote. A count is believed as told: a request that reaches the server past a counted proxy, straight
+to its socket, is read by entries its client wrote, so a server so reachable lists its proxies
+instead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)).
 A bound by address counts as one the users behind one NAT, and as many the addresses of one IPv6
 network.
+
+```ts
+// a sidecar on the loopback, listed, and Heroku's router before it, its addresses unpublished, counted
+const server = createHTTPTransportServer({
+  createServer: (listener) => {
+    return createServer(listener);
+  },
+  trustedProxies: ['127.0.0.1'],
+  unnamedProxies: 1,
+});
+```
 
 What the server sends of its own — a subscription's notifications, a command, a request relayed to
 the connection, a cancel — reaches a client that listens. The client says so at connect,

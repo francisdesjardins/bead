@@ -102,6 +102,7 @@ share.
   lends leg B's session to every requester in a session at the relay, at every destination: it
   reads none, so a requester in any session acts at every destination with leg B's rights, as a
   deputy that lends its own authority (CWE-441).
+
 - **The client's router** presents its `Credential` on every call that gives none of its own. A
   default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
   the refusal crossed: `CredentialWithdrawn` tells the application its scheme alone, never its
@@ -122,6 +123,7 @@ share.
       client.Router.Credential = Credential.Jwt(renewed);
   };
   ```
+
 - **HTTP's transport** sets the shared behaviour where Kestrel's defaults would differ: no body
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
   503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`,
@@ -132,15 +134,67 @@ share.
 - **The transports** hold the same ready states on both sides, and the client reconnects alike, its
   delay, attempts, token and tap, its router rejecting what waited on the connection replaced.
   Neither client reads a `Retry-After`: a reconnection waits its own schedule, whatever a refusal's
-  `Retry-After` asks (spec 15.7). A server listens on `127.0.0.1` unless `Start` is given an
-  `Address`, an IP address written bare, RFC 3986's grammar and not the platform's parser's: a
-  container, or any server another machine reaches, says `0.0.0.0` or `::`, and names its hosts; a
-  name, `[::1]`, `127.1` or `0` is an `ArgumentException` as it starts. On the loopback it is secure
-  (spec 13.4); behind a proxy on the same machine that serves the network in the clear, it says
-  `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
+  `Retry-After` asks (spec 15.7). A server listens on `localhost` unless `Start` is given an
+  `Address`: both loopbacks, `127.0.0.1` and `::1`, on one port, so no other process can answer a
+  client that reaches it by `localhost` on the family it tries first (spec 15.12). It binds each by
+  a `Listen` of its own in one Kestrel application, as `ListenLocalhost` binds both, which it never
+  calls: `ListenLocalhost` refuses a drawn port and reports `localhost` where it bound `127.0.0.1`
+  alone. Under `FindOpenPort` the port is drawn on `127.0.0.1`; a port another socket holds on
+  either loopback fails the start, and a drawn one is drawn again, eight times at most. Where the
+  IPv6 loopback is absent — a container with IPv6 off — it listens on `127.0.0.1` alone and reports
+  `127.0.0.1`. An `Address` given is `localhost`, both loopbacks as above, or an IP address written
+  bare, RFC 3986's grammar and not the platform's parser's, which it listens on alone: a container,
+  or any server another machine reaches, says `0.0.0.0` or `::`, and names its hosts; any other
+  name — `LOCALHOST`, `localhost.`, `a.localhost` — `[::1]`, `127.1` or `0` is an
+  `ArgumentException` as it starts. On the loopback
+  it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
+  clear, it says `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
-  client given a `Handler` keeps the handler's behaviour.
+  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: a 3xx
+  answered to a connect, a send or an upgrade fails it, its status named (spec 15.6), the
+  WebSocket client's handler built with `AllowAutoRedirect = false` as the HTTP client's is.
+- **The credential a transport carries** beside an envelope, which a call presenting `ELSEWHERE`
+  stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
+  envelope of the connection, toward its server alone (spec 15.2, [decision
+  0032](../../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
+  `WebSocketConnectOptions` takes it as `Credential`, a string, or as `CredentialProvider`, called
+  at each attempt, a reconnection's included, with the attempt's token, as SignalR's
+  `AccessTokenProvider` is: where a credential past its end is renewed. A connect refuses, an
+  `ArgumentException`, nothing moved: both given; one that is no field value — anything but visible
+  ASCII, spaces and tabs, or a space or a tab first or last (RFC 9110 §5.5), which the HTTP client
+  refuses alike before a send goes; one over `ws://` off the loopback. A value the provider hands
+  that is no field value fails its attempt alike, which a reconnection does not try again; what it
+  throws fails the attempt, a `WebSocketException` whose inner exception it is. `Carries` says what
+  a call may present: over HTTP any field value, over a WebSocket the bytes its upgrade carried
+  alone, compared by `CryptographicOperations.FixedTimeEquals`. An upgrade that carries an `Origin`
+  carries none, whatever its `Authorization`: a page's browser writes its own authentication on it.
+  One connection carries one credential: a client presents another by connecting again, and gives
+  its router's default the same bytes, from one source; between the two, a call fails before it
+  goes, `DESTINATION_UNREACHABLE`.
+
+  ```csharp
+  // one source for the upgrade's credential and the router's default, renewed together
+  var token = await SignIn();
+  client.Router.Credential = Credential.Elsewhere($"Bearer {token}");
+  client.Router.CredentialWithdrawn += async (_) =>
+  {
+      token = await SignIn();
+      client.Router.Credential = Credential.Elsewhere($"Bearer {token}");
+
+      // a new connection, whose upgrade the provider gives the new credential
+      await client.Reconnect();
+  };
+  await client.Connect(new WebSocketConnectOptions
+  {
+      Host = "localhost",
+      Port = port,
+      CredentialProvider = (_) =>
+      {
+          return ValueTask.FromResult($"Bearer {token}");
+      },
+  });
+  ```
 - **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
   `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
   own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
@@ -233,10 +287,11 @@ zero, nothing after; for `http`, `https`, `ws` and `wss`, the host in lower case
 port.
 
 Behind a proxy, a server, over HTTP or over WebSocket alike, believes `X-Forwarded-For` from the
-proxies `TrustedProxies` names alone, each an IP address or a network, `10.0.0.0/8` say, or the
-compose network's: while the address reached is one they hold, the field's next entry from the right
-is the client's, so what a client wrote to the left of the first address none of them holds is never
-read (spec 15.12). An entry is read in RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`,
+proxies `TrustedProxies` names, each an IP address or a network, `10.0.0.0/8` say, or the compose
+network's, and as many more as `UnnamedProxies` counts: while the address reached is one they hold,
+or one they do not while fewer than `UnnamedProxies` such addresses were passed, the field's next
+entry from the right is the client's, so what a client wrote to the left of the first address past
+the count that none of them holds is never read (spec 15.12). An entry is read in RFC 7239's node forms, `192.0.2.7`, `192.0.2.7:51234`,
 `2001:db8::1` or `[2001:db8::1]:443`, its port dropped, and held in one form, IPv4-mapped as IPv4
 and IPv6 as RFC 5952 writes it, hexadecimal throughout, by the transport's own reading rather than
 `IPAddress.TryParse`'s; any other, `unknown` or a zone among them, ends the walk at the proxy that
@@ -244,15 +299,32 @@ wrote it. None trusts no proxy, the loopback among them; a name, a network whose
 prefix are set, and a network of prefix 0, which would trust what every client writes, are an
 `ArgumentException` as the transport is built. `Forwarded` is never read. The client's address so
 read names its connection, `ip=` in its handle, and its refusals; its port is the socket's, the
-nearest proxy's connection's behind one. A proxy not listed is a client as any other: every client
-behind it is its address, which names them on either transport and which an HTTP server's
-`MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your proxy's, or a
-`largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A deployment whose
-proxies' addresses it cannot name, a platform's router or a cloud load balancer on public addresses,
-counts one address per proxy, a hop bound for such proxies being ahead
-([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+nearest proxy's connection's behind one. A proxy neither listed nor counted is a client as any
+other: every client behind it is its address, which names them on either transport and which an
+HTTP server's `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
+proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A
+proxy whose platform publishes its addresses is listed: Google Cloud's global load balancer by
+`130.211.0.0/22`, `35.191.0.0/16` and the forwarding rule's own address, Cloudflare by its ranges,
+an AWS ALB by its VPC's network. One whose addresses its platform does not publish — Heroku's
+router, a serverless backend behind a load balancer — is counted, `UnnamedProxies`, one each, from 0
+to 8, 0 by default, any other an `ArgumentOutOfRangeException` as the transport is built: a listed
+proxy costs none of the count, wherever it stands, so a count is of the proxies the list does not
+name alone, unlike Envoy's `xff_num_trusted_hops` and Express's `trust proxy` n, which count every
+hop — a proxy both listed and counted hands the client an entry it wrote. A count is believed as
+told: a request that reaches the server past a counted proxy, straight to its socket, is read by
+entries its client wrote, so a server so reachable lists its proxies instead
+([decision 0030](../../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)).
 A bound by address counts as one the users behind one NAT, and as many the addresses of one IPv6
 network.
+
+```csharp
+// a sidecar on the loopback, listed, and Heroku's router before it, its addresses unpublished, counted
+var server = new HttpTransportServer(new HttpTransportServerOptions
+{
+    TrustedProxies = ["127.0.0.1"],
+    UnnamedProxies = 1,
+});
+```
 
 A refused host is told on the wire, 403 and `bead-refusal: host-refused`, which `curl -i` and a
 browser's network panel show. Each refusal the server judges of its own it tells, the event
@@ -277,7 +349,10 @@ which no router forwards to its own. A server gives its transport as `IServerTra
 carries `Error` and `Refusal` alike, so an application hears both through `server.Transport`,
 whichever transport it built, beside its router's; a client's, through the client transport it
 built. An `async` lambda given to one of its events is `async void`, whose exception ends the
-process, so a listener catches its own.
+process, so a listener catches its own. The threading analyzers'
+[VSTHRD101](https://microsoft.github.io/vs-threading/analyzers/VSTHRD101.html) says where one is
+given, at build: Bead's own projects hold it, and an application's may, by
+`Microsoft.VisualStudio.Threading.Analyzers`.
 
 ```csharp
 server.Router.Error += (reason, connectionHandle) =>

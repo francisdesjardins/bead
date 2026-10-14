@@ -35,7 +35,7 @@ public static class Serving
         var address = await server.Transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", Port = port, FindOpenPort = port == 0 });
 
         // LF, as the TypeScript server writes it, on every platform
-        Console.Out.Write($"{JsonSerializer.Serialize(new Dictionary<string, int> { ["port"] = address.Port })}\n");
+        await Console.Out.WriteAsync($"{JsonSerializer.Serialize(new Dictionary<string, int> { ["port"] = address.Port })}\n");
         await Console.Out.FlushAsync();
 
         // served until whoever started it lets go of its input

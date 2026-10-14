@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+
+// A namespace that would close the C# target's line and write a type of its own.
+option csharp_namespace = "X.V1; public static class Injected { } namespace X.V2";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A message, so the file declares something.
+message Held {
+  string value = 1;
+}

@@ -43,6 +43,10 @@ public sealed partial class RouterClientTests
         // the server asks its client back, by a command, before it answers
         await RequesterOf(link.ClientServices, "ask")(JsonOf("null"))().WaitAsync(Patience, Cancelled);
 
+        // ! the server ends a call as its answer is handed to its transport, after the client may
+        // have it: wait for the server's loop, behind that hand-off, before reading what it counted
+        await link.Server.Gauges().WaitAsync(Patience, Cancelled);
+
         string[] expected =
         [
             "bead_client_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
@@ -123,6 +127,10 @@ public sealed partial class RouterClientTests
                 },
                 Cancelled);
         })).WaitAsync(Patience, Cancelled);
+
+        // ! the server ends a call as its answer is handed to its transport, after the client may
+        // have it: wait for the server's loop, behind that hand-off, before reading what it counted
+        await link.Server.Gauges().WaitAsync(Patience, Cancelled);
 
         var each = Threads * Calls;
 

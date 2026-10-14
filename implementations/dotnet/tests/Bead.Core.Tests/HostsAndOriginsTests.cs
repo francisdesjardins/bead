@@ -424,24 +424,32 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
-    public void Refuses_to_listen_on_an_address_that_is_no_bare_IP_address_naming_it_and_tells_a_bracketed_one_how_to_write_itself()
+    public void Refuses_to_listen_on_an_address_that_is_no_bare_IP_address_nor_localhost_naming_it_and_tells_a_bracketed_one_how_to_write_itself()
     {
-        foreach (var address in Addresses.Listening)
+        // localhost, exactly, both loopbacks: a keyword, never resolved, and no IP address
+        foreach (var address in Addresses.Listening.Concat(Addresses.NamedListening))
         {
             HostsAndOrigins.AssertAddress(address, "Address");
         }
 
-        var named = Assert.Throws<ArgumentException>(() =>
+        Assert.DoesNotContain(Addresses.NamedListening, HostsAndOrigins.IsIpAddress);
+
+        foreach (var name in new[] { "LOCALHOST", "localhost.", "a.localhost" })
         {
-            HostsAndOrigins.AssertAddress("localhost", "Address");
-        });
+            var named = Assert.Throws<ArgumentException>(() =>
+            {
+                HostsAndOrigins.AssertAddress(name, "Address");
+            });
+
+            Assert.Equal(($"a server listens on an IP address, or on localhost, both loopbacks, not \"{name}\" (Parameter 'Address')", "Address"), (named.Message, named.ParamName));
+        }
+
         var bracketed = Assert.Throws<ArgumentException>(() =>
         {
             HostsAndOrigins.AssertAddress("[::1]", "Address");
         });
 
-        Assert.Equal(("a server listens on an IP address, not \"localhost\" (Parameter 'Address')", "Address"), (named.Message, named.ParamName));
-        Assert.Equal("a server listens on an IP address, not \"[::1]\": write ::1, not [::1] (Parameter 'Address')", bracketed.Message);
+        Assert.Equal("a server listens on an IP address, or on localhost, both loopbacks, not \"[::1]\": write ::1, not [::1] (Parameter 'Address')", bracketed.Message);
     }
 
     [Fact]

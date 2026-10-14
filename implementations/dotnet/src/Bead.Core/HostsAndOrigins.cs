@@ -308,15 +308,17 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
-    /// The address a server is to listen on, as it starts: one <see cref="IsIpAddress"/> refuses is
-    /// an <see cref="ArgumentException"/> naming the option, which tells how to write an IPv6
-    /// address given in brackets.
+    /// The address a server is to listen on, as it starts: <c>localhost</c>, exactly, both loopbacks,
+    /// a keyword never resolved (spec 15.12), or an IP address <see cref="IsIpAddress"/> takes; any
+    /// other, another case of <c>localhost</c>, <c>localhost.</c> and a name under <c>.localhost</c>
+    /// among them, is an <see cref="ArgumentException"/> naming the option, which tells how to write
+    /// an IPv6 address given in brackets.
     /// </summary>
     public static void AssertAddress(string address, string name)
     {
         ArgumentNullException.ThrowIfNull(address, name);
 
-        if (IsIpAddress(address))
+        if (address == Loopbacks.Localhost || IsIpAddress(address))
         {
             return;
         }
@@ -324,7 +326,7 @@ internal static class HostsAndOrigins
         var bare = address.Length > 2 && address.StartsWith('[') && address.EndsWith(']') ? address[1..^1] : null;
         var hint = bare is not null && IsIpAddress(bare) ? $": write {bare}, not {address}" : "";
 
-        throw new ArgumentException($"a server listens on an IP address, not \"{address}\"{hint}", name);
+        throw new ArgumentException($"a server listens on an IP address, or on localhost, both loopbacks, not \"{address}\"{hint}", name);
     }
 
     /// <summary>
@@ -347,6 +349,21 @@ internal static class HostsAndOrigins
         {
             return character == '\t' || character is >= ' ' and <= '~';
         });
+    }
+
+    /// <summary>
+    /// The credential an <c>Authorization</c> carries (spec 15.1), over HTTP a <c>POST</c>'s and over
+    /// a WebSocket its upgrade's: its first line's value whole, its auth-scheme included, without
+    /// the spaces and tabs around it (RFC 9110 §5.5); none when it has no line, or when nothing is
+    /// left. Two lines are refused before it is read, as no list to combine (RFC 9110 §5.3).
+    /// </summary>
+    public static string? CredentialOf(IReadOnlyList<string?> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        var value = lines.Count == 0 ? "" : (lines[0] ?? "").Trim(FieldWhitespace);
+
+        return value.Length == 0 ? null : value;
     }
 
     /// <summary>

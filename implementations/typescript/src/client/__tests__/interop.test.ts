@@ -14,6 +14,7 @@ import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
+import { WebSocket as WsWebSocket } from 'ws';
 import { INTEROP_SERVICE } from '../../../interop/credentials';
 import { InteropClient, InteropProcedures } from '../../../interop/generated/interop_bead';
 import { offerInteropClient } from '../../../interop/handlers';
@@ -436,17 +437,24 @@ test.describe('the C# server of the interop service', () => {
         ).resolves.toBe('ada');
       });
 
-      test('an ELSEWHERE goes over HTTP alone, its Authorization what the verifier reads: whoami answers the sub it names; over a WebSocket it fails before it goes', async () => {
-        const whoami = interop().whoami(null)({
-          credential: { carried: 'Interop sub=ada', scheme: CredentialScheme.ELSEWHERE },
-        });
+      test('an ELSEWHERE goes in each POST’s Authorization over HTTP and in its upgrade’s over a WebSocket: whoami answers the sub it names', async () => {
+        const elsewhere = { carried: 'Interop sub=ada', scheme: CredentialScheme.ELSEWHERE };
 
-        await (label === 'HTTP'
-          ? expect(whoami).resolves.toBe('ada')
-          : expect(whoami).rejects.toMatchObject({
-              code: ProtocolCode.DESTINATION_UNREACHABLE,
-              origin: 'local',
-            }));
+        if (label === 'WebSocket') {
+          // its upgrade carries none yet: a call presenting one fails before it goes
+          await expect(interop().whoami(null)({ credential: elsewhere })).rejects.toMatchObject({
+            code: ProtocolCode.DESTINATION_UNREACHABLE,
+            origin: 'local',
+          });
+
+          // given the credential at its connect, over ws, which writes it on the upgrade
+          await client[Symbol.asyncDispose]();
+          client = createWSClient({ transport: { WebSocket: WsWebSocket } });
+          made = undefined;
+          await client.connect({ credential: elsewhere.carried, host: HOST, port: portOf(ports) });
+        }
+
+        await expect(interop().whoami(null)({ credential: elsewhere })).resolves.toBe('ada');
       });
 
       test('login and register hold a duration as section 1.4 does: a fraction rounded, one under a millisecond or past 2³¹ − 1 refused with PROCEDURE_FAILED, nothing opened or registered', async () => {

@@ -426,7 +426,7 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
-    public async Task Fails_an_ELSEWHERE_over_a_transport_that_carries_none_before_it_goes_DESTINATION_UNREACHABLE_nothing_sent_the_default_kept_no_event()
+    public async Task Fails_an_ELSEWHERE_over_a_transport_that_carries_none_before_it_goes_or_over_a_WebSocket_whose_upgrade_carried_other_bytes_DESTINATION_UNREACHABLE_nothing_sent_the_default_kept_no_event()
     {
         using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = Credential.Elsewhere("Interop sub=ada") });
         var (router, transport) = (scripted.Router, scripted.Transport);
@@ -456,6 +456,26 @@ public sealed partial class RouterClientTests
         Assert.Empty(withdrawn);
         Assert.Empty(scripted.Errors);
         Assert.Equal(Credential.Elsewhere("Interop sub=ada"), router.Credential);
+
+        // a WebSocket whose upgrade carried the default's bytes: another credential fails before it
+        // goes, the very bytes go
+        using var upgraded = new ScriptedRouter(new RouterClientOptions { Credential = Credential.Elsewhere("Interop sub=ada") });
+
+        upgraded.Transport.CarriedByUpgrade = "Interop sub=ada";
+
+        var other = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return CallOf(upgraded.Router, Credential.Elsewhere("Interop sub=bob")).WaitAsync(Patience, Cancelled);
+        });
+
+        _ = CallOf(upgraded.Router);
+        await upgraded.Settle();
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
+            (other.Code, other.Origin, other.Failure.Detail));
+        Assert.Equal([(1u, (Credential?)Credential.Elsewhere(), (string?)"Interop sub=ada")], PresentedOf(upgraded.Transport));
+        Assert.Empty(upgraded.Errors);
     }
 
     [Fact]

@@ -261,7 +261,9 @@ export const createPipedTransports = ({
 
   // in process, never leaving it: a credential is carried both ways, as it is given
   const clientTransport: IRouterClientTransportLike = {
-    carriesCredential: true,
+    carries: () => {
+      return true;
+    },
     isSecure: true,
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: client.off,

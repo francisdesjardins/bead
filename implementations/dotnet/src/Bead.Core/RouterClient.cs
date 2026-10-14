@@ -41,23 +41,22 @@ public interface IRouterClientTransport
 
     /// <summary>
     /// Hands <paramref name="message"/> to the connection: at once, in order, without blocking; the
-    /// task settles once it was sent, or could not be. Its credential goes over HTTP alone, in the
-    /// <c>Authorization</c> of its <c>POST</c>; a socket carries none.
+    /// task settles once it was sent, or could not be. Its credential goes over HTTP in the
+    /// <c>Authorization</c> of its <c>POST</c>, over a WebSocket in its upgrade's, written as it
+    /// connects; a worker carries none.
     /// </summary>
     Task Send(TransportMessage message);
 
     /// <summary>
-    /// Whether it carries a credential beside an envelope it sends (spec 15.1): HTTP does, in its
-    /// <c>Authorization</c>; a WebSocket does not. A call presenting
-    /// <see cref="CredentialScheme.Elsewhere"/> over one that does not fails before it goes. None
-    /// does by default.
+    /// Whether it carries <paramref name="credential"/> beside an envelope it sends (spec 15.1):
+    /// HTTP any field value, in the <c>Authorization</c> of each <c>POST</c>; a WebSocket the one its
+    /// upgrade carried alone, compared in constant time. A call presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> over one that does not carry its credential fails
+    /// before it goes. None carries one by default.
     /// </summary>
-    bool CarriesCredential
+    bool Carries(string credential)
     {
-        get
-        {
-            return false;
-        }
+        return false;
     }
 
     /// <summary>
@@ -327,13 +326,13 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
         }
     }
 
-    /// <summary>Whether its transport carries a credential beside an envelope, as a relay's leg B asks.</summary>
-    public bool CarriesCredential
+    /// <summary>
+    /// Whether its transport carries <paramref name="credential"/> beside an envelope, as a relay's
+    /// leg B presenting <see cref="CredentialScheme.Elsewhere"/> asks.
+    /// </summary>
+    public bool Carries(string credential)
     {
-        get
-        {
-            return Transport.CarriesCredential;
-        }
+        return Transport.Carries(credential);
     }
 
     /// <summary>Whether its transport is secure, as a relay's leg B asks.</summary>
@@ -976,9 +975,9 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             }
         }
 
-        public bool CarriesCredential(string connectionHandle)
+        public bool Carries(string credential, string connectionHandle)
         {
-            return client.Transport.CarriesCredential;
+            return client.Transport.Carries(credential);
         }
 
         public bool IsSecure(string connectionHandle)
