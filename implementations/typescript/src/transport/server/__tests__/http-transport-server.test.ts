@@ -43,7 +43,14 @@ import {
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
 import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
-import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
+import {
+  bindError,
+  holdIPv6Loopback,
+  isFreeOn,
+  LISTENING_ADDRESSES,
+  LISTENING_NAMES,
+  NO_LISTENING_ADDRESSES,
+} from './addresses';
 import { createFakeHTTPServer } from './fake-http-server';
 import { TLS_FIXTURE } from './tls-fixture';
 
@@ -250,7 +257,7 @@ const refusalOf = async (answered: Promise<Response>) => {
 const startScripted = async (options?: Partial<IHTTPTransportServerOptions>) => {
   const fake = createFakeHTTPServer();
   const server = createHTTPTransportServer({ createServer: fake.createServer, ...options });
-  const starting = server.start({ port: 4_321 });
+  const starting = server.start({ address: host, port: 4_321 });
 
   fake.listen();
   await starting;
@@ -330,7 +337,7 @@ test.describe('createHTTPTransportServer', () => {
     });
     expect(BURIAL_MILLISECONDS).toBe(RESERVATION_MILLISECONDS);
     expect(MAXIMUM_BODY_BYTES).toBe(LIMIT_DEFAULTS.maximumEnvelopeBytes);
-    expect(START_DEFAULTS).toEqual({ address: '127.0.0.1', findOpenPort: false, port: 80 });
+    expect(START_DEFAULTS).toEqual({ address: 'localhost', findOpenPort: false, port: 80 });
   });
 
   test('draws a connection on a connect: a token of 16 bytes, a 201, and "connection" first, showing neither', async () => {
@@ -1845,8 +1852,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
     const securedBy = async ({ address, isTls }: { address: string; isTls: boolean }) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
       const server = createHTTPTransportServer({
-        createServer: (listener) => {
-          const created = fake.createServer(listener);
+        createServer: (listener, options) => {
+          const created = fake.createServer(listener, options);
 
           // a server under TLS has its contexts, as Node's https server does
           return isTls ? Object.assign(created, { addContext: () => {} }) : created;
@@ -1891,8 +1898,8 @@ test.describe('createHTTPTransportServer, its edges', () => {
     }) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
       const server = createHTTPTransportServer({
-        createServer: (listener) => {
-          const created = fake.createServer(listener);
+        createServer: (listener, options) => {
+          const created = fake.createServer(listener, options);
 
           return isTls ? Object.assign(created, { addContext: () => {} }) : created;
         },
@@ -3900,7 +3907,7 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
     await tcpSocketsClosed();
   });
 
-  test('listens on the loopback when given no address, reached by 127.0.0.1 and by localhost, and is secure there', async () => {
+  test('listens on localhost when given no address, both loopbacks on one port, reached by 127.0.0.1, by [::1] and by localhost, reports localhost, and is secure there', async () => {
     const server = createHTTPTransportServer({
       createServer: (listener) => {
         return createServer(listener);
@@ -3911,23 +3918,150 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       const { address, port } = await server.start({ findOpenPort: true });
 
       expect([address, server.address, START_DEFAULTS.address]).toEqual([
-        '127.0.0.1',
-        '127.0.0.1',
-        '127.0.0.1',
+        'localhost',
+        'localhost',
+        'localhost',
       ]);
 
-      for (const name of [host, 'localhost']) {
+      for (const name of [host, '[::1]', 'localhost']) {
         const response = await post(`http://${name}:${String(port)}/bead`);
 
         expect([name, response.status]).toEqual([name, 201]);
       }
 
       expect(
-        server.clients.map(({ connectionHandle }) => {
-          return server.isSecure(connectionHandle);
+        server.clients.map(({ address: from, connectionHandle }) => {
+          return [from, server.isSecure(connectionHandle)];
         })
-      ).toEqual([true, true]);
+      ).toEqual([
+        ['127.0.0.1', true],
+        ['::1', true],
+        [expect.stringMatching(/^(?:127\.0\.0\.1|::1)$/u), true],
+      ]);
     } finally {
+      await server.stop();
+    }
+
+    // both let go
+    expect(await isFreeOn('::1', server.port)).toBe(true);
+  });
+
+  // decision 0024
+  test('calls the application’s createServer once per address it binds, 127.0.0.1 then ::1 on localhost, each told its address', async () => {
+    const told: string[] = [];
+    const server = createHTTPTransportServer({
+      createServer: (listener, { address }) => {
+        told.push(address);
+
+        return createServer(listener);
+      },
+    });
+
+    try {
+      await server.start({ findOpenPort: true });
+      expect(told).toEqual(['127.0.0.1', '::1']);
+      await server.stop();
+
+      // an address given, alone
+      await server.start({ address: '::1', findOpenPort: true });
+      expect(told).toEqual(['127.0.0.1', '::1', '::1']);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses to start on localhost when another socket holds the other loopback’s port, ending closed', async () => {
+    await using held = await holdIPv6Loopback();
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        return createServer(listener);
+      },
+    });
+
+    await expect(server.start({ port: held.port })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    // the IPv4 loopback's port let go
+    expect([server.isClosed(), await isFreeOn(host, held.port)]).toEqual([true, true]);
+  });
+
+  test('draws a port on localhost again when the IPv6 loopback holds the one drawn on IPv4', async () => {
+    const fake = createFakeHTTPServer();
+    const server = createHTTPTransportServer({ createServer: fake.createServer });
+    const starting = server.start({ findOpenPort: true });
+
+    // the port drawn on 127.0.0.1 is held on ::1: both let go, and both listen again
+    await fake.listenEach(1);
+    await fake.told();
+    fake.servers[1]?.emit('error', bindError('EADDRINUSE'));
+    await fake.listenEach(2);
+
+    expect(await starting).toEqual({ address: 'localhost', port: 50_000 });
+    // built once each, never asked of the application again
+    expect(
+      fake.servers.map(({ built, closes, listened }) => {
+        return [built, closes, listened];
+      })
+    ).toEqual([
+      ['127.0.0.1', 1, [0, '127.0.0.1']],
+      ['::1', 1, [50_000, '::1']],
+    ]);
+    await server.stop();
+
+    // eight draws at most, then the last error
+    const held = createFakeHTTPServer();
+    const refused = createHTTPTransportServer({ createServer: held.createServer });
+    const refusing = refused.start({ findOpenPort: true });
+
+    for (let draw = 1; draw <= 8; draw += 1) {
+      await held.listenEach(1);
+      await held.told();
+      held.servers[1]?.emit('error', bindError('EADDRINUSE'));
+    }
+
+    await expect(refusing).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect([refused.isClosed(), held.servers[0]?.closes, held.servers[1]?.closes]).toEqual([
+      true,
+      8,
+      8,
+    ]);
+
+    // a port it was given is never drawn again
+    const given = createFakeHTTPServer();
+    const fixed = createHTTPTransportServer({ createServer: given.createServer });
+    const fixing = fixed.start({ port: 4_321 });
+
+    await given.listenEach(1);
+    await given.told();
+    given.servers[1]?.emit('error', bindError('EADDRINUSE'));
+
+    await expect(fixing).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect([fixed.isClosed(), given.servers.length, given.servers[0]?.closes]).toEqual([
+      true,
+      2,
+      1,
+    ]);
+  });
+
+  test('listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1', async () => {
+    for (const code of ['EADDRNOTAVAIL', 'EAFNOSUPPORT']) {
+      const fake = createFakeHTTPServer();
+      const server = createHTTPTransportServer({ createServer: fake.createServer });
+      const starting = server.start({ findOpenPort: true });
+
+      await fake.listenEach(1);
+      await fake.told();
+      fake.servers[1]?.emit('error', bindError(code));
+
+      expect([code, await starting, server.address]).toEqual([
+        code,
+        { address: '127.0.0.1', port: 50_000 },
+        '127.0.0.1',
+      ]);
+      // the IPv6 server let go, the IPv4 one serving, secure there
+      expect([
+        fake.servers[0]?.closes,
+        fake.servers[1]?.closes,
+        server.isSecure('type=HTTP;ip=127.0.0.1;ordinal=1'),
+      ]).toEqual([0, 1, true]);
       await server.stop();
     }
   });
@@ -3936,11 +4070,8 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
     const startedOn = async (address: string) => {
       const fake = createFakeHTTPServer({ address: { address, port: 50_000 } });
       const server = createHTTPTransportServer({ createServer: fake.createServer });
-      const starting = server.start({ address, port: 50_000 });
-
-      fake.listen();
-
-      const outcome = await starting.then(
+      // localhost binds both loopbacks
+      const outcome = server.start({ address, port: 50_000 }).then(
         () => {
           return 'listening';
         },
@@ -3949,10 +4080,14 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
         }
       );
 
+      await fake.listenEach(LISTENING_NAMES.includes(address) ? 2 : 1);
+
+      const told = await outcome;
+
       await server.stop();
 
       // a server refused opened nothing
-      return [address, outcome, server.isClosed(), fake.servers.length];
+      return [address, told, server.isClosed(), fake.servers.length];
     };
 
     expect(await Promise.all(LISTENING_ADDRESSES.map(startedOn))).toEqual(
@@ -3960,13 +4095,18 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
         return [address, 'listening', true, 1];
       })
     );
+    expect(await Promise.all(LISTENING_NAMES.map(startedOn))).toEqual(
+      LISTENING_NAMES.map((address) => {
+        return [address, 'listening', true, 2];
+      })
+    );
     expect(await Promise.all(NO_LISTENING_ADDRESSES.map(startedOn))).toEqual(
       NO_LISTENING_ADDRESSES.map((address) => {
         return [
           address,
           address === '[::1]'
-            ? 'a server listens on an IP address, not "[::1]": write ::1, not [::1]'
-            : `a server listens on an IP address, not "${address}"`,
+            ? 'a server listens on an IP address, or on localhost, both loopbacks, not "[::1]": write ::1, not [::1]'
+            : `a server listens on an IP address, or on localhost, both loopbacks, not "${address}"`,
           true,
           0,
         ];

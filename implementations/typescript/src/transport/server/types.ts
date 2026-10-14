@@ -25,6 +25,10 @@ import type {
 
 /** Where a started server listens. */
 export interface ITransportServerAddress {
+  /**
+   * What it bound: the address it was given, `localhost` when both loopbacks took it, and
+   * `127.0.0.1` where the IPv6 loopback is absent.
+   */
   address: string;
   port: number;
 }
@@ -98,10 +102,15 @@ export interface ITransportServerOptions {
 
 export interface ITransportServerStartOptions {
   /**
-   * An IP address, bare, as RFC 3986 writes one (spec 15.12): `127.0.0.1`, the loopback, by
-   * default; `0.0.0.0` or `::` for every interface, which a container needs. A name, a bracketed
-   * or zoned address, an IPv4-mapped one or a form outside the grammar, `127.1` or `0` among them,
-   * is a {@link ProgrammerError} as the start begins, ending CLOSED. A worker's listens on none.
+   * Where it listens (spec 15.12): `localhost` by default, both loopbacks, `127.0.0.1` and `::1` on
+   * one port, a keyword never resolved; or an IP address, bare, as RFC 3986 writes one, which it
+   * listens on alone, `0.0.0.0` or `::` for every interface, which a container needs. On
+   * `localhost`, `127.0.0.1` binds first, on `port` or one drawn there, then `::1` on that port; a
+   * port another socket holds on either fails the start, a drawn one is drawn again, eight times at
+   * most; where the IPv6 loopback is absent, it listens on `127.0.0.1` alone and reports it. Any
+   * other name — `LOCALHOST`, `localhost.`, a name under `.localhost` among them — a bracketed or
+   * zoned address, an IPv4-mapped one or a form outside the grammar, `127.1` or `0` among them, is a
+   * {@link ProgrammerError} as the start begins, ending CLOSED. A worker's listens on none.
    */
   address?: string | undefined;
   /** Lets the system pick a free port, which `start` then reports; `port` is ignored. */
@@ -117,7 +126,10 @@ export interface ITransportServer<
   Socket extends object = object,
   Request = unknown,
 > extends IReadyStateMethods {
-  /** Where the server listens, or will: the defaults until the first `start`. */
+  /**
+   * Where the server listens, or will, as its start reports it: the defaults until the first
+   * `start`.
+   */
   readonly address: string;
   /** A copy, so a caller may consume it; each entry is what the connection looked like then. */
   readonly clients: ITransportServerClient[];
@@ -460,20 +472,41 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * reached is one they hold, the field's next entry from the right is the client's, when it is an
    * address — bare, or as RFC 7239 §6 writes a node, its port dropped — held in one form,
    * IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it: the address a connection's handle and
-   * `clients` name, and a refusal tells; its port stays the socket's. The transport bounds no
-   * address, so a proxy not listed costs nothing but that: every client behind it is named by the
-   * proxy's address. None, when not given, the loopback among them. A name, and a network of prefix
-   * 0, which would trust what every client writes, are a {@link ProgrammerError} as the server is
-   * built, as is any other entry. `Forwarded` is never read.
+   * `clients` name, and a refusal tells; its port stays the socket's; `unnamedProxies` counts those
+   * it cannot name. The transport bounds no address, so a proxy neither listed nor counted costs
+   * nothing but that: every client behind it is named by the proxy's address. None, when not
+   * given, the loopback among them. A name, and a network of prefix 0, which would trust what every
+   * client writes, are a {@link ProgrammerError} as the server is built, as is any other entry.
+   * `Forwarded` is never read.
    */
   trustedProxies?: readonly string[] | undefined;
+  /**
+   * How many proxies on every path to it `trustedProxies` does not name (spec 15.12): one for each
+   * proxy whose addresses its platform does not publish — a PaaS router, a serverless platform's
+   * front end — where a proxy whose addresses are published is named, never counted: Google Cloud's
+   * global load balancer by its ranges and its forwarding rule's address, Cloudflare by its ranges,
+   * an AWS ALB by its VPC's network. The walk spends one on each address the list does not hold,
+   * none on one it holds, and stops where neither remains. It counts the proxies the list does not
+   * name alone, unlike a count of every hop — Envoy's `xff_num_trusted_hops`, Express's
+   * `trust proxy` n — so a proxy both named and counted hands the client an entry it wrote. A count is
+   * believed as told: a request that reaches the server by a path with fewer such proxies, straight
+   * to its socket among them, is read by entries its client wrote; a server so reachable names its
+   * proxies instead. A whole number from 0 to 8, 0 when not given; any other, `Infinity` among it,
+   * is a {@link ProgrammerError} as the server is built.
+   */
+  unnamedProxies?: number | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
   WebSocketServer: IWebSocketServerConstructor;
 }
 
 // types
 
-export type WSTransportServer = ITransportServer<IServerSocketLike, IIncomingMessageLike>;
+/**
+ * Its `connection` event shows the upgrade that opened a connection as the HTTP transport's shows a
+ * connect, headers aside: a frozen {@link IDrawingRequest}, never the platform's request, which
+ * holds the credential the connection carries.
+ */
+export type WSTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>;
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
@@ -487,7 +520,10 @@ export interface IDrawnConnection {
   readonly ordinal: number;
 }
 
-/** The request that drew a connection, as the `connection` event shows it: nothing of its headers. */
+/**
+ * The request that drew a connection — an HTTP connect, a WebSocket upgrade — as the `connection`
+ * event shows it: nothing of its headers, its credential among them.
+ */
 export interface IDrawingRequest {
   readonly method: string | undefined;
   readonly remoteAddress: string;
@@ -566,12 +602,17 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   bodyBytesBudget?: number | undefined;
   /**
-   * Builds the server on the transport's listener: `(listener) => createServer(listener)` from
+   * Builds a server on the transport's listener: `(listener) => createServer(listener)` from
    * `node:http`, `(listener) => createServer({ key, cert }, listener)` from `node:https`, or
    * `createSecureServer({ allowHTTP1: true, … }, listener)` from `node:http2`. Its own timeouts —
-   * `headersTimeout`, `requestTimeout`, `keepAliveTimeout` — are the application's to set.
+   * `headersTimeout`, `requestTimeout`, `keepAliveTimeout` — are the application's to set. It is
+   * called once per address the transport binds, told it as `address`: on `localhost`, twice,
+   * `127.0.0.1` then `::1`, so every server it builds is to be configured alike — a certificate
+   * rotated by `setSecureContext`, an SNI context added, a timeout, a `tlsClientError` listener —
+   * since one kept alone serves one loopback. A port drawn again listens again on the servers it
+   * built, never calling it again.
    */
-  createServer: (listener: HTTPRequestListener) => IHTTPServerLike;
+  createServer: (listener: HTTPRequestListener, options: { address: string }) => IHTTPServerLike;
   /**
    * Milliseconds a request handed on waits for its answer before its exchange counts as lost, which
    * closes its connection: from 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for
@@ -659,13 +700,29 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * §3.1, RFC 4291 §2.3), from 1, its bits past the prefix zero. While the address reached is one
    * they hold, the field's next entry from the right is the client's, when it is an address — bare,
    * or as RFC 7239 §6 writes a node, its port dropped — held in one form, IPv4-mapped as IPv4 and
-   * IPv6 as RFC 5952 writes it. A proxy not listed is a client as any other, every client behind it
+   * IPv6 as RFC 5952 writes it; `unnamedProxies` counts those it cannot name. A proxy neither
+   * listed nor counted is a client as any other, every client behind it
    * its address: a told `busy` naming it, or a `largestAddressConnections` near its ceiling, is a
    * proxy to list. None, when not given, the loopback among them. A name, and a network of prefix 0,
    * which would trust what every client writes, are a {@link ProgrammerError} as the server is
    * built, as is any other entry. `Forwarded` is never read.
    */
   trustedProxies?: readonly string[] | undefined;
+  /**
+   * How many proxies on every path to it `trustedProxies` does not name (spec 15.12): one for each
+   * proxy whose addresses its platform does not publish — a PaaS router, a serverless platform's
+   * front end — where a proxy whose addresses are published is named, never counted: Google Cloud's
+   * global load balancer by its ranges and its forwarding rule's address, Cloudflare by its ranges,
+   * an AWS ALB by its VPC's network. The walk spends one on each address the list does not hold,
+   * none on one it holds, and stops where neither remains. It counts the proxies the list does not
+   * name alone, unlike a count of every hop — Envoy's `xff_num_trusted_hops`, Express's
+   * `trust proxy` n — so a proxy both named and counted hands the client an entry it wrote. A count is
+   * believed as told: a request that reaches the server by a path with fewer such proxies, straight
+   * to its socket among them, is read by entries its client wrote; a server so reachable names its
+   * proxies instead. A whole number from 0 to 8, 0 when not given; any other, `Infinity` among it,
+   * is a {@link ProgrammerError} as the server is built.
+   */
+  unnamedProxies?: number | undefined;
 }
 
 // types

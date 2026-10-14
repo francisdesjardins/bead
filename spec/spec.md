@@ -42,7 +42,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
   a transport's listener that throws, and its stop, section 15;
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md):
-  a server's hosts, and a request's authority, section 15;
+  a server's hosts, the address it listens on, and a request's authority, section 15;
 - [0025](../docs/decisions/0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md): a
   connection's handle, section 15;
 - [0026](../docs/decisions/0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md):
@@ -53,10 +53,12 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a `proto` payload's records, read against its message before its library, section 17.9;
 - [0029](../docs/decisions/0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md): a
   listen's cursor and wait in fields, section 15.9;
-- [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md):
-  a client's address behind the proxies a server names, section 15.12;
+- [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md):
+  a client's address behind the proxies a server names and those it counts, section 15.12;
 - [0031](../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md):
-  the `proto` encoding, section 17.9.
+  the `proto` encoding, section 17.9;
+- [0032](../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md):
+  a WebSocket upgrade's credential, and a client that follows no redirect, section 15.
 
 **Version: 0.5.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
@@ -701,24 +703,25 @@ the session it learned standing for its connection's.
 
 A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
-credential stays. It does so for a call that presents `ELSEWHERE` over a transport that carries no
-credential beside an envelope — a WebSocket (section 15.2), a Web Worker, whose messages carry an
-envelope alone, a server's over HTTP (section 15.9) — and for one that presents a `JWT` or an
-`ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential crosses
-only TLS off the machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A
-transport is judged by what it is given, never by what a name resolves to. It is secure under TLS,
+credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry
+the credential it presents — a WebSocket whose upgrade carried other bytes, or none (section 15.2),
+a Web Worker, whose messages carry an envelope alone, a server's over HTTP or over a WebSocket
+(sections 15.9, 15.2) — and for one that presents a `JWT` or an `ELSEWHERE` over a transport that
+leaves the machine in the clear, since a bearer credential crosses only TLS off the machine
+([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged by
+what it is given, never by what a name resolves to. It is secure under TLS,
 its scheme `wss` or `https`; on the loopback: a client by the host it names in its URL — `localhost`
 or a name that ends in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8,
 or the IPv6 loopback, `[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8 or
-`::1`; or when it never leaves the machine, a Web Worker or a router called in process. Every client
-reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as 127.0.0.1, are on the
-loopback; a host it fails on, one followed by a space among them, is not, nor is `localhost.`,
-which it keeps as given. A client takes a `localhost` name on the loopback without resolving it, as
-Secure Contexts does where the platform resolves such names there alone
+potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8,
+`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker or a router called in
+process. Every client reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as
+127.0.0.1, are on the loopback; a host it fails on, one followed by a space among them, is not, nor
+is `localhost.`, which it keeps as given. A client takes a `localhost` name on the loopback without
+resolving it, as Secure Contexts does where the platform resolves such names there alone
 ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
 sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
 A server cannot tell what stands in front of it: its application MAY say so, and is then believed
@@ -952,11 +955,11 @@ transfer of its own when it needs one. Leg B's request names no destination, so 
 chain, and no loop can form. A relay forwards a bearer credential, and its destination verifies it:
 leg B's request presents what leg A's does, by its credential scheme, as section 14.3 lets it.
 
-| Leg A presents | The relay                                                                                                                         | Leg B presents                                                         |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session (section 14.3, step 1) | none: it runs in leg B's session at the destination (section 14.7)     |
-| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies                         | the same bytes                                                         |
-| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries one                                | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
+| Leg A presents | The relay                                                                                                                                                                                            | Leg B presents                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session (section 14.3, step 1)                                                                    | none: it runs in leg B's session at the destination (section 14.7)     |
+| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies                                                                                            | the same bytes                                                         |
+| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries it, as section 13.4 judges a client's: an HTTP leg B, never a WebSocket whose upgrade carried another | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
 
 A call that presents a credential never runs in leg B's session in place of its own. What leg A's
 transport carried beside a call that presents anything but `ELSEWHERE` stays at the relay.
@@ -1012,7 +1015,8 @@ resolving as section 9.2 says:
    audience its `aud` does not name — read as section 13.8's step 11 reads it, without verifying
    the token; with `verifies`, the `aud` verified at step 1 — or to a destination registered with
    none; an `ELSEWHERE` to a destination registered with no audience, or over a leg B whose
-   transport carries no credential beside an envelope (section 15.1); a `JWT` or an `ELSEWHERE`
+   transport cannot carry it (section 13.4): a WebSocket's, whose upgrade carried the relay's own
+   credential or none, never leg A's; a `JWT` or an `ELSEWHERE`
    over a leg B that reaches off the machine in the clear, neither over TLS — `wss`, `https` — nor
    within the machine — the loopback, a Web Worker, a router called in process — since a bearer
    credential crosses only TLS off the machine
@@ -1101,24 +1105,47 @@ it hands the router what it carried with an envelope it took, and carries what t
 with one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2,
 step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header
 says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's
-`POST` (section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
-credential beside an envelope it sends, and whether it is secure — under TLS, on the loopback, or
-never leaving the machine — so that a side fails before it goes a call whose credential it cannot
-carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
-header's: only its credential scheme.
+`POST` (section 15.5), each request's own; over a WebSocket, the `Authorization` field of an upgrade
+that carries no `Origin`, one for every envelope of the connection, toward its server alone (section
+15.2). A transport says whether it carries the credential a call presents beside an envelope it
+sends — a client's over HTTP any field value, over a WebSocket the one its upgrade carried,
+compared in constant time; a Web Worker's none, nor a server's toward its client (sections 15.2,
+15.9) — and whether it is secure — under TLS, on the loopback, or never leaving the machine — so
+that a side fails before it goes a call whose credential it cannot carry (section 13.4). No
+failure's detail, event, trace or log carries that credential, nor a header's: only its credential
+scheme.
 
 ### WebSocket
 
 15.2. Each envelope is one binary message ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)), and
 each binary message one envelope. A text message is no envelope: the receiver reports it as
-`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket carries no
-credential beside an envelope, either way: a request that presents `ELSEWHERE` on one is refused
-`SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
-before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake carried,
-its `Authorization` among it, is no credential beside an envelope, and never stands for `ELSEWHERE`.
-A client writes no `Origin` on its upgrade: a page's browser writes its own, which the server judges
-(step 7). A server judges a request at its WebSocket's address in this order, and answers the first
-that applies:
+`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket upgrade that
+carries no `Origin` carries one credential, toward its server alone: its `Authorization` field
+([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
+[RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
+auth-scheme included — its surrounding whitespace removed, none when the field is empty or absent.
+An upgrade that carries an `Origin` carries none, whatever its `Authorization`: it comes from a
+page, whose browser writes its own authentication on it as it sends its cookies
+([Fetch](https://fetch.spec.whatwg.org/#http-network-or-cache-fetch), credentials mode `include`),
+so that a page of any origin the server takes would present its user's credential; a page presents
+a `JWT`. The server hands the credential to the router beside every envelope of that connection, as
+an HTTP server hands a `POST`'s beside its request (section 15.5): a request presenting `ELSEWHERE`
+stands for it, resolved once per request (section 13.11), so a credential that no longer holds, or
+whose end has come, is refused on the request that presents it, and the connection stays; a
+request that presents none, `OPAQUE` or a `JWT` resolves as its header says (section 15.1). One
+connection carries one credential: a client presents another by connecting again, or presents a
+`JWT`, which its envelope carries and a renewal moves without a new connection (section 13.10). An
+HTTP connection carries a credential per `POST`, so its connect's is read by no one (section 15.5);
+a WebSocket carries one per connection, so its upgrade's is the one read. Nothing is carried toward
+a client: a server's command that presents `ELSEWHERE` over a WebSocket fails before it goes,
+`DESTINATION_UNREACHABLE`. A client writes on each upgrade the credential it is given for it, as
+given, and none otherwise; it fails that upgrade before it goes for one that is no field value, as
+section 15.5 says, and for one over a WebSocket that leaves the machine in the clear (section
+13.4), its upgrade being where it would cross. No server reads a credential from its target's
+query, which logs keep ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from
+a cookie, which a page's browser sends on its own, or from a subprotocol. A client writes no
+`Origin` on its upgrade: a page's browser writes its own, which the server judges (step 7). A server
+judges a request at its WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, or a field that holds a control character or an octet past
@@ -1143,7 +1170,8 @@ that applies:
    version shapes.
 6. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose `Sec-WebSocket-Key` is
    not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a list of distinct
-   tokens, or that has content
+   tokens, that carries more than one `Authorization` field line, which is no list to combine
+   ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or that has content
    ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)).
 7. An upgrade that carries an `Origin` neither its own nor among those it takes is then refused 403,
    `origin-refused`, so that the `Origin` it judges an upgrade by is the field it judges an exchange
@@ -1195,12 +1223,13 @@ that call id for 5 seconds — what a requester reserves one for when its call w
 
 A client writes the credential a request carries in the `Authorization` field of its `POST`
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2)), as it is given, and
-fails the send before it goes for one no field can carry: anything but visible ASCII, spaces and
-tabs. It writes no `Origin`, on any exchange: a page's browser writes its own, which the server
-judges (section 15.12). The server reads that field on a `POST` that carries a REQUEST, and no other
-exchange's: it hands the router the field's value with the request, as it came, whole — its
-auth-scheme included — its surrounding whitespace removed, and none when the field is empty or
-absent. Two calls of one
+fails the send before it goes for one that is no field value
+([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)): anything but visible ASCII,
+spaces and tabs, or a space or a tab first or last, which a field cannot keep. It writes no
+`Origin`, on any exchange: a page's browser writes its own, which the server judges (section 15.12).
+The server reads that field on a `POST` that carries a REQUEST, and no other exchange's: it hands
+the router the field's value with the request, as it came, whole — its auth-scheme included — its
+surrounding whitespace removed, and none when the field is empty or absent. Two calls of one
 connection may so present two credentials, and a token is renewed without connecting again. A
 `POST /bead` that presents a token with more than one `Authorization` field is refused, 400, before
 its body is read: the field is no list to combine
@@ -1212,9 +1241,12 @@ rejects a send on a marked refusal: nothing was tried. It names the status and t
 fails with, its connect's and its upgrade's among them, where its platform lets it read the response
 ([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)); a page's WebSocket reads
 none, the [WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/) failing its connection
-with no detail, and its server's tell (section 15.1) is then what says why. Any other status that is
-not 2xx — a gateway's 502, a proxy's 404 — may come after the request ran: the client counts the
-exchange lost.
+with no detail, and its server's tell (section 15.1) is then what says why. A client follows no
+redirect: a 3xx answered to its connect, to a send or to its upgrade fails it, its status named, as
+a page's `fetch` under redirect mode `error` and a page's WebSocket fail
+([WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/)); a redirect would carry the
+request where its credential and its security were not judged. Any other status that is not 2xx — a
+gateway's 502, a proxy's 404 — may come after the request ran: the client counts the exchange lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                         |
 | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1454,8 +1486,21 @@ address in the form a server listens on, or a network, that address followed by 
 prefix's length ([RFC 4632 §3.1](https://www.rfc-editor.org/rfc/rfc4632#section-3.1),
 [RFC 4291 §2.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.3)), from 1, its bits past the
 prefix zero; none when not given, the loopback among them. A server is refused as it is built any
-other entry: a name, and a network of prefix 0, which would trust what every client writes. While
-the address reached is one it trusts, the next entry of the request's `X-Forwarded-For` — at a
+other entry: a name, and a network of prefix 0, which would trust what every client writes. It may
+be told besides how many proxies on every path to it `trustedProxies` does not name,
+`unnamedProxies` — one each for a proxy whose addresses its platform does not publish; a proxy
+whose addresses are published is named, never counted — a whole number from 0 to 8, 0 when not
+given; any other is refused as it is built, the count of every hop among it. A proxy it names costs
+none of the count, whatever the order, so a count is of the proxies it does not name alone: unlike
+a count of every hop
+([Envoy](https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/http/original_ip_detection/xff/v3/xff.proto),
+`trust proxy` n), a proxy both named and counted gives the client one entry it wrote. A count is
+believed as told: a request that reaches the server by a path with fewer such proxies — straight to
+its socket, or past a proxy it counts — brings entries its client wrote where those proxies' would
+be, and is read by them, any address the list holds among them passed free; a server so reachable
+names its proxies instead. The walk starts at the socket's address. While the address reached is
+one `trustedProxies` holds, or one it does not while fewer than `unnamedProxies` such addresses
+were passed, which then counts it, the next entry of the request's `X-Forwarded-For` — at a
 WebSocket's address, its upgrade's — its lines joined by ", "
 ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)) and read from the right, is
 the client's, when that entry is an address: an IPv4 address, or an IPv6 address without a zone,
@@ -1468,24 +1513,31 @@ address in the text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#sectio
 hexadecimal throughout. Its port is the socket's, the nearest proxy's connection's behind one. A
 server reads no `Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy
 that writes `X-Forwarded-For` would pass on as its client wrote it
-([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it is not told of is a client
-as any other: its clients are its address, which its bound per address counts and its refusals
-tell. A bound by address counts as one the users behind one NAT, and as many the addresses of one
-IPv6 network. A WebSocket server bounds no address: the client's address is what its handle and its
-refusals name.
+([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it neither names nor counts
+is a client as any other: its clients are its address, which its bound per address counts and its
+refusals tell. A bound by address counts as one the users behind one NAT, and as many the addresses
+of one IPv6 network. A WebSocket server bounds no address: the client's address is what its handle
+and its refusals name.
 
-A server listens on the IPv4 loopback, `127.0.0.1`
-([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), unless it is given an
-address: an `IPv4address` or an `IPv6address` of
+A server listens on `localhost`, both loopbacks — the IPv4 one, `127.0.0.1`
+([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), and the IPv6 one, `::1`
+([RFC 4291 §2.5.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.3)), on one port — unless it
+is given an address: `localhost`, which names both and is never resolved, as section 13.4 takes
+it; or an `IPv4address` or an `IPv6address` of
 [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), bare, with no zone, and
 not IPv4-mapped ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)),
-never a name, which another host would resolve otherwise. A server the network reaches is one its
-application opened to it, `0.0.0.0` or `::` among them
-([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)). Its address keeps the network out,
-and `hosts` a page on its own machine that rebinds its name to it; neither stands for the other. A
-client that connects by `localhost` reaches it whichever loopback family it tries first, racing
-them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); another process listening on the other
-family's loopback, on the same port, answers a client that tries that one first.
+which it listens on alone; never another name, which another host would resolve otherwise. On
+`localhost` it binds `127.0.0.1` first, on the port it is given or on one drawn there, then `::1` on
+that port, taking no IPv4 there. A port another socket holds on either family fails its start; a
+port drawn is drawn again, eight times at most. Where the IPv6 loopback is absent, its bind refused
+for want of the address or of the family, it listens on `127.0.0.1` alone, and reports `127.0.0.1`
+as its address in place of `localhost`. A server the network reaches is one its application opened
+to it, `0.0.0.0` or `::` among them ([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)).
+Its address keeps the network out, and `hosts` a page on its own machine that rebinds its name to
+it; neither stands for the other. A client that connects by `localhost` reaches it on whichever
+family it tries first, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); a server
+given one loopback, `127.0.0.1` or `::1`, leaves the other's port to any process that listens
+there, which then answers a client that tries that family first.
 
 ## 16. Services and procedures
 

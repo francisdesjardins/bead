@@ -107,12 +107,28 @@ public sealed record HttpTransportServerOptions
     /// they hold, the next entry of the field from the right is the client's, when it is an address,
     /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
     /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. A proxy
-    /// left out is a client as any other: every client behind it is its address, which the bound per
+    /// it neither names nor counts (<see cref="UnnamedProxies"/>) is a client as any other: every
+    /// client behind it is its address, which the bound per
     /// address counts, a told <c>busy</c> names, and the gauge <c>largestAddressConnections</c> shows
     /// near its ceiling. A bound by address counts as one the users behind one NAT, and as many the
     /// addresses of one IPv6 network.
     /// </summary>
     public IReadOnlyList<string>? TrustedProxies { get; init; }
+
+    /// <summary>
+    /// How many proxies on every path to it <see cref="TrustedProxies"/> does not name (spec 15.12):
+    /// one each for a proxy whose addresses its platform does not publish, a PaaS router among them;
+    /// a proxy whose addresses are published — Google Cloud's global load balancer, Cloudflare, an
+    /// AWS ALB's VPC — is named, never counted. From 0, by default, to 8; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. The walk spends one on an
+    /// address the list does not hold, none on one it holds, wherever it stands, and stops where
+    /// neither remains: unlike a count of every hop, Envoy's <c>xff_num_trusted_hops</c> or
+    /// Express's <c>trust proxy</c> n, a proxy both named and counted gives the client an entry it
+    /// wrote. A count is believed as told: a request that reaches the server by a path with fewer
+    /// such proxies, straight to its socket or past one it counts, is read by entries its client
+    /// wrote, so a server so reachable names its proxies instead.
+    /// </summary>
+    public int UnnamedProxies { get; init; }
 
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
@@ -136,13 +152,18 @@ public sealed record HttpTransportServerOptions
 public sealed record HttpTransportStartOptions
 {
     /// <summary>
-    /// The address it listens on (spec 15.12), an IP address written bare: <c>127.0.0.1</c>, the
-    /// loopback, by default; <c>0.0.0.0</c> or <c>::</c> for every interface, which a container, or any
-    /// server another machine reaches, needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or
-    /// <c>IPv6address</c>, with no brackets, no zone, and not IPv4-mapped; a name or any other form is
-    /// an <see cref="ArgumentException"/> as it starts, which ends Closed.
+    /// The address it listens on (spec 15.12): <c>localhost</c> by default, both loopbacks,
+    /// <c>127.0.0.1</c> and <c>::1</c> on one port, as Kestrel's <c>ListenLocalhost</c> binds them, so
+    /// no other process answers a client that reaches it by <c>localhost</c> on the other family; a
+    /// port another socket holds on either fails the start, and a port drawn is drawn again, eight
+    /// times at most. Where the IPv6 loopback is absent it listens on <c>127.0.0.1</c> alone, and
+    /// reports it. Or an IP address written bare, which it listens on alone: <c>0.0.0.0</c> or
+    /// <c>::</c> for every interface, which a container, or any server another machine reaches,
+    /// needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or <c>IPv6address</c>, with no
+    /// brackets, no zone, and not IPv4-mapped; another name or any other form is an
+    /// <see cref="ArgumentException"/> as it starts, which ends Closed.
     /// </summary>
-    public string Address { get; init; } = "127.0.0.1";
+    public string Address { get; init; } = Loopbacks.Localhost;
 
     /// <summary>The port it listens on.</summary>
     public int Port { get; init; } = 80;
@@ -207,7 +228,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private readonly TimeProvider _clock;
 
     // the networks of the proxies it believes X-Forwarded-For from
-    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
+    private readonly ProxyTrust _proxyTrust;
 
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
@@ -242,7 +263,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
-        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(HttpTransportServerOptions.TrustedProxies));
+        _proxyTrust = Bead.TrustedProxies.TrustOf(
+            (given.TrustedProxies, nameof(HttpTransportServerOptions.TrustedProxies)),
+            (given.UnnamedProxies, nameof(HttpTransportServerOptions.UnnamedProxies)));
         AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
 
         var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
@@ -306,6 +329,12 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// answer whole at once would win the race.
     /// </summary>
     internal Func<CancellationToken, Task>? Answering { get; set; }
+
+    /// <summary>
+    /// How a start on <c>localhost</c> draws its port and binds the IPv6 loopback: the tests' way to
+    /// draw a port another socket holds there, and to start where it is absent.
+    /// </summary>
+    internal LoopbackBinding Loopback { get; init; } = new();
 
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
@@ -443,16 +472,35 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return _life.Stop(Stopping);
     }
 
-    // builds its application and starts it; what a failed start built goes with it
+    // listens where it is told, localhost on both loopbacks, and gives where
     private async Task<TransportServerAddress> Starting((HttpTransportStartOptions Start, CancellationToken Token) call)
     {
         var (start, cancellationToken) = call;
-        WebApplication? application = null;
-        TransportServerAddress bound;
 
         // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
         // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
         HostsAndOrigins.AssertAddress(start.Address, nameof(HttpTransportStartOptions.Address));
+
+        var ((application, port), address) = start.Address == Loopbacks.Localhost
+            ? await Loopbacks.Bind(
+                (listening) =>
+                {
+                    return Serving(listening, cancellationToken);
+                },
+                Loopback with { Port = start.Port, FindOpenPort = start.FindOpenPort })
+            : (await Serving(([IPAddress.Parse(start.Address)], start.FindOpenPort ? 0 : start.Port), cancellationToken), start.Address);
+
+        _isSecure = _options.Secure ?? TransportSecurity.IsSecure((_options.Certificate is not null, address));
+        _application = application;
+
+        return new TransportServerAddress(address, port);
+    }
+
+    // builds an application on the addresses and the port given and starts it, every address served
+    // by one configuration, and gives the port it listens on; what a failed start built goes with it
+    private async Task<(WebApplication Application, int Port)> Serving((IReadOnlyList<IPAddress> Addresses, int Port) listening, CancellationToken cancellationToken)
+    {
+        WebApplication? application = null;
 
         try
         {
@@ -469,14 +517,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
                 // the transport counts each body against its own limit and budget
                 kestrel.Limits.MaxRequestBodySize = null;
-                kestrel.Listen(IPAddress.Parse(start.Address), start.FindOpenPort ? 0 : start.Port, (listen) =>
+                foreach (var address in listening.Addresses)
                 {
-                    if (_options.Certificate is { } certificate)
+                    kestrel.Listen(address, listening.Port, (listen) =>
                     {
-                        listen.Protocols = HttpProtocols.Http1AndHttp2;
-                        listen.UseHttps(certificate);
-                    }
-                });
+                        if (_options.Certificate is { } certificate)
+                        {
+                            listen.Protocols = HttpProtocols.Http1AndHttp2;
+                            listen.UseHttps(certificate);
+                        }
+                    });
+                }
             });
             application = builder.Build();
             application.Run(Exchanging);
@@ -485,8 +536,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             var addresses = application.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
-            bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
-            _isSecure = _options.Secure ?? TransportSecurity.IsSecure((_options.Certificate is not null, start.Address));
+            return (application, new Uri(addresses.Addresses.First()).Port);
         }
         catch
         {
@@ -497,10 +547,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
             throw;
         }
-
-        _application = application;
-
-        return bound;
     }
 
     /// <summary>Closes every connection, as <see cref="CloseConnection"/> closes one, and gives what each close gave.</summary>
@@ -693,16 +739,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         var values = request.Headers[name];
 
         return values.Count == 0 ? null : values.ToString();
-    }
-
-    // the credential a request's Authorization carries: its value whole, without the spaces and tabs
-    // around it (RFC 9110 §5.5); none when nothing is left
-    private static string? CredentialOf(HttpRequest request)
-    {
-        var values = request.Headers.Authorization;
-        var value = values.Count == 0 ? "" : (values[0] ?? "").Trim(' ', '\t');
-
-        return value.Length == 0 ? null : value;
     }
 
     // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or
@@ -908,7 +944,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
     }
 
     // an exchange from the server's own origin, its request's authority under http or https when its
@@ -1449,7 +1485,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
 
         // a request is handed on with the credential its exchange carried; no other envelope is
-        _listeners.Tell(Message, (new TransportMessage(envelope, false) { Credential = CredentialOf(context.Request) }, connection.ConnectionHandle));
+        _listeners.Tell(Message, (new TransportMessage(envelope, false) { Credential = HostsAndOrigins.CredentialOf(context.Request.Headers.Authorization) }, connection.ConnectionHandle));
 
         bool isWaiting;
 

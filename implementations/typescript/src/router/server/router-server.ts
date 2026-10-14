@@ -243,11 +243,15 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     return series === undefined ? UNCOUNTED : { series };
   };
 
-  // what a connection's transport carries beside an envelope the router sends: a credential, and
-  // whether off the machine in the clear, each none when the transport does not say
+  // what a connection's transport carries beside an envelope the router sends: any credential, or
+  // none, and whether off the machine in the clear, each none when the transport does not say
   const carriageOf = (connectionHandle: TransportServerConnectionHandle) => {
+    const carriesCredential = transport.carriesCredential?.(connectionHandle) ?? false;
+
     return {
-      carriesCredential: transport.carriesCredential?.(connectionHandle) ?? false,
+      carries: () => {
+        return carriesCredential;
+      },
       isSecure: transport.isSecure?.(connectionHandle) ?? false,
     };
   };
@@ -551,7 +555,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     const uncarried =
       connectionHandle === undefined
         ? undefined
-        : uncarriedOf(credential, { ...carriageOf(connectionHandle), failures: SERVER_FAILURES });
+        : uncarriedOf(credential, {
+            ...carriageOf(connectionHandle),
+            carried,
+            failures: SERVER_FAILURES,
+          });
 
     // a connection not open fails the call as one that closes does, once it started
     if (connectionHandle === undefined) {

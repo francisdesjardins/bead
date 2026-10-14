@@ -5,6 +5,7 @@ import {
   assertTrustedProxies,
   clientAddressOf,
   heldAddressOf,
+  MAXIMUM_UNNAMED_PROXIES,
   trustedProxiesOf,
 } from '../trusted-proxies';
 
@@ -138,6 +139,87 @@ test.describe('trusted proxies', () => {
         trustedProxies: trustedProxiesOf([]),
       }),
     ]).toEqual(['127.0.0.1', '127.0.0.1']);
+  });
+
+  // spec 15.12
+  test('refuses an unnamedProxies that is not a whole number from 0 to 8, Infinity among it, as the server is built', () => {
+    const built = (unnamedProxies: number | undefined) => {
+      return () => {
+        return trustedProxiesOf([], { unnamedProxies });
+      };
+    };
+
+    for (const count of [-1, 9, 1.5, Number.NaN, -Infinity, 2 ** 31 - 1]) {
+      expect(built(count), String(count)).toThrow(ProgrammerError);
+      expect(built(count), String(count)).toThrow(
+        `unnamedProxies is a whole number of proxies from 0 to 8, those trustedProxies does not name: not ${String(count)}`
+      );
+    }
+
+    // the count of every hop, refused as a network of prefix 0 is
+    expect(built(Infinity)).toThrow('it would trust what every client writes');
+    expect(MAXIMUM_UNNAMED_PROXIES).toBe(8);
+
+    for (const count of [undefined, 0, 1, 8]) {
+      expect(built(count), String(count)).not.toThrow();
+    }
+
+    expect([
+      trustedProxiesOf(undefined).unnamed,
+      trustedProxiesOf([], { unnamedProxies: 3 }).unnamed,
+    ]).toEqual([0, 3]);
+  });
+
+  // spec 15.12
+  test('spends unnamedProxies on each address trustedProxies does not hold, none on one it holds, and stops at the first past the count', () => {
+    const walked = (
+      { named = [], unnamed }: { named?: readonly string[]; unnamed: number },
+      { forwarded, remoteAddress = '127.0.0.1' }: { forwarded?: string; remoteAddress?: string }
+    ) => {
+      return clientAddressOf(remoteAddress, {
+        forwarded,
+        trustedProxies: trustedProxiesOf(named, { unnamedProxies: unnamed }),
+      });
+    };
+
+    expect([
+      // a count alone: that many hops from the socket, whatever their address
+      walked({ unnamed: 1 }, { forwarded: '198.51.100.7, 192.0.2.1' }),
+      walked({ unnamed: 2 }, { forwarded: '203.0.113.9, 198.51.100.7, 192.0.2.1' }),
+      // a named hop passes free, wherever it stands: before the unnamed one or after it
+      walked({ named: ['10.0.0.0/8'], unnamed: 1 }, { forwarded: '198.51.100.7, 10.0.0.5' }),
+      walked(
+        { named: ['10.0.0.0/8'], unnamed: 1 },
+        { forwarded: '198.51.100.8, 10.0.0.6, 10.0.0.5' }
+      ),
+      walked(
+        { named: ['10.0.0.0/8'], unnamed: 1 },
+        { forwarded: '203.0.113.9, 10.0.0.5, 198.51.100.7', remoteAddress: '10.0.0.1' }
+      ),
+      // past the count, the first address none holds is the client: what it wrote left is not read
+      walked({ named: ['10.0.0.0/8'], unnamed: 1 }, { forwarded: '203.0.113.9, 198.51.100.7' }),
+      // a proxy both named and counted gives the client an entry it wrote
+      walked(
+        { named: ['127.0.0.1/32'], unnamed: 2 },
+        { forwarded: '192.0.2.66, 203.0.113.1, 198.51.100.7' }
+      ),
+      // an entry that is no address ends the walk within the count, and so does the field's end
+      walked({ unnamed: 3 }, { forwarded: 'unknown, 192.0.2.1' }),
+      walked({ unnamed: 3 }, { forwarded: '192.0.2.1' }),
+      // 0 counts none: an unnamed socket's field is not read
+      walked({ unnamed: 0 }, { forwarded: '192.0.2.1' }),
+    ]).toEqual([
+      '192.0.2.1',
+      '198.51.100.7',
+      '198.51.100.7',
+      '198.51.100.8',
+      '203.0.113.9',
+      '198.51.100.7',
+      '192.0.2.66',
+      '192.0.2.1',
+      '192.0.2.1',
+      '127.0.0.1',
+    ]);
   });
 
   // spec 15.12

@@ -1723,8 +1723,11 @@ public sealed partial class RouterClientTests
         // what a send fails with, once set: what it was given is recorded all the same
         public Exception? Refusal { get; set; }
 
-        // whether it carries a credential beside an envelope, and is secure: in process, it is both
+        // whether it carries a credential beside an envelope, and is secure: in process, it is both;
+        // once told one, it carries that one alone, as a WebSocket carries its upgrade's
         public bool CarriesCredential { get; set; } = true;
+
+        public string? CarriedByUpgrade { get; set; }
 
         public bool IsSecure { get; set; } = true;
 
@@ -1843,6 +1846,11 @@ public sealed partial class RouterClientTests
         public void CloseConnection()
         {
             Close?.Invoke(false, false);
+        }
+
+        public bool Carries(string credential)
+        {
+            return CarriesCredential && (CarriedByUpgrade is null || CarriedByUpgrade == credential);
         }
 
         public Task Send(TransportMessage message)

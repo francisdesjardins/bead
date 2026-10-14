@@ -91,18 +91,36 @@ export const createFakeHTTPServer = (options?: {
     options === undefined || !('address' in options)
       ? { address: '127.0.0.1', port: 50_000 }
       : options.address;
-  const servers: (EventEmitter & { closes: number; listened: [number, string] | undefined })[] = [];
+  const servers: (EventEmitter & {
+    /** The address the transport built it for. */
+    built: string | undefined;
+    closes: number;
+    listened: [number, string] | undefined;
+  })[] = [];
   let listener: HTTPRequestListener | undefined;
   let listening: (() => void) | undefined;
 
-  const createServer = (handler: HTTPRequestListener): IHTTPServerLike => {
+  const createServer = (
+    handler: HTTPRequestListener,
+    options: { address: string }
+  ): IHTTPServerLike => {
     const emitter = Object.assign(new EventEmitter(), {
+      built: options.address,
       closes: 0,
       listened: undefined as [number, string] | undefined,
     });
 
     listener = handler;
     servers.push(emitter);
+
+    // a bind that fails never calls back: its listen is no longer pending
+    let pending: (() => void) | undefined;
+
+    emitter.on('error', () => {
+      if (listening !== undefined && listening === pending) {
+        listening = undefined;
+      }
+    });
 
     return {
       address: () => {
@@ -113,7 +131,7 @@ export const createFakeHTTPServer = (options?: {
       },
       listen: (...[port, host, callback]) => {
         emitter.listened = [port, host];
-        listening = callback;
+        listening = pending = callback;
       },
       on: (event: string, handlerOfEvent: (...params: never[]) => void) => {
         return emitter.on(event, handlerOfEvent as (...params: unknown[]) => void);
@@ -121,9 +139,32 @@ export const createFakeHTTPServer = (options?: {
     };
   };
 
-  /** Tells the transport it listens, as a server's callback does. */
+  /** Tells the transport it listens, as a server's callback does: the last told to listen. */
   const listen = () => {
-    listening?.();
+    const told = listening;
+
+    listening = undefined;
+    told?.();
+  };
+
+  /**
+   * Tells each of `count` servers, in turn, that it listens, each once the transport told it to: on
+   * `localhost`, two, `127.0.0.1` then `::1`.
+   */
+  const listenEach = async (count: number) => {
+    for (let index = 0; index < count; index += 1) {
+      await told();
+      listen();
+    }
+  };
+
+  /** Resolves once the transport told a server to listen, which no callback answered yet. */
+  const told = async () => {
+    for (let turn = 0; listening === undefined && turn < 1_000; turn += 1) {
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    }
   };
 
   /**
@@ -188,5 +229,5 @@ export const createFakeHTTPServer = (options?: {
     request.emit('close');
   };
 
-  return { createServer, exchange, feed, listen, servers };
+  return { createServer, exchange, feed, listen, listenEach, servers, told };
 };

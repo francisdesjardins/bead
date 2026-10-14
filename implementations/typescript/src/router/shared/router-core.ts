@@ -1283,7 +1283,17 @@ export const createRouterCore = <Handle extends string>(
   const admitRouted = ({ dispatched, payload, resolver }: IRouted<Handle>): void => {
     const { connectionHandle, header, session } = dispatched;
     const { callId, total } = header;
-    const refusal = refusalOf(resolver, { connectionHandle, header, session });
+    // what its transport carried stands for ELSEWHERE alone, as its resolver is handed it
+    const transportCredential =
+      header.credential?.scheme === CredentialScheme.ELSEWHERE
+        ? dispatched.transportCredential
+        : undefined;
+    const refusal = refusalOf(resolver, {
+      connectionHandle,
+      header,
+      session,
+      ...(transportCredential === undefined ? {} : { transportCredential }),
+    });
 
     if (refusal !== undefined) {
       return (refuse(refusal, dispatched), undefined);

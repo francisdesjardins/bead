@@ -82,10 +82,14 @@ export const createFakeWebSocketServer = (options?: {
       ? { address: '127.0.0.1', port: 50_000 }
       : options.address;
 
-  // a function rather than an arrow, since the transport calls it with `new`
+  // a function rather than an arrow, since the transport calls it with `new`; it forwards the
+  // `error` of the server it is given, as `ws` does, its `listening` the test's to tell
   const FakeWebSocketServer = function (serverOptions: unknown) {
     const emitter = Object.assign(new EventEmitter(), { closeCount: 0, options: serverOptions });
     instances.push(emitter);
+    (serverOptions as { server?: EventEmitter } | undefined)?.server?.on('error', (error) => {
+      emitter.emit('error', error);
+    });
     return Object.assign(emitter, {
       address: () => {
         return reported;
@@ -132,5 +136,27 @@ export const createFakeWebSocketServer = (options?: {
     instances.at(-1)?.emit('connection', socket, request);
   };
 
-  return { connect, connectGone, FakeWebSocketServer, instances };
+  /** The instance at `index`, once the transport built it. */
+  const builtAt = async (index: number) => {
+    for (let turn = 0; instances[index] === undefined && turn < 1_000; turn += 1) {
+      await new Promise((resolve) => {
+        setImmediate(resolve);
+      });
+    }
+
+    return instances[index];
+  };
+
+  /**
+   * Tells each of `count` instances, in turn from `from`, that it listens, as `ws` forwards its
+   * server's `listening`, each once the transport built it: on `localhost`, two, `127.0.0.1` then
+   * `::1`.
+   */
+  const listenEach = async (count: number, from = 0) => {
+    for (let index = from; index < from + count; index += 1) {
+      (await builtAt(index))?.emit('listening');
+    }
+  };
+
+  return { builtAt, connect, connectGone, FakeWebSocketServer, instances, listenEach };
 };

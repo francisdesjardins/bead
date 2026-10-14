@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Bead.Transport.WebSockets;
 
@@ -74,6 +76,28 @@ public sealed record WebSocketConnectOptions
     /// zero is refused.
     /// </summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// The credential its upgrade carries, written as given in its <c>Authorization</c> (spec 15.2),
+    /// which its server hands beside every envelope of the connection, a call presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> standing for it; none when not given, and an empty one
+    /// is none. Visible ASCII, spaces and tabs, none first or last (RFC 9110 §5.5), over <c>wss</c>
+    /// or to a host on the loopback (spec 13.4): any other, or one given beside
+    /// <see cref="CredentialProvider"/>, is an <see cref="ArgumentException"/> as the connect is
+    /// asked, nothing changed. A reconnection writes it again: a credential that renews is given by
+    /// <see cref="CredentialProvider"/>.
+    /// </summary>
+    public string? Credential { get; init; }
+
+    /// <summary>
+    /// What hands the credential its upgrade carries, as <see cref="Credential"/> is written, called
+    /// at each attempt — the connect's, and each of a reconnection's — before its upgrade goes, with
+    /// the attempt's token, as SignalR's <c>AccessTokenProvider</c> is: a renewed credential reaches
+    /// the next connection. What it throws fails that attempt, its cause; a value that is no field
+    /// value fails it with an <see cref="ArgumentException"/>, which a reconnection does not try
+    /// again. Held to the rules of <see cref="Credential"/> as the connect is asked.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<string>>? CredentialProvider { get; init; }
 }
 
 /// <summary>
@@ -90,9 +114,13 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     // what sends every client's opening handshake: the platform's handler for a socket with no
     // proxy, cookie, credential or certificate of its own, as a ClientWebSocket builds it, but for
     // its connect, which races the address families of a name, as RFC 8305 asks, where the
-    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows
+    // platform's tries each address in turn and waits out a family's refusal, two seconds on Windows.
+    // ! It follows no redirect (spec 15.6): a 3xx answered to the upgrade fails the connect, its
+    // status named, as a page's WebSocket fails; followed, it would carry the upgrade where its
+    // credential and its security were never judged
     private static readonly HttpMessageInvoker Racing = new(new SocketsHttpHandler
     {
+        AllowAutoRedirect = false,
         ConnectCallback = HappyEyeballs.ConnectCallback,
         PooledConnectionLifetime = TimeSpan.Zero,
         UseCookies = false,
@@ -109,6 +137,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private ClientWebSocket? _connecting;
     // the open connection; a connection this side dropped is none, and its end tells nothing
     private volatile WebSocketConnection? _connection;
+    // the credential the upgrade of a connection carried, which it carries alone; none for one whose
+    // upgrade carried none
+    private (WebSocketConnection Connection, string Credential)? _carried;
     // the close handshake under way on the open connection, told whether a dispose dropped it
     private (WebSocketConnection Connection, TaskCompletionSource<bool> Closed)? _disconnecting;
     private Action? _reconnect;
@@ -217,8 +248,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     /// <summary>
     /// Connects to the server; settles once the connection is open. Refused with an
     /// <see cref="ArgumentOutOfRangeException"/> for a timeout
-    /// <see cref="WebSocketConnectOptions.Timeout"/> does not take, zero among them, which leaves the state, and the target a
-    /// reconnection replays, as they were; with an <see cref="InvalidOperationException"/> unless
+    /// <see cref="WebSocketConnectOptions.Timeout"/> does not take, zero among them, and with an
+    /// <see cref="ArgumentException"/> for a credential <see cref="WebSocketConnectOptions.Credential"/>
+    /// does not take, each of which leaves the state, and the target a reconnection replays, as they
+    /// were; with an <see cref="InvalidOperationException"/> unless
     /// Uninitialized or Closed; and with an <see cref="OperationCanceledException"/>, nothing
     /// changed, when its token is cancelled already. Then it throws a <see cref="TimeoutException"/> past its timeout, an
     /// <see cref="OperationCanceledException"/> once its token is cancelled, and the
@@ -231,15 +264,32 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     /// <summary>
-    /// A WebSocket carries no credential beside an envelope (spec 15.2): a call presenting
-    /// <see cref="CredentialScheme.Elsewhere"/> over it fails before it goes.
+    /// Whether it carries <paramref name="credential"/> beside an envelope (spec 15.2): only the
+    /// bytes the upgrade of its open connection carried, compared in constant time, time telling at
+    /// most their length; none before its first connect, nor once its connection is gone. A call
+    /// presenting <see cref="CredentialScheme.Elsewhere"/> with any other fails before it goes.
     /// </summary>
-    public bool CarriesCredential
+    public bool Carries(string credential)
     {
-        get
+        ArgumentNullException.ThrowIfNull(credential);
+
+        (WebSocketConnection Connection, string Credential)? carried;
+        WebSocketConnection? connection;
+
+        lock (_gate)
+        {
+            carried = _carried;
+            connection = _connection;
+        }
+
+        // ! a visible field alone: ASCII's encoder writes any other character as '?', which would
+        // equal a '?' carried
+        if (carried is not { } held || held.Connection != connection || !HostsAndOrigins.IsVisibleField(credential))
         {
             return false;
         }
+
+        return CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(held.Credential), Encoding.ASCII.GetBytes(credential));
     }
 
     /// <summary>
@@ -259,9 +309,9 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
     /// <summary>
     /// Hands the bytes of <paramref name="message"/> to the connection, as binary; refused with a
-    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. A
-    /// WebSocket carries no credential: one given is not carried, as its router fails a call
-    /// presenting one before it goes.
+    /// <see cref="DisconnectException"/> unless Open, as the TypeScript side's ReadyStateError. Its
+    /// credential is not sent beside it: the connection carries its upgrade's alone, as its router
+    /// fails before it goes a call presenting another.
     /// </summary>
     public Task Send(TransportMessage message)
     {
@@ -498,6 +548,67 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         return readyState.ToString().ToLowerInvariant();
     }
 
+    // the credential a connect is given, refused before anything moves: one a field cannot carry as
+    // it is, one beside a provider, and one its upgrade would carry off the machine in the clear
+    // (spec 13.4), the upgrade being where it would cross
+    private static void AssertCredential(WebSocketConnectOptions options)
+    {
+        if (options.Credential is not null && options.CredentialProvider is not null)
+        {
+            throw new ArgumentException("a connect takes a credential or a credential provider, not both", nameof(options));
+        }
+
+        if (options.Credential is { } credential)
+        {
+            AssertFieldValue(credential);
+        }
+
+        if ((options.Credential is not null || options.CredentialProvider is not null) && !TransportSecurity.IsSecure((options.Secured, options.Host)))
+        {
+            throw new ArgumentException(
+                "a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback",
+                nameof(options));
+        }
+    }
+
+    // a credential its upgrade's Authorization can carry as it is (RFC 9110 §5.5): one with a space
+    // or a tab first or last the server would read trimmed, another than the one a call presents
+    private static void AssertFieldValue(string credential)
+    {
+        if (!HostsAndOrigins.IsVisibleField(credential))
+        {
+            throw new ArgumentException("a credential holds visible ASCII, spaces and tabs alone, none first or last", nameof(credential));
+        }
+    }
+
+    // the credential an attempt's upgrade carries: the one given, or the provider's, called for this
+    // attempt with its token, what it throws failing the attempt as its cause; none for an empty one
+    private static async ValueTask<string?> CredentialOf(WebSocketConnectOptions options, CancellationToken token)
+    {
+        var credential = options.Credential;
+
+        if (options.CredentialProvider is { } provider)
+        {
+            try
+            {
+                credential = await provider(token);
+            }
+            catch (Exception reason) when (reason is not OperationCanceledException)
+            {
+                throw new WebSocketException(WebSocketError.Faulted, "the credential provider failed", reason);
+            }
+        }
+
+        if (credential is null)
+        {
+            return null;
+        }
+
+        AssertFieldValue(credential);
+
+        return credential.Length == 0 ? null : credential;
+    }
+
     // closes a connection this side let go of, without waiting on it: its close goes out going
     // away, 1001, where a browser's close() sends none, which this socket cannot; the server says it
     // was not clean either way, and the close timeout drops one that never answers
@@ -511,6 +622,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     private async Task Connecting(WebSocketConnectOptions given, (CancellationToken Token, bool IsAttempt) call)
     {
         ArgumentNullException.ThrowIfNull(given);
+        AssertCredential(given);
 
         // held before anything moves or is kept, so a reconnection connects again with it held
         var options = given with
@@ -558,8 +670,21 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             using var timeout = options.Timeout > TimeSpan.Zero ? new CancellationTokenSource(options.Timeout, _clock) : null;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, timeout?.Token ?? CancellationToken.None);
 
+            // the provider's token, cancelled once its attempt is over, an open one's included
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+            string? credential;
+
             try
             {
+                // * the provider called at each attempt, within its timeout, so a reconnection carries
+                // the credential as it is now
+                credential = await CredentialOf(options, attempt.Token);
+
+                if (credential is not null)
+                {
+                    socket.Options.SetRequestHeader("Authorization", credential);
+                }
+
                 await socket.ConnectAsync(UriOf(options), _options.Invoker ?? Racing, linked.Token);
             }
             catch (OperationCanceledException reason) when (timeout is { IsCancellationRequested: true } && !token.IsCancellationRequested)
@@ -573,6 +698,10 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 // names the mark
                 throw new WebSocketException(reason.WebSocketErrorCode, $"the server refused the upgrade: {RefusalOf(socket)}", reason);
             }
+            finally
+            {
+                await attempt.CancelAsync();
+            }
 
             lock (_gate)
             {
@@ -584,6 +713,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
 
                 _connecting = null;
                 _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
+                _carried = credential is null ? null : (connection, credential);
                 _readyState = ReadyState.Open;
             }
         }

@@ -8,6 +8,8 @@
     <!-- the tests run a router on a scheduler they wait on, so they know when it settled -->
     <InternalsVisibleTo Include="Bead.Core.Tests" />
     <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
+    <!-- the WebSocket server's tests draw a port held on ::1, and refuse its bind, as the HTTP one's -->
+    <InternalsVisibleTo Include="Bead.Transport.WebSockets.Tests" />
     <!-- the transports share what makes a client reconnect, as the TypeScript side's createTransportClient -->
     <InternalsVisibleTo Include="Bead.Transport.Http" />
     <InternalsVisibleTo Include="Bead.Transport.WebSockets" />

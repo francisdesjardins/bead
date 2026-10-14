@@ -12,9 +12,9 @@ the client answers; and `countDown`, which fails past 10 with `TOO_FAR`, notifie
 to a client that asks for them at a window of 1, and is admitted by its hook, `greeted`, once the
 connection said hello. Both halves serve and call it over WebSocket.
 
-Its servers listen on `127.0.0.1`, as every server does by default, and name no hosts: every server
-takes `127.0.0.1`, which its clients connect to, and refuses a page that rebinds its name to it
-(spec 15.12).
+Its servers listen on `127.0.0.1`, the address each is given, where a server given none listens on
+`localhost`, both loopbacks, and name no hosts: every server takes `127.0.0.1`, which its clients
+connect to, and refuses a page that rebinds its name to it (spec 15.12).
 
 ## Its files
 

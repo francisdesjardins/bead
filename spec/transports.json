@@ -9,7 +9,7 @@
     "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
     "A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.",
     "Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform's threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform's threads, would fire first.",
-    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins and its trustedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
+    "options, where given, are the server's bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins, its trustedProxies and its unnamedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server's own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router's, as in conversations.json.",
     "Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
@@ -3919,6 +3919,330 @@
       ]
     },
     {
+      "name": "behind the proxies it counts, whatever their address, the client is the X-Forwarded-For entry that many hops from its socket, what a client wrote to its left never read",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "unnamedProxies": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7, 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "other"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: rebind.example\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 203.0.113.9, 192.0.2.3\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "192.0.2.3",
+              "port": "{port}"
+            }
+          },
+          "on": "rebound"
+        }
+      ]
+    },
+    {
+      "name": "unnamedProxies counts the addresses trustedProxies does not hold: one it holds costs none, and the walk stops at the first address past the count that it does not hold",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "10.0.0.0/8"
+        ],
+        "unnamedProxies": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.7, 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 203.0.113.9, 198.51.100.7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "198.51.100.7",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 198.51.100.8, 10.0.0.6, 10.0.0.5\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "a proxy both named and counted gives the client an entry it wrote: behind a socket trustedProxies holds, unnamedProxies 2 passes the one unnamed proxy and reads the entry to its left",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.1/32"
+        ],
+        "unnamedProxies": 2
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.66, 203.0.113.1, 198.51.100.7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.66, 203.0.113.2, 198.51.100.7\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.66",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "an X-Forwarded-For entry that is no address ends the walk within the proxies it counts, and so does the field's end",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "unnamedProxies": 3
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: unknown, 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "unnamedProxies 0 counts none: the X-Forwarded-For of a socket trustedProxies does not hold is not read",
+      "clauses": [
+        "15.6.13",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "http",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "unnamedProxies": 0
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.1\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 201
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\nx-forwarded-for: 192.0.2.2\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
       "name": "past the requests waiting on one connection, a request is refused 429, marked",
       "clauses": [
         "15.6.12",
@@ -6724,8 +7048,9 @@
       ]
     },
     {
-      "name": "a WebSocket carries no credential, nor does its upgrade's Authorization: a request presenting ELSEWHERE is answered SESSION_REQUIRED",
+      "name": "a WebSocket upgrade that carries no Origin carries its Authorization beside every envelope of its connection, as it came, its auth-scheme included and its surrounding whitespace removed: a request presenting ELSEWHERE hands it to the verifier, whoami answering the sub it names, and one presenting none is refused SESSION_REQUIRED, the upgrade's credential standing for nothing but ELSEWHERE",
       "clauses": [
+        "15.1",
         "15.2"
       ],
       "transport": "websocket",
@@ -6734,7 +7059,7 @@
           "send": {
             "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\n\r\n"
           },
-          "on": "socket"
+          "on": "ada"
         },
         {
           "expect": {
@@ -6744,13 +7069,123 @@
               "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
             }
           },
-          "on": "socket"
+          "on": "ada"
         },
         {
           "send": {
             "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
           },
-          "on": "socket"
+          "on": "ada"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "ada"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 03  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "ada"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "ada"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 05  00 01 00 0E | 6E 75 6C 6C"
+          },
+          "on": "ada"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 5,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "ada"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization:  \tInterop sub=bob\t \r\n\r\n"
+          },
+          "on": "bob"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "bob"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "bob"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 62 6F 62 22"
+            }
+          },
+          "on": "bob"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade that carries no Authorization, or an empty one, carries none: a request presenting ELSEWHERE on its connection is answered SESSION_REQUIRED, no credential came",
+      "clauses": [
+        "15.1",
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "none"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "none"
         },
         {
           "expect": {
@@ -6765,7 +7200,292 @@
               }
             }
           },
-          "on": "socket"
+          "on": "none"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: \r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0,
+                "detail": "no credential came"
+              }
+            }
+          },
+          "on": "empty"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade that carries an Origin, one the server takes, carries no credential, whatever its Authorization: a page's browser writes its own authentication on it, so a request presenting ELSEWHERE on its connection is answered SESSION_REQUIRED, no credential came",
+      "clauses": [
+        "15.1",
+        "15.2"
+      ],
+      "transport": "websocket",
+      "options": {
+        "origins": [
+          "https://bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: https://bead.test\r\nauthorization: Interop sub=ada\r\n\r\n"
+          },
+          "on": "page"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "page"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "page"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0,
+                "detail": "no credential came"
+              }
+            }
+          },
+          "on": "page"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\n\r\n"
+          },
+          "on": "service"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "service"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "service"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "service"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade with two Authorization fields is refused 400, marked, before its origin is judged",
+      "clauses": [
+        "15.2",
+        "15.2.6",
+        "15.6.4"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\nauthorization: Interop sub=ada\r\norigin: https://elsewhere.test\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "twice"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\n\r\n"
+          },
+          "on": "once"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "once"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "once"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "once"
+        }
+      ]
+    },
+    {
+      "name": "a credential its upgrade carried is judged at each request as an HTTP one is: an end the wall clock has reached as its verifier settles does not hold, one a millisecond short of it holds, and the connection stays",
+      "clauses": [
+        "13.11",
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada, end=1767225600000\r\n\r\n"
+          },
+          "on": "ended"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "ended"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "ended"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0,
+                "detail": "the credential does not hold"
+              }
+            }
+          },
+          "on": "ended"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+          },
+          "on": "ended"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 79 22"
+            }
+          },
+          "on": "ended"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada, end=1767225600001\r\n\r\n"
+          },
+          "on": "held"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "held"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "held"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "held"
         }
       ]
     },
@@ -8526,6 +9246,79 @@
         {
           "send": {
             "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 192.0.2.1\r\n\r\n"
+          },
+          "on": "taken"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "taken"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "taken"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "taken"
+        }
+      ]
+    },
+    {
+      "name": "behind the proxies it counts, a WebSocket server's refusal of an upgrade tells the client's address, the X-Forwarded-For entry that many hops from its socket, and its port the proxy's connection's",
+      "clauses": [
+        "15.2",
+        "15.2.2",
+        "15.6.5",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "options": {
+        "unnamedProxies": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: rebind.example\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 203.0.113.9, 198.51.100.7\r\n\r\n"
+          },
+          "on": "rebound"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "host-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "host-refused",
+              "authority": "rebind.example",
+              "origin": null,
+              "address": "198.51.100.7",
+              "port": "{port}"
+            }
+          },
+          "on": "rebound"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 203.0.113.9\r\n\r\n"
           },
           "on": "taken"
         },

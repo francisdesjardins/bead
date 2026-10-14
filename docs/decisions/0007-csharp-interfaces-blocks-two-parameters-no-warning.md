@@ -112,7 +112,7 @@ delegate or an interface: a request is made in three calls, as on the TypeScript
 no body limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the
 marked 503; a refusal of HTTP/1 whose body it does not read says `connection: close`;
 `x-forwarded-for` is read by one rule of its own
-([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)).
 
 **The gate is two commands, from `implementations/dotnet`**:
 `dotnet format Bead.slnx --verify-no-changes`, then `dotnet test --solution Bead.slnx`, which

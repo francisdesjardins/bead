@@ -54,9 +54,9 @@ interface IRegistration extends IDestination {
   timeout: number;
 }
 
-/** What a leg B's transport carries beside a request: a credential, and whether in the clear. */
+/** What a leg B's transport carries beside a request: which credential, and whether in the clear. */
 interface ICarriage {
-  carriesCredential: boolean;
+  carries(credential: string): boolean;
   isSecure: boolean;
 }
 
@@ -98,6 +98,11 @@ type Handle = TransportServerConnectionHandle;
 
 const isConnectionTarget = (target: RelayTarget): target is IConnectionTarget => {
   return 'connectionHandle' in target;
+};
+
+// what a transport that says nothing carries: no credential
+const carriesNone = (): boolean => {
+  return false;
 };
 
 /**
@@ -235,18 +240,24 @@ export const createRelay = ({
   // the transport it calls through says
   const carriageOfTarget = (target: RelayTarget): ICarriage => {
     if (isConnectionTarget(target)) {
-      return carriageOf?.(target.connectionHandle) ?? { carriesCredential: false, isSecure: false };
+      return carriageOf?.(target.connectionHandle) ?? { carries: carriesNone, isSecure: false };
     }
 
+    const { transport } = target;
+
     return {
-      carriesCredential: target.transport?.carriesCredential === true,
-      isSecure: target.transport?.isSecure === true,
+      carries: (credential) => {
+        return transport?.carries?.(credential) === true;
+      },
+      isSecure: transport?.isSecure === true,
     };
   };
 
-  // a call leg B cannot carry, its credential holding or not, as section 14.3's step 5 lists them
+  // a call leg B cannot carry, its credential holding or not, as section 14.3's step 5 lists them:
+  // ! an ELSEWHERE goes only where leg B carries the very bytes leg A's transport carried — never
+  // over a WebSocket whose upgrade carried the relay's own, which it would present for leg A's
   const uncarriedOf = (
-    { credential }: IRequestHeader,
+    { header: { credential }, transportCredential }: IAdmissionRequest<Handle>,
     { audience, destinationId, target }: IRegistration
   ): IFailure | undefined => {
     if (credential?.scheme === CredentialScheme.JWT && 'token' in credential) {
@@ -261,8 +272,14 @@ export const createRelay = ({
         return unreachableOf(destinationId, 'it verifies no audience, which ELSEWHERE crosses to');
       }
 
-      if (!carriageOfTarget(target).carriesCredential) {
-        return unreachableOf(destinationId, 'its transport carries no credential beside a request');
+      if (
+        transportCredential === undefined ||
+        !carriageOfTarget(target).carries(transportCredential)
+      ) {
+        return unreachableOf(
+          destinationId,
+          'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another'
+        );
       }
     } else {
       return undefined;
@@ -542,7 +559,8 @@ export const createRelay = ({
       }
 
       // what refuses an admitted request to this destination: nothing, for one that goes on
-      const refusalOfRoute = (header: IRequestHeader): IFailure | undefined => {
+      const refusalOfRoute = (request: IAdmissionRequest<Handle>): IFailure | undefined => {
+        const { header } = request;
         const { opensSubscription, total } = header;
         const { target } = registration;
 
@@ -563,13 +581,13 @@ export const createRelay = ({
 
         // a transfer's total is held before any credit; a payload that came whole, as it comes
         return (
-          uncarriedOf(header, registration) ??
+          uncarriedOf(request, registration) ??
           (total === undefined ? undefined : tooLargeOf(total, { header, registration }))
         );
       };
 
       const admit = (admissionRequest: IAdmissionRequest<Handle>): IFailure | undefined => {
-        return admission(admissionRequest) ?? refusalOfRoute(admissionRequest.header);
+        return admission(admissionRequest) ?? refusalOfRoute(admissionRequest);
       };
 
       return Object.assign(

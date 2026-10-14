@@ -767,7 +767,7 @@ const heldByHTTPServer = async (
   }
 
   const server = building.built;
-  const starting = server.start({ port: 4_321 });
+  const starting = server.start({ address: '127.0.0.1', port: 4_321 });
 
   fake.listen();
   await starting;

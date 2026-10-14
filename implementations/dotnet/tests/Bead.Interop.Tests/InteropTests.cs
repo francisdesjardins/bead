@@ -137,8 +137,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal(expected, Snapshot(heard));
     }
 
-    // a client of the TypeScript server, connected over a transport
-    private async Task<Connected> ConnectedOver(string transport)
+    // a client of the TypeScript server, connected over a transport, a WebSocket's upgrade carrying
+    // the credential given
+    private async Task<Connected> ConnectedOver(string transport, string? credential = null)
     {
         var (port, httpPort) = await server.Ports();
 
@@ -146,7 +147,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         {
             var client = new WebSocketClient();
 
-            await client.Connect(new WebSocketConnectOptions { Host = Host, Port = port }, Cancelled);
+            await client.Connect(new WebSocketConnectOptions { Host = Host, Port = port, Credential = credential }, Cancelled);
 
             return new Connected(client, client.DisposeAsync);
         }
@@ -499,22 +500,24 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]
-    public async Task An_ELSEWHERE_goes_over_HTTP_alone_its_Authorization_what_the_verifier_reads_whoami_answers_the_sub_it_names_over_a_WebSocket_it_fails_before_it_goes(string transport)
+    public async Task An_ELSEWHERE_goes_in_each_POST_s_Authorization_over_HTTP_and_in_its_upgrade_s_over_a_WebSocket_whoami_answers_the_sub_it_names(string transport)
     {
-        await using var client = await ConnectedOver(transport);
+        // * the one place one side's client writes the field and the other side's server reads it
+        await using var client = await ConnectedOver(transport, "Interop sub=ada");
 
         var whoami = client.Interop.Whoami(JsonOf("null"));
 
+        Assert.Equal("\"ada\"", (await whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled)).GetRawText());
+
         if (transport == Http)
         {
-            Assert.Equal("\"ada\"", (await whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled)).GetRawText());
-
             return;
         }
 
+        // over a WebSocket, those bytes alone: another credential fails before it goes
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
+            return whoami(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=bob") }).WaitAsync(Patience, Cancelled);
         });
 
         Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local), (refused.Code, refused.Origin));

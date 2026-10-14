@@ -62,7 +62,7 @@
       }
     },
     "options": {
-      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, and the proxies it trusts.",
+      "description": "The server's bounds a case sets, and what it takes besides: hosts, origins, the proxies it trusts, and how many it counts that trustedProxies does not name.",
       "type": "object",
       "minProperties": 1,
       "$ref": "#/$defs/bounds",
@@ -70,7 +70,13 @@
       "properties": {
         "hosts": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "origins": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-        "trustedProxies": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        "trustedProxies": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "unnamedProxies": {
+          "description": "The proxies on every path to the server that trustedProxies does not name, each one of the count (spec 15.12).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8
+        }
       }
     },
     "response": {

@@ -114,9 +114,11 @@ const notificationEnvelopeOf = (callId: number, payload = Uint8Array.of(5)): Out
  * beside it, delivers what a test gives, and carries a credential, securely, unless told otherwise.
  */
 const createScriptedTransport = ({
-  carriesCredential = true,
+  carries = () => {
+    return true;
+  },
   isSecure = true,
-}: { carriesCredential?: boolean; isSecure?: boolean } = {}) => {
+}: { carries?: (credential: string) => boolean; isSecure?: boolean } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
     message: [message: ITransportMessage];
@@ -127,7 +129,7 @@ const createScriptedTransport = ({
   const control = { sendError: undefined as Error | undefined };
 
   const transport: IRouterClientTransportLike = {
-    carriesCredential,
+    carries,
     isSecure,
     off: emitter.off,
     on: emitter.on,
@@ -160,6 +162,11 @@ const createScriptedTransport = ({
 // a JWT, which a client presents as it is given, and an ELSEWHERE, with what its transport carries
 const JWT = Object.freeze({ scheme: CredentialScheme.JWT, token: 'a.b.c' });
 const RENEWED_JWT = Object.freeze({ scheme: CredentialScheme.JWT, token: 'd.e.f' });
+// what a transport carries that carries no credential beside an envelope
+const CARRIES_NONE = (): boolean => {
+  return false;
+};
+
 const ELSEWHERE = Object.freeze({
   carried: 'Bearer mF_9.B5f-4.1JqM',
   scheme: CredentialScheme.ELSEWHERE,
@@ -1023,8 +1030,8 @@ test.describe('createRouterClient', () => {
       expect(codesOf(errors)).toEqual([ProtocolCode.CALL_UNKNOWN]);
     });
 
-    test('fails an ELSEWHERE over a transport that carries none before it goes, DESTINATION_UNREACHABLE: nothing sent, the default kept, no event', async () => {
-      const scripted = createScriptedTransport({ carriesCredential: false });
+    test('fails an ELSEWHERE over a transport that carries none before it goes, or over a WebSocket whose upgrade carried other bytes, DESTINATION_UNREACHABLE: nothing sent, the default kept, no event', async () => {
+      const scripted = createScriptedTransport({ carries: CARRIES_NONE });
       using router = createRouterClient(scripted.transport, { credential: ELSEWHERE });
       const withdrawn: unknown[][] = [];
       const errors = recordErrors(router);
@@ -1054,6 +1061,41 @@ test.describe('createRouterClient', () => {
       expect(router.credential).toEqual(ELSEWHERE);
       expect(withdrawn).toEqual([]);
       expect(errors).toEqual([]);
+
+      // a WebSocket's upgrade carried one credential: an ELSEWHERE with other bytes fails, its
+      // detail naming no credential, and one with the same bytes goes
+      const upgraded = createScriptedTransport({
+        carries: (credential) => {
+          return credential === 'Interop sub=bob';
+        },
+      });
+      using overUpgrade = createRouterClient(upgraded.transport, { credential: ELSEWHERE });
+      const refused = await overUpgrade
+        .request(new Uint8Array(0), { options, procedure: service })
+        .catch((reason: unknown) => {
+          return reason as FailureError;
+        });
+
+      expect(refused).toMatchObject({
+        code: ProtocolCode.DESTINATION_UNREACHABLE,
+        origin: 'local',
+      });
+      expect(JSON.stringify(refused)).not.toContain(ELSEWHERE.carried);
+
+      const carried = overUpgrade.request(new Uint8Array(0), {
+        options: {
+          ...options,
+          credential: { carried: 'Interop sub=bob', scheme: CredentialScheme.ELSEWHERE },
+        },
+        procedure: service,
+      });
+
+      upgraded.deliver(resultOf(1));
+      await carried;
+
+      expect(presentedOf(upgraded)).toEqual([
+        [1, { scheme: CredentialScheme.ELSEWHERE }, 'Interop sub=bob'],
+      ]);
     });
 
     test('fails a JWT or an ELSEWHERE over a transport not secure before it goes, DESTINATION_UNREACHABLE, where a call presenting none or OPAQUE goes', async () => {
@@ -2592,7 +2634,7 @@ test.describe('createRouterClient', () => {
     // debugging 9.3, 9.6.1 and 9.6.2
     test('counts a call refused before it goes, SESSION_REQUIRED or DESTINATION_UNREACHABLE, as started and ended in the turn it started, and a programmer’s error or an aborted signal as nothing', async () => {
       const metricsRegistry = createMetricsRegistry();
-      const { transport } = createScriptedTransport({ carriesCredential: false });
+      const { transport } = createScriptedTransport({ carries: CARRIES_NONE });
       using router = createRouterClient(transport, { clock: createTestClock(), metricsRegistry });
       const series = router.declareRequester(service);
       const ask = (

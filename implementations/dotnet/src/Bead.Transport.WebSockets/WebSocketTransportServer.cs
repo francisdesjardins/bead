@@ -99,23 +99,44 @@ public sealed record WebSocketTransportServerOptions
     /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
     /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. The
     /// client's address so read names its connection, <c>ip=</c> in its handle, and its refusals; its
-    /// port is the socket's, the nearest proxy's connection's behind one. A proxy left out is a
-    /// client as any other: every client behind it is named by its address.
+    /// port is the socket's, the nearest proxy's connection's behind one. A proxy it neither names
+    /// nor counts (<see cref="UnnamedProxies"/>) is a client as any other: every client behind it is
+    /// named by its address.
     /// </summary>
     public IReadOnlyList<string>? TrustedProxies { get; init; }
+
+    /// <summary>
+    /// How many proxies on every path to it <see cref="TrustedProxies"/> does not name (spec 15.12):
+    /// one each for a proxy whose addresses its platform does not publish, a PaaS router among them;
+    /// a proxy whose addresses are published — Google Cloud's global load balancer, Cloudflare, an
+    /// AWS ALB's VPC — is named, never counted. From 0, by default, to 8; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. The walk spends one on an
+    /// address the list does not hold, none on one it holds, wherever it stands, and stops where
+    /// neither remains: unlike a count of every hop, Envoy's <c>xff_num_trusted_hops</c> or
+    /// Express's <c>trust proxy</c> n, a proxy both named and counted gives the client an entry it
+    /// wrote. A count is believed as told: a request that reaches the server by a path with fewer
+    /// such proxies, straight to its socket or past one it counts, is read by entries its client
+    /// wrote, so a server so reachable names its proxies instead.
+    /// </summary>
+    public int UnnamedProxies { get; init; }
 }
 
 /// <summary>Where a transport server listens.</summary>
 public sealed record WebSocketTransportStartOptions
 {
     /// <summary>
-    /// The address it listens on (spec 15.12), an IP address written bare: <c>127.0.0.1</c>, the
-    /// loopback, by default; <c>0.0.0.0</c> or <c>::</c> for every interface, which a container, or any
-    /// server another machine reaches, needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or
-    /// <c>IPv6address</c>, with no brackets, no zone, and not IPv4-mapped; a name or any other form is
-    /// an <see cref="ArgumentException"/> as it starts, which ends Closed.
+    /// The address it listens on (spec 15.12): <c>localhost</c> by default, both loopbacks,
+    /// <c>127.0.0.1</c> and <c>::1</c> on one port, as Kestrel's <c>ListenLocalhost</c> binds them, so
+    /// no other process answers a client that reaches it by <c>localhost</c> on the other family; a
+    /// port another socket holds on either fails the start, and a port drawn is drawn again, eight
+    /// times at most. Where the IPv6 loopback is absent it listens on <c>127.0.0.1</c> alone, and
+    /// reports it. Or an IP address written bare, which it listens on alone: <c>0.0.0.0</c> or
+    /// <c>::</c> for every interface, which a container, or any server another machine reaches,
+    /// needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or <c>IPv6address</c>, with no
+    /// brackets, no zone, and not IPv4-mapped; another name or any other form is an
+    /// <see cref="ArgumentException"/> as it starts, which ends Closed.
     /// </summary>
-    public string Address { get; init; } = "127.0.0.1";
+    public string Address { get; init; } = Loopbacks.Localhost;
 
     /// <summary>The port it listens on.</summary>
     public int Port { get; init; } = 80;
@@ -137,14 +158,17 @@ public sealed record WebSocketTransportStartOptions
 /// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
 /// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
 /// 13, 426; a malformed upgrade, 400; an origin not taken, 403; and, once its stop began, one it
-/// would take, 503, busy.
+/// would take, 503, busy. An upgrade that carries no <c>Origin</c> carries its <c>Authorization</c>,
+/// trimmed, beside every envelope of its connection, which a request presenting
+/// <see cref="CredentialScheme.Elsewhere"/> stands for (spec 15.2); one that carries an
+/// <c>Origin</c>, a page's, carries none; nothing is carried toward a client.
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
     private readonly WebSocketTransportServerOptions _options;
     private readonly TimeProvider _clock;
     // the networks of the proxies it believes X-Forwarded-For from
-    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
+    private readonly ProxyTrust _proxyTrust;
     // each connection, and its end as the server tells it: gone from the handles, its close raised
     private readonly ConcurrentDictionary<string, Held> _connections = new();
     // its ready state, and the guards around its start and its stop, as every transport server's
@@ -170,7 +194,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
-        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(WebSocketTransportServerOptions.TrustedProxies));
+        _proxyTrust = Bead.TrustedProxies.TrustOf(
+            (given.TrustedProxies, nameof(WebSocketTransportServerOptions.TrustedProxies)),
+            (given.UnnamedProxies, nameof(WebSocketTransportServerOptions.UnnamedProxies)));
         _options = given with
         {
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
@@ -224,6 +250,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     /// tests' way to give one a socket of theirs.
     /// </summary>
     internal Func<WebSocket, string, (WebSocket Socket, string ConnectionHandle)>? Accepted { get; init; }
+
+    /// <summary>
+    /// How a start on <c>localhost</c> draws its port and binds the IPv6 loopback: the tests' way to
+    /// draw a port another socket holds there, and to start where it is absent.
+    /// </summary>
+    internal LoopbackBinding Loopback { get; init; } = new();
 
     /// <summary>
     /// The largest message its connections read: the option given, or a router's largest envelope
@@ -319,16 +351,35 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return _life.Stop(Stopping);
     }
 
-    // builds its application and starts it; what a failed start built goes with it
+    // listens where it is told, localhost on both loopbacks, and gives where
     private async Task<TransportServerAddress> Starting((WebSocketTransportStartOptions Start, CancellationToken Token) call)
     {
         var (start, cancellationToken) = call;
-        WebApplication? application = null;
-        TransportServerAddress bound;
 
         // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
         // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
         HostsAndOrigins.AssertAddress(start.Address, nameof(WebSocketTransportStartOptions.Address));
+
+        var ((application, port), address) = start.Address == Loopbacks.Localhost
+            ? await Loopbacks.Bind(
+                (listening) =>
+                {
+                    return Serving(listening, cancellationToken);
+                },
+                Loopback with { Port = start.Port, FindOpenPort = start.FindOpenPort })
+            : (await Serving(([IPAddress.Parse(start.Address)], start.FindOpenPort ? 0 : start.Port), cancellationToken), start.Address);
+
+        _isSecure = _options.Secure ?? TransportSecurity.IsSecure((false, address));
+        _application = application;
+
+        return new TransportServerAddress(address, port);
+    }
+
+    // builds an application on the addresses and the port given and starts it, and gives the port
+    // it listens on; what a failed start built goes with it
+    private async Task<(WebApplication Application, int Port)> Serving((IReadOnlyList<IPAddress> Addresses, int Port) listening, CancellationToken cancellationToken)
+    {
+        WebApplication? application = null;
 
         try
         {
@@ -341,7 +392,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             });
             builder.WebHost.ConfigureKestrel((kestrel) =>
             {
-                kestrel.Listen(IPAddress.Parse(start.Address), start.FindOpenPort ? 0 : start.Port);
+                foreach (var address in listening.Addresses)
+                {
+                    kestrel.Listen(address, listening.Port);
+                }
+
                 kestrel.AddServerHeader = false;
 
                 // * an origin server MUST take an absolute-form target's authority over its Host (RFC
@@ -361,8 +416,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             var addresses = application.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
-            bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
-            _isSecure = _options.Secure ?? TransportSecurity.IsSecure((false, start.Address));
+            return (application, new Uri(addresses.Addresses.First()).Port);
         }
         catch
         {
@@ -373,10 +427,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             throw;
         }
-
-        _application = application;
-
-        return bound;
     }
 
     /// <summary>
@@ -411,8 +461,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <summary>
-    /// A WebSocket carries no credential beside an envelope (spec 15.2): a command presenting
-    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes.
+    /// Nothing is carried toward a client (spec 15.2): a command presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes. What its upgrade carried goes
+    /// the other way alone, beside every envelope its client sends.
     /// </summary>
     public bool CarriesCredential(string connectionHandle)
     {
@@ -496,7 +547,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
     }
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the
@@ -566,6 +617,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             return;
         }
 
+        // ! an upgrade that carries an Origin is a page's, whose browser writes its own
+        // authentication on it as it sends its cookies (Fetch, credentials mode include): it carries
+        // none, whatever its Authorization; one from no page carries its Authorization beside every
+        // envelope of its connection (spec 15.2)
+        var headers = context.Request.Headers;
+        var credential = headers.Origin.Count == 0 ? HostsAndOrigins.CredentialOf(headers.Authorization) : null;
         var accepted = await context.WebSockets.AcceptWebSocketAsync();
         var ip = AddressOf(context) ?? "";
         var port = context.Connection.RemotePort;
@@ -608,7 +665,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             await connection.Read((message) =>
             {
                 held.Client = held.Client with { LastActivity = _clock.GetUtcNow() };
-                _listeners.Tell(Message, (message, connectionHandle));
+                _listeners.Tell(Message, (message with { Credential = credential }, connectionHandle));
             });
         }
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)

@@ -1219,7 +1219,7 @@ public sealed partial class RouterCoreTests
             Reports.Add(reason);
         }
 
-        public bool CarriesCredential(string connectionHandle)
+        public bool Carries(string credential, string connectionHandle)
         {
             return IsCarrying;
         }

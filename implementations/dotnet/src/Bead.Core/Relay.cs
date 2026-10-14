@@ -76,15 +76,13 @@ public interface IRouterTarget
     RouterLimits Limits { get; }
 
     /// <summary>
-    /// Whether its transport carries a credential beside an envelope, as a leg B presenting
-    /// <see cref="CredentialScheme.Elsewhere"/> needs; none does by default.
+    /// Whether its transport carries <paramref name="credential"/> beside an envelope, as a leg B
+    /// presenting <see cref="CredentialScheme.Elsewhere"/> needs: over a WebSocket, only the bytes its
+    /// upgrade carried. None carries one by default.
     /// </summary>
-    bool CarriesCredential
+    bool Carries(string credential)
     {
-        get
-        {
-            return false;
-        }
+        return false;
     }
 
     /// <summary>
@@ -440,14 +438,18 @@ internal sealed class Relay
 
     // step 5 of section 14.3: what leg B cannot carry, its credential holding or not, nothing tried —
     // a JWT to a destination whose audience its aud does not name, or of none; an ELSEWHERE to a
-    // destination of no audience, or over a leg B that carries no credential; either over a leg B
-    // in the clear off the machine. A call presenting none or OPAQUE is never refused here
-    private Failure? CredentialRefusalOf(Registration registration, RequestHeader header)
+    // destination of no audience, or over a leg B that cannot carry what leg A's transport carried —
+    // ! a WebSocket's, whose upgrade carried the relay's own credential or none, never leg A's: the
+    // confused deputy stays shut; either over a leg B in the clear off the machine. A call
+    // presenting none or OPAQUE is never refused here
+    private Failure? CredentialRefusalOf(Registration registration, AdmissionRequest request)
     {
+        var header = request.Header;
+        var carried = request.TransportCredential;
         var destinationId = registration.Destination.DestinationId;
         var target = registration.Target;
         var (carries, isSecure) = target is IRouterTarget router
-            ? (router.CarriesCredential, router.IsSecure)
+            ? (carried is { } bytes && router.Carries(bytes), router.IsSecure)
             : (_router.CarriesCredential(((ConnectionTarget)target).ConnectionHandle), _router.IsSecure(((ConnectionTarget)target).ConnectionHandle));
 
         return header.Credential switch
@@ -457,7 +459,7 @@ internal sealed class Relay
             { Scheme: CredentialScheme.Elsewhere } when registration.Audience is null
                 => UnreachableOf(destinationId, "it was registered with no audience"),
             { Scheme: CredentialScheme.Elsewhere } when !carries
-                => UnreachableOf(destinationId, "its transport carries no credential beside an envelope"),
+                => UnreachableOf(destinationId, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             { Scheme: CredentialScheme.Jwt or CredentialScheme.Elsewhere } when !isSecure
                 => UnreachableOf(destinationId, "it is reached off the machine in the clear, which a bearer credential never crosses"),
             _ => null,
@@ -672,14 +674,16 @@ internal sealed class Relay
 
         public Failure? Admit(AdmissionRequest request)
         {
-            return relay.AdmissionOf(request) ?? RefusalOfRoute(request.Header);
+            return relay.AdmissionOf(request) ?? RefusalOfRoute(request);
         }
 
         public Task Handle(RequestResolverProps props)
         {
             ArgumentNullException.ThrowIfNull(props);
 
-            var refusal = props.IsAdmitted ? null : Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session });
+            var refusal = props.IsAdmitted
+                ? null
+                : Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session, TransportCredential = props.TransportCredential });
 
             return refusal is null
                 ? relay.Forward(_registration, props)
@@ -687,8 +691,9 @@ internal sealed class Relay
         }
 
         // what refuses an admitted request to this destination: none, for one that goes on
-        private Failure? RefusalOfRoute(RequestHeader header)
+        private Failure? RefusalOfRoute(AdmissionRequest request)
         {
+            var header = request.Header;
             var destinationId = _registration.Destination.DestinationId;
 
             if (header.OpensSubscription)
@@ -706,7 +711,7 @@ internal sealed class Relay
                 return UnreachableOf(destinationId, "its connection carries no request");
             }
 
-            return relay.CredentialRefusalOf(_registration, header);
+            return relay.CredentialRefusalOf(_registration, request);
         }
     }
 }

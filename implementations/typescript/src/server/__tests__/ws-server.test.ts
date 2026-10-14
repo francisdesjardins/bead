@@ -132,7 +132,7 @@ test('createWSServer takes a message of an envelope at most, more when the trans
       limits,
       transport: { maxPayload, WebSocketServer: fake.FakeWebSocketServer },
     });
-    const starting = server.transport.start({ port: 4_321 });
+    const starting = server.transport.start({ address: '127.0.0.1', port: 4_321 });
 
     fake.instances[0]?.emit('listening');
     await starting;

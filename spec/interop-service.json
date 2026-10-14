@@ -196,7 +196,7 @@
       }
     },
     "elsewhere": {
-      "reads": "what its call's transport carried beside the request, whole: over HTTP, the Authorization of its POST as it came, its auth-scheme included and its surrounding whitespace removed (spec 15.5). Its server asks it nothing for a request whose transport carried nothing, which it refuses with SESSION_REQUIRED, detail \"no credential came\"",
+      "reads": "what its call's transport carried beside the request, whole: over HTTP, the Authorization of its POST, and over a WebSocket, that of its connection's upgrade when the upgrade carries no Origin, each as it came, its auth-scheme included and its surrounding whitespace removed (spec 15.2, 15.5). Its server asks it nothing for a request whose transport carried nothing, which it refuses with SESSION_REQUIRED, detail \"no credential came\"",
       "grammar": [
         "credential  = auth-scheme SP ( holding / failing )",
         "auth-scheme = \"Interop\"  ; case-insensitive, as RFC 9110 §11.1 compares an auth-scheme",

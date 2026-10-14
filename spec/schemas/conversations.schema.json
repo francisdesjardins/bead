@@ -251,7 +251,7 @@
           "$ref": "#/$defs/carried"
         },
         "carries": {
-          "description": "false for a connection whose transport carries no credential beside an envelope, as a WebSocket's, or a listen's batch.",
+          "description": "false for a connection whose transport carries no credential beside an envelope it sends, as a WebSocket's toward its client, or a listen's batch.",
           "const": false
         },
         "secure": {

@@ -474,7 +474,7 @@ public sealed partial class RouterCoreTests
             return IsConnected;
         }
 
-        public bool CarriesCredential(string connectionHandle)
+        public bool Carries(string credential, string connectionHandle)
         {
             return IsCarrying;
         }

@@ -70,9 +70,7 @@ own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
   latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names; and a hop bound for proxies whose
-  address a deployment cannot name
-  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+  [the index](docs/decisions/README.md#where-bead-goes) names.
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -119,7 +117,7 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 106 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
+| [`transports.json`](spec/transports.json)               | 116 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
 | [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
