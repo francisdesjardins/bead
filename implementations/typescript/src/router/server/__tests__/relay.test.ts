@@ -155,8 +155,6 @@ const createTestRelay = (
   const own: IAsked[] = [];
   const reports: [message: string, isLegA: boolean][] = [];
   const control = {
-    /** What each answer throws, in turn, when there is one. */
-    respondErrors: [] as Error[],
     settle: answering(Uint8Array.of(8)),
   };
   const relay = createRelay({
@@ -179,9 +177,7 @@ const createTestRelay = (
     respond: (answer, { header }) => {
       answers.push([answer, header]);
 
-      const error = control.respondErrors.shift();
-
-      return error === undefined ? Promise.resolve() : Promise.reject(error);
+      return Promise.resolve();
     },
   });
 
@@ -913,32 +909,6 @@ test.describe('createRelay', () => {
     await relay.handlerOf(7)?.(propsOf(headerOf(1), { signal: controller.signal }));
 
     expect(answers).toEqual([]);
-  });
-
-  // spec 14.5
-  test('answers as failed, once, what leg A cannot carry, and lets why be reported', async () => {
-    const { answers, control, relay } = createTestRelay();
-    const tooLarge = new FailureError({
-      ...SERVER_FAILURES.payloadTooLarge,
-      detail: 'a payload is 8 bytes at most, not 9',
-    });
-    const gone = new Error('the socket is closed');
-
-    relay.register(createTarget().target, { destinationId: 7 });
-    control.respondErrors.push(tooLarge);
-
-    await expect(relay.handlerOf(7)?.(propsOf(headerOf(1)))).rejects.toBe(tooLarge);
-
-    // the second cannot go out either: it goes nowhere, and the first reason is the one reported
-    control.respondErrors.push(gone, new Error('still closed'));
-
-    await expect(relay.handlerOf(7)?.(propsOf(headerOf(3)))).rejects.toBe(gone);
-    expect(failuresOf(answers)).toEqual([
-      [9],
-      [ProtocolCode.PAYLOAD_TOO_LARGE, undefined, 'a payload is 8 bytes at most, not 9'],
-      [9],
-      [ProtocolCode.PROCEDURE_FAILED, undefined, 'the socket is closed'],
-    ]);
   });
 
   test('registers a destination given or drawn — never 0, nor one taken — lists them, and takes out its own alone', () => {

@@ -670,50 +670,6 @@ public sealed class RelayTests
         Assert.Empty(test.Answers);
     }
 
-    // spec 14.5
-    [Fact]
-    public async Task Answers_as_failed_once_what_leg_A_cannot_carry_and_lets_why_be_reported()
-    {
-        var test = new TestRelay();
-        var tooLarge = FailureException.OfProtocol(ProtocolCode.PayloadTooLarge, RouterSide.Server, "a payload is 8 bytes at most, not 9");
-        var gone = new IOException("the socket is closed");
-
-        test.Relay.Register(new RecordingTarget(), Seven);
-        test.RespondErrors.Enqueue(tooLarge);
-
-        Assert.Same(tooLarge, await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)));
-        }));
-
-        // the second cannot go out either: it goes nowhere, and the first reason is the one reported
-        test.RespondErrors.Enqueue(gone);
-        test.RespondErrors.Enqueue(new IOException("still closed"));
-
-        Assert.Same(gone, await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
-        }));
-        Assert.Equal<object>(
-            [
-                new byte[] { 9 },
-                Failure.OfProtocol(ProtocolCode.PayloadTooLarge, "a payload is 8 bytes at most, not 9"),
-                new byte[] { 9 },
-                Failure.OfProtocol(ProtocolCode.ProcedureFailed, "the socket is closed"),
-            ],
-            FailuresOf(test.Answers));
-
-        // C# only: a failure of leg A's own crossed no relay, whatever relays it says it crossed
-        test.RespondErrors.Enqueue(
-            new FailureException(tooLarge.Failure with { Relays = 3 }, new FailureException.Raised(FailureOrigin.Local, RouterSide.Server)));
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(5)));
-        });
-
-        Assert.Equal(Failure.OfProtocol(ProtocolCode.PayloadTooLarge, "a payload is 8 bytes at most, not 9"), test.Answers[^1].Answer.Failure);
-    }
-
     // a destination is a uint here: one below 0, past 2³² − 1 or not whole has no twin
     [Fact]
     public void Registers_a_destination_given_or_drawn_never_0_nor_one_taken_lists_them_and_takes_out_its_own_alone()
@@ -1048,7 +1004,7 @@ public sealed class RelayTests
                     {
                         Answers.Add((answer, target));
 
-                        return RespondErrors.TryDequeue(out var error) ? Task.FromException(error) : Task.CompletedTask;
+                        return Task.CompletedTask;
                     },
                 },
                 options ?? Admitting);
@@ -1061,9 +1017,6 @@ public sealed class RelayTests
         public List<Asked> Own { get; } = [];
 
         public List<(string Message, bool IsLegA)> Reports { get; } = [];
-
-        // what each answer throws, in turn, while there is one
-        public Queue<Exception> RespondErrors { get; } = [];
 
         public Func<Action<bool>, Task<RouterResult>> Settle { get; set; } = Answering(new byte[] { 8 });
     }

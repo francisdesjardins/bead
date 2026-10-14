@@ -229,6 +229,7 @@
     {
       "name": "a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported",
       "clauses": [
+        "9.0",
         "9.5"
       ],
       "steps": [
@@ -242,7 +243,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -526,6 +528,7 @@
     {
       "name": "an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE",
       "clauses": [
+        "9.0",
         "12.1"
       ],
       "limits": {
@@ -545,7 +548,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -557,6 +561,7 @@
     {
       "name": "a result is counted with the 20 bytes of an announcement: one that fits only without them is refused as one that does not",
       "clauses": [
+        "9.0",
         "12.1"
       ],
       "limits": {
@@ -586,7 +591,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -598,6 +604,7 @@
     {
       "name": "the result of a request that opens a subscription, too large for one envelope, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE, where the same result without SUBSCRIPTION goes as a transfer",
       "clauses": [
+        "9.0",
         "11.6",
         "12.1"
       ],
@@ -616,7 +623,8 @@
             "failure": {
               "code": 64,
               "scope": 0,
-              "relays": 0
+              "relays": 0,
+              "detail": ""
             }
           }
         },
@@ -6771,6 +6779,118 @@
         },
         {
           "report": "exception",
+          "on": "client"
+        }
+      ]
+    },
+    {
+      "name": "a relayed result too large for leg A is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE",
+      "clauses": [
+        "9.0",
+        "12.1",
+        "14.6"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumTransfers": 0
+      },
+      "relay": {
+        "beforeRoute": "shareLegBSession"
+      },
+      "steps": [
+        {
+          "open": "client"
+        },
+        {
+          "open": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 61 64 61 22",
+            "credential": "OPAQUE"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 32"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 03  00 01 00 01  00 00 00 0C | 22 78 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 78 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 22"
+          },
+          "on": "client"
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 05  00 01 00 01  00 00 00 0C | 22 79 22",
+          "on": "client"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 4,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 1,
+            "payload": "22 79 22"
+          },
+          "on": "device"
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 04 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 22",
+          "on": "device"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0,
+              "detail": ""
+            }
+          },
+          "on": "client"
+        },
+        {
+          "report": 34,
           "on": "client"
         }
       ]

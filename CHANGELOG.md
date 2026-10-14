@@ -69,6 +69,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{ address }`: an application that configures its server after building it configures each.
 - Decision 0030 is renamed for the count it holds, "A server believes `X-Forwarded-For` from the
   proxies it names and as many unnamed ones as it counts", its file with it; every citation moves.
+- A relay answers a result leg A cannot carry, one past leg A's limit, `PROCEDURE_FAILED` with no
+  detail, whatever refused it, `PAYLOAD_TOO_LARGE` among them, as a server answers a result its side
+  cannot send, and reports why it did not go out with leg A's connection; an answer leg A's
+  transport did not take goes nowhere again, and is reported. 34 would say the request was refused
+  at its admission, though the destination's procedure ran (spec 14.5; decision 0019).
+- A failure a side answers for an error of its own, a resolver that throws, a verifier or an
+  admission that fails, a result it cannot send, an answer leg A cannot carry, a codec that throws
+  other than a refusal, carries no detail of that error, never an exception's message, which is
+  reported; `PROCEDURE_FAILED` so answered carries none, as OWASP ASVS 5.0's 16.5.1 returns a
+  generic message to the consumer of an unexpected error (spec 9.0; decision 0001).
 
 ### Fixed
 
