@@ -12,6 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `beadc check` refuses, `CSHARP_NAMESPACE`, a `csharp_namespace` that is no C# namespace,
   identifiers of ASCII letters, digits and `_` by dots: the C# target writes it as it is, so
   anything else would be code of the `.proto`'s author in every consumer's build.
+- CI holds the supply chain: every action pinned by its commit's full sha, its version beside it;
+  OSV-Scanner over every lockfile and NuGetAudit over every C# package, direct or transitive, a
+  known advisory failing the run; Semgrep's community rules for TypeScript, C#, GitHub Actions and
+  secrets over the code. No dependency runs a script as it installs, but buf's and esbuild's,
+  named in each `package.json` (decision 0006).
 
 - Each side's tests run under coverage in CI, and what they run, lines and branches each, holds the
   side's floor in `tools/coverage-floors.json`: `tools/coverage-report.mjs --floor` fails under it,
@@ -30,6 +35,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   header that the source no longer gives, and `generate` names it and leaves it: nothing but beadc
   writes one, so a service a source dropped no longer ships in silence. Under `clean`, `generate`
   still takes it out.
+- The DevTools extension's hook and bridge post to the page's own origin, `'/'`, never `'*'`, which
+  would reach a document the window navigated to.
 - The C# side's projects build under the threading analyzers' VSTHRD100 and VSTHRD101: an
   `async void`, an `async` lambda given to an event among them, fails the build. The WebSocket
   connection's close awaits `CancelAsync`, and the C# README names the analyzer for an

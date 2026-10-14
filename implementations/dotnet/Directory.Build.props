@@ -20,6 +20,11 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <!-- in CI, a restore that would change a lock file fails, as Yarn's immutable install does -->
     <RestoreLockedMode Condition="'$(CI)' == 'true'">true</RestoreLockedMode>
+    <!-- every package restored, direct or transitive, against the advisories NuGet knows: one of any
+         severity is a warning, so an error, and the build stops on it -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
   </PropertyGroup>
   <ItemGroup>
     <!-- an async lambda given where a void delegate goes, an event's listener among them, is an
