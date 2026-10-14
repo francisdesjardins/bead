@@ -12,7 +12,7 @@ export const meta = {
 };
 
 // args: { repo, scratch, venv, slug, design, branch, parts?, stages?, first?, together?,
-//         specEffort?, series?, notes? }
+//         specEffort?, series?, suites?, notes? }
 // - design: the path of the settled design, the one source every stage reads;
 // - parts: the stages to run, ['spec', 'typescript', 'csharp'] by default;
 // - stages: { <key>: { task, effort? } }, a stage of the design's own (a folder the three do not
@@ -20,8 +20,14 @@ export const meta = {
 // - first: the stages that run before the others, in order, ['spec'] by default;
 // - together: true runs every stage at once, when the design fixes every case they read;
 // - specEffort: 'high' by default, 'xhigh' for the spec's identity rules (CLAUDE.md, the agents' effort);
-// - series: true has the integration build the design's commits in a clone of its own, each one's
-//   gates run there, in place of proposing whole-file commits;
+// - series: true has the integration build the design's commits in a clone of its own, each one
+//   held to the fast gates and its build there, in place of proposing whole-file commits; the
+//   series' last tree is the working tree the integration ran every gate over, so no suite runs
+//   twice;
+// - suites: 'local' by default, every test suite run by the integration; 'ci' leaves the whole
+//   suites to GitHub's CI on the feature branch, which the session pushes once the series lands
+//   (the user, 2026-10-14: a push of a feature/* branch to save tokens and time), the integration
+//   running the fast gates, both builds and the tests of what changed;
 // - notes: what the stages need beyond the design, in a few lines.
 const required = (name) => {
   if (!args || !args[name]) {
@@ -39,6 +45,7 @@ const BRANCH = required('branch');
 const PARTS = args.parts || ['spec', 'typescript', 'csharp'];
 const STAGES = args.stages || {};
 const OUT = `${SCRATCH}/${SLUG}`;
+const SUITES = args.suites || 'local';
 const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp`;
 
 const COMMON = `
@@ -56,9 +63,9 @@ const DEFAULT_TASKS = {
   spec: `# Your task: the spec, the conformance, the records (effort ${args.specEffort || 'high'})
 Implement the design's text and conformance: \`spec/spec.md\` and \`spec/debugging.md\` as the design touches them, the generators and the conformance files (${GENERATE}), \`spec/units.txt\` and \`spec/debugging-units.txt\` (\`--write-units\` naming each unit whose text the design moves, and no other; a new unit given its status), the decision records (the round of the Tenth Man kept in its record), \`docs/support.md\`, \`CHANGELOG.md\` under \`[Unreleased]\`, the README's counts. These files are yours alone. Then: \`${VENV} spec/check.py\`, ${FORMAT} (fixing your files only), \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\`, the names check. Report the files, the cases and each gate's result.`,
   typescript: `# Your task: the TypeScript side (effort high)
-Implement the design under \`implementations/typescript/\` only, with its tests, one test file per module in the \`__tests__/\` folder beside it; then \`yarn check\` and \`yarn test\` from that folder (rerun at the end). Report the files, the tests by name and the results.`,
+Implement the design under \`implementations/typescript/\` only, with its tests, one test file per module in the \`__tests__/\` folder beside it. While you work, run the test files of what you change (\`yarn test <files>\`); at the end, \`yarn check\` and the whole \`yarn test\` once, from that folder. Report the files, the tests by name and the results.`,
   csharp: `# Your task: the C# side (effort high)
-Implement the design under \`implementations/dotnet/\` only, with its tests named as the TypeScript twins; decision 0007 holds. Then \`dotnet format Bead.slnx --verify-no-changes\` and \`dotnet test --solution Bead.slnx\` with \`BEAD_INTEROP_REQUIRED=1\`, from that folder (rerun at the end). Report the files, the tests by name and the results.`,
+Implement the design under \`implementations/dotnet/\` only, with its tests named as the TypeScript twins; decision 0007 holds. While you work, run the test project of what you change (\`dotnet test --project tests/<project>\`, \`--filter-method\` to narrow); at the end, \`dotnet format Bead.slnx --verify-no-changes\` and the whole \`dotnet test --solution Bead.slnx\` with \`BEAD_INTEROP_REQUIRED=1\` once, from that folder. Report the files, the tests by name and the results.`,
 };
 
 const taskOf = (key) => {
@@ -118,13 +125,17 @@ others.forEach((key, index) => {
 
 // the commits: whole files proposed, or the design's series built and proven in a clone
 const PLAN = `propose the commits, whole files each, with Conventional Commit subjects and bodies of one or two lines (no attribution), in ${SCRATCH}/msgs/${SLUG}-<n>.txt, with the files in ${SCRATCH}/msgs/${SLUG}-files.txt as "<n> <path>" lines covering every changed file once; run \`node tools/check-commits.mjs --message\` and the names check over each.`;
-const SERIES = `build the design's commits, in its order, with its subjects, bodies of one or two lines and no attribution, in a clone of your own, never in the repository: \`git clone --no-hardlinks ${REPO} ${OUT}/series\`, a branch \`${BRANCH}\` there at the repository's HEAD, \`user.name\` and \`user.email\` copied from the repository's config. The repository keeps the end state in its working tree, unstaged, and its own git is never written. Each commit passes \`node tools/check-commits.mjs --message\` and the names check (\`node ${REPO}/.claude/local/check.mjs\` over the commit's files and its message, from the clone's root), and the gates its files touch; a commit that is not green is fixed within its slice, or joined to the next, and the report says which and why. The series' last tree equals the repository's working tree, blob for blob.`;
+const SERIES = `build the design's commits, in its order, with its subjects, bodies of one or two lines and no attribution, in a clone of your own, never in the repository: \`git clone --no-hardlinks ${REPO} ${OUT}/series\`, a branch \`${BRANCH}\` there at the repository's HEAD, \`user.name\` and \`user.email\` copied from the repository's config. The repository keeps the end state in its working tree, unstaged, and its own git is never written. Each commit passes \`node tools/check-commits.mjs --message\` and the names check (\`node ${REPO}/.claude/local/check.mjs\` over the commit's files and its message, from the clone's root), then the fast gates its files touch and its build: \`spec/check.py\` when \`spec/\` or a cited test moved, ${FORMAT}, \`node tools/check-links.mjs\`, \`node tools/check-versions.mjs\`, \`yarn check\` when the TypeScript side moved, \`dotnet build Bead.slnx\` when the C# side moved. ! No test suite runs at a commit: the series' last tree equals the repository's working tree, blob for blob, which the gates above already ran over whole; an earlier commit is held to building and to its fast gates. A commit that is not green is fixed within its slice, or joined to the next, and the report says which and why.`;
+const SUITE_GATES =
+  SUITES === 'ci'
+    ? "the tests of what changed, by file (`yarn test <files>`) and by project (`dotnet test --project tests/<project>`, the interop's with `BEAD_INTEROP_REQUIRED=1` when a transport or the interop moved), and `dotnet build Bead.slnx`: the whole suites are GitHub's CI's, on the feature branch the session pushes once the series lands; say so in the report"
+    : '`yarn test`, with `yarn devtools:build` and `yarn test:devtools` when the DevTools panel changed; `dotnet test --solution Bead.slnx` with `BEAD_INTEROP_REQUIRED=1`; `yarn test` in `builder` when a copy it holds moved (the `.editorconfig` of the C# goldens)';
 
 phase('Integrate');
 const integration = await agent(
   `${COMMON}
 # Your task: integrate (effort high)
-Check that both sides do what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\` and \`yarn test\`, with \`yarn devtools:build\` and \`yarn test:devtools\` when the DevTools panel changed; \`dotnet format Bead.slnx --verify-no-changes\` and \`dotnet test --solution Bead.slnx\` with \`BEAD_INTEROP_REQUIRED=1\`; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Return what you fixed, each gate's result, the test counts and the commits.
+Check that both sides do what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; ${FORMAT}; \`node tools/check-links.mjs\`; \`node tools/check-versions.mjs\`; \`node --test "tools/__tests__/*.test.mjs"\` when \`tools/\` changed; \`yarn check\`; \`dotnet format Bead.slnx --verify-no-changes\`; ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Return what you fixed, each gate's result, the test counts and the commits.
 The reports:
 ${PARTS.map((key) => {
   return `## ${key}\n${reports[key] || '(no report)'}`;
