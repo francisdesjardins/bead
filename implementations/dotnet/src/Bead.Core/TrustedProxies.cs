@@ -6,13 +6,22 @@ using System.Text;
 namespace Bead;
 
 /// <summary>
+/// What a server believes <c>X-Forwarded-For</c> from, as it is built: the networks of the proxies
+/// it names, and how many proxies on every path to it they do not name, which it counts.
+/// </summary>
+/// <param name="Networks">The networks of <c>TrustedProxies</c>, an address alone one of its family's bits.</param>
+/// <param name="Unnamed">The proxies <c>UnnamedProxies</c> counts, from 0 to 8.</param>
+internal sealed record ProxyTrust(IReadOnlyList<IPNetwork> Networks, int Unnamed);
+
+/// <summary>
 /// The proxies a server believes <c>X-Forwarded-For</c> from, over HTTP or over WebSocket alike, and
 /// the client's address it reads past them (spec 15.12): each an IP address in the form a server
 /// listens on, or a network, that address, <c>/</c> and its prefix's length (RFC 4632 §3.1, RFC
-/// 4291 §2.3), from 1, its bits past the prefix zero. While the address reached is one they hold,
-/// the next entry from the right is the client's, when it is an address in one of RFC 7239 §6's
-/// node forms, unquoted, its port dropped; any other entry ends the walk, as nginx's
-/// <c>real_ip_recursive</c> and Express's <c>trust proxy</c> walk it. Every address so read, and the
+/// 4291 §2.3), from 1, its bits past the prefix zero; and as many proxies besides as it counts, those
+/// it does not name. While the address reached is one they hold, or one they do not while fewer
+/// than the count were passed, the next entry from the right is the client's, when it is an address
+/// in one of RFC 7239 §6's node forms, unquoted, its port dropped; any other entry ends the walk, as
+/// nginx's <c>real_ip_recursive</c> and Express's <c>trust proxy</c> walk it. Every address so read, and the
 /// socket's, is held in one form: an IPv4-mapped one as its IPv4 address (RFC 4291 §2.5.5.2), an
 /// IPv6 one in RFC 5952 §4's text, hexadecimal throughout, written here rather than by the
 /// platform, which writes some IPv6 addresses with a dotted IPv4 tail.
@@ -24,6 +33,12 @@ internal static class TrustedProxies
     // the bits of each family's address
     private const int IPv4Bits = 32;
     private const int IPv6Bits = 128;
+
+    /// <summary>
+    /// The most proxies a server counts that its trusted proxies do not name (spec 15.12): past any
+    /// path a platform documents, a tripwire against the count of every hop.
+    /// </summary>
+    public const int MaximumUnnamedProxies = 8;
 
     // helpers
 
@@ -264,24 +279,57 @@ internal static class TrustedProxies
     }
 
     /// <summary>
-    /// The client's address (spec 15.12): the socket's, then, while the address reached is one the
-    /// proxies hold, the next entry of <c>X-Forwarded-For</c> from the right, its lines joined by
-    /// commas, when that entry is an address; any other entry, or the field's end, ends the walk.
-    /// Its one form, as <see cref="FormOf"/> writes it.
+    /// A server's trust, as it is built: its trusted proxies, as <see cref="NetworksOf"/> takes them,
+    /// and the count of the proxies they do not name, from 0 to <see cref="MaximumUnnamedProxies"/>;
+    /// any other count, the count of every hop among it, is an
+    /// <see cref="ArgumentOutOfRangeException"/> naming it.
     /// </summary>
-    public static string ClientAddressOf(IPAddress remote, (string? Forwarded, IReadOnlyList<IPNetwork> Proxies) given)
+    public static ProxyTrust TrustOf((IReadOnlyList<string>? Entries, string Name) proxies, (int Count, string Name) unnamed)
+    {
+        if (unnamed.Count is < 0 or > MaximumUnnamedProxies)
+        {
+            throw new ArgumentOutOfRangeException(
+                unnamed.Name,
+                string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{unnamed.Name} is a whole number of proxies from 0 to {MaximumUnnamedProxies}, those {proxies.Name} does not name: not {unnamed.Count}"));
+        }
+
+        return new ProxyTrust(NetworksOf(proxies.Entries, proxies.Name), unnamed.Count);
+    }
+
+    /// <summary>
+    /// The client's address (spec 15.12): the socket's, then, while the address reached is one the
+    /// proxies named hold, or one they do not while fewer than the count of unnamed ones were
+    /// passed, which then counts it, the next entry of <c>X-Forwarded-For</c> from the right, its
+    /// lines joined by commas, when that entry is an address; any other entry, or the field's end,
+    /// ends the walk. A proxy named costs none of the count, wherever it stands. Its one form, as
+    /// <see cref="FormOf"/> writes it.
+    /// </summary>
+    public static string ClientAddressOf(IPAddress remote, (string? Forwarded, ProxyTrust Trust) given)
     {
         ArgumentNullException.ThrowIfNull(remote);
-        ArgumentNullException.ThrowIfNull(given.Proxies);
+        ArgumentNullException.ThrowIfNull(given.Trust);
 
         var address = Unzoned(remote);
         var entries = given.Forwarded is null ? [] : given.Forwarded.Split(',');
         var index = entries.Length;
+        var unnamed = given.Trust.Unnamed;
 
-        // * from the right, past each proxy it names: what a client wrote to the left of the first
-        // address none of them holds is never read
-        while (index > 0 && IsTrusted(address, given.Proxies))
+        // * from the right, past each proxy it names and as many others as it counts: what a client
+        // wrote to the left of the first address past the count that none of them holds is never read
+        while (index > 0)
         {
+            if (!IsTrusted(address, given.Trust.Networks))
+            {
+                if (unnamed == 0)
+                {
+                    break;
+                }
+
+                unnamed -= 1;
+            }
+
             index -= 1;
 
             if (ParsedEntry(entries[index]) is not { } read)

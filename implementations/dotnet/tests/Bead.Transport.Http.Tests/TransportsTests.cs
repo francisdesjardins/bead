@@ -158,6 +158,7 @@ public sealed class TransportsTests
                 "hosts" => options with { Hosts = TextsOf(value) },
                 "origins" => options with { Origins = TextsOf(value) },
                 "trustedProxies" => options with { TrustedProxies = TextsOf(value) },
+                "unnamedProxies" => options with { UnnamedProxies = value.GetInt32() },
 
                 // the server layer's, which ConnectionInactivityTimeoutOf reads
                 "connectionInactivityTimeout" => options,
@@ -198,6 +199,7 @@ public sealed class TransportsTests
                 "hosts" => options with { Hosts = TextsOf(option.Value) },
                 "origins" => options with { Origins = TextsOf(option.Value) },
                 "trustedProxies" => options with { TrustedProxies = TextsOf(option.Value) },
+                "unnamedProxies" => options with { UnnamedProxies = option.Value.GetInt32() },
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }

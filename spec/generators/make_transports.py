@@ -535,6 +535,39 @@ cases = [
          connect('portless', fields={'x-forwarded-for': '[2001:db8::3]'}), expect('portless', 201),
          connect('zoned', fields={'x-forwarded-for': '2001:db8::2%eth0'}), expect('zoned', 201),
          connect('unknown', fields={'x-forwarded-for': 'unknown'}), refused('unknown', 503, 'busy', BUSY)]),
+    # 15.12: unnamedProxies, the proxies on every path trustedProxies does not name, each costing one
+    # of the count wherever it stands, a listed one none
+    ('behind the proxies it counts, whatever their address, the client is the X-Forwarded-For entry that many hops from its socket, what a client wrote to its left never read',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 1}, [
+         connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
+         refused('second', 503, 'busy', BUSY),
+         connect('other', fields={'x-forwarded-for': '192.0.2.2'}), expect('other', 201),
+         connect('rebound', host='rebind.example', fields={'x-forwarded-for': '203.0.113.9, 192.0.2.3'}),
+         refused('rebound', 403, 'host-refused')]),
+    ('unnamedProxies counts the addresses trustedProxies does not hold: one it holds costs none, and the walk stops at the first address past the count that it does not hold',
+     ['15.6.13', '15.12', '15.12.2'],
+     {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['10.0.0.0/8'], 'unnamedProxies': 1}, [
+         connect('first', fields={'x-forwarded-for': '198.51.100.7, 10.0.0.5'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '203.0.113.9, 198.51.100.7'}),
+         refused('second', 503, 'busy', BUSY),
+         connect('other', fields={'x-forwarded-for': '198.51.100.8, 10.0.0.6, 10.0.0.5'}), expect('other', 201)]),
+    # a count of every hop, 2 for a sidecar the list names and a router it does not, reads one entry
+    # too far: the one its client wrote
+    ('a proxy both named and counted gives the client an entry it wrote: behind a socket trustedProxies holds, unnamedProxies 2 passes the one unnamed proxy and reads the entry to its left',
+     ['15.6.13', '15.12', '15.12.2'],
+     {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1/32'], 'unnamedProxies': 2}, [
+         connect('first', fields={'x-forwarded-for': '192.0.2.66, 203.0.113.1, 198.51.100.7'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '192.0.2.66, 203.0.113.2, 198.51.100.7'}),
+         refused('second', 503, 'busy', BUSY)]),
+    ('an X-Forwarded-For entry that is no address ends the walk within the proxies it counts, and so does the field\'s end',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 3}, [
+         connect('first', fields={'x-forwarded-for': 'unknown, 192.0.2.1'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '192.0.2.1'}), refused('second', 503, 'busy', BUSY)]),
+    ('unnamedProxies 0 counts none: the X-Forwarded-For of a socket trustedProxies does not hold is not read',
+     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 0}, [
+         connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
+         connect('second', fields={'x-forwarded-for': '192.0.2.2'}), refused('second', 503, 'busy', BUSY)]),
     ('past the requests waiting on one connection, a request is refused 429, marked',
      ['15.6.12', '15.12.3'], {'maximumWaitingExchanges': 1}, [
          *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
@@ -1020,6 +1053,12 @@ websocket = [
          refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
          *upgrade('taken', {'x-forwarded-for': '192.0.2.1'}), message('taken', binary=ECHO),
          heard('taken', envelope=result(1, '"x"'))]),
+    ('behind the proxies it counts, a WebSocket server\'s refusal of an upgrade tells the client\'s address, the X-Forwarded-For entry that many hops from its socket, and its port the proxy\'s connection\'s',
+     ['15.2', '15.2.2', '15.6.5', '15.12'], {'options': {'unnamedProxies': 1}}, [
+         handshake('rebound', {'x-forwarded-for': '203.0.113.9, 198.51.100.7'}, host='rebind.example'),
+         refused('rebound', 403, 'host-refused', UPGRADE_REFUSED),
+         *upgrade('taken', {'x-forwarded-for': '203.0.113.9'}), message('taken', binary=ECHO),
+         heard('taken', envelope=result(1, '"x"'))]),
     # 15.2: the method, then whether a WebSocket is asked at all, then its version, then its form
     ('a request at a WebSocket\'s address of a method but GET or HEAD is refused 405, its Allow naming GET and HEAD, before its handshake is read',
      ['15.2', '15.2.3', '15.6.7'], {}, [
@@ -1174,14 +1213,23 @@ def address_of_entry(entry):
 
 def client_address_of(head, options):
     """The client's address (spec 15.12): the socket's, 127.0.0.1, where every runner serves and
-    connects, then, while the address reached is one trustedProxies holds, the next X-Forwarded-For
-    entry from the right, its lines joined by ", ", when it is an address."""
+    connects; then, while the address reached is one trustedProxies holds, or one it does not while
+    fewer than unnamedProxies such addresses were passed, the next X-Forwarded-For entry from the
+    right, its lines joined by ", ", when it is an address."""
     networks = [ipaddress.ip_network(entry) for entry in (options or {}).get('trustedProxies', [])]
+    unnamed = (options or {}).get('unnamedProxies', 0)
     lines = field_lines(head, 'x-forwarded-for')
     entries = ', '.join(lines).split(',') if lines else []
     address = '127.0.0.1'
 
-    while entries and any(ipaddress.ip_address(address) in network for network in networks):
+    while entries:
+        # an address the list does not hold spends one of the count, and ends the walk past it
+        if not any(ipaddress.ip_address(address) in network for network in networks):
+            if unnamed == 0:
+                break
+
+            unnamed -= 1
+
         read = address_of_entry(entries.pop())
 
         if read is None:
@@ -1253,7 +1301,7 @@ document = {
         'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
         'Here an advance goes no further than the due its until timer named, and one meant to fire that timer ends on it: what a timer fired leads to, on the platform\'s threads, reads the clock, which must not have run past it. Here an until timer waits for the earliest timer armed to be due as it names, and the only one so due: one armed before it and not yet cleared, on the platform\'s threads, would fire first.',
-        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins and its trustedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
+        'options, where given, are the server\'s bounds by the names sections 15.3 and 15.12 give them, and its hosts, * among them, its origins, its trustedProxies and its unnamedProxies, for either transport; any other is its default, as defaults states them, in milliseconds for a time. connectionInactivityTimeout is the HTTP server\'s own connection timeout (spec 13.7), which its server layer holds, not its transport. limits, where given, are its router\'s, as in conversations.json.',
         'Shapes: token, 16 bytes in base64url without padding; delay-seconds, a number of seconds in ASCII digits; http-date, an IMF-fixdate (RFC 9110, section 5.6.7).',
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],

@@ -169,11 +169,11 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * a method but `GET` or `HEAD`; 426 to a request that asks no WebSocket, and to a version but 13;
  * 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an `Origin` neither its
  * own nor among `origins`; each refusal as {@link refusalOfHandshake} writes it. A connection, and
- * a refusal, name the client's address: behind the proxies `trustedProxies` names, the upgrade's
- * `X-Forwarded-For` entry reached past them, as the HTTP transport reads it (spec 15.12), else its
- * socket's. It listens on `localhost` by default, both loopbacks on one port. Each message is an
- * envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that
- * sends a larger one with 1009.
+ * a refusal, name the client's address: behind the proxies `trustedProxies` names and
+ * `unnamedProxies` counts, the upgrade's `X-Forwarded-For` entry the walk reaches, as the HTTP
+ * transport reads it (spec 15.12), else its socket's. It listens on `localhost` by default, both
+ * loopbacks on one port. Each message is an envelope at most by default,
+ * {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that sends a larger one with 1009.
  *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
@@ -192,13 +192,14 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     origins = [],
     secure,
     trustedProxies,
+    unnamedProxies,
     WebSocketServer,
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
   assertHosts(hosts);
   assertOrigins(origins);
-  const proxies = trustedProxiesOf(trustedProxies);
+  const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
   const judged = { hosts, origins };
 
   const decoder = new TextDecoder();
@@ -239,8 +240,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         });
       };
 
-      // the client's address: the socket's, in the one form, or, behind proxies the transport
-      // trusts, the rightmost `X-Forwarded-For` entry of its upgrade none of them holds (spec 15.12)
+      // the client's address: the socket's, in the one form, or, behind the proxies the transport
+      // names and counts, the `X-Forwarded-For` entry of its upgrade the walk reaches (spec 15.12)
       const addressOf = (request: IIncomingMessageLike): string | undefined => {
         const { remoteAddress } = request.socket;
 

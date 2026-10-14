@@ -9,16 +9,24 @@ import { isIPAddress, isIPv4Address } from './hosts-and-origins';
 // types
 
 /**
- * The proxies a server trusts, one `BlockList` a family: a network holds the addresses of its own
- * family alone, where one `BlockList` would match an IPv4 address against an IPv6 network by its
- * mapped form.
+ * The proxies a server trusts: those it names, one `BlockList` a family — a network holds the
+ * addresses of its own family alone, where one `BlockList` would match an IPv4 address against an
+ * IPv6 network by its mapped form — and how many it counts that none of them holds.
  */
 export interface ITrustedProxies {
   readonly ipv4: BlockList;
   readonly ipv6: BlockList;
+  /** The proxies on every path to the server that the lists do not hold, `unnamedProxies`. */
+  readonly unnamed: number;
 }
 
 // constants
+
+/**
+ * The most proxies a server counts that `trustedProxies` does not name (spec 15.12): past any path a
+ * platform documents, a tripwire against the count of every hop.
+ */
+export const MAXIMUM_UNNAMED_PROXIES = 8;
 
 // a network: an address, `/`, and its prefix's length, with no leading zero (RFC 4632 §3.1, RFC 4291
 // §2.3)
@@ -202,14 +210,47 @@ export const assertTrustedProxies = (entries: readonly string[] | undefined): vo
 };
 
 /**
- * The proxies a server trusts, from `entries` once {@link assertTrustedProxies} took them: their
- * addresses and networks, each family's apart, which {@link clientAddressOf} checks an address of
- * the one form against. None trusts no proxy, the loopback among them.
+ * Refuses, with a {@link ProgrammerError} naming it, an `unnamedProxies` that is not a whole number
+ * from 0 to {@link MAXIMUM_UNNAMED_PROXIES}: a fraction, `NaN`, and `Infinity`, the count of every
+ * hop, which would trust what every client writes, among them.
  */
-export const trustedProxiesOf = (entries: readonly string[] | undefined): ITrustedProxies => {
-  assertTrustedProxies(entries);
+export const assertUnnamedProxies = (count: number | undefined): void => {
+  if (count === Infinity) {
+    throw new ProgrammerError(
+      'unnamedProxies is a whole number of proxies from 0 to 8, those trustedProxies does not name, not Infinity: it would trust what every client writes'
+    );
+  }
 
-  const proxies: ITrustedProxies = Object.freeze({ ipv4: new BlockList(), ipv6: new BlockList() });
+  if (
+    count !== undefined &&
+    (!Number.isInteger(count) || count < 0 || count > MAXIMUM_UNNAMED_PROXIES)
+  ) {
+    throw new ProgrammerError(
+      `unnamedProxies is a whole number of proxies from 0 to 8, those trustedProxies does not name: not ${String(count)}`
+    );
+  }
+};
+
+/**
+ * The proxies a server trusts, from `entries` once {@link assertTrustedProxies} took them — their
+ * addresses and networks, each family's apart, which {@link clientAddressOf} checks an address of
+ * the one form against — and `unnamedProxies` once {@link assertUnnamedProxies} took it, 0 when not
+ * given. None trusts no proxy, the loopback among them.
+ */
+export const trustedProxiesOf = (
+  entries: readonly string[] | undefined,
+  options?: { unnamedProxies?: number | undefined }
+): ITrustedProxies => {
+  const { unnamedProxies = 0 } = options ?? {};
+
+  assertTrustedProxies(entries);
+  assertUnnamedProxies(unnamedProxies);
+
+  const proxies: ITrustedProxies = Object.freeze({
+    ipv4: new BlockList(),
+    ipv6: new BlockList(),
+    unnamed: unnamedProxies,
+  });
 
   for (const entry of entries ?? []) {
     const { address = entry, prefix } = NETWORK.exec(entry)?.groups ?? {};
@@ -228,11 +269,12 @@ export const trustedProxiesOf = (entries: readonly string[] | undefined): ITrust
 
 /**
  * A client's address (spec 15.12): its socket's, `remoteAddress`, in {@link heldAddressOf}'s form;
- * then, while the address reached is one of `trustedProxies`, the next entry of `forwarded`, an
+ * then, while the address reached is one `trustedProxies` names, or one it does not while fewer than
+ * its `unnamed` such addresses were passed, which then counts it, the next entry of `forwarded`, an
  * `X-Forwarded-For`'s lines joined, read from the right, while it is an address
  * ({@link addressOfEntry}): an entry that is none, or the field's end, ends the walk where it is. A
- * client cannot move it: what it wrote left of the first address no proxy it trusts holds is never
- * read.
+ * named proxy costs none of the count, wherever it stands. A client cannot move it: what it wrote
+ * left of the first address past the count that no proxy named holds is never read.
  */
 export const clientAddressOf = (
   remoteAddress: string,
@@ -241,8 +283,9 @@ export const clientAddressOf = (
   const { forwarded, trustedProxies } = options ?? {};
   const entries = forwarded === undefined ? [] : forwarded.split(',');
   let client = heldAddressOf(remoteAddress);
+  let unnamed = trustedProxies?.unnamed ?? 0;
 
-  const isTrusted = (address: string): boolean => {
+  const isNamed = (address: string): boolean => {
     const family = familyOf(address);
 
     return (
@@ -252,7 +295,16 @@ export const clientAddressOf = (
     );
   };
 
-  for (let index = entries.length - 1; index >= 0 && isTrusted(client); index -= 1) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    // * an address no proxy named holds spends one of the count, and ends the walk past it
+    if (!isNamed(client)) {
+      if (unnamed === 0) {
+        break;
+      }
+
+      unnamed -= 1;
+    }
+
     const next = addressOfEntry(entries[index] ?? '');
 
     if (next === undefined) {

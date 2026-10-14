@@ -556,6 +556,7 @@ export const createHTTPTransportServer = (
     pathname = PATHNAME,
     secure,
     trustedProxies,
+    unnamedProxies,
   } = options;
 
   assertOption('bodyBytesBudget', { value: bodyBytesBudget });
@@ -569,7 +570,7 @@ export const createHTTPTransportServer = (
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
   assertHosts(hosts);
   assertOrigins(origins);
-  const proxies = trustedProxiesOf(trustedProxies);
+  const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
 
   // what the transport keeps of each connection, by handle
   const drawn = new Map<TransportServerConnectionHandle, IDrawn>();
@@ -593,8 +594,8 @@ export const createHTTPTransportServer = (
         return perAddress.get(address) ?? 0;
       };
 
-      // the client's address: the socket's, in the one form, or, behind proxies the transport
-      // trusts, the rightmost `X-Forwarded-For` entry none of them holds (spec 15.12)
+      // the client's address: the socket's, in the one form, or, behind the proxies the transport
+      // names and counts, the `X-Forwarded-For` entry the walk reaches (spec 15.12)
       const addressOf = (request: IHTTPRequestLike): string | undefined => {
         const { remoteAddress } = request.socket;
         const lines = linesOf(request, 'x-forwarded-for');

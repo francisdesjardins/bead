@@ -1484,8 +1484,21 @@ address in the form a server listens on, or a network, that address followed by 
 prefix's length ([RFC 4632 §3.1](https://www.rfc-editor.org/rfc/rfc4632#section-3.1),
 [RFC 4291 §2.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.3)), from 1, its bits past the
 prefix zero; none when not given, the loopback among them. A server is refused as it is built any
-other entry: a name, and a network of prefix 0, which would trust what every client writes. While
-the address reached is one it trusts, the next entry of the request's `X-Forwarded-For` — at a
+other entry: a name, and a network of prefix 0, which would trust what every client writes. It may
+be told besides how many proxies on every path to it `trustedProxies` does not name,
+`unnamedProxies` — one each for a proxy whose addresses its platform does not publish; a proxy
+whose addresses are published is named, never counted — a whole number from 0 to 8, 0 when not
+given; any other is refused as it is built, the count of every hop among it. A proxy it names costs
+none of the count, whatever the order, so a count is of the proxies it does not name alone: unlike
+a count of every hop
+([Envoy](https://www.envoyproxy.io/docs/envoy/latest/api-v3/extensions/http/original_ip_detection/xff/v3/xff.proto),
+`trust proxy` n), a proxy both named and counted gives the client one entry it wrote. A count is
+believed as told: a request that reaches the server by a path with fewer such proxies — straight to
+its socket, or past a proxy it counts — brings entries its client wrote where those proxies' would
+be, and is read by them, any address the list holds among them passed free; a server so reachable
+names its proxies instead. The walk starts at the socket's address. While the address reached is
+one `trustedProxies` holds, or one it does not while fewer than `unnamedProxies` such addresses
+were passed, which then counts it, the next entry of the request's `X-Forwarded-For` — at a
 WebSocket's address, its upgrade's — its lines joined by ", "
 ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)) and read from the right, is
 the client's, when that entry is an address: an IPv4 address, or an IPv6 address without a zone,
@@ -1498,11 +1511,11 @@ address in the text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#sectio
 hexadecimal throughout. Its port is the socket's, the nearest proxy's connection's behind one. A
 server reads no `Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy
 that writes `X-Forwarded-For` would pass on as its client wrote it
-([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it is not told of is a client
-as any other: its clients are its address, which its bound per address counts and its refusals
-tell. A bound by address counts as one the users behind one NAT, and as many the addresses of one
-IPv6 network. A WebSocket server bounds no address: the client's address is what its handle and its
-refusals name.
+([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it neither names nor counts
+is a client as any other: its clients are its address, which its bound per address counts and its
+refusals tell. A bound by address counts as one the users behind one NAT, and as many the addresses
+of one IPv6 network. A WebSocket server bounds no address: the client's address is what its handle
+and its refusals name.
 
 A server listens on `localhost`, both loopbacks — the IPv4 one, `127.0.0.1`
 ([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), and the IPv6 one, `::1`

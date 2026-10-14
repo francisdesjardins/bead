@@ -930,10 +930,10 @@ test.describe('WSTransportServer, its hosts and origins', () => {
   });
 
   // spec 15.12
-  test('refuses as it is built a trustedProxies entry that is a name or a network of prefix 0', () => {
-    const built = (trustedProxies: readonly string[]) => {
+  test('refuses as it is built a trustedProxies entry that is a name or a network of prefix 0, or an unnamedProxies past 8', () => {
+    const built = (trustedProxies: readonly string[], unnamedProxies?: number) => {
       return () => {
-        return createWSTransportServer({ trustedProxies, WebSocketServer });
+        return createWSTransportServer({ trustedProxies, unnamedProxies, WebSocketServer });
       };
     };
 
@@ -943,6 +943,10 @@ test.describe('WSTransportServer, its hosts and origins', () => {
       expect(built([everyone]), everyone).toThrow('it would trust what every client writes');
     }
     expect(built(['127.0.0.1', '10.0.0.0/8', '::1', 'fd00::/8'])).not.toThrow();
+    // the proxies it counts, those the list does not name, 8 at most
+    expect(built([], 9)).toThrow(ProgrammerError);
+    expect(built([], Infinity)).toThrow('it would trust what every client writes');
+    expect(built(['10.0.0.0/8'], 8)).not.toThrow();
   });
 });
 

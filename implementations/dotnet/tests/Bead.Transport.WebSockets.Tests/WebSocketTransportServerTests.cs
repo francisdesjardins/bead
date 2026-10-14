@@ -993,7 +993,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
     // spec 15.12
     [Fact]
-    public void Refuses_as_it_is_built_a_trustedProxies_entry_that_is_a_name_or_a_network_of_prefix_0()
+    public void Refuses_as_it_is_built_a_trustedProxies_entry_that_is_a_name_or_a_network_of_prefix_0_or_an_unnamedProxies_past_8()
     {
         var name = Assert.Throws<ArgumentException>(() =>
         {
@@ -1017,6 +1017,20 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Null(Record.Exception(() =>
         {
             return new WebSocketTransportServer(new WebSocketTransportServerOptions { TrustedProxies = ["127.0.0.1", "10.0.0.0/8", "::1", "fd00::/8"] });
+        }));
+
+        // the proxies it counts, those the list does not name, 8 at most
+        foreach (var count in new[] { 9, -1 })
+        {
+            Assert.Equal("UnnamedProxies", Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new WebSocketTransportServer(new WebSocketTransportServerOptions { UnnamedProxies = count });
+            }).ParamName);
+        }
+
+        Assert.Null(Record.Exception(() =>
+        {
+            return new WebSocketTransportServer(new WebSocketTransportServerOptions { TrustedProxies = ["10.0.0.0/8"], UnnamedProxies = 8 });
         }));
     }
 

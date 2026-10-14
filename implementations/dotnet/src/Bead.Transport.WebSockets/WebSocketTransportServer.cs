@@ -99,10 +99,26 @@ public sealed record WebSocketTransportServerOptions
     /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
     /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. The
     /// client's address so read names its connection, <c>ip=</c> in its handle, and its refusals; its
-    /// port is the socket's, the nearest proxy's connection's behind one. A proxy left out is a
-    /// client as any other: every client behind it is named by its address.
+    /// port is the socket's, the nearest proxy's connection's behind one. A proxy it neither names
+    /// nor counts (<see cref="UnnamedProxies"/>) is a client as any other: every client behind it is
+    /// named by its address.
     /// </summary>
     public IReadOnlyList<string>? TrustedProxies { get; init; }
+
+    /// <summary>
+    /// How many proxies on every path to it <see cref="TrustedProxies"/> does not name (spec 15.12):
+    /// one each for a proxy whose addresses its platform does not publish, a PaaS router among them;
+    /// a proxy whose addresses are published — Google Cloud's global load balancer, Cloudflare, an
+    /// AWS ALB's VPC — is named, never counted. From 0, by default, to 8; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. The walk spends one on an
+    /// address the list does not hold, none on one it holds, wherever it stands, and stops where
+    /// neither remains: unlike a count of every hop, Envoy's <c>xff_num_trusted_hops</c> or
+    /// Express's <c>trust proxy</c> n, a proxy both named and counted gives the client an entry it
+    /// wrote. A count is believed as told: a request that reaches the server by a path with fewer
+    /// such proxies, straight to its socket or past one it counts, is read by entries its client
+    /// wrote, so a server so reachable names its proxies instead.
+    /// </summary>
+    public int UnnamedProxies { get; init; }
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -152,7 +168,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     private readonly WebSocketTransportServerOptions _options;
     private readonly TimeProvider _clock;
     // the networks of the proxies it believes X-Forwarded-For from
-    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
+    private readonly ProxyTrust _proxyTrust;
     // each connection, and its end as the server tells it: gone from the handles, its close raised
     private readonly ConcurrentDictionary<string, Held> _connections = new();
     // its ready state, and the guards around its start and its stop, as every transport server's
@@ -178,7 +194,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
-        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(WebSocketTransportServerOptions.TrustedProxies));
+        _proxyTrust = Bead.TrustedProxies.TrustOf(
+            (given.TrustedProxies, nameof(WebSocketTransportServerOptions.TrustedProxies)),
+            (given.UnnamedProxies, nameof(WebSocketTransportServerOptions.UnnamedProxies)));
         _options = given with
         {
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
@@ -529,7 +547,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
     }
 
     // a refusal written: its status, its fields, its mark when it has one, its date from the

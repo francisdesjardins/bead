@@ -472,13 +472,29 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    * reached is one they hold, the field's next entry from the right is the client's, when it is an
    * address — bare, or as RFC 7239 §6 writes a node, its port dropped — held in one form,
    * IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it: the address a connection's handle and
-   * `clients` name, and a refusal tells; its port stays the socket's. The transport bounds no
-   * address, so a proxy not listed costs nothing but that: every client behind it is named by the
-   * proxy's address. None, when not given, the loopback among them. A name, and a network of prefix
-   * 0, which would trust what every client writes, are a {@link ProgrammerError} as the server is
-   * built, as is any other entry. `Forwarded` is never read.
+   * `clients` name, and a refusal tells; its port stays the socket's; `unnamedProxies` counts those
+   * it cannot name. The transport bounds no address, so a proxy neither listed nor counted costs
+   * nothing but that: every client behind it is named by the proxy's address. None, when not
+   * given, the loopback among them. A name, and a network of prefix 0, which would trust what every
+   * client writes, are a {@link ProgrammerError} as the server is built, as is any other entry.
+   * `Forwarded` is never read.
    */
   trustedProxies?: readonly string[] | undefined;
+  /**
+   * How many proxies on every path to it `trustedProxies` does not name (spec 15.12): one for each
+   * proxy whose addresses its platform does not publish — a PaaS router, a serverless platform's
+   * front end — where a proxy whose addresses are published is named, never counted: Google Cloud's
+   * global load balancer by its ranges and its forwarding rule's address, Cloudflare by its ranges,
+   * an AWS ALB by its VPC's network. The walk spends one on each address the list does not hold,
+   * none on one it holds, and stops where neither remains. It counts the proxies the list does not
+   * name alone, unlike a count of every hop — Envoy's `xff_num_trusted_hops`, Express's
+   * `trust proxy` n — so a proxy both named and counted hands the client an entry it wrote. A count is
+   * believed as told: a request that reaches the server by a path with fewer such proxies, straight
+   * to its socket among them, is read by entries its client wrote; a server so reachable names its
+   * proxies instead. A whole number from 0 to 8, 0 when not given; any other, `Infinity` among it,
+   * is a {@link ProgrammerError} as the server is built.
+   */
+  unnamedProxies?: number | undefined;
   /** `ws`'s `WebSocketServer`: there is no global one to default to. */
   WebSocketServer: IWebSocketServerConstructor;
 }
@@ -684,13 +700,29 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * §3.1, RFC 4291 §2.3), from 1, its bits past the prefix zero. While the address reached is one
    * they hold, the field's next entry from the right is the client's, when it is an address — bare,
    * or as RFC 7239 §6 writes a node, its port dropped — held in one form, IPv4-mapped as IPv4 and
-   * IPv6 as RFC 5952 writes it. A proxy not listed is a client as any other, every client behind it
+   * IPv6 as RFC 5952 writes it; `unnamedProxies` counts those it cannot name. A proxy neither
+   * listed nor counted is a client as any other, every client behind it
    * its address: a told `busy` naming it, or a `largestAddressConnections` near its ceiling, is a
    * proxy to list. None, when not given, the loopback among them. A name, and a network of prefix 0,
    * which would trust what every client writes, are a {@link ProgrammerError} as the server is
    * built, as is any other entry. `Forwarded` is never read.
    */
   trustedProxies?: readonly string[] | undefined;
+  /**
+   * How many proxies on every path to it `trustedProxies` does not name (spec 15.12): one for each
+   * proxy whose addresses its platform does not publish — a PaaS router, a serverless platform's
+   * front end — where a proxy whose addresses are published is named, never counted: Google Cloud's
+   * global load balancer by its ranges and its forwarding rule's address, Cloudflare by its ranges,
+   * an AWS ALB by its VPC's network. The walk spends one on each address the list does not hold,
+   * none on one it holds, and stops where neither remains. It counts the proxies the list does not
+   * name alone, unlike a count of every hop — Envoy's `xff_num_trusted_hops`, Express's
+   * `trust proxy` n — so a proxy both named and counted hands the client an entry it wrote. A count is
+   * believed as told: a request that reaches the server by a path with fewer such proxies, straight
+   * to its socket among them, is read by entries its client wrote; a server so reachable names its
+   * proxies instead. A whole number from 0 to 8, 0 when not given; any other, `Infinity` among it,
+   * is a {@link ProgrammerError} as the server is built.
+   */
+  unnamedProxies?: number | undefined;
 }
 
 // types

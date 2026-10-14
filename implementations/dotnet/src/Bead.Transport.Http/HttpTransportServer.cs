@@ -107,12 +107,28 @@ public sealed record HttpTransportServerOptions
     /// they hold, the next entry of the field from the right is the client's, when it is an address,
     /// bare or in RFC 7239 §6's node forms, its port dropped; any other entry ends the walk, so what a
     /// client wrote to the left of its own proxy is never read. No <c>Forwarded</c> is read. A proxy
-    /// left out is a client as any other: every client behind it is its address, which the bound per
+    /// it neither names nor counts (<see cref="UnnamedProxies"/>) is a client as any other: every
+    /// client behind it is its address, which the bound per
     /// address counts, a told <c>busy</c> names, and the gauge <c>largestAddressConnections</c> shows
     /// near its ceiling. A bound by address counts as one the users behind one NAT, and as many the
     /// addresses of one IPv6 network.
     /// </summary>
     public IReadOnlyList<string>? TrustedProxies { get; init; }
+
+    /// <summary>
+    /// How many proxies on every path to it <see cref="TrustedProxies"/> does not name (spec 15.12):
+    /// one each for a proxy whose addresses its platform does not publish, a PaaS router among them;
+    /// a proxy whose addresses are published — Google Cloud's global load balancer, Cloudflare, an
+    /// AWS ALB's VPC — is named, never counted. From 0, by default, to 8; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. The walk spends one on an
+    /// address the list does not hold, none on one it holds, wherever it stands, and stops where
+    /// neither remains: unlike a count of every hop, Envoy's <c>xff_num_trusted_hops</c> or
+    /// Express's <c>trust proxy</c> n, a proxy both named and counted gives the client an entry it
+    /// wrote. A count is believed as told: a request that reaches the server by a path with fewer
+    /// such proxies, straight to its socket or past one it counts, is read by entries its client
+    /// wrote, so a server so reachable names its proxies instead.
+    /// </summary>
+    public int UnnamedProxies { get; init; }
 
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
@@ -212,7 +228,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     private readonly TimeProvider _clock;
 
     // the networks of the proxies it believes X-Forwarded-For from
-    private readonly IReadOnlyList<IPNetwork> _trustedProxies;
+    private readonly ProxyTrust _proxyTrust;
 
     // what the transport holds, under its lock: the connections by handle and by token, how many
     // each address holds, the exchanges under way, and the bytes of body being read
@@ -247,7 +263,9 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));
-        _trustedProxies = Bead.TrustedProxies.NetworksOf(given.TrustedProxies, nameof(HttpTransportServerOptions.TrustedProxies));
+        _proxyTrust = Bead.TrustedProxies.TrustOf(
+            (given.TrustedProxies, nameof(HttpTransportServerOptions.TrustedProxies)),
+            (given.UnnamedProxies, nameof(HttpTransportServerOptions.UnnamedProxies)));
         AssertWhole((nameof(HttpTransportServerOptions.BodyBytesBudget), given.BodyBytesBudget));
 
         var exchangeTimeout = Clocks.AssertHeld((nameof(HttpTransportServerOptions.ExchangeTimeout), nameof(HttpTransportServerOptions.ExchangeTimeout)), given.ExchangeTimeout);
@@ -926,7 +944,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
         var forwarded = context.Request.Headers["x-forwarded-for"];
 
-        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _trustedProxies));
+        return Bead.TrustedProxies.ClientAddressOf(remote, (forwarded.Count == 0 ? null : forwarded.ToString(), _proxyTrust));
     }
 
     // an exchange from the server's own origin, its request's authority under http or https when its
