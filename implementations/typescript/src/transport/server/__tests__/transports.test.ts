@@ -596,7 +596,7 @@ test.describe('the transports', () => {
     // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
     const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
-    const starting = wsTransport.start({ port: 4_321 });
+    const starting = wsTransport.start({ address: HOST, port: 4_321 });
 
     fake.instances[0]?.emit('listening');
     await starting;

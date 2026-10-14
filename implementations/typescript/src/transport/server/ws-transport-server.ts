@@ -29,7 +29,13 @@ import {
   assertOrigins,
   credentialOf,
 } from './hosts-and-origins';
-import { createTransportServer, generateHandle } from './transport-server';
+import {
+  createTransportServer,
+  generateHandle,
+  type ITransportServerBound,
+  LOCALHOST,
+  listenOn,
+} from './transport-server';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
   IDrawingRequest,
@@ -76,24 +82,27 @@ export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
 
 /** What an omitted start option resolves to. */
 export const START_DEFAULTS = Object.freeze({
-  address: '127.0.0.1',
+  address: LOCALHOST,
   findOpenPort: false,
   port: 80,
 } satisfies ITransportServerStartOptions);
 
 // helpers
 
-// closes what a start opened and does not keep: an HTTP server still binding its address once it
+// an HTTP server of the transport's, bound on one address, and its `WebSocketServer`: serving once
+// it listens, until a stop, or a start that does not keep it, lets it go
+interface IListener {
+  readonly http: Server;
+  readonly instance: IWebSocketServerLike;
+  readonly stopServing: () => void;
+}
+
+// lets go of what a start opened: an HTTP server still binding its address is closed once it
 // listens, since it closes nothing before then
-const closeOpened = (
-  opened: { http: Server; instance: IWebSocketServerLike } | undefined
-): void => {
-  if (opened === undefined) {
-    return;
-  }
+const closeListener = (listener: IListener): void => {
+  const { http, instance } = listener;
 
-  const { http, instance } = opened;
-
+  listener.stopServing();
   instance.close();
 
   if (!http.listening) {
@@ -162,8 +171,9 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * own nor among `origins`; each refusal as {@link refusalOfHandshake} writes it. A connection, and
  * a refusal, name the client's address: behind the proxies `trustedProxies` names, the upgrade's
  * `X-Forwarded-For` entry reached past them, as the HTTP transport reads it (spec 15.12), else its
- * socket's. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
- * closes a connection that sends a larger one with 1009.
+ * socket's. It listens on `localhost` by default, both loopbacks on one port. Each message is an
+ * envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that
+ * sends a larger one with 1009.
  *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
@@ -195,8 +205,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
   return createTransportServer<IServerSocketLike, IDrawingRequest>(
     (server, connections, { isHeard, tell }) => {
-      let httpServer: Server | undefined;
-      let webSocketServer: IWebSocketServerLike | undefined;
+      // what the start under way, or the last, opened and keeps: one listener an address bound
+      const listeners = new Set<IListener>();
       // the rank of the last connection taken, across its starts: no handle is given twice
       let ordinal = 0;
 
@@ -461,76 +471,100 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         start: async ({ address, findOpenPort, port, signal }) => {
           assertListeningAddress(address);
 
-          let opened: { http: Server; instance: IWebSocketServerLike } | undefined;
-          let isListening = false;
+          // one address and port: an HTTP server of its own, which ws forwards `listening` and
+          // `error` of, serving until it is let go
+          const bind = (host: string, given: number): Promise<ITransportServerBound> => {
+            return createPromise((resolve, reject) => {
+              let isServing = false;
+              // a head is judged by its own server: one that ends after it was let go is refused
+              const { onRequest, shouldUpgradeCallback } = answersOf(() => {
+                return !isServing;
+              });
+              const http = createServer({ shouldUpgradeCallback }, onRequest);
+              const listener: IListener = {
+                http,
+                instance: new WebSocketServer({ maxPayload, server: http }),
+                stopServing: () => {
+                  isServing = false;
+                },
+              };
+              const { instance } = listener;
+              let isListening = false;
+
+              const release = (): void => {
+                listeners.delete(listener);
+                closeListener(listener);
+              };
+
+              listeners.add(listener);
+              http.on('connect', onConnect);
+
+              instance.on(ERROR_EVENT, (error) => {
+                if (isListening) {
+                  return (server.emit(ERROR_EVENT, error, ''), undefined);
+                }
+
+                release();
+
+                return (reject(error), undefined);
+              });
+
+              instance.on('listening', () => {
+                const addressInfo = instance.address();
+
+                isListening = true;
+                // a start given up meanwhile let it go already
+                isServing = listeners.has(listener);
+
+                resolve({
+                  close: release,
+                  port:
+                    typeof addressInfo === 'object' && addressInfo !== null
+                      ? addressInfo.port
+                      : port,
+                });
+              });
+
+              instance.on(CONNECTION_EVENT, onConnection);
+              instance.on('wsClientError', onClientError);
+              http.listen(given, host);
+            });
+          };
 
           try {
             return await createPromise<ITransportServerAddress>(
               (resolve, reject) => {
-                const { onRequest, shouldUpgradeCallback } = answersOf(() => {
-                  return httpServer !== http;
-                });
-                const http = createServer({ shouldUpgradeCallback }, onRequest);
-                const instance = new WebSocketServer({ maxPayload, server: http });
-
-                opened = { http, instance };
-                http.on('connect', onConnect);
-
-                // ws forwards its server's `error` and `listening`
-                instance.on(ERROR_EVENT, (error) => {
-                  if (isListening) {
-                    return (server.emit(ERROR_EVENT, error, ''), undefined);
-                  }
-
-                  return (reject(error), undefined);
-                });
-
-                instance.on('listening', () => {
-                  const addressInfo = instance.address();
-
-                  isListening = true;
-                  httpServer = http;
-                  webSocketServer = instance;
-
-                  resolve({
-                    address,
-                    port:
-                      typeof addressInfo === 'object' && addressInfo !== null
-                        ? addressInfo.port
-                        : port,
-                  });
-                });
-
-                instance.on(CONNECTION_EVENT, onConnection);
-                instance.on('wsClientError', onClientError);
-                http.listen(findOpenPort ? 0 : port, address);
+                listenOn(bind, { address, findOpenPort, port, signal }).then(resolve, reject);
               },
               { signal }
             );
           } catch (reason) {
             // an error before listening, or an abort: close what was opened, listening or not, and
             // once it listens when its address is still being bound
-            httpServer = undefined;
-            webSocketServer = undefined;
-            closeOpened(opened);
+            for (const listener of listeners) {
+              closeListener(listener);
+            }
+
+            listeners.clear();
 
             throw reason;
           }
         },
 
         stop: async () => {
-          const instance = webSocketServer;
-          const http = httpServer;
+          const stopped = [...listeners];
 
-          webSocketServer = undefined;
-          httpServer = undefined;
+          listeners.clear();
 
           // first, so no connection arrives while the open ones are closing; the port is free once it
           // returns, and its callback is not awaited because it also waits on peers that never
           // upgraded; ws leaves open the server it was given
-          instance?.close();
-          http?.close();
-          http?.closeIdleConnections();
+          for (const { http, instance, stopServing } of stopped) {
+            stopServing();
+            instance.close();
+            http.close();
+            http.closeIdleConnections();
+          }
 
           await Promise.all(
             connections

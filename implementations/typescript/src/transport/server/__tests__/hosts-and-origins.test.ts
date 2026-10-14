@@ -17,7 +17,7 @@ import {
   originOf,
   ownAuthorityOf,
 } from '../hosts-and-origins';
-import { LISTENING_ADDRESSES, NO_LISTENING_ADDRESSES } from './addresses';
+import { LISTENING_ADDRESSES, LISTENING_NAMES, NO_LISTENING_ADDRESSES } from './addresses';
 
 // constants
 
@@ -516,20 +516,33 @@ test.describe('hosts and origins', () => {
     ).toEqual([true, true, false, false, false]);
   });
 
-  test('refuses to listen on an address that is no bare IP address, naming it, and tells a bracketed one how to write itself', () => {
-    for (const address of LISTENING_ADDRESSES) {
+  test('refuses to listen on an address that is no bare IP address nor localhost, naming it, and tells a bracketed one how to write itself', () => {
+    // localhost, exactly, both loopbacks
+    for (const address of [...LISTENING_ADDRESSES, ...LISTENING_NAMES]) {
       expect(() => {
         assertListeningAddress(address);
       }).not.toThrow();
     }
 
+    for (const address of NO_LISTENING_ADDRESSES) {
+      expect(() => {
+        assertListeningAddress(address);
+      }, address).toThrow(ProgrammerError);
+    }
+
     expect(() => {
-      assertListeningAddress('localhost');
-    }).toThrow(new ProgrammerError('a server listens on an IP address, not "localhost"'));
+      assertListeningAddress('LOCALHOST');
+    }).toThrow(
+      new ProgrammerError(
+        'a server listens on an IP address, or on localhost, both loopbacks, not "LOCALHOST"'
+      )
+    );
     expect(() => {
       assertListeningAddress('[::1]');
     }).toThrow(
-      new ProgrammerError('a server listens on an IP address, not "[::1]": write ::1, not [::1]')
+      new ProgrammerError(
+        'a server listens on an IP address, or on localhost, both loopbacks, not "[::1]": write ::1, not [::1]'
+      )
     );
   });
 

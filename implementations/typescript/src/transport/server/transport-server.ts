@@ -110,6 +110,86 @@ export const generateHandle = ({
     : `type=${type};ip=${ip};port=${port};ordinal=${ordinal}`;
 };
 
+/**
+ * What a transport bound on one address, as {@link listenOn} asks it of `bind`: the port it took,
+ * and how to let it go, which a start that does not keep it calls.
+ */
+export interface ITransportServerBound {
+  readonly port: number;
+  close(): void;
+}
+
+/** The address a server listens on by default, both loopbacks (spec 15.12): never resolved. */
+export const LOCALHOST = 'localhost';
+
+/** How many times a server on {@link LOCALHOST} draws its port, the IPv6 loopback holding it. */
+export const LOCALHOST_DRAWS = 8;
+
+// what a bind on the IPv6 loopback fails with where that loopback is absent: its address, or its
+// family
+const IPV6_ABSENT: ReadonlySet<unknown> = new Set(['EADDRNOTAVAIL', 'EAFNOSUPPORT']);
+
+const codeOf = (reason: unknown): unknown => {
+  return typeof reason === 'object' && reason !== null && 'code' in reason
+    ? reason.code
+    : undefined;
+};
+
+/**
+ * Listens on `address` by `bind`, which binds one IP address and port (spec 15.12): an IP address
+ * alone, on `port` or, with `findOpenPort`, on one the system draws; {@link LOCALHOST}, both
+ * loopbacks, `127.0.0.1` first, on `port` or one drawn there, then `::1` on that port. A port
+ * another socket holds on `::1` fails the start, `127.0.0.1` let go, unless it was drawn: then it
+ * is drawn again, {@link LOCALHOST_DRAWS} times at most. Where the IPv6 loopback is absent, its
+ * bind refused for want of the address or of the family, it listens on `127.0.0.1` alone, and
+ * reports it. Resolves with the address it listens on and its port; checks `signal` before each
+ * bind, so an abort starts none.
+ */
+export const listenOn = async (
+  bind: (address: string, port: number) => Promise<ITransportServerBound>,
+  options: {
+    address: string;
+    findOpenPort: boolean;
+    port: number;
+    signal?: AbortSignal | undefined;
+  }
+): Promise<{ address: string; port: number }> => {
+  const { address, findOpenPort, port, signal } = options;
+  const isDrawn = findOpenPort || port === 0;
+
+  signal?.throwIfAborted();
+
+  if (address !== LOCALHOST) {
+    const bound = await bind(address, findOpenPort ? 0 : port);
+
+    return { address, port: bound.port };
+  }
+
+  for (let draw = 1; ; draw += 1) {
+    const ipv4 = await bind('127.0.0.1', isDrawn ? 0 : port);
+
+    try {
+      signal?.throwIfAborted();
+      await bind('::1', ipv4.port);
+
+      return { address: LOCALHOST, port: ipv4.port };
+    } catch (reason) {
+      // ! no process can take `::1` where it is absent; a port held there is the capture itself
+      if (IPV6_ABSENT.has(codeOf(reason))) {
+        return { address: '127.0.0.1', port: ipv4.port };
+      }
+
+      ipv4.close();
+
+      if (!isDrawn || codeOf(reason) !== 'EADDRINUSE' || draw >= LOCALHOST_DRAWS) {
+        throw reason;
+      }
+    }
+
+    signal?.throwIfAborted();
+  }
+};
+
 // definition
 
 /**

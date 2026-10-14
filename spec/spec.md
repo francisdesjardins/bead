@@ -714,12 +714,12 @@ or the IPv6 loopback, `[::1]` in a URL — as the
 [WHATWG URL Standard's host parser](https://url.spec.whatwg.org/#host-parsing) reads it, by which
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
-potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8 or
-`::1`; or when it never leaves the machine, a Web Worker or a router called in process. Every client
-reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as 127.0.0.1, are on the
-loopback; a host it fails on, one followed by a space among them, is not, nor is `localhost.`,
-which it keeps as given. A client takes a `localhost` name on the loopback without resolving it, as
-Secure Contexts does where the platform resolves such names there alone
+potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8,
+`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker or a router called in
+process. Every client reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as
+127.0.0.1, are on the loopback; a host it fails on, one followed by a space among them, is not, nor
+is `localhost.`, which it keeps as given. A client takes a `localhost` name on the loopback without
+resolving it, as Secure Contexts does where the platform resolves such names there alone
 ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
 sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
 A server cannot tell what stands in front of it: its application MAY say so, and is then believed
@@ -1504,18 +1504,25 @@ tell. A bound by address counts as one the users behind one NAT, and as many the
 IPv6 network. A WebSocket server bounds no address: the client's address is what its handle and its
 refusals name.
 
-A server listens on the IPv4 loopback, `127.0.0.1`
-([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), unless it is given an
-address: an `IPv4address` or an `IPv6address` of
+A server listens on `localhost`, both loopbacks — the IPv4 one, `127.0.0.1`
+([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), and the IPv6 one, `::1`
+([RFC 4291 §2.5.3](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.3)), on one port — unless it
+is given an address: `localhost`, which names both and is never resolved, as section 13.4 takes
+it; or an `IPv4address` or an `IPv6address` of
 [RFC 3986 §3.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-3.2.2), bare, with no zone, and
 not IPv4-mapped ([RFC 4291 §2.5.5.2](https://www.rfc-editor.org/rfc/rfc4291#section-2.5.5.2)),
-never a name, which another host would resolve otherwise. A server the network reaches is one its
-application opened to it, `0.0.0.0` or `::` among them
-([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)). Its address keeps the network out,
-and `hosts` a page on its own machine that rebinds its name to it; neither stands for the other. A
-client that connects by `localhost` reaches it whichever loopback family it tries first, racing
-them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); another process listening on the other
-family's loopback, on the same port, answers a client that tries that one first.
+which it listens on alone; never another name, which another host would resolve otherwise. On
+`localhost` it binds `127.0.0.1` first, on the port it is given or on one drawn there, then `::1` on
+that port, taking no IPv4 there. A port another socket holds on either family fails its start; a
+port drawn is drawn again, eight times at most. Where the IPv6 loopback is absent, its bind refused
+for want of the address or of the family, it listens on `127.0.0.1` alone, and reports `127.0.0.1`
+as its address in place of `localhost`. A server the network reaches is one its application opened
+to it, `0.0.0.0` or `::` among them ([CWE-1327](https://cwe.mitre.org/data/definitions/1327.html)).
+Its address keeps the network out, and `hosts` a page on its own machine that rebinds its name to
+it; neither stands for the other. A client that connects by `localhost` reaches it on whichever
+family it tries first, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); a server
+given one loopback, `127.0.0.1` or `::1`, leaves the other's port to any process that listens
+there, which then answers a client that tries that family first.
 
 ## 16. Services and procedures
 

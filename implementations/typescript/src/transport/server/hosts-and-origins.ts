@@ -162,12 +162,14 @@ export const isIPAddress = (value: string): boolean => {
 };
 
 /**
- * Refuses, with a {@link ProgrammerError} naming it, an address a server cannot listen on: any
- * that {@link isIPAddress} does not take, a name among them, which another host would resolve
- * otherwise. A bracketed IPv6 address is told how to write itself.
+ * Refuses, with a {@link ProgrammerError} naming it, an address a server cannot listen on (spec
+ * 15.12): any that {@link isIPAddress} does not take but `localhost`, exactly, the keyword for both
+ * loopbacks, never resolved; any other name among them, `LOCALHOST`, `localhost.` and a name under
+ * `.localhost` too, which another host would resolve otherwise. A bracketed IPv6 address is told how
+ * to write itself.
  */
 export const assertListeningAddress = (address: string): void => {
-  if (isIPAddress(address)) {
+  if (address === 'localhost' || isIPAddress(address)) {
     return;
   }
 
@@ -175,7 +177,9 @@ export const assertListeningAddress = (address: string): void => {
   const hint =
     literal !== undefined && isIPAddress(literal) ? `: write ${literal}, not ${address}` : '';
 
-  throw new ProgrammerError(`a server listens on an IP address, not "${address}"${hint}`);
+  throw new ProgrammerError(
+    `a server listens on an IP address, or on localhost, both loopbacks, not "${address}"${hint}`
+  );
 };
 
 /**

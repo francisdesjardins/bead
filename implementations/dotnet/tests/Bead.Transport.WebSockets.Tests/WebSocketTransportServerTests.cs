@@ -480,6 +480,27 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // a socket of another process's on the IPv6 loopback, IPv6 alone, listening on the port given,
+    // any free one for 0
+    private static Socket HeldOnIPv6(int port)
+    {
+        var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = false };
+
+        try
+        {
+            socket.Bind(new IPEndPoint(IPAddress.IPv6Loopback, port));
+            socket.Listen();
+
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+
+            throw;
+        }
+    }
+
     // definition
 
     public async ValueTask InitializeAsync()
@@ -672,21 +693,103 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Listens_on_the_loopback_when_given_no_address_reached_by_127_0_0_1_and_by_localhost_and_is_secure_there()
+    public async Task Listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_IPv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
     {
         await using var server = new WebSocketTransportServer();
         var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
-        var connected = 0;
+        var hasIPv6 = Addresses.HasIPv6Loopback();
+        string[] hosts = hasIPv6 ? ["127.0.0.1", "::1", "localhost"] : ["127.0.0.1", "localhost"];
 
-        server.Connection += (_) =>
+        // where the IPv6 loopback is absent, the IPv4 one alone, reported as it is
+        Assert.Equal(hasIPv6 ? "localhost" : "127.0.0.1", bound.Address);
+        Assert.True(server.IsSecure("any"));
+
+        foreach (var host in hosts)
         {
-            Interlocked.Increment(ref connected);
+            await using var client = new WebSocketTransportClient();
+
+            await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+            Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_to_start_on_localhost_when_another_socket_holds_the_other_loopback_s_port_ending_closed()
+    {
+        if (!Addresses.HasIPv6Loopback())
+        {
+            return;
+        }
+
+        // * the capture itself: another process on [::1] would answer a client that reaches the
+        // server by localhost over IPv6
+        using var other = HeldOnIPv6(0);
+        var port = ((IPEndPoint)other.LocalEndPoint!).Port;
+        await using var server = new WebSocketTransportServer();
+
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+        {
+            return server.Start(new WebSocketTransportStartOptions { Port = port }, Cancelled);
+        });
+        Assert.Equal(ReadyState.Closed, server.ReadyState);
+
+        // nothing kept the IPv4 loopback's port
+        using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+        probe.Bind(new IPEndPoint(IPAddress.Loopback, port));
+    }
+
+    [Fact]
+    public async Task Draws_a_port_on_localhost_again_when_the_IPv6_loopback_holds_the_one_drawn_on_IPv4()
+    {
+        if (!Addresses.HasIPv6Loopback())
+        {
+            return;
+        }
+
+        using var other = HeldOnIPv6(0);
+        var held = ((IPEndPoint)other.LocalEndPoint!).Port;
+        var drawn = new List<int>();
+        await using var server = new WebSocketTransportServer()
+        {
+            // the first port drawn free on IPv4, held on IPv6: drawn again
+            Loopback = new LoopbackBinding
+            {
+                DrawPort = () =>
+                {
+                    drawn.Add(drawn.Count == 0 ? held : Loopbacks.DrawPort());
+
+                    return drawn[^1];
+                },
+            },
         };
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+
+        Assert.Equal(("localhost", 2), (bound.Address, drawn.Count));
+        Assert.Equal((held, drawn[1]), (drawn[0], bound.Port));
+    }
+
+    [Fact]
+    public async Task Listens_on_127_0_0_1_alone_where_the_IPv6_loopback_is_absent_and_reports_127_0_0_1()
+    {
+        // its bind refused for want of the address, as in a container with IPv6 off
+        await using var server = new WebSocketTransportServer()
+        {
+            Loopback = new LoopbackBinding
+            {
+                IPv6Refusal = (_) =>
+                {
+                    return new SocketException((int)SocketError.AddressNotAvailable);
+                },
+            },
+        };
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        string[] hosts = ["127.0.0.1"];
 
         Assert.Equal("127.0.0.1", bound.Address);
         Assert.True(server.IsSecure("any"));
 
-        foreach (var host in new[] { "127.0.0.1", "localhost" })
+        foreach (var host in hosts)
         {
             await using var client = new WebSocketTransportClient();
 
@@ -694,7 +797,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
         }
 
-        Assert.Equal(2, connected);
+        // the IPv6 loopback's port is left alone
+        if (Addresses.HasIPv6Loopback())
+        {
+            using var free = HeldOnIPv6(bound.Port);
+        }
     }
 
     [Fact]
@@ -709,7 +816,16 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             });
 
             Assert.Equal((address, nameof(WebSocketTransportStartOptions.Address), ReadyState.Closed), (address, refused.ParamName, server.ReadyState));
-            Assert.StartsWith($"a server listens on an IP address, not \"{address}\"", refused.Message, StringComparison.Ordinal);
+            Assert.StartsWith($"a server listens on an IP address, or on localhost, both loopbacks, not \"{address}\"", refused.Message, StringComparison.Ordinal);
+        }
+
+        // localhost, both loopbacks, or the IPv4 one alone where the IPv6 one is absent
+        foreach (var address in Addresses.NamedListening)
+        {
+            await using var server = new WebSocketTransportServer();
+
+            Assert.Equal(Addresses.HasIPv6Loopback() ? address : "127.0.0.1", (await server.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled)).Address);
+            await server.Stop();
         }
 
         foreach (var address in Addresses.Listening.Where((address) =>
@@ -1542,12 +1658,12 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Listens_on_127_0_0_1_port_80_and_beats_every_30_seconds_when_told_nothing()
+    public void Listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing()
     {
         var start = new WebSocketTransportStartOptions();
         var options = new WebSocketTransportServerOptions();
 
-        Assert.Equal(("127.0.0.1", 80, false), (start.Address, start.Port, start.FindOpenPort));
+        Assert.Equal(("localhost", 80, false), (start.Address, start.Port, start.FindOpenPort));
         Assert.Equal(TimeSpan.FromSeconds(30), options.Heartbeat);
         Assert.Equal(TimeSpan.FromSeconds(5), options.CloseTimeout);
         Assert.Null(options.MaximumMessageBytes);

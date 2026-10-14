@@ -109,13 +109,18 @@ public sealed record WebSocketTransportServerOptions
 public sealed record WebSocketTransportStartOptions
 {
     /// <summary>
-    /// The address it listens on (spec 15.12), an IP address written bare: <c>127.0.0.1</c>, the
-    /// loopback, by default; <c>0.0.0.0</c> or <c>::</c> for every interface, which a container, or any
-    /// server another machine reaches, needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or
-    /// <c>IPv6address</c>, with no brackets, no zone, and not IPv4-mapped; a name or any other form is
-    /// an <see cref="ArgumentException"/> as it starts, which ends Closed.
+    /// The address it listens on (spec 15.12): <c>localhost</c> by default, both loopbacks,
+    /// <c>127.0.0.1</c> and <c>::1</c> on one port, as Kestrel's <c>ListenLocalhost</c> binds them, so
+    /// no other process answers a client that reaches it by <c>localhost</c> on the other family; a
+    /// port another socket holds on either fails the start, and a port drawn is drawn again, eight
+    /// times at most. Where the IPv6 loopback is absent it listens on <c>127.0.0.1</c> alone, and
+    /// reports it. Or an IP address written bare, which it listens on alone: <c>0.0.0.0</c> or
+    /// <c>::</c> for every interface, which a container, or any server another machine reaches,
+    /// needs, its hosts named beside. RFC 3986's <c>IPv4address</c> or <c>IPv6address</c>, with no
+    /// brackets, no zone, and not IPv4-mapped; another name or any other form is an
+    /// <see cref="ArgumentException"/> as it starts, which ends Closed.
     /// </summary>
-    public string Address { get; init; } = "127.0.0.1";
+    public string Address { get; init; } = Loopbacks.Localhost;
 
     /// <summary>The port it listens on.</summary>
     public int Port { get; init; } = 80;
@@ -229,6 +234,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     internal Func<WebSocket, string, (WebSocket Socket, string ConnectionHandle)>? Accepted { get; init; }
 
     /// <summary>
+    /// How a start on <c>localhost</c> draws its port and binds the IPv6 loopback: the tests' way to
+    /// draw a port another socket holds there, and to start where it is absent.
+    /// </summary>
+    internal LoopbackBinding Loopback { get; init; } = new();
+
+    /// <summary>
     /// The largest message its connections read: the option given, or a router's largest envelope
     /// by default, which a transport built alone takes, its router unknown to it.
     /// </summary>
@@ -322,16 +333,35 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         return _life.Stop(Stopping);
     }
 
-    // builds its application and starts it; what a failed start built goes with it
+    // listens where it is told, localhost on both loopbacks, and gives where
     private async Task<TransportServerAddress> Starting((WebSocketTransportStartOptions Start, CancellationToken Token) call)
     {
         var (start, cancellationToken) = call;
-        WebApplication? application = null;
-        TransportServerAddress bound;
 
         // ! an IP address by RFC 3986's grammar before the platform's parser reads it: it takes 0 for
         // 0.0.0.0, every interface, and 127.1, octal, hexadecimal and a zone besides
         HostsAndOrigins.AssertAddress(start.Address, nameof(WebSocketTransportStartOptions.Address));
+
+        var ((application, port), address) = start.Address == Loopbacks.Localhost
+            ? await Loopbacks.Bind(
+                (listening) =>
+                {
+                    return Serving(listening, cancellationToken);
+                },
+                Loopback with { Port = start.Port, FindOpenPort = start.FindOpenPort })
+            : (await Serving(([IPAddress.Parse(start.Address)], start.FindOpenPort ? 0 : start.Port), cancellationToken), start.Address);
+
+        _isSecure = _options.Secure ?? TransportSecurity.IsSecure((false, address));
+        _application = application;
+
+        return new TransportServerAddress(address, port);
+    }
+
+    // builds an application on the addresses and the port given and starts it, and gives the port
+    // it listens on; what a failed start built goes with it
+    private async Task<(WebApplication Application, int Port)> Serving((IReadOnlyList<IPAddress> Addresses, int Port) listening, CancellationToken cancellationToken)
+    {
+        WebApplication? application = null;
 
         try
         {
@@ -344,7 +374,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             });
             builder.WebHost.ConfigureKestrel((kestrel) =>
             {
-                kestrel.Listen(IPAddress.Parse(start.Address), start.FindOpenPort ? 0 : start.Port);
+                foreach (var address in listening.Addresses)
+                {
+                    kestrel.Listen(address, listening.Port);
+                }
+
                 kestrel.AddServerHeader = false;
 
                 // * an origin server MUST take an absolute-form target's authority over its Host (RFC
@@ -364,8 +398,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             var addresses = application.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
                 ?? throw new InvalidOperationException("Kestrel says nothing of where it listens");
 
-            bound = new TransportServerAddress(start.Address, new Uri(addresses.Addresses.First()).Port);
-            _isSecure = _options.Secure ?? TransportSecurity.IsSecure((false, start.Address));
+            return (application, new Uri(addresses.Addresses.First()).Port);
         }
         catch
         {
@@ -376,10 +409,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
 
             throw;
         }
-
-        _application = application;
-
-        return bound;
     }
 
     /// <summary>
