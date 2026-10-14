@@ -734,9 +734,10 @@ conversations = [
     ('a request that opens a subscription to a procedure that notifies nothing is answered, and holds nothing', ['11.2'], None, [
         json_request(1, 'echo', '"x"', flags=0x10), result(1, '"x"'),
         json_request(1, 'echo', '"y"'), result(1, '"y"')]),
-    # 9.5: what the resolver fails at
-    ('a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported', ['9.5'], None, [
-        json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED), report('exception')]),
+    # 9.5: what the resolver fails at; a failure answered for an error of the side's own carries no
+    # detail of it (9.0)
+    ('a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported', ['9.0', '9.5'], None, [
+        json_request(1, 'broken', 'null'), failure(1, PROCEDURE_FAILED, detail=''), report('exception')]),
     ('a payload that is not JSON is answered PAYLOAD_UNDECODABLE', ['9.5'], None, [
         request(1, 'echo', 'FF'), failure(1, PAYLOAD_UNDECODABLE)]),
     # 17: a json payload read as section 17.5 reads it, and written in its canonical form, whichever side
@@ -769,19 +770,20 @@ conversations = [
     ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.5'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),
-    ('an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE', ['12.1'],
+    ('an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE', ['9.0', '12.1'],
      {**SMALL, 'maximumTransfers': 0}, [
-         json_request(1, 'bytes', '{"length":60}'), failure(1, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE)]),
+         json_request(1, 'bytes', '{"length":60}'), failure(1, PROCEDURE_FAILED, detail=''), report(PAYLOAD_TOO_LARGE)]),
     # 8 bytes of prefix, 20 of an announcement and 36 of payload fill an envelope of 64; 37 do not
     ('a result is counted with the 20 bytes of an announcement: one that fits only without them is refused as one that does not',
-     ['12.1'], {**SMALL, 'maximumTransfers': 0}, [
+     ['9.0', '12.1'], {**SMALL, 'maximumTransfers': 0}, [
          json_request(1, 'bytes', '{"length":34}'), result(1, '"' + 'x' * 34 + '"'),
-         json_request(3, 'bytes', '{"length":35}'), failure(3, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE)]),
+         json_request(3, 'bytes', '{"length":35}'), failure(3, PROCEDURE_FAILED, detail=''), report(PAYLOAD_TOO_LARGE)]),
     # 11.6: the result of a request that opens a subscription goes whole, whatever its procedure
     # notifies, from a side that sends transfers too; 8 + 20 + 37 bytes pass chunkBytes, 64
     ('the result of a request that opens a subscription, too large for one envelope, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE, where the same result without SUBSCRIPTION goes as a transfer',
-     ['11.6', '12.1'], CHUNKED, [
-         json_request(1, 'bytes', '{"length":35}', flags=0x10), failure(1, PROCEDURE_FAILED), report(PAYLOAD_TOO_LARGE),
+     ['9.0', '11.6', '12.1'], CHUNKED, [
+         json_request(1, 'bytes', '{"length":35}', flags=0x10), failure(1, PROCEDURE_FAILED, detail=''),
+         report(PAYLOAD_TOO_LARGE),
          json_request(3, 'bytes', '{"length":35}'), result_opening(3, RESULT_37[:28], 37),
          credit_in(3, 37), chunk_out(3, 28, RESULT_37[28:], True)]),
     # 9.1: a server opens calls of its own, a command to its client, on its even call ids
@@ -1171,6 +1173,18 @@ conversations += [
         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
         armed(2_000), advance(2_000),
         on(cancelled(2), 'device'), on(failure(3, DESTINATION_LOST), 'client'), on(report('exception'), 'client')])),
+    # 14.5: a result leg B brought whole, 8 + 36 bytes, goes back to leg A counted with the 20 bytes of an
+    # announcement: 64 fit chunkBytes; one byte more needs a transfer, which this server sends none of,
+    # and is answered as section 12.1 answers a result its side cannot send, its reason reported with
+    # leg A's connection
+    sharing_leg_b(('a relayed result too large for leg A is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE',
+     ['9.0', '12.1', '14.6'], {**CHUNKED, 'maximumTransfers': 0}, [
+         opened('client'), opened('device'), *logged_in(), *registered(),
+         on(relayed(3, 'echo', '"x"'), 'client'), leg_b(2, 'echo', '"x"'),
+         on(answer(2, json_string(36)), 'device'), on(result(3, json_string(36)), 'client'),
+         on(relayed(5, 'echo', '"y"'), 'client'), leg_b(4, 'echo', '"y"'),
+         on(answer(4, json_string(37)), 'device'), on(failure(5, PROCEDURE_FAILED, detail=''), 'client'),
+         on(report(PAYLOAD_TOO_LARGE), 'client')])),
 ]
 
 

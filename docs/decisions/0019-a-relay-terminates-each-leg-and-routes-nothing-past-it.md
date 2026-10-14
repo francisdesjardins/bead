@@ -31,6 +31,15 @@ lost, the procedure run or not: HTTP's gateway 502 against its 504, and what gRP
 on. Those failures name no address behind the relay: why leg B failed is reported where the relay
 runs.
 
+**An answer leg A cannot carry is the relay's own `PROCEDURE_FAILED`, with no detail**, whatever
+refused it: the relay terminates leg A, so a result past leg A's limit is a result its side cannot
+send, which spec 12.1 answers so, and why it did not go out is reported with leg A's connection.
+`PAYLOAD_TOO_LARGE` (34) would say the request was refused at its admission, while the destination's
+procedure ran, and invite its requester to send a procedure that is not idempotent again; with no
+relay crossed, it would besides mean what spec 14.3's sixth step refuses, one code with two meanings
+([0003](0003-one-word-one-meaning.md)). An answer leg A's transport did not take goes nowhere again:
+a call is answered once (spec 9.3, 9.4, 14.5).
+
 **A cancel on leg A cancels leg B.** A destination on a connection of the relay's own dies with that
 connection, so a newcomer under the same handle is never taken for it. An answer names its call
 alone, so no RESULT or FAILURE carries a destination: an id means something to its relay only.
@@ -67,3 +76,21 @@ each side's twin tests ([0004](0004-one-behaviour-in-every-language.md)).
 
 **The rule is section 14 of [`spec/spec.md`](../../spec/spec.md)**, and `spec/conversations.json`
 plays it against every implementation's relay.
+
+## The Tenth Man
+
+The decision meets the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md))
+in one round, on the answer leg A cannot carry, which
+[0001](0001-the-envelope-sits-at-fixed-offsets.md) points here for the rule of spec 9.0 it states: a
+failure a side answers for an error of its own carries none of that error. Its objections, each
+with the answer that holds:
+
+### On the answer leg A cannot carry
+
+| Objection                                                                                                                                                                                                                                                                                                                                                                                                                                     | Answer                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The case named, a transport that refuses the answer or a socket that closed, never sends a second answer: the router marks the call answered before its transport has the answer, and a second answer on it goes nowhere (spec 9.4); twin tests that stand a mock in the router's place pin an envelope the router forbids                                                                                                                    | Accepted: the twin tests play the real router, whose leg A's transport refuses the relayed result: one result handed over, nothing after it, the reason reported with leg A's connection. Spec 14.5 says that an answer its transport did not take goes nowhere again, and is reported |
+| A result past leg A's limit is answered `PAYLOAD_TOO_LARGE` through a relay and `PROCEDURE_FAILED` by a server's own resolver, the same situation; 34 says the request was refused at its admission (spec 8.1) though the procedure ran, inviting a requester to send a procedure that is not idempotent again, and with no relay crossed it also means spec 14.3's sixth step: one code, two meanings ([0003](0003-one-word-one-meaning.md)) | Accepted, and decisive: the relay answers it `PROCEDURE_FAILED` with no detail, whatever refused it, as spec 12.1 answers a result its side cannot send, its reason reported; a conversation plays it, a result that fits crossing beside it                                           |
+| "With no detail", written in spec 14.5 alone, invites the reading a contrario for spec 9.5, 11.6, 12.1, 9.2's fifth step and 17.2's fifth item, and no case pins an empty detail                                                                                                                                                                                                                                                              | Accepted: the rule is stated once, in spec 9.0, beside what a side reports and what it answers, and the conversations of 9.5, 11.6 and 12.1 pin an empty detail                                                                                                                        |
+| An envelope's codec that throws other than a refusal has its message put in `ENVELOPE_MALFORMED`'s detail on the TypeScript side, a message a peer's bytes reach, where the C# side puts none                                                                                                                                                                                                                                                 | Accepted: nothing of the error in the failure, both sides alike, the error reported, and a twin test on each                                                                                                                                                                           |
+| "The failure that refused it" calls a closed socket a refusal, which the spec's words never do (spec 15.6, [0003](0003-one-word-one-meaning.md))                                                                                                                                                                                                                                                                                              | Accepted: spec 14.5 says why the answer did not go out                                                                                                                                                                                                                                 |

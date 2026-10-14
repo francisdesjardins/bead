@@ -69,11 +69,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `{ address }`: an application that configures its server after building it configures each.
 - Decision 0030 is renamed for the count it holds, "A server believes `X-Forwarded-For` from the
   proxies it names and as many unnamed ones as it counts", its file with it; every citation moves.
+- A relay answers a result leg A cannot carry, one past leg A's limit, `PROCEDURE_FAILED` with no
+  detail, whatever refused it, `PAYLOAD_TOO_LARGE` among them, as a server answers a result its side
+  cannot send, and reports why it did not go out with leg A's connection; an answer leg A's
+  transport did not take goes nowhere again, and is reported. 34 would say the request was refused
+  at its admission, though the destination's procedure ran (spec 14.5; decision 0019).
+- A failure a side answers for an error of its own, a resolver that throws, a verifier or an
+  admission that fails, a result it cannot send, an answer leg A cannot carry, a codec that throws
+  other than a refusal, carries no detail of that error, never an exception's message, which is
+  reported; `PROCEDURE_FAILED` so answered carries none, as OWASP ASVS 5.0's 16.5.1 returns a
+  generic message to the consumer of an unexpected error (spec 9.0; decision 0001).
 
 ### Fixed
 
 - The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one and
   both HTTP clients: a 3xx fails its connect, its status named (spec 15.6; decision 0032).
+- The TypeScript side puts nothing of an error its envelope codec throws, other than a refusal, in
+  the failure it answers: the exception's message, which a peer's bytes could reach, is reported,
+  never sent (spec 9.0).
+- The C# side answers a request its envelope codec throws on, other than a refusal,
+  `ENVELOPE_MALFORMED` with no detail, where it answered nothing and the call waited out its
+  timeout; such an error, at the prefix or past it, is reported once, with its connection
+  (spec 9.0).
 
 ## [0.4.1] - 2026-10-13
 

@@ -373,6 +373,44 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
+    // spec 9.0
+    test('answers a request its codec throws on other than a refusal ENVELOPE_MALFORMED with no detail, and reports the error with its connection', async () => {
+      const { port, reported, sent } = createPort();
+      using core = createRouterCore(port);
+      const callId = callIdsOf('client')();
+      const bytes = requestOf(callId, {
+        credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+      });
+      const thrown = new Error('internal: 10.0.0.5:8443');
+      const { fromCharCode } = String;
+
+      // * the codec reads a JWT's bytes as text: there, and once, it throws what is not a refusal
+      String.fromCharCode = () => {
+        String.fromCharCode = fromCharCode;
+
+        throw thrown;
+      };
+
+      try {
+        core.receive(bytes, 'a');
+      } finally {
+        String.fromCharCode = fromCharCode;
+      }
+
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([['a', 'failure', callId, ProtocolCode.ENVELOPE_MALFORMED]]);
+      expect(sent[0]?.envelope).toMatchObject({
+        failure: {
+          code: ProtocolCode.ENVELOPE_MALFORMED,
+          detail: '',
+          scope: FailureScope.PROTOCOL,
+        },
+      });
+      expect(codesOf(reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+      expect(reported[0]?.[0]).toMatchObject({ cause: thrown, detail: thrown.message });
+    });
+
     test('asks a request’s admission on its header, once, past its route and before its payload: a refusal answers it before any credit', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port, { limits });

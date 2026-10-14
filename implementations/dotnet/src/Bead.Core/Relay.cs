@@ -576,18 +576,15 @@ internal sealed class Relay
         {
             await _router.Respond(answer, target);
         }
-        catch (Exception reason)
+        catch (Exception)
         {
-            // an answer leg A cannot carry — a result past its limit, say — is answered as failed,
-            // once; one that could not go out goes nowhere again, and what failed is reported either
-            // way
-            var failure = reason is FailureException refused
-                ? refused.Failure with { Relays = 0 }
-                : Failure.OfProtocol(ProtocolCode.ProcedureFailed, reason.Message);
-
+            // ! an answer leg A cannot carry — a result past its limit — is answered PROCEDURE_FAILED,
+            // nothing of why in it, as a result this side cannot send (spec 9.0, 12.1, 14.5); one its
+            // transport did not take goes nowhere again, its call answered already. Why it did not go
+            // out is reported either way, with leg A's connection
             try
             {
-                await _router.Respond(RouterAnswer.OfFailure(failure), target);
+                await _router.Respond(RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.ProcedureFailed)), target);
             }
             catch (Exception)
             {

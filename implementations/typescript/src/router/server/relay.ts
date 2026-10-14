@@ -4,7 +4,7 @@
 
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { assertHeld } from '../../transport/shared/clock';
-import { ProgrammerError, reasonMessage, toError } from '../../transport/shared/errors';
+import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { IGauges } from '../../transport/shared/types';
@@ -430,14 +430,9 @@ export const createRelay = ({
     try {
       await respond(answer, props);
     } catch (reason) {
-      // an answer leg A cannot carry — a result past its limit, say — is answered as failed, once;
-      // one that could not go out goes nowhere again, and what failed is reported either way
-      const failure: IFailure =
-        reason instanceof FailureError
-          ? { code: reason.code, detail: reason.detail, scope: reason.scope }
-          : { ...failures.procedureFailed, detail: reasonMessage(reason) };
-
-      await respond({ failure }, props).catch(noop);
+      // ! an answer leg A cannot carry is answered PROCEDURE_FAILED, no detail, whatever refused it;
+      // one it did not take goes nowhere again; why is reported (spec 9.0, 14.5)
+      await respond({ failure: failures.procedureFailed }, props).catch(noop);
 
       throw reason;
     }

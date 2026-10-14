@@ -318,7 +318,14 @@ _Conversations: `spec/conversations.json`._
 
 9.0. What a side _reports_ it tells its application — an error it raises, with the connection it
 came on — and puts nothing on the wire. What it _answers_ goes back on the wire, as a failure on
-the call id. What it _drops in silence_ it does neither.
+the call id. What it _drops in silence_ it does neither. A failure a side answers for an error of
+its own — a resolver that throws, a verifier or an admission that fails, a result it cannot send,
+an answer leg A cannot carry (section 14.5), a codec that throws other than a refusal — MUST NOT
+carry any detail of that error, an exception's message least of all: the error is reported, and
+`PROCEDURE_FAILED` so answered carries no detail. Its code alone tells the requester how far its
+call went (section 8.1), as a generic message is all an unexpected error returns to its consumer in
+OWASP's Application Security Verification Standard
+([ASVS 5.0 §16.5.1](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
 
 9.1. A call is a request and its answer, under one call id on one connection. Either side opens
 calls: a client its requests, a server its commands to a client. A requester draws its call ids in
@@ -1044,8 +1051,9 @@ leg B, and leg A is answered nothing.
 | any error once the transport had it: a limit, a timeout, the connection gone | `DESTINATION_LOST`: the procedure may have run |
 | nothing: leg A ended first                                                   | nothing                                        |
 
-An answer leg A cannot carry — a result past its limit — is answered with the failure that refused
-it, or `PROCEDURE_FAILED`.
+An answer leg A cannot carry — a result past its limit — is answered with `PROCEDURE_FAILED`, why
+it did not go out reported, as section 12.1 answers a result its side cannot send; one its
+transport did not take goes nowhere again, and is reported (section 9.4).
 
 14.6. A failure through a relay counts the relays it crossed, one more per relay, 255 at most
 (section 7.5); its side is not known. The relay's own failures cross no relay, and name no address
