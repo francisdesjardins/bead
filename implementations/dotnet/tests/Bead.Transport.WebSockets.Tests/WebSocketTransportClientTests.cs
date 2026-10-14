@@ -963,7 +963,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
                 var first = new byte[1];
                 var reading = peer.GetStream().ReadAsync(first, Cancelled).AsTask();
-                var isRead = await Task.WhenAny(reading, Task.Delay(1_000, Cancelled)) == reading;
+                // a ping comes within the patience of every wait; its absence is waited for a second
+                var isRead = await Task.WhenAny(reading, Task.Delay(isPinging ? Patience : TimeSpan.FromSeconds(1), Cancelled)) == reading;
 
                 Assert.Equal(isPinging, isRead);
 

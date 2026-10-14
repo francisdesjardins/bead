@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 using Bead.Interop;
@@ -52,6 +53,23 @@ public sealed class WebSocketClientTests : IAsyncLifetime
                 return procedure.Procedure.ProcedureName == procedureName;
             }).Procedure,
             new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
+    }
+
+    // the next request the client's router sends, gone out: what a test cancels, stops or replaces
+    // after, never a delay that a loaded runner outlasts
+    private Task RequestSent()
+    {
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        _client.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Tx && envelope.Header is RequestHeader)
+            {
+                sent.TrySetResult();
+            }
+        };
+
+        return sent.Task.WaitAsync(Patience, Cancelled);
     }
 
     // definition
@@ -136,18 +154,22 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     [Fact]
     public async Task Cancels_a_call_at_the_server_when_its_token_is_cancelled()
     {
-        using var source = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        using var source = new CancellationTokenSource();
+        var sent = RequestSent();
+        var slow = RequesterOf("slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token });
 
+        // ! cancelled once the request went out: a token cancelled before cancels nothing at the server
+        await sent;
+        await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
         {
-            return RequesterOf("slow")(JsonOf("{\"milliseconds\":3600000}"))(new RequestOptions { CancellationToken = source.Token })
-                .WaitAsync(Patience, Cancelled);
+            return slow.WaitAsync(Patience, Cancelled);
         });
 
         // the server counts it once its resolver heard the cancel, which comes after the cancel itself
         var counted = 0;
 
-        for (var tries = 0; tries < 40 && counted != 1; tries += 1)
+        for (var tries = 0; tries < 200 && counted != 1; tries += 1)
         {
             counted = (await RequesterOf("cancellations")(JsonOf("null"))().WaitAsync(Patience, Cancelled)).GetInt32();
             await Task.Delay(50, Cancelled);
@@ -159,16 +181,17 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     [Fact]
     public async Task Takes_its_layers_apart_in_reverse_rejecting_what_waits_as_disposed_then_closing()
     {
+        var sent = RequestSent();
         var slow = RequesterOf("slow")(JsonOf("{\"milliseconds\":3600000}"))();
-        var errors = new List<Exception>();
+        var errors = new ConcurrentQueue<Exception>();
         var closed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        _client.Router.Error += errors.Add;
+        _client.Router.Error += errors.Enqueue;
         _client.Transport.Close += (wasClean, _) =>
         {
             closed.TrySetResult(wasClean);
         };
-        await Task.Delay(100, Cancelled);
+        await sent;
         await _client.DisposeAsync();
         Assert.Equal("the router was disposed before the answer", (await Assert.ThrowsAsync<DisconnectException>(() =>
         {
@@ -181,6 +204,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     [Fact]
     public async Task Rejects_what_waits_once_the_server_stops()
     {
+        var sent = RequestSent();
         var slow = RequesterOf("slow")(JsonOf("{\"milliseconds\":3600000}"))();
         var closed = new TaskCompletionSource<bool>();
 
@@ -188,7 +212,7 @@ public sealed class WebSocketClientTests : IAsyncLifetime
         {
             closed.TrySetResult(wasClean);
         };
-        await Task.Delay(100, Cancelled);
+        await sent;
         await _transport.Stop();
         await Assert.ThrowsAsync<DisconnectException>(() =>
         {
@@ -294,9 +318,10 @@ public sealed class WebSocketClientTests : IAsyncLifetime
     {
         // only this side's router hears the transport's reconnect through its interface, the
         // transport's own name being the method's: this pins that the two meet
+        var sent = RequestSent();
         var slow = RequesterOf("slow")(JsonOf("{\"milliseconds\":3600000}"))();
 
-        await Task.Delay(100, Cancelled);
+        await sent;
         await _client.Reconnect().WaitAsync(Patience, Cancelled);
 
         Assert.Equal("the connection was replaced before the answer", (await Assert.ThrowsAsync<DisconnectException>(() =>
