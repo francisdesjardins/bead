@@ -14,6 +14,7 @@ import type { DescriptorProto, FieldDescriptorProto } from '@bufbuild/protobuf/w
 
 import { diagnosticOf, type IDiagnostic } from '../diagnostics.ts';
 import type { RuleName } from '../rules.ts';
+import { NAMESPACE } from '../targets/csharp/options.ts';
 import { classNamesOf, csharpNamespaceOf } from '../targets/names.ts';
 import { enumNamed, messageNamed, PAYLOAD_TYPES } from './blueprint-of.ts';
 import { pathOf, positionOf } from './comments.ts';
@@ -33,6 +34,9 @@ import {
 // the fields of descriptor.proto a file's and a message's declarations are under, by their numbers
 const FILE_MESSAGE_TYPE = 4;
 const FILE_EXTENSION = 7;
+const FILE_OPTIONS = 8;
+// FileOptions' csharp_namespace
+const OPTIONS_CSHARP_NAMESPACE = 37;
 const MESSAGE_FIELD = 2;
 const MESSAGE_NESTED_TYPE = 3;
 const MESSAGE_EXTENSION = 6;
@@ -154,6 +158,22 @@ export const checkProto = (input: IProtoInput): IDiagnostic[] => {
     const desc: DescFile = file.desc;
     const fileOptions = fileOptionsOf(desc);
     const namespace = csharpNamespaceOf(desc.proto.package, desc.proto.options?.csharpNamespace);
+    const csharpNamespace = desc.proto.options?.csharpNamespace;
+
+    // ! the C# target writes it as it is, `namespace <it>;`: anything but identifiers by dots would
+    // be code of the .proto's author in every consumer's build, which protoc's own C# writes alike
+    if (
+      csharpNamespace !== undefined &&
+      csharpNamespace !== '' &&
+      !NAMESPACE.test(csharpNamespace)
+    ) {
+      report('CSHARP_NAMESPACE', {
+        file,
+        path: [FILE_OPTIONS, OPTIONS_CSHARP_NAMESPACE],
+        message: `csharp_namespace ${JSON.stringify(csharpNamespace)} is no C# namespace: identifiers of ASCII letters, digits and _, by dots`,
+      });
+    }
+
     // the full name a top-level declaration's type is under, as a field's type names it
     const packageScope = desc.proto.package === '' ? '' : `.${desc.proto.package}`;
 

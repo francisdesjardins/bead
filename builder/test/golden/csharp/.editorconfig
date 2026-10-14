@@ -83,6 +83,18 @@ dotnet_naming_style.pascal.capitalization = pascal_case
 # the naming rules above, held by the build as `dotnet format` holds them
 dotnet_diagnostic.IDE1006.severity = warning
 
+# ! an async lambda where a void delegate goes, an event's listener among them, is an async void:
+# its exception ends the process. VSTHRD100 and VSTHRD101 hold it; of the threading analyzers' other
+# rules, four read this side's design as a fault and are off: VSTHRD002, a task's result read once
+# it completed; VSTHRD003 and VSTHRD110, a task the router posts to its scheduler and a test awaits
+# from elsewhere; VSTHRD200, an `Async` suffix the surface does not take (0007)
+dotnet_diagnostic.VSTHRD100.severity = warning
+dotnet_diagnostic.VSTHRD101.severity = warning
+dotnet_diagnostic.VSTHRD002.severity = none
+dotnet_diagnostic.VSTHRD003.severity = none
+dotnet_diagnostic.VSTHRD110.severity = none
+dotnet_diagnostic.VSTHRD200.severity = none
+
 # tests name what they show, in words: xUnit's test methods are the one place underscores read best
 [tests/**.cs]
 dotnet_diagnostic.CA1707.severity = none

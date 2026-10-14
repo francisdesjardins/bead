@@ -60,6 +60,7 @@ export const RULES = Object.freeze({
   FAILURES_ENUM: { level: Level.PROTO, severity: Severity.ERROR },
   PAYLOAD_TYPE_FIELD: { level: Level.PROTO, severity: Severity.ERROR },
   OPTIONS_COPY: { level: Level.PROTO, severity: Severity.ERROR },
+  CSHARP_NAMESPACE: { level: Level.PROTO, severity: Severity.ERROR },
   // on both
   ADMISSION_EMPTY: { level: Level.BOTH, severity: Severity.ERROR },
   // on any blueprint, in their order: its JSON, its format, its features, its schema
