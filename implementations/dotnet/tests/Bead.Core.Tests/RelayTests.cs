@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -618,6 +620,10 @@ public sealed class RelayTests
     }
 
     [Fact]
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD103:Call async methods when in an async method",
+        Justification = "leg A's signal is cancelled while leg B's call is in flight, its callbacks run before the call settles; CancelAsync would run them later")]
     public async Task Answers_nothing_once_leg_A_ended_leg_B_cancelled_by_the_same_signal_rejects()
     {
         var test = new TestRelay();

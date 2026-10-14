@@ -102,6 +102,7 @@ share.
   lends leg B's session to every requester in a session at the relay, at every destination: it
   reads none, so a requester in any session acts at every destination with leg B's rights, as a
   deputy that lends its own authority (CWE-441).
+
 - **The client's router** presents its `Credential` on every call that gives none of its own. A
   default is withdrawn once a call that presented it is refused `SESSION_REQUIRED`, whatever relays
   the refusal crossed: `CredentialWithdrawn` tells the application its scheme alone, never its
@@ -122,6 +123,7 @@ share.
       client.Router.Credential = Credential.Jwt(renewed);
   };
   ```
+
 - **HTTP's transport** sets the shared behaviour where Kestrel's defaults would differ: no body
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
   503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`,
@@ -277,7 +279,10 @@ which no router forwards to its own. A server gives its transport as `IServerTra
 carries `Error` and `Refusal` alike, so an application hears both through `server.Transport`,
 whichever transport it built, beside its router's; a client's, through the client transport it
 built. An `async` lambda given to one of its events is `async void`, whose exception ends the
-process, so a listener catches its own.
+process, so a listener catches its own. The threading analyzers'
+[VSTHRD101](https://microsoft.github.io/vs-threading/analyzers/VSTHRD101.html) says where one is
+given, at build: Bead's own projects hold it, and an application's may, by
+`Microsoft.VisualStudio.Threading.Analyzers`.
 
 ```csharp
 server.Router.Error += (reason, connectionHandle) =>

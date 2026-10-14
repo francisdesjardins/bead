@@ -60,7 +60,11 @@ build, a documentation file, and `TreatWarningsAsErrors`. **Every public member 
 comment**: the build fails on one that has none (CS1591). A test project is exempt, and so are
 underscores in a test's name (CA1707): a test says what it shows by its name. An analyzer is
 overruled only on the type it would wrongly refuse, with its reason where it stands: CA1711, on
-`EnvelopeFlags` ([0003](0003-one-word-one-meaning.md)).
+`EnvelopeFlags` ([0003](0003-one-word-one-meaning.md)). **No `async void`**: the threading analyzers'
+VSTHRD100 and VSTHRD101 fail the build on one, an `async` lambda given to an event among them,
+whose exception ends the process; their rules that read this side's design as a fault — a result
+read once its task completed, a task posted to the router's scheduler, an `Async` suffix — are
+off, each with its reason, in `.editorconfig`.
 
 **One solution, `Bead.slnx`**, laid out as the C# side's
 [README](../../implementations/dotnet/README.md) says: a transport that needs a framework has a
