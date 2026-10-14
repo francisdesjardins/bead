@@ -29,8 +29,8 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and next a
-topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, from
+0.6.0, a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -63,14 +63,19 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
 own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: a penetration test of Bead's servers, before 0.5.0.
-- **0.5.0**: a topic-based publish/subscribe broker as one more transport, one core and one
+- **Next**: the bounds a server keeps against a peer that holds it — the calls a peer holds open
+  over a WebSocket or a Web Worker (spec 8.3), a WebSocket server's connections, what a WebSocket
+  server queues for a client that no longer reads, a request whose headers or body trickle in — and
+  a security event for a credential refused, each by a decision of its own; then each side's
+  parsers fuzzed, guided by coverage, Jazzer.js on the TypeScript side and SharpFuzz on the C#
+  side, both held to read one corpus alike, a short run in CI.
+- **0.6.0**: a topic-based publish/subscribe broker as one more transport, one core and one
   adapter a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
   latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names.
+  [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -401,18 +406,31 @@ git commit -am "chore(release): 0.2.0, dated"   # only if it changed something
 # wait for ci-ok on release/0.2.0
 git flow release finish --keepremote 0.2.0     # without -p: origin's branch goes with the push
 node tools/release.mjs tag                     # spec-v… and debugging-v… at v0.2.0, then the gate on develop
+git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/ci.yml   # only if tag took one out
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 ```
 
 Before `prepare`, the release moves by hand the three digests beadc's image and its lint pin: the
 Dockerfile frontend's and the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's
 image in `ci.yml`, each to its tag's current digest; CI then builds and tests the image on them.
-`prepare` lists what else the release owes by hand: each `--except` of CI's `beadc breaking` step,
-which the release makes moot and develop drops once its tag is pushed, and each of
+`prepare` lists what else the release owes by hand: the CHANGELOG's line, under the release, that
+tells a document's new version and its tag, the spec's or its companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
-moves to that record's table.
+moves to that record's table; and the documents brought to the release by the
+`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)).
 
-A document whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
+A waiver of CI's `beadc breaking` step, an `--except`, holds until the release that carries its
+change is the one the step compares against: the release's own commit is still compared with the
+release before it, so `prepare` leaves the waivers be on a release branch, and on a hotfix, which
+starts from `main`, takes every one out of the step, each moot since the release `main` holds.
+After the finish, `tag` takes out of the step on the branch checked out, `develop` at its
+back-merge, each waiver the tagged commit carries, and prints the commit that keeps that, made
+before the push.
+
+While the product's major is 0, a release that breaks what a consumer calls, reads or builds moves
+its minor, and a release of fixes alone its patch
+([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)). A document
+whose files changed takes `--spec` or `--debugging`: `minor` when an implementation must
 change to keep passing, `patch` when a conforming one passes unchanged, and `minor` at least when a
 file, a key or a property was added
 ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)). Nothing is
@@ -425,9 +443,12 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 [`ci.yml`](.github/workflows/ci.yml) runs every job on every push and pull request, on pinned
 runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
 (regenerate, then diff, then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9
-(install, check, test, the demo's static build, and the root's files under the same formatter),
-`dotnet` (format, build, the builder's C# goldens among its projects, test, the interop both ways
-with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium against both HTTP servers),
+(install, check, test, under coverage on Node 26, held to the side's floor, the demo's static
+build, the DevTools extension built and, on Node 26, tested in Chromium, and the root's files under
+the same formatter), `dotnet` (every C# package audited by NuGetAudit as it restores, format,
+build, the builder's C# goldens among its projects, test under coverage, held to the side's floor,
+the interop both ways with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium
+against both HTTP servers),
 `builder` (install, protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and
 `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
@@ -444,8 +465,10 @@ buf's lint and layout over its `.proto`; each half's gates and both its builds; 
 against each server, both modes of each half, sixteen pairs), `protobuf-conformance` (protobuf's
 conformance suite, its runner by its pin's sha512, through each side's generated `proto` codec, each
 held to its failure list and the floor, the C# testee's format, then one corpus of `Probe` through
-both sides), and `commits` (the subjects, the links, the versions, then the root's tools' own
-tests).
+both sides), and `commits` (the subjects, the links, the versions, the root's tools' own tests,
+then the supply chain: every action pinned by its commit's full sha, OSV-Scanner over every
+lockfile, and Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, each
+scanner at its digest).
 `ci-ok` needs them all, so one check stands for every job; branch protection, which would make it
 the one check a branch requires, waits on GitHub Pro or a public repository.
 

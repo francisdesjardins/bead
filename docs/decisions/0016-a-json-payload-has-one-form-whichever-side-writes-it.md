@@ -136,7 +136,7 @@ reader refuses besides what is not JSON. Each item, with what each platform does
   `JsonDocument.Parse` takes it and `GetString` throws `InvalidOperationException`; with
   `AllowDuplicateProperties = false`, a name holding one throws `InvalidOperationException` from the
   parse itself, not `JsonException`, which the JWT verifier catches (`JwtVerifier.cs`).
-- **A noncharacter**, U+FFFF and the 65 others: RFC 7493 §2.1 says a string MUST NOT hold one ;
+- **A noncharacter**, U+FFFF and the 65 others: RFC 7493 §2.1 says a string MUST NOT hold one;
   Unicode's Corrigendum #9 (2013) says one may be interchanged, and the RFC came after it. Neither
   platform's reader refuses one, nor spec 13.8's, nor a `text` payload (17.4) — but `JSON.parse`
   refuses no name given twice either, and this record refuses it: what a platform takes is no reason
@@ -154,7 +154,7 @@ reader refuses besides what is not JSON. Each item, with what each platform does
   a C side parses on a stack it sizes as it is built. **Chosen: 64**, the bound .NET's reader holds
   by default, refused before anything deeper is built: the TypeScript reader counts the depth over
   the decoded text before `JSON.parse`, its strings skipped and every loop bounded by the text's
-  length, and refuses the 16 MiB in 2.6 to 3.1 ms, with no heap taken .
+  length, and refuses the 16 MiB in 2.6 to 3.1 ms, with no heap taken.
 - **A number past a double**: RFC 7493 §2.2 says a sender SHOULD NOT write one. `JSON.parse` reads
   `1E400` as `Infinity`, which `JSON.stringify` then writes `null`; `JsonDocument` keeps its text,
   and `GetDouble` gives `Infinity`. **Refused**: no double holds it.

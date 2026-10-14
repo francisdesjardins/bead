@@ -69,7 +69,11 @@ exchanges from the Network panel's entries, decoding what their bodies carry wit
 codec. What every browser shares — the hook, the panel with its model and its views, the readers,
 the messages — asks of the browser only what the panel's host names; Chrome's glue is in
 `devtools/chrome/`, its manifest, its bridge, its background, its DevTools page and the host made of
-its API, and another browser's extension brings its own glue beside it.
+its API, and another browser's extension brings its own glue beside it. The hook and the bridge
+post to the page's own window at its own origin, `postMessage(…, '/')`, an opaque one included, and
+never to `'*'`, which would reach a document the window navigated to: HTML's `postMessage` delivers
+a message only to a window whose origin is its target origin
+([HTML §9.3.3](https://html.spec.whatwg.org/multipage/web-messaging.html#posting-messages)).
 
 **It is tested apart from the package, in two projects of its own**: its pure modules in Node, the
 panel's model among them; and, in Chromium, the extension loaded against the demo's static build,

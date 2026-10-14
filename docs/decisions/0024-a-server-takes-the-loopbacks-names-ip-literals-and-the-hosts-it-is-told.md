@@ -9,8 +9,7 @@
   the host's place in 15.2's order; the address a server listens on by default, `localhost`, both
   loopbacks, its form, which 13.4's server half reads, and what it reports; the TypeScript HTTP
   transport's `createServer`, called once per address bound; the C# clients' race of a name's
-  address families. What `origins`
-  takes, and a client's loopback (13.4), are
+  address families. What `origins` takes, and a client's loopback (13.4), are
   [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; a connection's handle is
   [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)'s; the refusal a
   server tells, and a request's fields,
@@ -282,9 +281,9 @@ certificate rotated, an SNI context added, a timeout, a `tlsClientError` listene
 application that keeps "the" server would reach one family. The C# side binds `IPAddress.Loopback`
 and `IPAddress.IPv6Loopback` itself in one Kestrel application, its port drawn by a socket when
 `FindOpenPort`, its fallback by rebuilding the application on `127.0.0.1` alone; never
-`ListenLocalhost`. The shared listener that couples transports, once it comes, binds the pair once
-for those it serves, by this rule. The address keeps the network out, and `hosts` a page on the
-server's own machine that rebinds its name to the loopback, which the address cannot; neither
+`ListenLocalhost`. A listener that couples transports, should a decision ever bring one, binds the
+pair once for those it serves, by this rule. The address keeps the network out, and `hosts` a page
+on the server's own machine that rebinds its name to the loopback, which the address cannot; neither
 stands for the other. A server the network reaches is one its application opened, `0.0.0.0` or
 `::`, and names its hosts.
 
@@ -338,7 +337,7 @@ writes none (spec 15.2, 15.5). The residual of a `.localhost` name a user agent 
 resolver that does not keep it local stays, stated in 15.12.
 
 **A container, or any server another machine reaches, says `0.0.0.0` or `::`**, and names its hosts:
-a container's loopback is its own, which a published port never reaches. A deployment that relied on
+a container's loopback is its own, which a published port never reaches. A deployment that relies on
 listening on every interface without saying it meets a refused or reset connection from outside,
 never a Bead refusal, since no socket opens: both READMEs say it where they say how to start a
 server.

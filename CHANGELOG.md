@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-14
+
 ### Added
 
 - `beadc check` refuses, `CSHARP_NAMESPACE`, a `csharp_namespace` that is no C# namespace,
@@ -39,6 +41,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.6.0 (`spec-v0.6.0`), and its companion, `spec/debugging.md`, to 0.2.1
+  (`debugging-v0.2.1`).
 - `beadc breaking` refuses a bare waiver of a breaking rule, `--except PROCEDURE_SAME_NAME`, and of
   buf's, `--except buf:FIELD_SAME_TYPE`, exit 2, naming the subject's form or a path: kept in a CI,
   it would waive a later change's finding too. A waiver names its subject or its `.proto` path, as
@@ -55,9 +59,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection's close awaits `CancelAsync`, and the C# README names the analyzer for an
   application's own listeners.
 - A client transport's `carriesCredential` is `carries(credential)`, `Carries`, on both sides: a
-  WebSocket carries the bytes its upgrade carried alone, compared in constant time, and a call
-  presenting `ELSEWHERE` with no bytes beside it fails before it goes, `DESTINATION_UNREACHABLE`,
-  over HTTP too (spec 13.4). A client refuses a credential with a space or a tab first or last,
+  WebSocket carries the bytes its upgrade carried alone, compared in constant time. A client refuses a credential with a space or a tab first or last,
   which no field value holds (spec 15.5). The TypeScript WebSocket server's `connection` event shows
   the upgrade headers aside, as the HTTP server's shows a connect (decision 0032).
 - A server given no address listens on `localhost`, both loopbacks, `127.0.0.1` and `::1` on one
@@ -79,11 +81,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   other than a refusal, carries no detail of that error, never an exception's message, which is
   reported; `PROCEDURE_FAILED` so answered carries none, as OWASP ASVS 5.0's 16.5.1 returns a
   generic message to the consumer of an unexpected error (spec 9.0; decision 0001).
+- The documents are brought to 0.5.0: the records, the spec in form alone, the READMEs and the
+  support matrix state what it carries as what holds, and what is ahead, the bounds a server keeps
+  against a peer, a security event for a refused credential and the parsers fuzzed, where Bead goes;
+  the broker as a transport moves to 0.6.0. No record changes its number or its file.
 
 ### Fixed
 
-- The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one and
-  both HTTP clients: a 3xx fails its connect, its status named (spec 15.6; decision 0032).
+- The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one does:
+  a 3xx fails its connect, its status named (spec 15.6; decision 0032).
 - The TypeScript side puts nothing of an error its envelope codec throws, other than a refusal, in
   the failure it answers: the exception's message, which a peer's bytes could reach, is reported,
   never sent (spec 9.0).
@@ -1339,7 +1345,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.1...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.5.0...develop
+[0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0

@@ -60,9 +60,10 @@ that reaches it by `localhost` on the family it tries first (spec 15.12). `127.0
 on the port given or one drawn there, then `::1` on that port; a port another socket holds on either
 fails the start, and a drawn one is drawn again, eight times at most. Where the IPv6 loopback is
 absent — a container with IPv6 off — it listens on `127.0.0.1` alone and reports `127.0.0.1`, its
-`address` and its `start`'s, where Kestrel would say `localhost`. An `address` given is an IP
-address written bare, as RFC 3986 writes one, which it listens on alone: a container, or any server
-another machine reaches, says `0.0.0.0` or `::`, and names its hosts. Any other name — `LOCALHOST`,
+`address` and its `start`'s, where Kestrel would say `localhost`. An `address` given is
+`localhost`, both loopbacks as above, or an IP address written bare, as RFC 3986 writes one, which
+it listens on alone: a container, or any server another machine reaches, says `0.0.0.0` or `::`,
+and names its hosts. Any other name — `LOCALHOST`,
 `localhost.`, `a.localhost` — `[::1]`, `127.1` or `0` fails the start, a `ProgrammerError`. On the
 loopback it is secure (spec 13.4); behind a proxy on the same machine that serves the network in the
 clear, it says `secure: false`. A client that connects by `localhost` reaches it whichever family it
@@ -276,7 +277,7 @@ far a request went:
 | 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                      |
 | 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                        |
 | 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                |
-| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, or its admission threw                                                                                                                            |
+| 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries         |
 | 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                    |
 
 A requester catches a `FailureError`: `isProtocol(codes, side?)` for the protocol's codes,
