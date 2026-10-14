@@ -75,11 +75,13 @@ not hold:
   and polls deadlines on a 1 kHz loop
   ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
-Ahead besides, each by a decision of its own that meets the Tenth Man: a hop bound for proxies
-whose address a deployment cannot name, and the rest
-[0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md) names; and a
-bound of the protocol's on the calls a peer holds open over a transport that keeps its connection,
-a WebSocket or a Web Worker (spec 8.3).
+Ahead besides, each by a decision of its own that meets the Tenth Man: what
+[0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md) names, from
+`Forwarded` to a per-address value fit for a NAT; a hook that verifies a WebSocket's credential at
+its upgrade, and a credential replaced in place on a live connection
+([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)); and
+a bound of the protocol's on the calls a peer holds open over a transport that keeps its
+connection, a WebSocket or a Web Worker (spec 8.3).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
@@ -112,15 +114,16 @@ table.
 
 ### Transports and relays
 
-| #                                                                                                 | Decision                                                                                             | Status   |
-| ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                                                      | A listen held is not silence, and a connection without a session is its server's                     | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                            | A relay terminates each leg between two transports, and routes nothing past it                       | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                            | accepted |
-| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own | accepted |
-| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began          | accepted |
-| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                    | A transport draws each connection's handle, and gives none twice                                     | accepted |
-| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL             | accepted |
+| #                                                                                                 | Decision                                                                                                                          | Status   |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                      | A listen held is not silence, and a connection without a session is its server's                                                  | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                            | A relay terminates each leg between two transports, and routes nothing past it                                                    | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                                                         | accepted |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                              | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began                                       | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                    | A transport draws each connection's handle, and gives none twice                                                                  | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                          | accepted |
+| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)     | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, and a client follows no redirect | accepted |
 
 ### A server's edge
 
@@ -129,7 +132,7 @@ table.
 | [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)   | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority | accepted |
 | [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII             | accepted |
 | [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)       | An HTTP server answers CORS to the origins it names, and to no other                                                                    | accepted |
-| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)         | A server believes `X-Forwarded-For` from the proxies it names alone                                                                     | accepted |
+| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)    | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                     | accepted |
 
 ### Time
 
@@ -164,7 +167,7 @@ table.
 
 ## Writing one
 
-The next decision is 0032. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0033. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

@@ -70,9 +70,7 @@ own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
   latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names; and a hop bound for proxies whose
-  address a deployment cannot name
-  ([0030](docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)).
+  [the index](docs/decisions/README.md#where-bead-goes) names.
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports

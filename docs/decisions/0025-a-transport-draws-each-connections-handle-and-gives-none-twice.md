@@ -61,7 +61,7 @@ The options weighed:
 **A server's transport draws each connection's handle as it takes it, and gives none twice** (spec
 15.1): no two connections it holds are one, and its bounds, its gauges and its stop reach each. A
 WebSocket server's handle is `type=WS;ip=…;port=…;ordinal=n`: the client's address, as 15.12 reads
-it ([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md)), and its
+it ([0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)), and its
 socket's peer port, kept for a reader of a trace, and the rank the transport took the connection at,
 counted per transport from 1 and never reset, a stop and a start included. It is drawn once the
 connection is taken, after the check for a socket already gone and, on the C# side, after the

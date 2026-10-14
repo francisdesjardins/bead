@@ -42,7 +42,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0023](../docs/decisions/0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md):
   a transport's listener that throws, and its stop, section 15;
 - [0024](../docs/decisions/0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md):
-  a server's hosts, and a request's authority, section 15;
+  a server's hosts, the address it listens on, and a request's authority, section 15;
 - [0025](../docs/decisions/0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md): a
   connection's handle, section 15;
 - [0026](../docs/decisions/0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md):
@@ -53,10 +53,12 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   a `proto` payload's records, read against its message before its library, section 17.9;
 - [0029](../docs/decisions/0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md): a
   listen's cursor and wait in fields, section 15.9;
-- [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-alone.md):
-  a client's address behind the proxies a server names, section 15.12;
+- [0030](../docs/decisions/0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md):
+  a client's address behind the proxies a server names and those it counts, section 15.12;
 - [0031](../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md):
-  the `proto` encoding, section 17.9.
+  the `proto` encoding, section 17.9;
+- [0032](../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md):
+  a WebSocket upgrade's credential, and a client that follows no redirect, section 15.
 
 **Version: 0.5.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,

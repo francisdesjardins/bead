@@ -23,6 +23,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or where nothing was measured, and writes the report into the run's summary. A floor sits half a
   point under what was measured and rises with `--raise`, never down but by a decision (decision
   0006). The C# side is measured over the whole solution, its six test projects.
+- A WebSocket upgrade that carries no `Origin` carries its `Authorization` beside every envelope
+  of its connection, which a request presenting `ELSEWHERE` stands for, resolved per request by the
+  verifier as over HTTP; one that carries an `Origin` carries none, a page's browser writing its own
+  authentication on it. A client writes the credential its connect is given, `credential` or
+  `credentialProvider`, `Credential` or `CredentialProvider`, a string or a provider called at each
+  attempt, a reconnection's included; it is refused over a URL in the clear off the loopback and, on
+  the TypeScript side, over a `WebSocket` constructor without `ws`'s shape; and an upgrade with two
+  `Authorization` fields is refused 400 (spec 15.2; decision 0032).
+- A server counts the proxies on every path to it that `trustedProxies` does not name,
+  `unnamedProxies`, `UnnamedProxies`, 0 to 8, over HTTP and over WebSocket: one whose address the
+  list holds costs none, any other one of the count, so a router whose addresses its platform does
+  not publish is passed, and a count past 8 is refused as built; a platform that publishes its
+  ranges is named in the list (spec 15.12; decision 0030).
 
 ### Changed
 
@@ -41,11 +54,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `async void`, an `async` lambda given to an event among them, fails the build. The WebSocket
   connection's close awaits `CancelAsync`, and the C# README names the analyzer for an
   application's own listeners.
+- A client transport's `carriesCredential` is `carries(credential)`, `Carries`, on both sides: a
+  WebSocket carries the bytes its upgrade carried alone, compared in constant time, and a call
+  presenting `ELSEWHERE` with no bytes beside it fails before it goes, `DESTINATION_UNREACHABLE`,
+  over HTTP too (spec 13.4). A client refuses a credential with a space or a tab first or last,
+  which no field value holds (spec 15.5). The TypeScript WebSocket server's `connection` event shows
+  the upgrade headers aside, as the HTTP server's shows a connect (decision 0032).
+- A server given no address listens on `localhost`, both loopbacks, `127.0.0.1` and `::1` on one
+  port, as Kestrel's `ListenLocalhost`: no other process can answer a client that reaches it by
+  `localhost` on the other family. `localhost` is the one name an address takes; a port taken on
+  either family fails the start, a drawn one is drawn again; where the IPv6 loopback is absent it
+  listens on `127.0.0.1` and reports it (spec 15.12; decision 0024).
+- The TypeScript HTTP transport's `createServer` is called once per address bound, told it as
+  `{ address }`: an application that configures its server after building it configures each.
+- Decision 0030 is renamed for the count it holds, "A server believes `X-Forwarded-For` from the
+  proxies it names and as many unnamed ones as it counts", its file with it; every citation moves.
 
 ### Fixed
 
 - The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one and
-  both HTTP clients: a 3xx fails its connect, its status named (spec 15.6).
+  both HTTP clients: a 3xx fails its connect, its status named (spec 15.6; decision 0032).
 
 ## [0.4.1] - 2026-10-13
 
