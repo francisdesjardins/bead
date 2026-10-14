@@ -1,6 +1,6 @@
 {
   "name": "@francisdesjardins/beadc",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "beadc, Bead's builder: compiles a .proto with buf into a blueprint, bead-blueprint/1, and checks a .proto or a blueprint by rule name.",
   "license": "Apache-2.0",

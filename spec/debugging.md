@@ -18,7 +18,7 @@ hold what of them a test can. The why of each rule is in the decisions:
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3).
 
-**Version: 0.2.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.2.1**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the

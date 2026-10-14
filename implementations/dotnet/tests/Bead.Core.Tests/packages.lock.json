@@ -180,7 +180,7 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.4.1, )"
+          "Bead.Core": "[0.5.0, )"
         }
       },
       "bead.protobuf": {

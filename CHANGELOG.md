@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-14
+
 ### Added
 
 - `beadc check` refuses, `CSHARP_NAMESPACE`, a `csharp_namespace` that is no C# namespace,
@@ -39,6 +41,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.6.0 (`spec-v0.6.0`), and its companion, `spec/debugging.md`, to 0.2.1
+  (`debugging-v0.2.1`).
 - `beadc breaking` refuses a bare waiver of a breaking rule, `--except PROCEDURE_SAME_NAME`, and of
   buf's, `--except buf:FIELD_SAME_TYPE`, exit 2, naming the subject's form or a path: kept in a CI,
   it would waive a later change's finding too. A waiver names its subject or its `.proto` path, as
@@ -1339,7 +1343,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.4.1...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.5.0...develop
+[0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/francisdesjardins/bead/compare/v0.2.0...v0.3.0
