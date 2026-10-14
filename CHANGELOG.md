@@ -9,6 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `beadc check` refuses, `CSHARP_NAMESPACE`, a `csharp_namespace` that is no C# namespace,
+  identifiers of ASCII letters, digits and `_` by dots: the C# target writes it as it is, so
+  anything else would be code of the `.proto`'s author in every consumer's build.
+
 - Each side's tests run under coverage in CI, and what they run, lines and branches each, holds the
   side's floor in `tools/coverage-floors.json`: `tools/coverage-report.mjs --floor` fails under it,
   or where nothing was measured, and writes the report into the run's summary. A floor sits half a
