@@ -84,6 +84,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The C# WebSocket client follows no redirect answered to its upgrade, as the TypeScript one and
   both HTTP clients: a 3xx fails its connect, its status named (spec 15.6; decision 0032).
+- The TypeScript side puts nothing of an error its envelope codec throws, other than a refusal, in
+  the failure it answers: the exception's message, which a peer's bytes could reach, is reported,
+  never sent (spec 9.0).
+- The C# side answers a request its envelope codec throws on, other than a refusal,
+  `ENVELOPE_MALFORMED` with no detail, where it answered nothing and the call waited out its
+  timeout; such an error, at the prefix or past it, is reported once, with its connection
+  (spec 9.0).
 
 ## [0.4.1] - 2026-10-13
 
