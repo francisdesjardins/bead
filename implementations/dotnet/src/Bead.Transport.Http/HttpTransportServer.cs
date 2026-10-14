@@ -695,16 +695,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         return values.Count == 0 ? null : values.ToString();
     }
 
-    // the credential a request's Authorization carries: its value whole, without the spaces and tabs
-    // around it (RFC 9110 §5.5); none when nothing is left
-    private static string? CredentialOf(HttpRequest request)
-    {
-        var values = request.Headers.Authorization;
-        var value = values.Count == 0 ? "" : (values[0] ?? "").Trim(' ', '\t');
-
-        return value.Length == 0 ? null : value;
-    }
-
     // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or
     // more, its parameters ignored (RFC 9651 §2.3), its lines joined, so two lines never parse.
     // Absent, it is 0, or none where it is required; anything else is none
@@ -1449,7 +1439,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         }
 
         // a request is handed on with the credential its exchange carried; no other envelope is
-        _listeners.Tell(Message, (new TransportMessage(envelope, false) { Credential = CredentialOf(context.Request) }, connection.ConnectionHandle));
+        _listeners.Tell(Message, (new TransportMessage(envelope, false) { Credential = HostsAndOrigins.CredentialOf(context.Request.Headers.Authorization) }, connection.ConnectionHandle));
 
         bool isWaiting;
 

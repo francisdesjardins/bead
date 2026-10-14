@@ -701,12 +701,13 @@ the session it learned standing for its connection's.
 
 A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
-credential stays. It does so for a call that presents `ELSEWHERE` over a transport that carries no
-credential beside an envelope — a WebSocket (section 15.2), a Web Worker, whose messages carry an
-envelope alone, a server's over HTTP (section 15.9) — and for one that presents a `JWT` or an
-`ELSEWHERE` over a transport that leaves the machine in the clear, since a bearer credential crosses
-only TLS off the machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A
-transport is judged by what it is given, never by what a name resolves to. It is secure under TLS,
+credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry
+the credential it presents — a WebSocket whose upgrade carried other bytes, or none (section 15.2),
+a Web Worker, whose messages carry an envelope alone, a server's over HTTP or over a WebSocket
+(sections 15.9, 15.2) — and for one that presents a `JWT` or an `ELSEWHERE` over a transport that
+leaves the machine in the clear, since a bearer credential crosses only TLS off the machine
+([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged by
+what it is given, never by what a name resolves to. It is secure under TLS,
 its scheme `wss` or `https`; on the loopback: a client by the host it names in its URL — `localhost`
 or a name that ends in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8,
 or the IPv6 loopback, `[::1]` in a URL — as the
@@ -952,11 +953,11 @@ transfer of its own when it needs one. Leg B's request names no destination, so 
 chain, and no loop can form. A relay forwards a bearer credential, and its destination verifies it:
 leg B's request presents what leg A's does, by its credential scheme, as section 14.3 lets it.
 
-| Leg A presents | The relay                                                                                                                         | Leg B presents                                                         |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session (section 14.3, step 1) | none: it runs in leg B's session at the destination (section 14.7)     |
-| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies                         | the same bytes                                                         |
-| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries one                                | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
+| Leg A presents | The relay                                                                                                                                                                                            | Leg B presents                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| none, `OPAQUE` | refuses it by default; where its admission takes leg A's connection's session, resolves it to that session (section 14.3, step 1)                                                                    | none: it runs in leg B's session at the destination (section 14.7)     |
+| `JWT`          | forwards it to a destination whose audience its `aud` names, read without verifying it unless it verifies                                                                                            | the same bytes                                                         |
+| `ELSEWHERE`    | forwards it to a destination registered with an audience, over a leg B whose transport carries it, as section 13.4 judges a client's: an HTTP leg B, never a WebSocket whose upgrade carried another | `ELSEWHERE`, leg A's credential moved to leg B's transport, as it came |
 
 A call that presents a credential never runs in leg B's session in place of its own. What leg A's
 transport carried beside a call that presents anything but `ELSEWHERE` stays at the relay.
@@ -1012,7 +1013,8 @@ resolving as section 9.2 says:
    audience its `aud` does not name — read as section 13.8's step 11 reads it, without verifying
    the token; with `verifies`, the `aud` verified at step 1 — or to a destination registered with
    none; an `ELSEWHERE` to a destination registered with no audience, or over a leg B whose
-   transport carries no credential beside an envelope (section 15.1); a `JWT` or an `ELSEWHERE`
+   transport cannot carry it (section 13.4): a WebSocket's, whose upgrade carried the relay's own
+   credential or none, never leg A's; a `JWT` or an `ELSEWHERE`
    over a leg B that reaches off the machine in the clear, neither over TLS — `wss`, `https` — nor
    within the machine — the loopback, a Web Worker, a router called in process — since a bearer
    credential crosses only TLS off the machine
@@ -1101,24 +1103,47 @@ it hands the router what it carried with an envelope it took, and carries what t
 with one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2,
 step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header
 says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's
-`POST` (section 15.5); over a WebSocket, none (section 15.2). A transport says whether it carries a
-credential beside an envelope it sends, and whether it is secure — under TLS, on the loopback, or
-never leaving the machine — so that a side fails before it goes a call whose credential it cannot
-carry (section 13.4). No failure's detail, event, trace or log carries that credential, nor a
-header's: only its credential scheme.
+`POST` (section 15.5), each request's own; over a WebSocket, the `Authorization` field of an upgrade
+that carries no `Origin`, one for every envelope of the connection, toward its server alone (section
+15.2). A transport says whether it carries the credential a call presents beside an envelope it
+sends — a client's over HTTP any field value, over a WebSocket the one its upgrade carried,
+compared in constant time; a Web Worker's none, nor a server's toward its client (sections 15.2,
+15.9) — and whether it is secure — under TLS, on the loopback, or never leaving the machine — so
+that a side fails before it goes a call whose credential it cannot carry (section 13.4). No
+failure's detail, event, trace or log carries that credential, nor a header's: only its credential
+scheme.
 
 ### WebSocket
 
 15.2. Each envelope is one binary message ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)), and
 each binary message one envelope. A text message is no envelope: the receiver reports it as
-`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket carries no
-credential beside an envelope, either way: a request that presents `ELSEWHERE` on one is refused
-`SESSION_REQUIRED` (section 9.2, step 5), and a side fails a call that would present it over one
-before it goes, `DESTINATION_UNREACHABLE`. Nor does its upgrade: what the opening handshake carried,
-its `Authorization` among it, is no credential beside an envelope, and never stands for `ELSEWHERE`.
-A client writes no `Origin` on its upgrade: a page's browser writes its own, which the server judges
-(step 7). A server judges a request at its WebSocket's address in this order, and answers the first
-that applies:
+`ENVELOPE_MALFORMED`, and answers nothing. No subprotocol is required. A WebSocket upgrade that
+carries no `Origin` carries one credential, toward its server alone: its `Authorization` field
+([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2),
+[RFC 6455 §10.5](https://www.rfc-editor.org/rfc/rfc6455#section-10.5)), as it came, whole — its
+auth-scheme included — its surrounding whitespace removed, none when the field is empty or absent.
+An upgrade that carries an `Origin` carries none, whatever its `Authorization`: it comes from a
+page, whose browser writes its own authentication on it as it sends its cookies
+([Fetch](https://fetch.spec.whatwg.org/#http-network-or-cache-fetch), credentials mode `include`),
+so that a page of any origin the server takes would present its user's credential; a page presents
+a `JWT`. The server hands the credential to the router beside every envelope of that connection, as
+an HTTP server hands a `POST`'s beside its request (section 15.5): a request presenting `ELSEWHERE`
+stands for it, resolved once per request (section 13.11), so a credential that no longer holds, or
+whose end has come, is refused on the request that presents it, and the connection stays; a
+request that presents none, `OPAQUE` or a `JWT` resolves as its header says (section 15.1). One
+connection carries one credential: a client presents another by connecting again, or presents a
+`JWT`, which its envelope carries and a renewal moves without a new connection (section 13.10). An
+HTTP connection carries a credential per `POST`, so its connect's is read by no one (section 15.5);
+a WebSocket carries one per connection, so its upgrade's is the one read. Nothing is carried toward
+a client: a server's command that presents `ELSEWHERE` over a WebSocket fails before it goes,
+`DESTINATION_UNREACHABLE`. A client writes on each upgrade the credential it is given for it, as
+given, and none otherwise; it fails that upgrade before it goes for one that is no field value, as
+section 15.5 says, and for one over a WebSocket that leaves the machine in the clear (section
+13.4), its upgrade being where it would cross. No server reads a credential from its target's
+query, which logs keep ([RFC 6750 §2.3](https://www.rfc-editor.org/rfc/rfc6750#section-2.3)), from
+a cookie, which a page's browser sends on its own, or from a subprotocol. A client writes no
+`Origin` on its upgrade: a page's browser writes its own, which the server judges (step 7). A server
+judges a request at its WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
    read, an authority that is no host, or a field that holds a control character or an octet past
@@ -1143,7 +1168,8 @@ that applies:
    version shapes.
 6. An upgrade of version 13 is malformed, and refused 400, `malformed`, whose `Sec-WebSocket-Key` is
    not one field of 16 bytes in base64, whose `Sec-WebSocket-Protocol` is not a list of distinct
-   tokens, or that has content
+   tokens, that carries more than one `Authorization` field line, which is no list to combine
+   ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or that has content
    ([RFC 6455 §4.2.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.2.1)).
 7. An upgrade that carries an `Origin` neither its own nor among those it takes is then refused 403,
    `origin-refused`, so that the `Origin` it judges an upgrade by is the field it judges an exchange
@@ -1195,12 +1221,13 @@ that call id for 5 seconds — what a requester reserves one for when its call w
 
 A client writes the credential a request carries in the `Authorization` field of its `POST`
 ([RFC 9110 §11.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.2)), as it is given, and
-fails the send before it goes for one no field can carry: anything but visible ASCII, spaces and
-tabs. It writes no `Origin`, on any exchange: a page's browser writes its own, which the server
-judges (section 15.12). The server reads that field on a `POST` that carries a REQUEST, and no other
-exchange's: it hands the router the field's value with the request, as it came, whole — its
-auth-scheme included — its surrounding whitespace removed, and none when the field is empty or
-absent. Two calls of one
+fails the send before it goes for one that is no field value
+([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)): anything but visible ASCII,
+spaces and tabs, or a space or a tab first or last, which a field cannot keep. It writes no
+`Origin`, on any exchange: a page's browser writes its own, which the server judges (section 15.12).
+The server reads that field on a `POST` that carries a REQUEST, and no other exchange's: it hands
+the router the field's value with the request, as it came, whole — its auth-scheme included — its
+surrounding whitespace removed, and none when the field is empty or absent. Two calls of one
 connection may so present two credentials, and a token is renewed without connecting again. A
 `POST /bead` that presents a token with more than one `Authorization` field is refused, 400, before
 its body is read: the field is no list to combine

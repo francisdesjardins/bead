@@ -136,29 +136,64 @@ test.describe('uncarriedOf', () => {
     const jwt = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
     const elsewhere = { scheme: CredentialScheme.ELSEWHERE } as const;
     const opaque = { scheme: CredentialScheme.OPAQUE, token: TOKEN } as const;
+    // a transport that carries every credential, none, or one alone, as a WebSocket's upgrade did
+    const every = () => {
+      return true;
+    };
+    const none = () => {
+      return false;
+    };
+    const one = (credential: string) => {
+      return credential === 'Interop sub=ada';
+    };
     const codeOf = (
       credential: Parameters<typeof uncarriedOf>[0],
-      [carriesCredential, isSecure]: [boolean, boolean]
+      [carries, isSecure]: [((credential: string) => boolean) | undefined, boolean]
     ) => {
-      return uncarriedOf(credential, { carriesCredential, failures: CLIENT_FAILURES, isSecure })
-        ?.code;
+      return uncarriedOf(credential, {
+        carried: credential === elsewhere ? 'Interop sub=bob' : undefined,
+        carries,
+        failures: CLIENT_FAILURES,
+        isSecure,
+      })?.code;
     };
     const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
 
     expect(
       [undefined, opaque, jwt, elsewhere].map((credential) => {
         return [
-          codeOf(credential, [true, true]),
-          codeOf(credential, [false, true]),
-          codeOf(credential, [true, false]),
+          codeOf(credential, [every, true]),
+          codeOf(credential, [none, true]),
+          codeOf(credential, [undefined, true]),
+          codeOf(credential, [one, true]),
+          codeOf(credential, [every, false]),
         ];
       })
     ).toEqual([
-      [undefined, undefined, undefined],
-      [undefined, undefined, undefined],
-      [undefined, undefined, unreachable],
-      [undefined, unreachable, unreachable],
+      [undefined, undefined, undefined, undefined, undefined],
+      [undefined, undefined, undefined, undefined, undefined],
+      [undefined, undefined, undefined, undefined, unreachable],
+      [undefined, unreachable, unreachable, unreachable, unreachable],
     ]);
+    // the very bytes it carries go; its detail names the scheme alone, never the credential
+    expect(
+      uncarriedOf(elsewhere, {
+        carried: 'Interop sub=ada',
+        carries: one,
+        failures: CLIENT_FAILURES,
+        isSecure: true,
+      })
+    ).toBeUndefined();
+    expect(
+      uncarriedOf(elsewhere, {
+        carried: 'Interop sub=bob',
+        carries: one,
+        failures: CLIENT_FAILURES,
+        isSecure: true,
+      })?.detail
+    ).toBe(
+      'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another'
+    );
   });
 });
 

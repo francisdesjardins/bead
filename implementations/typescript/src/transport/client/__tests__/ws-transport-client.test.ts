@@ -61,8 +61,11 @@ const judgedOf = async (target: { host: string; secured?: boolean }) => {
 
   await client.connect({ ...target, port: 8_080 }).catch(() => {});
 
-  return [client.carriesCredential, client.isSecure];
+  return [client.carries(BEARER), client.isSecure];
 };
+
+// a bearer credential, as RFC 6750 §2.1 writes one
+const BEARER = 'Bearer mF_9.B5f-4.1JqM';
 
 const nextEvent = <K extends TRANSPORT_CLIENT_EVENTS>(client: WSTransportClient, event: K) => {
   return new Promise<TransportClientEventMap[K]>((resolve) => {
@@ -914,7 +917,27 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
 });
 
 test.describe('WSTransportClient, what it carries', () => {
-  test('carries no credential beside an envelope, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
+  const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
+  const Ws = TrackedWs as unknown as IWebSocketConstructor;
+
+  // the Authorization lines of each upgrade `hearing` took, as they came
+  const upgradesOf = (hearing: Awaited<ReturnType<typeof startRefusing>>) => {
+    const heard: string[][] = [];
+
+    hearing.upgrading.on('connection', (_socket, request) => {
+      const { rawHeaders } = request;
+
+      heard.push(
+        rawHeaders.filter((_value, index) => {
+          return index % 2 === 1 && rawHeaders[index - 1]?.toLowerCase() === 'authorization';
+        })
+      );
+    });
+
+    return heard;
+  };
+
+  test('carries no credential its upgrade did not carry, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
     expect(createWSTransportClient().isSecure).toBe(false);
     expect(
       await Promise.all([
@@ -933,6 +956,287 @@ test.describe('WSTransportClient, what it carries', () => {
       [false, false],
       [false, false],
     ]);
+  });
+
+  // spec 15.1 and 15.2
+  test('writes the credential it is given on its upgrade, and carries those bytes alone', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    const client = createWSTransportClient({ WebSocket: Ws });
+
+    // none before its first connect
+    expect(client.carries(BEARER)).toBe(false);
+
+    await client.connect({ credential: BEARER, host, port: hearing.port });
+
+    // its Authorization, one line, as given
+    expect(heard).toEqual([[BEARER]]);
+    // those bytes alone, none a byte off, longer or shorter, nor trimmed of what a field cannot hold
+    expect(client.carries(BEARER)).toBe(true);
+    expect(
+      [
+        'Bearer mF_9.B5f-4.1JqN',
+        `${BEARER}x`,
+        BEARER.slice(0, -1),
+        ` ${BEARER}`,
+        '',
+        'Bearer mF_9.B5f-4.1Jq?',
+      ].map((other) => {
+        return client.carries(other);
+      })
+    ).toEqual([false, false, false, false, false, false]);
+
+    await client.disconnect();
+
+    // none once its connection is gone
+    expect(client.carries(BEARER)).toBe(false);
+
+    // none on an upgrade given none, an empty one among them
+    for (const given of [undefined, '']) {
+      const bare = createWSTransportClient({ WebSocket: Ws });
+
+      await bare.connect({ credential: given, host, port: hearing.port });
+      expect([bare.carries(''), bare.carries(BEARER)]).toEqual([false, false]);
+      await bare.disconnect();
+    }
+
+    expect(heard).toEqual([[BEARER], [], []]);
+  });
+
+  // spec 15.2
+  test('calls its credential provider at each attempt, a reconnection’s included, and carries the bytes it handed', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    const signals: AbortSignal[] = [];
+    const away = new Error('the token store is away');
+    let handed = 0;
+    const client = createWSTransportClient({ WebSocket: Ws });
+
+    await client.connect({
+      credentialProvider: ({ signal }) => {
+        signals.push(signal);
+        handed += 1;
+
+        // * its second call throws: that attempt fails, its throw the cause, and the next calls it
+        // again
+        if (handed === 2) {
+          throw away;
+        }
+
+        return Promise.resolve(`Bearer token-${String(handed)}`);
+      },
+      host,
+      port: hearing.port,
+    });
+
+    expect([heard, client.carries('Bearer token-1'), handed]).toEqual([
+      [['Bearer token-1']],
+      true,
+      1,
+    ]);
+
+    await client.reconnect({ delay: 0, maxAttempts: 2 });
+
+    // the failed attempt went nowhere: the next one carries what the provider handed it
+    expect([
+      heard,
+      client.carries('Bearer token-1'),
+      client.carries('Bearer token-3'),
+      handed,
+    ]).toEqual([[['Bearer token-1'], ['Bearer token-3']], false, true, 3]);
+    // each told when its attempt is over
+    expect(
+      signals.map(({ aborted }) => {
+        return aborted;
+      })
+    ).toEqual([true, true, true]);
+    await client.disconnect();
+
+    // a provider's throw fails the connect, its cause
+    const failing = createWSTransportClient({ WebSocket: Ws });
+    const reason: unknown = await failing
+      .connect({
+        credentialProvider: () => {
+          throw away;
+        },
+        host,
+        port: hearing.port,
+      })
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    expect([reason instanceof ConnectError, (reason as ConnectError).cause]).toEqual([true, away]);
+    expect([failing.isClosed(), heard.length]).toEqual([true, 2]);
+  });
+
+  // spec 13.4, 15.2 and 15.5
+  test('refuses a credential that is no field value, a space or a tab first or last among them, or over a URL in the clear off the loopback, before its upgrade goes', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    const client = createWSTransportClient({ WebSocket: Ws });
+    const target = { host, port: hearing.port };
+
+    for (const credential of [
+      ` ${BEARER}`,
+      `${BEARER} `,
+      `\t${BEARER}`,
+      `${BEARER}\t`,
+      'Bearer a\r\nb',
+      'Bearer é',
+      'Bearer \u0000',
+    ]) {
+      await expect(
+        client.connect({ ...target, credential }),
+        JSON.stringify(credential)
+      ).rejects.toThrow(
+        new ProgrammerError(
+          'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+        )
+      );
+    }
+
+    // the upgrade itself would carry it in the clear, a provider's alike, which is never called
+    let called = 0;
+    const credentialProvider = () => {
+      called += 1;
+
+      return BEARER;
+    };
+
+    for (const faraway of [
+      { ...target, credential: BEARER, host: '192.0.2.1' },
+      { ...target, credentialProvider, host: 'example.com' },
+    ]) {
+      await expect(client.connect(faraway)).rejects.toThrow(
+        new ProgrammerError(
+          'a credential never crosses off the machine in the clear: connect over wss, or to a host on the loopback'
+        )
+      );
+    }
+
+    // nothing moved: no state, no target a reconnection replays, no upgrade sent
+    expect([called, client.isUninitialized(), heard]).toEqual([0, true, []]);
+    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
+
+    // a provider's value, held alike once handed: the connect fails, and a reconnection does not
+    // try again what no attempt would mend
+    let handed = BEARER;
+    const provided = createWSTransportClient({ WebSocket: Ws });
+
+    await provided.connect({
+      ...target,
+      credentialProvider: () => {
+        called += 1;
+
+        return handed;
+      },
+    });
+    handed = `${BEARER} `;
+
+    await expect(provided.reconnect({ delay: 0, maxAttempts: 3 })).rejects.toThrow(
+      new ProgrammerError(
+        'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+      )
+    );
+    expect([called, provided.isClosed(), heard]).toEqual([2, true, [[BEARER]]]);
+  });
+
+  test('refuses a credential and a credential provider given together', async () => {
+    const client = createWSTransportClient({ WebSocket: Ws });
+
+    await expect(
+      client.connect({
+        credential: BEARER,
+        credentialProvider: () => {
+          return BEARER;
+        },
+        host,
+        port: 8_080,
+      })
+    ).rejects.toThrow(
+      new ProgrammerError('a connect takes a credential or a credential provider, not both')
+    );
+    expect(client.isUninitialized()).toBe(true);
+  });
+
+  // a platform's: a page's script writes no field of its own choosing on an upgrade (WHATWG
+  // WebSockets Standard), nor does Node's global but in a call shape of undici's own
+  test('refuses a credential over a WebSocket constructor without ws’s shape, a page’s and Node’s global among them', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    let called = 0;
+    // a subclass of the global, and a wrapper of it, as a page's script would build one
+    const Subclass = class extends WebSocket {};
+    const Wrapper = function (url: string, protocols?: string | string[]) {
+      return new WebSocket(url, protocols);
+    } as unknown as IWebSocketConstructor;
+
+    for (const Constructor of [
+      TrackedGlobal,
+      Subclass as unknown as IWebSocketConstructor,
+      Object.assign(Wrapper, { CONNECTING: 0, OPEN: 1 }),
+    ]) {
+      const client = createWSTransportClient({ WebSocket: Constructor });
+
+      for (const given of [
+        { credential: BEARER },
+        {
+          credentialProvider: () => {
+            called += 1;
+
+            return BEARER;
+          },
+        },
+      ]) {
+        await expect(client.connect({ ...given, host, port: hearing.port })).rejects.toThrow(
+          "a credential is written on its upgrade by ws's WebSocket alone"
+        );
+      }
+
+      expect(client.isUninitialized()).toBe(true);
+    }
+
+    // given none, the global connects as ever
+    const plain = createWSTransportClient({ WebSocket: TrackedGlobal });
+
+    await plain.connect({ host, port: hearing.port });
+    await plain.disconnect();
+    expect([called, heard]).toEqual([0, [[]]]);
+  });
+
+  // spec 15.6
+  test('fails its connect on a redirect answered to its upgrade, naming its status', async () => {
+    // to a server that would take the upgrade: followed, the connect would open there
+    await using taking = await startRefusing();
+    const heard = upgradesOf(taking);
+    await using redirecting = await startRefusing(
+      `HTTP/1.1 302 Found\r\nLocation: ws://${host}:${String(taking.port)}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`
+    );
+
+    for (const [Constructor, message] of [
+      [Ws, 'the server refused the upgrade: 302'],
+      [TrackedGlobal, '1006'],
+    ] as const) {
+      const client = createWSTransportClient({ WebSocket: Constructor });
+      const reason: unknown = await client
+        .connect({
+          credential: Constructor === Ws ? BEARER : undefined,
+          host,
+          port: redirecting.port,
+        })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      expect([reason instanceof ConnectError, (reason as ConnectError).message]).toEqual([
+        true,
+        message,
+      ]);
+      expect([client.isClosed(), client.carries(BEARER)]).toEqual([true, false]);
+    }
+
+    expect(heard).toEqual([]);
   });
 });
 
@@ -1214,41 +1518,6 @@ test.describe('WSTransportClient, an upgrade refused', () => {
       new ConnectError('the server refused the upgrade: 502')
     );
     expect(client.isClosed()).toBe(true);
-  });
-
-  // spec 15.6
-  test('fails its connect on a redirect answered to its upgrade, naming its status', async () => {
-    // to a server that would take the upgrade: followed, the connect would open there
-    await using taking = await startRefusing();
-    let upgrades = 0;
-
-    taking.upgrading.on('connection', () => {
-      upgrades += 1;
-    });
-
-    await using redirecting = await startRefusing(
-      `HTTP/1.1 302 Found\r\nLocation: ws://${host}:${String(taking.port)}/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`
-    );
-
-    for (const [Constructor, message] of [
-      [TrackedWs as unknown as IWebSocketConstructor, 'the server refused the upgrade: 302'],
-      [TrackedGlobal, '1006'],
-    ] as const) {
-      const client = createWSTransportClient({ WebSocket: Constructor });
-      const reason: unknown = await client
-        .connect({ host, port: redirecting.port })
-        .catch((error: unknown) => {
-          return error;
-        });
-
-      expect([reason instanceof ConnectError, (reason as ConnectError).message]).toEqual([
-        true,
-        message,
-      ]);
-      expect(client.isClosed()).toBe(true);
-    }
-
-    expect(upgrades).toBe(0);
   });
 });
 

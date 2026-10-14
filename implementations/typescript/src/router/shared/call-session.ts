@@ -149,28 +149,38 @@ export const presentedCredentialOf = (
 
 /**
  * The failure of a call presenting `credential` that its transport cannot carry (spec 13.4):
- * `DESTINATION_UNREACHABLE`, nothing tried, for an `ELSEWHERE` over a transport that carries no
- * credential beside an envelope, and for a `JWT` or an `ELSEWHERE` over one that is not secure;
- * `undefined` for a call it carries, any presenting none or `OPAQUE` among them.
+ * `DESTINATION_UNREACHABLE`, nothing tried, for an `ELSEWHERE` whose `carried` its transport does
+ * not carry beside an envelope — none, or, over a WebSocket, another than its upgrade's — and for a
+ * `JWT` or an `ELSEWHERE` over one that is not secure; `undefined` for a call it carries, any
+ * presenting none or `OPAQUE` among them. Its detail names the scheme alone, never the credential
+ * (spec 15.1).
  */
 export const uncarriedOf = (
   credential: Credential | undefined,
-  {
-    carriesCredential,
-    failures,
-    isSecure,
-  }: { carriesCredential: boolean; failures: IRouterFailures; isSecure: boolean }
+  options: {
+    /** What an `ELSEWHERE` gives its transport to carry. */
+    carried: string | undefined;
+    /** Whether the transport carries a credential beside an envelope; none, without it. */
+    carries: ((credential: string) => boolean) | undefined;
+    failures: IRouterFailures;
+    isSecure: boolean;
+  }
 ): IFailure | undefined => {
+  const { carried, carries, failures, isSecure } = options;
   const scheme = credential?.scheme;
 
   if (scheme !== CredentialScheme.JWT && scheme !== CredentialScheme.ELSEWHERE) {
     return undefined;
   }
 
-  if (scheme === CredentialScheme.ELSEWHERE && !carriesCredential) {
+  if (
+    scheme === CredentialScheme.ELSEWHERE &&
+    (carried === undefined || carries?.(carried) !== true)
+  ) {
     return {
       ...failures.destinationUnreachable,
-      detail: 'its transport carries no credential beside an envelope, which ELSEWHERE stands for',
+      detail:
+        'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another',
     };
   }
 

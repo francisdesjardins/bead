@@ -35,7 +35,8 @@ public readonly record struct Credential
 
     /// <summary>
     /// What a call presenting <see cref="CredentialScheme.Elsewhere"/> has its transport carry beside
-    /// its envelope — over HTTP, its <c>Authorization</c>, as it is given — among a call's options; none
+    /// its envelope — over HTTP, its <c>Authorization</c>, as it is given; over a WebSocket, the bytes
+    /// its upgrade carried, which it must be — among a call's options; none
     /// on a header, whose block holds nothing, and for any other scheme.
     /// </summary>
     public string? Carried { get; private init; }
@@ -91,7 +92,8 @@ public readonly record struct Credential
     /// <summary>
     /// <see cref="CredentialScheme.Elsewhere"/> among a call's options, with what its transport carries
     /// beside its envelope: its header's block holds nothing, and <paramref name="carried"/> goes with
-    /// the envelope — over HTTP, as its <c>Authorization</c>.
+    /// the envelope — over HTTP, as its <c>Authorization</c>; over a WebSocket, only when its upgrade
+    /// carried those very bytes.
     /// </summary>
     public static Credential Elsewhere(string carried)
     {

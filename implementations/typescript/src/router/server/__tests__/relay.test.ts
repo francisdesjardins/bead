@@ -231,7 +231,17 @@ const createCarryingRelay = (
   const own: IAsked[] = [];
   const relay = createRelay({
     carriageOf: (connectionHandle) => {
-      return carriage.get(connectionHandle) ?? { carriesCredential: true, isSecure: true };
+      const { carriesCredential, isSecure } = carriage.get(connectionHandle) ?? {
+        carriesCredential: true,
+        isSecure: true,
+      };
+
+      return {
+        carries: () => {
+          return carriesCredential;
+        },
+        isSecure,
+      };
     },
     failures: SERVER_FAILURES,
     limits,
@@ -282,10 +292,12 @@ test.describe('createRelay, credentials', () => {
     relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 7 });
     relay.register({ connectionHandle: plain }, { audience: 'bead-interop', destinationId: 9 });
 
+    // an ELSEWHERE admitted with what leg A's transport carried, as its resolution needs
     const codeOf = (credential: Credential | undefined, destinationId: number) => {
       return relay.handlerOf(destinationId)?.admit?.({
         connectionHandle: first,
         header: presentingOf(1, { credential, destinationId }),
+        ...(credential === ELSEWHERE ? { transportCredential: CARRIED } : {}),
       })?.code;
     };
     const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
@@ -313,6 +325,50 @@ test.describe('createRelay, credentials', () => {
       [unreachable, unreachable, unreachable, unreachable],
       [undefined, unreachable, unreachable, unreachable],
     ]);
+  });
+
+  test('answers an ELSEWHERE DESTINATION_UNREACHABLE over a leg B whose upgrade carried the relay’s own credential', async () => {
+    // leg B: a router over a WebSocket whose upgrade carried the relay's own credential, which its
+    // transport carries alone
+    const pipe = createPipedTransports({ connectionHandle: device });
+    using legB = createRouterClient(pipe.client);
+    const target = {
+      limits: legB.limits,
+      request: legB.request,
+      transport: {
+        carries: (credential: string) => {
+          return credential === 'Interop sub=relay';
+        },
+        isSecure: true,
+      },
+    };
+    const { answers, own, relay } = createTestRelay();
+
+    pipe.open();
+    relay.register(target, { audience: 'bead-interop', destinationId: 7 });
+
+    // leg A's credential is another: the relay presents none of its own for it, nothing tried
+    await relay.handlerOf(7)?.({
+      ...propsOf(presentingOf(1, { credential: ELSEWHERE }), { isAdmitted: false }),
+      transportCredential: CARRIED,
+    });
+
+    expect(failuresOf(answers)).toEqual([
+      [
+        ProtocolCode.DESTINATION_UNREACHABLE,
+        undefined,
+        'destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another',
+      ],
+    ]);
+    expect(own).toEqual([]);
+    // the very bytes leg B's upgrade carried go
+    expect(
+      relay.handlerOf(7)?.admit?.({
+        connectionHandle: first,
+        header: presentingOf(3, { credential: ELSEWHERE }),
+        transportCredential: 'Interop sub=relay',
+      })
+    ).toBeUndefined();
   });
 
   test('presents on leg B what leg A does: a JWT’s same bytes, an ELSEWHERE with what leg A’s transport carried, none for none or OPAQUE', async () => {

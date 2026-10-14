@@ -704,12 +704,9 @@ public sealed partial class DurationsTests
     {
         public RouterLimits Limits { get; } = RouterLimits.Default;
 
-        public bool CarriesCredential
+        public bool Carries(string credential)
         {
-            get
-            {
-                return true;
-            }
+            return true;
         }
 
         public bool IsSecure

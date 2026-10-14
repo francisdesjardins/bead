@@ -137,7 +137,10 @@ public sealed record WebSocketTransportStartOptions
 /// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
 /// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
 /// 13, 426; a malformed upgrade, 400; an origin not taken, 403; and, once its stop began, one it
-/// would take, 503, busy.
+/// would take, 503, busy. An upgrade that carries no <c>Origin</c> carries its <c>Authorization</c>,
+/// trimmed, beside every envelope of its connection, which a request presenting
+/// <see cref="CredentialScheme.Elsewhere"/> stands for (spec 15.2); one that carries an
+/// <c>Origin</c>, a page's, carries none; nothing is carried toward a client.
 /// </summary>
 public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposable
 {
@@ -411,8 +414,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <summary>
-    /// A WebSocket carries no credential beside an envelope (spec 15.2): a command presenting
-    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes.
+    /// Nothing is carried toward a client (spec 15.2): a command presenting
+    /// <see cref="CredentialScheme.Elsewhere"/> fails before it goes. What its upgrade carried goes
+    /// the other way alone, beside every envelope its client sends.
     /// </summary>
     public bool CarriesCredential(string connectionHandle)
     {
@@ -566,6 +570,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             return;
         }
 
+        // ! an upgrade that carries an Origin is a page's, whose browser writes its own
+        // authentication on it as it sends its cookies (Fetch, credentials mode include): it carries
+        // none, whatever its Authorization; one from no page carries its Authorization beside every
+        // envelope of its connection (spec 15.2)
+        var headers = context.Request.Headers;
+        var credential = headers.Origin.Count == 0 ? HostsAndOrigins.CredentialOf(headers.Authorization) : null;
         var accepted = await context.WebSockets.AcceptWebSocketAsync();
         var ip = AddressOf(context) ?? "";
         var port = context.Connection.RemotePort;
@@ -608,7 +618,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             await connection.Read((message) =>
             {
                 held.Client = held.Client with { LastActivity = _clock.GetUtcNow() };
-                _listeners.Tell(Message, (message, connectionHandle));
+                _listeners.Tell(Message, (message with { Credential = credential }, connectionHandle));
             });
         }
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)

@@ -112,7 +112,20 @@ export const RECONNECT_DEFAULTS = Object.freeze({
   maxAttempts: 5,
 } satisfies ITransportClientReconnectOptions);
 
+// a field's value, and so a credential an `Authorization` carries (RFC 9110 §5.5): visible ASCII,
+// spaces and tabs alone, none first or last, which a field cannot keep
+const FIELD_VALUE = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
+
 // helpers
+
+/**
+ * Whether `value` is a field value (RFC 9110 §5.5), as a credential every client writes must be
+ * (spec 15.5): visible ASCII, spaces and tabs alone, none first or last, which a field cannot keep
+ * and a server would read trimmed.
+ */
+export const isFieldValue = (value: string): boolean => {
+  return FIELD_VALUE.test(value);
+};
 
 const sleep = (
   delay: number,
@@ -200,9 +213,6 @@ export const createTransportClient = <
       return client;
     }),
 
-    get carriesCredential() {
-      return implementation.carriesCredential === true;
-    },
     get clock() {
       return implementation.clock ?? PLATFORM_CLOCK;
     },
@@ -210,9 +220,12 @@ export const createTransportClient = <
       return implementation.isSecure === true;
     },
 
+    carries: (credential) => {
+      return implementation.carries?.(credential) === true;
+    },
     connect: (given) => {
       // held here, so by every transport, before anything moves or is kept for a reconnection, which
-      // connects again with the timeout held
+      // connects again with the timeout held; and what its transport refuses of the options alike
       let options: ConnectOptions;
 
       try {
@@ -220,6 +233,7 @@ export const createTransportClient = <
           given.timeout === undefined
             ? given
             : { ...given, timeout: assertHeld("a connect's timeout", given.timeout) };
+        implementation.assertConnect?.(options);
       } catch (reason) {
         return Promise.reject(toError(reason));
       }
@@ -330,6 +344,11 @@ export const createTransportClient = <
           } catch (reason) {
             if (signal?.aborted) {
               throw toCancelError(signal);
+            }
+
+            // a misuse an attempt met, the next would meet again
+            if (reason instanceof ProgrammerError) {
+              throw reason;
             }
 
             if (attempt >= maxAttempts) {

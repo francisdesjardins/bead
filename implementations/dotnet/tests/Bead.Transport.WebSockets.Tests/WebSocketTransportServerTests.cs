@@ -961,7 +961,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         // a key missing, not base64, of 4 or 17 bytes, twice, empty, or with a space inside; two
         // versions; subprotocols that are no list of tokens, or none; content, by its length or in
-        // chunks; a bad key from an origin not taken
+        // chunks; a bad key from an origin not taken; two Authorization lines, which are no list to
+        // combine, from no page or from an origin not taken
         await AssertAnswered(
             [
                 HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key"),
@@ -977,6 +978,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 [.. HandshakeOf("GET / HTTP/1.1", "Content-Length: 5"), .. "hello"u8],
                 [.. HandshakeOf("GET / HTTP/1.1", "Transfer-Encoding: chunked"), .. "5\r\nhello\r\n0\r\n\r\n"u8],
                 HandshakeOf("GET / HTTP/1.1", "Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"),
+                HandshakeOf("GET / HTTP/1.1", $"Authorization: {Bearer}", $"Authorization: {Bearer}"),
+                HandshakeOf("GET / HTTP/1.1", $"Authorization: {Bearer}", $"Authorization: {Bearer}", "Origin: https://elsewhere.test"),
             ],
             (400, RefusedWith(WebSocketRefusals.Malformed)));
         Assert.True(_connections.Reader.Count == 0);
@@ -1446,21 +1449,89 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Carries_no_credential_either_way()
+    public async Task Hands_every_envelope_of_a_connection_its_upgrade_s_Authorization_as_it_came_and_trimmed_and_carries_none_toward_its_client()
     {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        // its spaces and tabs around it removed, its auth-scheme kept, beside each envelope
+        using (var tcp = await OpenTcp())
+        {
+            await tcp.GetStream().WriteAsync((byte[])[.. HandshakeOf("GET / HTTP/1.1", $"Authorization:  \t{Bearer}\t "), .. TextFrame("first"), .. TextFrame("second")], Cancelled);
+
+            var first = await Next(_messages);
+            var second = await Next(_messages);
+
+            Assert.Equal((Bearer, Bearer), (first.Message.Credential, second.Message.Credential));
+            Assert.Equal((await Next(_connections), first.ConnectionHandle), (first.ConnectionHandle, second.ConnectionHandle));
+            Assert.False(_server.CarriesCredential(first.ConnectionHandle));
+        }
+
+        // none from an upgrade that carries none, or an empty one
+        foreach (var fields in new string[][] { [], ["Authorization: "] })
+        {
+            using var tcp = await OpenTcp();
+
+            await tcp.GetStream().WriteAsync((byte[])[.. HandshakeOf("GET / HTTP/1.1", fields), .. TextFrame("bare")], Cancelled);
+
+            var drawn = await Next(_connections);
+            var (message, from) = await Next(_messages);
+
+            Assert.Equal((drawn, (string?)null), (from, message.Credential));
+        }
+
+        // nothing toward its client: the envelope alone goes
         var (client, connectionHandle) = await Connect();
 
         using (client)
         {
-            await client.SendAsync("up"u8.ToArray(), WebSocketMessageType.Binary, true, Cancelled);
-
-            Assert.Null((await Next(_messages)).Message.Credential);
-
             await _server.Send(new TransportMessage("down"u8.ToArray(), false) { Credential = Bearer }, connectionHandle).WaitAsync(Patience, Cancelled);
 
             var (result, bytes) = await ReceiveOf(client);
 
             Assert.Equal((WebSocketMessageType.Binary, "down"), (result.MessageType, Encoding.ASCII.GetString(bytes)));
+        }
+    }
+
+    [Fact]
+    public async Task Names_a_connection_to_its_listeners_by_its_handle_and_nothing_of_its_credential()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
+
+        using var tcp = await OpenTcp();
+
+        await tcp.GetStream().WriteAsync((byte[])[.. HandshakeOf("GET / HTTP/1.1", $"Authorization: {Bearer}"), .. TextFrame("up")], Cancelled);
+
+        // the handle alone, as its client was drawn: the credential stays beside the envelopes
+        var connectionHandle = await Next(_connections);
+
+        Assert.StartsWith("type=WS;ip=127.0.0.1;port=", connectionHandle, StringComparison.Ordinal);
+        Assert.DoesNotContain("mF_9", connectionHandle, StringComparison.Ordinal);
+        Assert.DoesNotContain("mF_9", string.Join(",", HandlesOf(_server.Clients)), StringComparison.Ordinal);
+        Assert.Equal(Bearer, (await Next(_messages)).Message.Credential);
+    }
+
+    [Fact]
+    public async Task Carries_no_credential_from_an_upgrade_that_carries_an_Origin_its_own_or_one_it_takes_whatever_its_Authorization()
+    {
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"], Origins = ["https://bead.example"] });
+
+        // ! a page's browser writes its own authentication on its upgrade, a page of any origin's
+        foreach (var origin in new[] { "http://bead.test", "https://bead.example" })
+        {
+            using var tcp = await OpenTcp();
+
+            await tcp.GetStream().WriteAsync((byte[])[.. HandshakeOf("GET / HTTP/1.1", $"Origin: {origin}", $"Authorization: {Bearer}"), .. TextFrame("page")], Cancelled);
+
+            var (message, _) = await Next(_messages);
+
+            Assert.Equal(("page", (string?)null), (Encoding.ASCII.GetString(message.Bytes.Span), message.Credential));
+        }
+
+        // from no page, the same Authorization is carried
+        using (var tcp = await OpenTcp())
+        {
+            await tcp.GetStream().WriteAsync((byte[])[.. HandshakeOf("GET / HTTP/1.1", $"Authorization: {Bearer}"), .. TextFrame("service")], Cancelled);
+            Assert.Equal(Bearer, (await Next(_messages)).Message.Credential);
         }
     }
 

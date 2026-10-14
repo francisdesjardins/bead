@@ -102,6 +102,13 @@ public readonly record struct AdmissionRequest(string ConnectionHandle, RequestH
 {
     /// <summary>The call's session, as its credential resolved it; none when the call runs in none.</summary>
     public CallSession? Session { get; init; }
+
+    /// <summary>
+    /// What its transport carried beside it, for a request presenting
+    /// <see cref="CredentialScheme.Elsewhere"/>, which a relay judges its leg B able to carry or not
+    /// (spec 14.3, step 5); none for any other.
+    /// </summary>
+    internal string? TransportCredential { get; init; }
 }
 
 /// <summary>A request as the router hands it to a resolver: its payload still encoded.</summary>
@@ -474,11 +481,11 @@ public interface IRouterCorePort
     }
 
     /// <summary>
-    /// Whether a connection's transport carries a credential beside an envelope the side sends on it
-    /// (spec 15.1): a call presenting <see cref="CredentialScheme.Elsewhere"/> over one that carries
-    /// none fails before it goes. None does by default.
+    /// Whether a connection's transport carries <paramref name="credential"/> beside an envelope the
+    /// side sends on it (spec 15.1): a call presenting <see cref="CredentialScheme.Elsewhere"/> over
+    /// one that cannot carry its credential fails before it goes. None carries one by default.
     /// </summary>
-    bool CarriesCredential(string connectionHandle)
+    bool Carries(string credential, string connectionHandle)
     {
         return false;
     }

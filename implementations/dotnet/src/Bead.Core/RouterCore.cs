@@ -607,7 +607,11 @@ public sealed class RouterCore : IDisposable
         var known = asked is { Scheme: CredentialScheme.Opaque, SessionToken: null } ? _port.KnownSessionTokenOf(connectionHandle) : null;
         var (presented, carried, refusal) = CallSession.PresentedCredentialOf(asked, known);
 
-        refusal ??= CallSession.UncarriedOf(presented, (_port.CarriesCredential(connectionHandle), _port.IsSecure(connectionHandle)));
+        // * what the call presents, against what the connection carries: over a WebSocket, the bytes
+        // its upgrade carried alone (spec 13.4)
+        var carries = carried is { } bytes && _port.Carries(bytes, connectionHandle);
+
+        refusal ??= CallSession.UncarriedOf(presented, (carries, _port.IsSecure(connectionHandle)));
 
         if (refusal is not null)
         {
@@ -1692,7 +1696,7 @@ public sealed class RouterCore : IDisposable
         var dispatched = (target, answering);
 
         // routed, it is asked its admission, on its header and its call's session
-        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session }) is { } refusal)
+        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session, TransportCredential = answering.TransportCredential }) is { } refusal)
         {
             Refuse(refusal, dispatched);
 

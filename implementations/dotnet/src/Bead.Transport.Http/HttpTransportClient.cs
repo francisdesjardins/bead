@@ -244,15 +244,14 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     }
 
     /// <summary>
-    /// It carries a credential beside an envelope, in the <c>Authorization</c> of its <c>POST</c>
-    /// (spec 15.5).
+    /// It carries any credential a field can hold beside an envelope, in the <c>Authorization</c> of
+    /// each <c>POST</c> (spec 15.5): visible ASCII, spaces and tabs, none first or last.
     /// </summary>
-    public bool CarriesCredential
+    public bool Carries(string credential)
     {
-        get
-        {
-            return true;
-        }
+        ArgumentNullException.ThrowIfNull(credential);
+
+        return HostsAndOrigins.IsVisibleField(credential);
     }
 
     /// <summary>
@@ -293,10 +292,11 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             return Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
         }
 
-        // refused before it goes, the connection kept: a field could not carry it as it is
-        if (message.Credential is { } credential && !IsFieldValue(credential))
+        // refused before it goes, the connection kept: a field could not carry it as it is (RFC 9110
+        // §5.5), and one with a space or a tab first or last the server would read trimmed
+        if (message.Credential is { } credential && !HostsAndOrigins.IsVisibleField(credential))
         {
-            return Task.FromException(new ArgumentException("a credential holds visible ASCII, spaces and tabs alone", nameof(message)));
+            return Task.FromException(new ArgumentException("a credential holds visible ASCII, spaces and tabs alone, none first or last", nameof(message)));
         }
 
         return Posting((connection, message));
@@ -515,16 +515,6 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         var path = options.Pathname.StartsWith('/') ? options.Pathname : $"/{options.Pathname}";
 
         return new Uri($"{(options.Secured ? "https" : "http")}://{host}:{options.Port}{path}");
-    }
-
-    // what a field's value holds, and so a credential the Authorization field carries: visible
-    // ASCII, spaces and tabs (RFC 9110 §5.5)
-    private static bool IsFieldValue(string value)
-    {
-        return value.All((character) =>
-        {
-            return character is '\t' or (>= ' ' and <= '~');
-        });
     }
 
     // the media type of a response, parameters aside

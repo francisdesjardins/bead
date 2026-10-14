@@ -473,7 +473,12 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
 
 // types
 
-export type WSTransportServer = ITransportServer<IServerSocketLike, IIncomingMessageLike>;
+/**
+ * Its `connection` event shows the upgrade that opened a connection as the HTTP transport's shows a
+ * connect, headers aside: a frozen {@link IDrawingRequest}, never the platform's request, which
+ * holds the credential the connection carries.
+ */
+export type WSTransportServer = ITransportServer<IServerSocketLike, IDrawingRequest>;
 
 // ── HTTP ──────────────────────────────────────────────────────────────────────
 
@@ -487,7 +492,10 @@ export interface IDrawnConnection {
   readonly ordinal: number;
 }
 
-/** The request that drew a connection, as the `connection` event shows it: nothing of its headers. */
+/**
+ * The request that drew a connection — an HTTP connect, a WebSocket upgrade — as the `connection`
+ * event shows it: nothing of its headers, its credential among them.
+ */
 export interface IDrawingRequest {
   readonly method: string | undefined;
   readonly remoteAddress: string;

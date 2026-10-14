@@ -23,10 +23,16 @@ import { createPromise } from '../shared/create-promise';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
-import { assertHosts, assertListeningAddress, assertOrigins } from './hosts-and-origins';
+import {
+  assertHosts,
+  assertListeningAddress,
+  assertOrigins,
+  credentialOf,
+} from './hosts-and-origins';
 import { createTransportServer, generateHandle } from './transport-server';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import type {
+  IDrawingRequest,
   IIncomingMessageLike,
   IServerSocketLike,
   ITransportServerAddress,
@@ -49,6 +55,7 @@ export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export { HOST_REFUSAL, ORIGIN_REFUSAL } from './hosts-and-origins';
 export type {
+  IDrawingRequest,
   IIncomingMessageLike,
   IServerSocketLike,
   IUpgradeSocketLike,
@@ -98,19 +105,35 @@ const closeOpened = (
   http.close();
 };
 
-// an upgrade's `X-Forwarded-For`, every line of it read where it stands and joined by `, ` (RFC
-// 9110 §5.3); none when it carries none
-const forwardedOf = (request: IIncomingMessageLike): string | undefined => {
+// the values of every line of the field `name` an upgrade carries, as they came: `headers` keeps
+// the first of two, or joins them, so they are read where each stands
+const linesOf = (request: IIncomingMessageLike, name: string): string[] => {
   const lines: string[] = [];
   const { rawHeaders } = request;
 
   for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
-    if (rawHeaders[index]?.toLowerCase() === 'x-forwarded-for') {
+    if (rawHeaders[index]?.toLowerCase() === name) {
       lines.push(rawHeaders[index + 1] ?? '');
     }
   }
 
+  return lines;
+};
+
+// an upgrade's `X-Forwarded-For`, every line of it joined by `, ` (RFC 9110 §5.3); none when it
+// carries none
+const forwardedOf = (request: IIncomingMessageLike): string | undefined => {
+  const lines = linesOf(request, 'x-forwarded-for');
+
   return lines.length === 0 ? undefined : lines.join(', ');
+};
+
+// ! an upgrade that carries an `Origin` carries no credential: a page's browser writes its own
+// authentication on it (Fetch, credentials mode `include`), as the server's JSDoc says
+const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined => {
+  return linesOf(request, 'origin').length > 0
+    ? undefined
+    : credentialOf(linesOf(request, 'authorization'));
 };
 
 // definition
@@ -123,19 +146,24 @@ const forwardedOf = (request: IIncomingMessageLike): string | undefined => {
  * pinged every `heartbeat`, and dropped when it left a ping unanswered: a peer gone without a word
  * — a network cut, a machine asleep — ends in a `close` rather than never.
  *
- * A WebSocket carries no credential beside an envelope: each message delivered carries none, and a
- * credential given to `send` is not carried.
+ * An upgrade that carries no `Origin` carries one credential, its `Authorization`, as it came,
+ * whole, its surrounding whitespace removed, none when empty or absent: every message of its
+ * connection is delivered with it, which a request presenting `ELSEWHERE` stands for, resolved per
+ * request as over HTTP (spec 15.2). An upgrade that carries an `Origin` carries none, whatever its
+ * `Authorization`: a page's browser writes its own authentication on it, so a page presents a
+ * `JWT`. A credential given to `send` is not carried: nothing is toward a client. A `connection`
+ * listener is shown the upgrade headers aside, its method, its target and its peer.
  *
  * A request at its address is judged in the order of spec 15.2, `hosts` and `origins` among its
  * steps as the HTTP transport's (spec 15.12): 400 as HTTP answers it to a `Host` missing, repeated
  * or no host, or to an absolute-form target that names none; 403 to a host it does not take; 405 to
  * a method but `GET` or `HEAD`; 426 to a request that asks no WebSocket, and to a version but 13;
- * 400 to a malformed upgrade; 403 to an `Origin` neither its own nor among `origins`; each refusal
- * as {@link refusalOfHandshake} writes it. A connection, and a refusal, name the client's address:
- * behind the proxies `trustedProxies` names, the upgrade's `X-Forwarded-For` entry reached past
- * them, as the HTTP transport reads it (spec 15.12), else its socket's. Each message is an envelope
- * at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that sends a
- * larger one with 1009.
+ * 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an `Origin` neither its
+ * own nor among `origins`; each refusal as {@link refusalOfHandshake} writes it. A connection, and
+ * a refusal, name the client's address: behind the proxies `trustedProxies` names, the upgrade's
+ * `X-Forwarded-For` entry reached past them, as the HTTP transport reads it (spec 15.12), else its
+ * socket's. Each message is an envelope at most by default, {@link MAXIMUM_MESSAGE_BYTES}, and `ws`
+ * closes a connection that sends a larger one with 1009.
  *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
@@ -165,7 +193,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
 
   const decoder = new TextDecoder();
 
-  return createTransportServer<IServerSocketLike, IIncomingMessageLike>(
+  return createTransportServer<IServerSocketLike, IDrawingRequest>(
     (server, connections, { isHeard, tell }) => {
       let httpServer: Server | undefined;
       let webSocketServer: IWebSocketServerLike | undefined;
@@ -333,6 +361,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         // read now: a socket already gone reports neither
         const address = addressOf(request);
         const { remotePort } = request.socket;
+        // read once, and handed beside every envelope of the connection (spec 15.2)
+        const credential = upgradeCredentialOf(request);
 
         // a socket gone has no peer to name, and its close is on its way
         if (address === undefined || remotePort === undefined) {
@@ -398,8 +428,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           const delivered = isBinary ? (data as Data) : decoder.decode(data as ArrayBufferView);
 
           return (
-            tell(MESSAGE_EVENT, [{ credential: undefined, data: delivered }, connectionHandle]),
-            undefined
+            tell(MESSAGE_EVENT, [{ credential, data: delivered }, connectionHandle]), undefined
           );
         });
 
@@ -411,8 +440,16 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         }
 
         // last and synchronous: a listener meets a connection already registered and wired, and before
-        // any frame that arrived with the upgrade request is read
-        tell(CONNECTION_EVENT, [socket, request, connectionHandle]);
+        // any frame that arrived with the upgrade request is read; it is shown the upgrade headers
+        // aside, a frozen copy, so no event carries its credential (spec 15.1)
+        const upgrade: IDrawingRequest = Object.freeze({
+          method: request.method,
+          remoteAddress: address,
+          remotePort,
+          url: request.url,
+        });
+
+        tell(CONNECTION_EVENT, [socket, upgrade, connectionHandle]);
       };
 
       return {
@@ -509,8 +546,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           return closeSocket(socket, 1000);
         },
 
-        // a credential given here is not carried: the router fails a command that presents one
-        // its transport cannot carry before it goes, DESTINATION_UNREACHABLE (decision 0010)
+        // a credential given here is not carried: nothing is toward a client, and the router fails a
+        // command that presents one before it goes, DESTINATION_UNREACHABLE (decision 0032)
         send: ({ data }, { socket }) => {
           return createPromise((resolve) => {
             // `ReadyState` keeps the WebSocket numbering, so its OPEN is the socket's

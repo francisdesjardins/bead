@@ -187,7 +187,7 @@ public sealed class RelayTests
         {
             var header = HeaderOf(1, call.DestinationId) with { Credential = call.Credential };
 
-            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header))?.Code;
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = "Interop sub=ada" })?.Code;
         }
 
         // a JWT whose aud names another, or none, or that does not read
@@ -214,6 +214,32 @@ public sealed class RelayTests
             {
                 Assert.Null(CodeOf(call));
             });
+    }
+
+    [Fact]
+    public void Answers_an_ELSEWHERE_DESTINATION_UNREACHABLE_over_a_leg_B_whose_upgrade_carried_the_relay_s_own_credential()
+    {
+        var relay = new TestRelay().Relay;
+
+        // a WebSocket leg B, its upgrade carrying the relay's own credential
+        relay.Register(new RecordingTarget { CarriedByUpgrade = "Interop sub=relay" }, Seven with { Audience = "bead-interop" });
+
+        Failure? RefusalOf(string carried)
+        {
+            var header = HeaderOf(1) with { Credential = Credential.Elsewhere() };
+
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = carried });
+        }
+
+        // ! leg A's credential never rides on the relay's: the confused deputy stays shut
+        var refused = RefusalOf("Interop sub=ada");
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
+            (refused?.Code, refused?.Detail));
+
+        // the very bytes its upgrade carried go
+        Assert.Null(RefusalOf("Interop sub=relay"));
     }
 
     [Fact]
@@ -916,14 +942,22 @@ public sealed class RelayTests
     {
         public RouterLimits Limits { get; } = limits ?? RouterLimits.Default;
 
-        // in process: it carries a credential, and is secure, unless a test says otherwise
+        // in process: it carries a credential, and is secure, unless a test says otherwise; once told
+        // one, it carries that one alone, as a WebSocket carries its upgrade's
         public bool CarriesCredential { get; init; } = true;
+
+        public string? CarriedByUpgrade { get; init; }
 
         public bool IsSecure { get; init; } = true;
 
         public List<Asked> Asked { get; } = [];
 
         public Func<Action<bool>, Task<RouterResult>> Settle { get; set; } = Answering(new byte[] { 9 });
+
+        public bool Carries(string credential)
+        {
+            return CarriesCredential && (CarriedByUpgrade is null || CarriedByUpgrade == credential);
+        }
 
         public Task<RouterResult> Request(ReadOnlyMemory<byte> payload, RouterRequest request)
         {

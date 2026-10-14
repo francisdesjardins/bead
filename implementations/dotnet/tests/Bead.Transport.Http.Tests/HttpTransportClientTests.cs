@@ -892,13 +892,13 @@ public sealed class HttpTransportClientTests
         await using var faked = new Faked(new HttpTransportClient(NotListening with { Handler = fetch }), fetch);
 
         // judged from what it connects with, before its first connect from nothing
-        Assert.Equal((true, false), (faked.Client.CarriesCredential, faked.Client.IsSecure));
+        Assert.Equal((true, false), (faked.Client.Carries(Bearer), faked.Client.IsSecure));
 
         var connecting = faked.Client.Connect(new HttpConnectOptions { Host = host, Port = 8_080, Secured = isTls }, Cancelled);
 
         (await fetch.CallOf(0)).Answer(DrawnOf(false));
         await connecting.WaitAsync(Patience, Cancelled);
-        Assert.Equal((true, isSecure), (faked.Client.CarriesCredential, faked.Client.IsSecure));
+        Assert.Equal((true, isSecure), (faked.Client.Carries(Bearer), faked.Client.IsSecure));
     }
 
     [Fact]
@@ -1042,6 +1042,29 @@ public sealed class HttpTransportClientTests
         }
 
         Assert.Equal((3, ReadyState.Open), (faked.Fetch.Calls.Count, faked.Client.ReadyState));
+    }
+
+    [Fact]
+    public async Task Refuses_a_credential_with_a_space_or_a_tab_first_or_last_before_its_send_goes()
+    {
+        await using var faked = await ConnectFake(NotListening);
+
+        // no field value opens or closes with whitespace (RFC 9110 §5.5): the server would read it
+        // trimmed, another credential than the one the call presents
+        foreach (var credential in new[] { $" {Bearer}", $"{Bearer} ", $"\t{Bearer}", $"{Bearer}\t" })
+        {
+            Assert.Equal(
+                "a credential holds visible ASCII, spaces and tabs alone, none first or last (Parameter 'message')",
+                (await Assert.ThrowsAsync<ArgumentException>(() =>
+                {
+                    return faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false) { Credential = credential });
+                })).Message);
+            Assert.False(faked.Client.Carries(credential));
+        }
+
+        // within, a space or a tab is a field's own
+        Assert.True(faked.Client.Carries("Bearer\ta b"));
+        Assert.Equal((1, ReadyState.Open), (faked.Fetch.Calls.Count, faked.Client.ReadyState));
     }
 
     [Fact]

@@ -7,6 +7,7 @@ import ipaddress
 import json
 import os
 import re
+from datetime import datetime
 
 from bounds import DEFAULTS
 from spec_version import spec_version
@@ -28,6 +29,9 @@ BATCH = 'application/prs.bead-batch'
 SLOW = '{"milliseconds":3600000}'
 # a page of another origin, which a server answers CORS to when origins names it (spec 15.12)
 PAGE = 'https://page.test'
+# where every case's wall clock starts, and that instant in milliseconds since the epoch
+WALL_CLOCK = '2026-01-01T00:00:00Z'
+EPOCH = int(datetime.fromisoformat(WALL_CLOCK.replace('Z', '+00:00')).timestamp()) * 1000
 
 
 def hexadecimal(data):
@@ -203,8 +207,10 @@ def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{ho
 BEARER = 'Bearer mF_9.B5f-4.1JqM'
 # what a 503 busy carries besides its mark
 BUSY = {'retry-after': {'shape': 'delay-seconds'}}
-# what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 5)
+# what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 5),
+# and of one its verifier does not hold, or whose end the wall clock has reached (13.11)
 NO_CREDENTIAL = 'no credential came'
+DOES_NOT_HOLD = 'the credential does not hold'
 
 
 def elsewhere(call_id):
@@ -849,10 +855,49 @@ websocket = [
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
     ('a message past the side\'s own limit closes its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
-    ('a WebSocket carries no credential, nor does its upgrade\'s Authorization: a request presenting ELSEWHERE is answered SESSION_REQUIRED',
-     ['15.2'], {}, [
-         *upgrade(fields={'authorization': 'Interop sub=ada'}), message('socket', binary=elsewhere(1)),
-         heard('socket', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
+    # 15.1 and 15.2: the Authorization of an upgrade from no page, carried beside every envelope of its
+    # connection; the verifier holds a value of its grammar alone, so whoami answers only if its
+    # auth-scheme came with it and the spaces and tabs around it went
+    ('a WebSocket upgrade that carries no Origin carries its Authorization beside every envelope of its connection, as it came, its auth-scheme included and its surrounding whitespace removed: a request presenting ELSEWHERE hands it to the verifier, whoami answering the sub it names, and one presenting none is refused SESSION_REQUIRED, the upgrade\'s credential standing for nothing but ELSEWHERE',
+     ['15.1', '15.2'], {}, [
+         *upgrade('ada', {'authorization': 'Interop sub=ada'}),
+         message('ada', binary=elsewhere(1)), heard('ada', envelope=result(1, '"ada"')),
+         message('ada', binary=elsewhere(3)), heard('ada', envelope=result(3, '"ada"')),
+         message('ada', binary=request(5, 'whoami', 'null')), heard('ada', envelope=failure(5, SESSION_REQUIRED)),
+         *upgrade('bob', {'authorization': ' \tInterop sub=bob\t '}),
+         message('bob', binary=elsewhere(1)), heard('bob', envelope=result(1, '"bob"'))]),
+    ('an upgrade that carries no Authorization, or an empty one, carries none: a request presenting ELSEWHERE on its connection is answered SESSION_REQUIRED, no credential came',
+     ['15.1', '15.2'], {}, [
+         *upgrade('none'), message('none', binary=elsewhere(1)),
+         heard('none', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)),
+         *upgrade('empty', {'authorization': ''}), message('empty', binary=elsewhere(1)),
+         heard('empty', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL))]),
+    # a page's browser writes its own HTTP authentication on its upgrade (Fetch, credentials mode
+    # include), so an upgrade that carries an Origin carries no credential, whatever its Authorization
+    ('an upgrade that carries an Origin, one the server takes, carries no credential, whatever its Authorization: a page\'s browser writes its own authentication on it, so a request presenting ELSEWHERE on its connection is answered SESSION_REQUIRED, no credential came',
+     ['15.1', '15.2'], {'options': {'origins': ['https://bead.test']}}, [
+         *upgrade('page', {'origin': 'https://bead.test', 'authorization': 'Interop sub=ada'}),
+         message('page', binary=elsewhere(1)),
+         heard('page', envelope=failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)),
+         *upgrade('service', {'authorization': 'Interop sub=ada'}), message('service', binary=elsewhere(1)),
+         heard('service', envelope=result(1, '"ada"'))]),
+    ('an upgrade with two Authorization fields is refused 400, marked, before its origin is judged',
+     ['15.2', '15.2.6', '15.6.4'], {}, [
+         handshake('twice', [('authorization', 'Interop sub=ada'), ('authorization', 'Interop sub=ada'),
+                             ('origin', 'https://elsewhere.test')]),
+         refused('twice', 400, 'malformed', UPGRADE_REFUSED),
+         *upgrade('once', {'authorization': 'Interop sub=ada'}), message('once', binary=elsewhere(1)),
+         heard('once', envelope=result(1, '"ada"'))]),
+    # 13.11: resolved at each request, as over HTTP, the wall clock standing at EPOCH, where no step
+    # moves it
+    ('a credential its upgrade carried is judged at each request as an HTTP one is: an end the wall clock has reached as its verifier settles does not hold, one a millisecond short of it holds, and the connection stays',
+     ['13.11', '15.2'], {}, [
+         *upgrade('ended', {'authorization': f'Interop sub=ada, end={EPOCH}'}),
+         message('ended', binary=elsewhere(1)),
+         heard('ended', envelope=failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD)),
+         message('ended', binary=request(3, 'echo', '"y"')), heard('ended', envelope=result(3, '"y"')),
+         *upgrade('held', {'authorization': f'Interop sub=ada, end={EPOCH + 1}'}),
+         message('held', binary=elsewhere(1)), heard('held', envelope=result(1, '"ada"'))]),
     # 15.2 and 15.12: what HTTP refuses of its own, answered as HTTP answers it, before hosts is read;
     # a host is of 15.12's grammar, narrower than RFC 3986's
     ('a request at a WebSocket\'s address without a Host, with two, or with one that is no host, is answered 400 as HTTP answers it, unmarked',
@@ -1213,7 +1258,7 @@ document = {
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
     ],
     'specVersion': spec_version(),
-    'wallClock': '2026-01-01T00:00:00Z',
+    'wallClock': WALL_CLOCK,
     'defaults': DEFAULTS,
     'responses': [
         {'name': name, 'pieces': pieces, 'status': status, 'fields': fields, 'body': body}

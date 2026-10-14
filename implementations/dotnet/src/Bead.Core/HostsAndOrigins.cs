@@ -350,6 +350,21 @@ internal static class HostsAndOrigins
     }
 
     /// <summary>
+    /// The credential an <c>Authorization</c> carries (spec 15.1), over HTTP a <c>POST</c>'s and over
+    /// a WebSocket its upgrade's: its first line's value whole, its auth-scheme included, without
+    /// the spaces and tabs around it (RFC 9110 §5.5); none when it has no line, or when nothing is
+    /// left. Two lines are refused before it is read, as no list to combine (RFC 9110 §5.3).
+    /// </summary>
+    public static string? CredentialOf(IReadOnlyList<string?> lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        var value = lines.Count == 0 ? "" : (lines[0] ?? "").Trim(FieldWhitespace);
+
+        return value.Length == 0 ? null : value;
+    }
+
+    /// <summary>
     /// A request's <c>Origin</c> as a refusal tells it (spec 15.1): its field lines as they came,
     /// joined by <c>", "</c> (RFC 9110 §5.3); none when it sends none.
     /// </summary>

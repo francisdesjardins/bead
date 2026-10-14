@@ -113,18 +113,20 @@ public sealed record CallSession
     /// <summary>
     /// The failure of a call presenting <paramref name="presented"/> that its transport cannot carry
     /// (spec 13.4): DESTINATION_UNREACHABLE, nothing tried, for an
-    /// <see cref="CredentialScheme.Elsewhere"/> over a transport that carries no credential beside an
-    /// envelope, and for a <see cref="CredentialScheme.Jwt"/> or an
-    /// <see cref="CredentialScheme.Elsewhere"/> over one that is not secure; none for a call it
-    /// carries, any presenting none or <see cref="CredentialScheme.Opaque"/> among them.
+    /// <see cref="CredentialScheme.Elsewhere"/> over a transport that does not carry the credential
+    /// it presents beside an envelope — none, or, over a WebSocket, another than its upgrade's — and
+    /// for a <see cref="CredentialScheme.Jwt"/> or an <see cref="CredentialScheme.Elsewhere"/> over
+    /// one that is not secure; none for a call it carries, any presenting none or
+    /// <see cref="CredentialScheme.Opaque"/> among them. Its detail names the scheme alone, never
+    /// the credential (spec 15.1).
     /// </summary>
-    internal static Failure? UncarriedOf(Credential? presented, (bool CarriesCredential, bool IsSecure) transport)
+    internal static Failure? UncarriedOf(Credential? presented, (bool Carries, bool IsSecure) transport)
     {
         return presented?.Scheme switch
         {
-            CredentialScheme.Elsewhere when !transport.CarriesCredential => Failure.OfProtocol(
+            CredentialScheme.Elsewhere when !transport.Carries => Failure.OfProtocol(
                 ProtocolCode.DestinationUnreachable,
-                "its transport carries no credential beside an envelope, which ELSEWHERE stands for"),
+                "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             CredentialScheme.Jwt or CredentialScheme.Elsewhere when !transport.IsSecure => Failure.OfProtocol(
                 ProtocolCode.DestinationUnreachable,
                 "its transport leaves the machine in the clear, which a bearer credential never crosses"),
@@ -147,7 +149,8 @@ public sealed record SessionRequest
 
     /// <summary>
     /// The credential its transport carried beside it, which an <see cref="CredentialScheme.Elsewhere"/>
-    /// stands for: over HTTP, its <c>Authorization</c> field; none when nothing was carried.
+    /// stands for: over HTTP, its <c>Authorization</c> field; over a WebSocket, that of its
+    /// connection's upgrade from no page; none when nothing was carried.
     /// </summary>
     public string? TransportCredential { get; init; }
 

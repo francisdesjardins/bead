@@ -765,9 +765,7 @@ export type RouterServerActivity = RouterActivity;
 export type RelayTarget =
   | IConnectionTarget
   | (Pick<IRouterClient, 'limits' | 'request'> & {
-      readonly transport?:
-        | Pick<IRouterClient['transport'], 'carriesCredential' | 'isSecure'>
-        | undefined;
+      readonly transport?: Pick<IRouterClient['transport'], 'carries' | 'isSecure'> | undefined;
     });
 
 /** Event name → the arguments its listeners receive. */

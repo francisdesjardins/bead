@@ -6724,8 +6724,9 @@
       ]
     },
     {
-      "name": "a WebSocket carries no credential, nor does its upgrade's Authorization: a request presenting ELSEWHERE is answered SESSION_REQUIRED",
+      "name": "a WebSocket upgrade that carries no Origin carries its Authorization beside every envelope of its connection, as it came, its auth-scheme included and its surrounding whitespace removed: a request presenting ELSEWHERE hands it to the verifier, whoami answering the sub it names, and one presenting none is refused SESSION_REQUIRED, the upgrade's credential standing for nothing but ELSEWHERE",
       "clauses": [
+        "15.1",
         "15.2"
       ],
       "transport": "websocket",
@@ -6734,7 +6735,7 @@
           "send": {
             "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\n\r\n"
           },
-          "on": "socket"
+          "on": "ada"
         },
         {
           "expect": {
@@ -6744,13 +6745,123 @@
               "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
             }
           },
-          "on": "socket"
+          "on": "ada"
         },
         {
           "send": {
             "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
           },
-          "on": "socket"
+          "on": "ada"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "ada"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 03  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "ada"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "ada"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 05  00 01 00 0E | 6E 75 6C 6C"
+          },
+          "on": "ada"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 5,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0
+              }
+            }
+          },
+          "on": "ada"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization:  \tInterop sub=bob\t \r\n\r\n"
+          },
+          "on": "bob"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "bob"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "bob"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 62 6F 62 22"
+            }
+          },
+          "on": "bob"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade that carries no Authorization, or an empty one, carries none: a request presenting ELSEWHERE on its connection is answered SESSION_REQUIRED, no credential came",
+      "clauses": [
+        "15.1",
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "none"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "none"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "none"
         },
         {
           "expect": {
@@ -6765,7 +6876,292 @@
               }
             }
           },
-          "on": "socket"
+          "on": "none"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: \r\n\r\n"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "empty"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "empty"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0,
+                "detail": "no credential came"
+              }
+            }
+          },
+          "on": "empty"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade that carries an Origin, one the server takes, carries no credential, whatever its Authorization: a page's browser writes its own authentication on it, so a request presenting ELSEWHERE on its connection is answered SESSION_REQUIRED, no credential came",
+      "clauses": [
+        "15.1",
+        "15.2"
+      ],
+      "transport": "websocket",
+      "options": {
+        "origins": [
+          "https://bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: https://bead.test\r\nauthorization: Interop sub=ada\r\n\r\n"
+          },
+          "on": "page"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "page"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "page"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0,
+                "detail": "no credential came"
+              }
+            }
+          },
+          "on": "page"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\n\r\n"
+          },
+          "on": "service"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "service"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "service"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "service"
+        }
+      ]
+    },
+    {
+      "name": "an upgrade with two Authorization fields is refused 400, marked, before its origin is judged",
+      "clauses": [
+        "15.2",
+        "15.2.6",
+        "15.6.4"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\nauthorization: Interop sub=ada\r\norigin: https://elsewhere.test\r\n\r\n"
+          },
+          "on": "twice"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": "malformed",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 400,
+              "reason": "malformed",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "twice"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada\r\n\r\n"
+          },
+          "on": "once"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "once"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "once"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "once"
+        }
+      ]
+    },
+    {
+      "name": "a credential its upgrade carried is judged at each request as an HTTP one is: an end the wall clock has reached as its verifier settles does not hold, one a millisecond short of it holds, and the connection stays",
+      "clauses": [
+        "13.11",
+        "15.2"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada, end=1767225600000\r\n\r\n"
+          },
+          "on": "ended"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "ended"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "ended"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 18,
+              "callId": 1,
+              "failure": {
+                "code": 32,
+                "scope": 0,
+                "relays": 0,
+                "detail": "the credential does not hold"
+              }
+            }
+          },
+          "on": "ended"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+          },
+          "on": "ended"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 79 22"
+            }
+          },
+          "on": "ended"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nauthorization: Interop sub=ada, end=1767225600001\r\n\r\n"
+          },
+          "on": "held"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "held"
+        },
+        {
+          "send": {
+            "binary": "A1 10 08 04  00 00 00 01  00 01 00 0E  00 03 00 00 | 6E 75 6C 6C"
+          },
+          "on": "held"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 61 64 61 22"
+            }
+          },
+          "on": "held"
         }
       ]
     },

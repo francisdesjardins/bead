@@ -190,6 +190,28 @@ export const isVisibleField = (value: string): boolean => {
 };
 
 /**
+ * The credential an `Authorization` carries (spec 15.1), over HTTP a `POST`'s and over a WebSocket
+ * its upgrade's: its first line's value whole, its auth-scheme included, without the spaces and tabs
+ * around it (RFC 9110 §5.5); none when it has no line, or when nothing is left. Two lines are
+ * refused before it is read, as no list to combine (RFC 9110 §5.3).
+ */
+export const credentialOf = (lines: readonly string[]): string | undefined => {
+  const [value = ''] = lines;
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && (value[start] === ' ' || value[start] === '	')) {
+    start += 1;
+  }
+
+  while (end > start && (value[end - 1] === ' ' || value[end - 1] === '	')) {
+    end -= 1;
+  }
+
+  return start === end ? undefined : value.slice(start, end);
+};
+
+/**
  * Whether every field value of a request, as it came — each name before its value — is one
  * {@link isVisibleField} takes, none padded at either end. A request that holds another is answered
  * 400 unmarked, as HTTP answers a malformed field, or over HTTP/2 its stream reset, before anything

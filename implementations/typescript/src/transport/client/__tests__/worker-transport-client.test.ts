@@ -117,7 +117,7 @@ test.describe('createWorkerTransportClient', () => {
     await using started = await startWorker();
     const client = createWorkerTransportClient({ worker: started.worker });
 
-    expect([client.carriesCredential, client.isSecure]).toEqual([false, true]);
+    expect([client.carries('Bearer mF_9.B5f-4.1JqM'), client.isSecure]).toEqual([false, true]);
   });
 
   test('closes as its server closes it, or as its worker errs, and connects again', async () => {

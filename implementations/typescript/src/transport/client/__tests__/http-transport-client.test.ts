@@ -108,7 +108,7 @@ const judgedOf = async (target: { host: string; secured?: boolean }) => {
 
   await client.connect({ ...target, port: 8_080 }).catch(() => {});
 
-  return [client.carriesCredential, client.isSecure];
+  return [client.carries('Bearer mF_9.B5f-4.1JqM'), client.isSecure];
 };
 
 const handleOf = (server: HTTPTransportServer) => {
@@ -308,11 +308,35 @@ test.describe('createHTTPTransportClient', () => {
         client.send({ credential, data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }) }),
         JSON.stringify(credential)
       ).rejects.toThrow(
-        new ProgrammerError('a credential holds visible ASCII, spaces and tabs alone')
+        new ProgrammerError(
+          'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+        )
       );
     }
 
     expect([fake.calls.length, client.isOpen()]).toEqual([3, true]);
+  });
+
+  // spec 15.5
+  test('refuses a credential with a space or a tab first or last before its send goes', async () => {
+    const { client, fake } = await connectFake();
+
+    for (const credential of [` ${BEARER}`, `${BEARER} `, `\t${BEARER}`, `${BEARER}\t`, ' ']) {
+      await expect(
+        client.send({ credential, data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) }),
+        JSON.stringify(credential)
+      ).rejects.toThrow(
+        new ProgrammerError(
+          'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+        )
+      );
+      // nor does it say it carries one, which a call presenting ELSEWHERE then fails before it goes
+      expect(client.carries(credential), JSON.stringify(credential)).toBe(false);
+    }
+
+    // a space or a tab within it is a field's
+    expect([client.carries(BEARER), client.carries('Bearer\ta b')]).toEqual([true, true]);
+    expect([fake.calls.length, client.isOpen()]).toEqual([1, true]);
   });
 
   test('disconnects by a DELETE, the server closing first, and closes clean', async () => {

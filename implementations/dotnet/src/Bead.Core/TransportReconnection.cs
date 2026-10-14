@@ -22,7 +22,9 @@ internal static class TransportReconnection
     /// <see cref="Clocks.LongestTimer"/> milliseconds, infinite among them, an
     /// <see cref="ArgumentOutOfRangeException"/> before the tap hears it, no attempt made after it;
     /// one held is rounded to the nearest whole millisecond, which the tap hears.
-    /// What the tap throws passes through.
+    /// What the tap throws passes through, and so does an <see cref="ArgumentException"/> an attempt
+    /// throws, a programmer's error no attempt after it would mend: a credential provider's value
+    /// that is no field value among them.
     /// </summary>
     public static async Task Attempting(Func<CancellationToken, Task> attempt, (TransportReconnectOptions Options, TimeProvider Clock) reconnection)
     {
@@ -40,7 +42,7 @@ internal static class TransportReconnection
 
                 return;
             }
-            catch (Exception reason)
+            catch (Exception reason) when (reason is not ArgumentException)
             {
                 if (token.IsCancellationRequested)
                 {

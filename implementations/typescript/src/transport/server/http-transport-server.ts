@@ -31,6 +31,7 @@ import {
   assertListeningAddress,
   assertOrigins,
   authorityOf,
+  credentialOf,
   hasVisibleFields,
   HOST_REFUSAL,
   isAuthority,
@@ -390,27 +391,6 @@ const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefined => 
     isRequired: request.httpVersion === '1.1',
     target: requestTargetOf(request.url),
   });
-};
-
-// the credential a field carries: its value whole, without the spaces and tabs around it (RFC 9110
-// §5.5); none when nothing is left
-const credentialOf = (value: string | undefined): string | undefined => {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  let start = 0;
-  let end = value.length;
-
-  while (start < end && (value[start] === ' ' || value[start] === '\t')) {
-    start += 1;
-  }
-
-  while (end > start && (value[end - 1] === ' ' || value[end - 1] === '\t')) {
-    end -= 1;
-  }
-
-  return start === end ? undefined : value.slice(start, end);
 };
 
 // a body of Bead's media type, parameters aside, sent as it is
@@ -1143,7 +1123,7 @@ export const createHTTPTransportServer = (
 
           // a request is handed on with the credential its exchange carried; no other envelope is
           if (kind === ENVELOPE_KINDS.REQUEST) {
-            const credential = credentialOf(authorizations[0]);
+            const credential = credentialOf(authorizations);
 
             state.isDelivered = true;
             tell(MESSAGE_EVENT, [{ credential, data: envelope }, connectionHandle]);

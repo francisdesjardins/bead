@@ -197,8 +197,11 @@ internal static class WebSocketHandshake
     {
         var headers = request.Headers;
 
+        // * two Authorization lines are no list to combine (RFC 9110 §5.3), refused whether the
+        // upgrade carries an Origin or not: a form fault, as a key is
         return IsKey(headers.SecWebSocketKey)
             && (headers.SecWebSocketProtocol.Count == 0 || IsSubprotocolList(headers.SecWebSocketProtocol))
+            && headers.Authorization.Count <= 1
             && headers.ContentLength is null or 0
             && headers.TransferEncoding.Count == 0;
     }
@@ -232,8 +235,8 @@ internal static class WebSocketHandshake
     /// what HTTP refuses of its own, a field value that holds a control character but HTAB or a
     /// character past ASCII, a <c>Host</c> missing or repeated, or an authority that is no host, 400
     /// unmarked; a host not taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, 426;
-    /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, 400; an origin
-    /// not taken, 403.
+    /// a version but 13, 426, and one in two field lines, 400; a malformed upgrade, two
+    /// <c>Authorization</c> lines among it, 400; an origin not taken, 403.
     /// </summary>
     public static HandshakeRefusal? RefusalOf(HttpRequest request, WebSocketTransportServerOptions options)
     {

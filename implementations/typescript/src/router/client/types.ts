@@ -170,11 +170,12 @@ export interface IRouterClientOptions {
 /** The part of a transport client this router uses — met by any of this package's. */
 export interface IRouterClientTransportLike {
   /**
-   * Whether it carries a credential beside an envelope it sends — over HTTP, its `POST`'s
-   * `Authorization`; a WebSocket and a worker carry none. None does without it: a call presenting
-   * `ELSEWHERE` over one that does not fails before it goes, DESTINATION_UNREACHABLE (spec 13.4).
+   * Whether it carries `credential` beside an envelope it sends — over HTTP, any field value, in
+   * each `POST`'s `Authorization`; over a WebSocket, the bytes its upgrade carried alone; a worker
+   * none. None does without it: a call presenting `ELSEWHERE` with a credential it does not carry
+   * fails before it goes, DESTINATION_UNREACHABLE (spec 13.4).
    */
-  readonly carriesCredential?: boolean | undefined;
+  carries?(credential: string): boolean;
   /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
   readonly clock?: IClock | undefined;
   /**
