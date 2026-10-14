@@ -63,6 +63,15 @@ codes, so a refusal says which side refused without a side ever being sent: a fa
 no relay is the peer's. Through a relay no side is known, and the scope alone tells the protocol's
 codes from a procedure's.
 
+**A failure answered for an error of the side's own carries none of that error**: a resolver that
+throws, a verifier or an admission that fails, a result the side cannot send, an answer a relay's
+leg A cannot carry, a codec that throws other than a refusal. Its code says how far the call went,
+which is all its requester acts on; the error, an exception's message above all, is reported where
+the side runs, since its internals tell a peer nothing it can use and tell an attacker what to try
+next, as OWASP's Application Security Verification Standard returns a generic message to the
+consumer of an unexpected error (ASVS 5.0, 16.5.1). `PROCEDURE_FAILED` so answered carries no
+detail at all, the one form every language writes alike (spec 9.0).
+
 **Every bit this layout does not define refuses the envelope as malformed**, and so do bytes after
 the header of a kind that carries no payload, a credit's or a cancel's, and a chunk that carries
 none. A credential scheme to come is no bit: its block is read whole, by the length it states, and
@@ -167,8 +176,11 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 in two rounds. A transport's order and copies met it with sections 15.1 and 15.9 of the spec, which
 [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md) points here for; the
 wire's edges met it with sections 7.3, 9.5, 12 and 14.3, a round
-[0010](0010-a-request-presents-a-credential-of-a-scheme.md) points here for. Their objections, each
-with the answer that holds:
+[0010](0010-a-request-presents-a-credential-of-a-scheme.md) points here for. A failure's detail
+for an error of the side's own met it in
+[0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s round, on the answer leg A
+cannot carry, which keeps its objections and answers. Their objections, each with the answer that
+holds:
 
 ### On a transport's order and copies
 
