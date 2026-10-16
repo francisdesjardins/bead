@@ -509,6 +509,8 @@ jobs:
           node tools/check-commits.mjs "$@"
       - name: Check the links
         run: node tools/check-links.mjs
+      - name: Check the details
+        run: node tools/check-details.mjs
       # Each version agrees with itself, the C# lock files' project ranges included, and a released
       # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
       # into main and main, the release moved each version its changes owe, dated its section, and

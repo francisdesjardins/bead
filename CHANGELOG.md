@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `tools/check-details.mjs`, in CI: no exception's message goes into a failure's detail but at
+  the sites that report alone (spec 9.0), on either side (decision 0006).
+
 ## [0.5.0] - 2026-10-14
 
 ### Added
