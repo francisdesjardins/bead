@@ -267,8 +267,8 @@ $encoding = [Console]::OutputEncoding
 try {
   [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
   if ($refs -eq 1) {
-    # * the archive piped as git writes it, into the image's /tmp and nowhere on the host, the
-    # engine's output its own, as beadc.sh pipes it
+    # * the archive piped as git writes it, extracted under the project's .beadc/ where a beadc.yaml
+    # is read, else in the image's /tmp; the engine's output its own, as beadc.sh pipes it
     # ! by two processes of .NET's, not PowerShell's pipe, which drops the engine's exit when the
     # engine closes its standard input early, as beadc refusing its arguments or an engine that
     # cannot run the image do. A git archive that fails midway leaves beadc a truncated archive,
