@@ -101,6 +101,16 @@ internal static class Program
 
             durations.Sort();
 
+            // client and server together, both in this process
+            var before = GC.GetTotalAllocatedBytes(true);
+
+            for (var index = 0; index < 2_000; index++)
+            {
+                _ = await echo(body)();
+            }
+
+            var allocated = (GC.GetTotalAllocatedBytes(true) - before) / 2_000;
+
             var done = 0;
 
             clock.Restart();
@@ -116,10 +126,46 @@ internal static class Program
 
             rows.Add(string.Create(
                 CultureInfo.InvariantCulture,
-                $"| {size} B | {Percentile(durations, 0.5) * 1_000:F0} | {Percentile(durations, 0.95) * 1_000:F0} | {Percentile(durations, 0.99) * 1_000:F0} | {done * 1_000 / clock.Elapsed.TotalMilliseconds:F0} |"));
+                $"| {size} B | {Percentile(durations, 0.5) * 1_000:F0} | {Percentile(durations, 0.95) * 1_000:F0} | {Percentile(durations, 0.99) * 1_000:F0} | {done * 1_000 / clock.Elapsed.TotalMilliseconds:F0} | {allocated} |"));
         }
 
         return rows;
+    }
+
+    private static async Task<string> Transfer()
+    {
+        const int Mebibyte = 1_048_576;
+        const int Echoes = 5;
+        var limits = new RouterLimits { MaximumPayloadBytes = 32 * Mebibyte };
+        var transport = new WebSocketTransportServer();
+        await using var server = new Server<string>(transport, new ServerOptions { Limits = limits });
+
+        InteropHandlers.Offer(server);
+
+        var port = (await transport.Start(new WebSocketTransportStartOptions { Address = "127.0.0.1", FindOpenPort = true })).Port;
+
+        await using var client = new WebSocketClient(new WebSocketClientOptions { Limits = limits });
+
+        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = port });
+
+        var echo = client.Services.GetRequest(
+            InteropProcedures.Echo.Procedure,
+            new RequestDependencies<JsonElement, JsonElement> { Serializer = new JsonPayloads() });
+        using var document = JsonDocument.Parse($"\"{new string('x', 20 * Mebibyte)}\"");
+        var body = document.RootElement.Clone();
+
+        _ = await echo(body)();
+
+        var clock = Stopwatch.StartNew();
+
+        for (var index = 0; index < Echoes; index++)
+        {
+            _ = await echo(body)();
+        }
+
+        var milliseconds = clock.Elapsed.TotalMilliseconds / Echoes;
+
+        return string.Create(CultureInfo.InvariantCulture, $"| 20 MiB | {milliseconds:F0} | {40 * 1_000 / milliseconds:F0} |");
     }
 
     // definition
@@ -144,12 +190,19 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("call, an echo over a WebSocket on the loopback");
         Console.WriteLine();
-        Console.WriteLine($"| payload | p50 us | p95 us | p99 us | calls/s at {Concurrency} |");
-        Console.WriteLine("| --- | --- | --- | --- | --- |");
+        Console.WriteLine($"| payload | p50 us | p95 us | p99 us | calls/s at {Concurrency} | B allocated per call |");
+        Console.WriteLine("| --- | --- | --- | --- | --- | --- |");
 
         foreach (var row in await Calls(seconds))
         {
             Console.WriteLine(row);
         }
+
+        Console.WriteLine();
+        Console.WriteLine("transfer, an echo of a payload past one envelope, as chunks both ways (MiB/s counts both)");
+        Console.WriteLine();
+        Console.WriteLine("| payload | ms per echo | MiB/s |");
+        Console.WriteLine("| --- | --- | --- |");
+        Console.WriteLine(await Transfer());
     }
 }
