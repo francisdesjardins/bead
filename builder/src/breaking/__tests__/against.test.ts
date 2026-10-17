@@ -270,3 +270,26 @@ test("a committed blueprint its .proto contradicts, or one named and missing, is
     })
   ).toEqual(['AGAINST_BLUEPRINT warning']);
 });
+
+test('--except PROTO_SKIPPED and --except AGAINST_BLUEPRINT leave their warnings out, bare, and no waiver goes unused', () => {
+  const skipped = breaking(
+    { proto: [join(EARLIER, 'proto')] },
+    { against: SHOP_BLUEPRINT, category: Category.API, except: ['PROTO_SKIPPED'] }
+  );
+  const contradicted = breaking(
+    { proto: [join(EARLIER, 'proto')] },
+    {
+      against: project('waived', { config: WITH_BLUEPRINT, committed: committedBlueprint() }),
+      category: Category.API,
+      except: [
+        'AGAINST_BLUEPRINT',
+        'PROCEDURE_SAME_NAME@service:1/procedure:1',
+        'NAME_NO_DELETE@service:1/procedure:1',
+        'SERVICE_REVISION@service:1',
+      ],
+    }
+  );
+
+  expect(skipped.diagnostics).toEqual([]);
+  expect(contradicted.diagnostics).toEqual([]);
+});
