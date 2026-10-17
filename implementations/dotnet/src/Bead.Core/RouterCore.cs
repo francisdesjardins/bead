@@ -830,7 +830,9 @@ public sealed class RouterCore : IDisposable
                 pendingRequest.OnSent?.Invoke(false);
             }
 
-            pendingRequest.Reject(reason);
+            // ! a dispose that closed the transport under it rejects it as disposed, as its rejection
+            // posted after would: which comes first is a race, and the TypeScript side has none
+            pendingRequest.Reject(_isDisposed ? new DisconnectException($"{Disposed} before the answer") : reason);
         }
     }
 

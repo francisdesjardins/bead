@@ -12,6 +12,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tools/check-details.mjs`, in CI: no exception's message goes into a failure's detail but at
   the sites that report alone (spec 9.0), on either side (decision 0006).
 
+### Fixed
+
+- On the C# side, a request whose sending fails as its router is disposed is rejected as disposed,
+  as the TypeScript side rejects it, not with the transport's refusal, which raced the disposal.
+
 ## [0.5.0] - 2026-10-14
 
 ### Added
