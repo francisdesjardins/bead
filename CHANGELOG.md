@@ -12,6 +12,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tools/check-details.mjs`, in CI: no exception's message goes into a failure's detail but at
   the sites that report alone, or where the error is the side's own (spec 9.0), on either side
   (decision 0006).
+- Each side's envelope readers are fuzzed in its suite: seeded mutations of `spec/vectors.json`'s
+  bytes, each read returning or refusing with a failure within a second; `BEAD_FUZZ_INPUTS` draws
+  more for a longer run.
 
 ### Fixed
 
