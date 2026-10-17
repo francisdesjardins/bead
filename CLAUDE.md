@@ -103,6 +103,9 @@ comment that a reader must not miss opens with its tag, after its marker (`//`, 
 
 Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
 
+A document that cites a test copies its title to the byte, an apostrophe included: the TypeScript
+titles that hold one write it `’`, and the citation does the same.
+
 **C#** (`implementations/dotnet`, decision 0007):
 
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
