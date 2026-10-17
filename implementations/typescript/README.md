@@ -390,7 +390,8 @@ any router that meets `IRouterLike`: a request is answered once, and as `PROCEDU
 resolver fails first. A resolver answers the procedure's own failure, `response(null, { code: 21 })`
 with a code from 1 to 65,535, or a refusal of admission from its router's table. The types refuse
 the protocol's other failures; a code out of that range, or a refusal from the other side's table,
-fails the resolver, and the request is answered as `PROCEDURE_FAILED`. A `beforeRequest` admits a
+fails the resolver, and the request is answered as `PROCEDURE_FAILED`, with no detail: the error is
+reported, never the peer's to read (spec 9.0). A `beforeRequest` admits a
 request only by returning `true`: anything else refuses it, with the `refusal` the function carries,
 or with `ACCESS_DENIED`. It is synchronous, and sees the request's header, its connection and the
 call's session, `session`, never its payload: its router asks it through the resolver's `admit`

@@ -195,6 +195,7 @@ share.
       },
   });
   ```
+
 - **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
   `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
   own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
@@ -353,6 +354,10 @@ process, so a listener catches its own. The threading analyzers'
 [VSTHRD101](https://microsoft.github.io/vs-threading/analyzers/VSTHRD101.html) says where one is
 given, at build: Bead's own projects hold it, and an application's may, by
 `Microsoft.VisualStudio.Threading.Analyzers`.
+
+An error of a side's own, a resolver that throws or a result it cannot send, is reported through its
+router's `Error` and answered `PROCEDURE_FAILED` with no detail: an exception's message is the
+side's, never the peer's to read (spec 9.0).
 
 ```csharp
 server.Router.Error += (reason, connectionHandle) =>
