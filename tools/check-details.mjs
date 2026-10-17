@@ -1,19 +1,22 @@
 #!/usr/bin/env node
-// No exception's message goes into a failure's detail unless the site is one the spec lets a side
-// report alone (spec 9.0): what an exception says is the side's, never a peer's to read.
+// No exception's message goes into a failure's detail unless the failure stays with the side, its
+// report alone (spec 9.0), or the error is the side's own, its words written for the peer: what a
+// foreign exception says is the side's, never a peer's to read.
 //
 //   node tools/check-details.mjs             both implementations' sources
 //   node tools/check-details.mjs <file…>     those files alone
 //
 // The TypeScript side builds a detail by `detail: <error>.message`; the C# side hands
 // `<error>.Message` to a failure's constructor. A site not in `ALLOWED` fails, with its file and
-// line: a new site is added here by decision, with the test that shows the message never leaves.
+// line: a new site is added here by decision, with the test that shows what its detail says.
 // Exit 1 on a site that is not allowed, or an allowed one gone.
 
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
-// the sites that report alone, by file: how many each holds
+// the sites allowed, by file: how many each holds. Each reports alone (a payload or an envelope
+// that does not decode), but router-core.ts's CapacityError, a bound of the side's own, whose words
+// the C# side writes as the detail itself
 export const ALLOWED = Object.freeze({
   'implementations/typescript/src/router/shared/notification.ts': 1,
   'implementations/typescript/src/router/shared/router-core.ts': 2,
