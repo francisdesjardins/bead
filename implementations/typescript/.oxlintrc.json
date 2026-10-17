@@ -190,11 +190,12 @@
       }
     },
     {
-      // the gates' CLIs, the commands `check` runs: stdout is their whole output contract
+      // the gates' CLIs, the commands `check` runs, and the measurement's: stdout is their whole output contract
       "files": [
         "tools/check-comment-budget.mjs",
         "tools/check-examples.mjs",
         "tools/check-oxlint-plugin.mjs",
+        "tools/bench.mjs",
         "tools/check-protobuf.mjs"
       ],
       "rules": {

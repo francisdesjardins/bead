@@ -9,6 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `implementations/typescript/tools/bench.mjs` and `implementations/dotnet/tools/Bead.Benchmarks`: the
+  same two layers measured on each side in the same units, the envelope codec and an echo over a
+  WebSocket on the loopback, by hand (README, Measurement).
 - `tools/check-details.mjs`, in CI: no exception's message goes into a failure's detail but at
   the sites that report alone, or where the error is the side's own (spec 9.0), on either side
   (decision 0006).

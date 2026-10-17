@@ -336,6 +336,19 @@ dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura -
 node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src --floor csharp
 ```
 
+## Measurement
+
+Each side measures the same two layers in the same units, run by hand on a quiet machine:
+
+- `node implementations/typescript/tools/bench.mjs [--seconds 3] [--json]`;
+- `dotnet run -c Release --project implementations/dotnet/tools/Bead.Benchmarks -- --seconds 3`.
+
+The envelope codec: a request written and read back, at payloads of 0 B, 1 KiB and 64 KiB, in
+nanoseconds a round trip. A call: the interop service's `echo` of a JSON string over a WebSocket on
+the loopback, its latency one call at a time (p50, p95 and p99, in microseconds) and its throughput
+32 calls at a time. A number is its machine's, run's and runtime's: it compares one side with the
+other and a run with the same machine's earlier one, never one machine with another.
+
 ## Support
 
 [`docs/support.md`](docs/support.md) shows, feature by feature, what each implementation supports
