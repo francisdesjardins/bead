@@ -3,10 +3,11 @@
 //
 //   node tools/bench.mjs [--seconds 3] [--json]
 //
-// Two layers. The envelope codec, a request written and read back, at payloads of 0 B, 1 KiB and
+// Three layers. The envelope codec, a request written and read back, at payloads of 0 B, 1 KiB and
 // 64 KiB: nanoseconds a round trip. A call, a request answered by a resolver that echoes its JSON, over a
 // WebSocket on the loopback of the machine it runs on: its latency one call at a time (p50, p95,
-// p99, in microseconds) and its throughput 32 calls at a time. The C# side's
+// p99, in microseconds) and its throughput 32 calls at a time; and a transfer, the same echo of 20 MiB,
+// past one envelope, as chunks both ways. The C# side's
 // `implementations/dotnet/tools/Bead.Benchmarks` measures the same, in the same units, so the two
 // are read side by side. A number is the machine's, the run's and the runtime's: it says nothing
 // across machines, only how one side compares with the other and with its own earlier runs.
@@ -94,6 +95,51 @@ const codec = (reader, size) => {
   }
 
   return ((performance.now() - started) * 1_000_000) / rounds;
+};
+
+const transfer = async (reader) => {
+  const MIB = 1_048_576;
+  const limits = { maximumPayloadBytes: 32 * MIB };
+  const text = {
+    decode: (bytes) => {
+      return JSON.parse(new TextDecoder().decode(bytes));
+    },
+    encode: (value) => {
+      return new TextEncoder().encode(JSON.stringify(value));
+    },
+  };
+  const echo = { procedureId: 2, procedureName: 'echo', serviceId: 1, serviceRevision: 1 };
+  const server = reader.createWSServer({
+    limits,
+    transport: { WebSocketServer: reader.WebSocketServer },
+  });
+  const { port } = await server.transport.start({ address: '127.0.0.1', findOpenPort: true });
+  const client = reader.createWSClient({ limits, transport: { WebSocket: reader.WebSocket } });
+  const echoes = 5;
+
+  try {
+    server.services.getRequestResolver(echo, { serializer: text })((request, response) => {
+      return response(request.payload);
+    });
+    await client.connect({ host: '127.0.0.1', port });
+
+    const call = client.services.getRequest(echo, { serializer: text })('x'.repeat(20 * MIB));
+
+    await call();
+
+    const started = performance.now();
+
+    for (let index = 0; index < echoes; index++) {
+      await call();
+    }
+
+    const milliseconds = (performance.now() - started) / echoes;
+
+    return { size: 20 * MIB, milliseconds, mebibytesPerSecond: (40 * 1_000) / milliseconds };
+  } finally {
+    await client[Symbol.asyncDispose]();
+    await server[Symbol.asyncDispose]();
+  }
 };
 
 const calls = async (reader) => {
@@ -188,6 +234,7 @@ try {
       return { size, nanosecondsPerRoundTrip: codec(reader, size) };
     }),
     calls: await calls(reader),
+    transfer: await transfer(reader),
   };
 
   if (args.includes('--json')) {
@@ -201,13 +248,16 @@ try {
       console.log(`| ${String(row.size)} B | ${row.nanosecondsPerRoundTrip.toFixed(0)} |`);
     }
     console.log(
-      `\ncall, an echo over a WebSocket on the loopback\n\n| payload | p50 us | p95 us | p99 us | calls/s at ${String(CONCURRENCY)} |\n| --- | --- | --- | --- | --- |`
+      `\ncall, an echo over a WebSocket on the loopback\n\n| payload | p50 us | p95 us | p99 us | calls/s at ${String(CONCURRENCY)} | B allocated per call |\n| --- | --- | --- | --- | --- | --- |`
     );
     for (const row of result.calls) {
       console.log(
-        `| ${String(row.size)} B | ${row.p50.toFixed(0)} | ${row.p95.toFixed(0)} | ${row.p99.toFixed(0)} | ${row.perSecond.toFixed(0)} |`
+        `| ${String(row.size)} B | ${row.p50.toFixed(0)} | ${row.p95.toFixed(0)} | ${row.p99.toFixed(0)} | ${row.perSecond.toFixed(0)} | n/a |`
       );
     }
+    console.log(
+      `\ntransfer, an echo of a payload past one envelope, as chunks both ways (MiB/s counts both)\n\n| payload | ms per echo | MiB/s |\n| --- | --- | --- |\n| 20 MiB | ${result.transfer.milliseconds.toFixed(0)} | ${result.transfer.mebibytesPerSecond.toFixed(0)} |`
+    );
   }
 } finally {
   rmSync(folder, { recursive: true, force: true });

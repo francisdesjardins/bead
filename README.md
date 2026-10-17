@@ -346,7 +346,8 @@ Each side measures the same two layers in the same units, run by hand on a quiet
 The envelope codec: a request written and read back, at payloads of 0 B, 1 KiB and 64 KiB, in
 nanoseconds a round trip. A call: the interop service's `echo` of a JSON string over a WebSocket on
 the loopback, its latency one call at a time (p50, p95 and p99, in microseconds) and its throughput
-32 calls at a time. A number is its machine's, run's and runtime's: it compares one side with the
+32 calls at a time, and on the C# side the bytes it allocates; a transfer, the same echo of 20 MiB,
+past one envelope. A number is its machine's, run's and runtime's: it compares one side with the
 other and a run with the same machine's earlier one, never one machine with another.
 
 ## Support
