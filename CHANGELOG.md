@@ -29,6 +29,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On the C# side, a call or a command presenting `Credential.Elsewhere()`, nothing for its
+  transport to carry, a JWT with no token, or a scheme to come is an `ArgumentException` before the
+  call starts, not counted, as the TypeScript side's `ProgrammerError` is; it failed counted,
+  `DESTINATION_UNREACHABLE`, or went with a scheme no side writes (spec 13.4, debugging 9.3).
+- On the C# side, a call that would present a default withdrawn is counted, started and ended
+  `SESSION_REQUIRED`, as on the TypeScript side, and fails after a programmer's error and before a
+  connection not open, as there.
 - On the C# side, a request whose sending fails as its router is disposed is rejected as disposed,
   as the TypeScript side rejects it, not with the transport's refusal, which raced the disposal.
 

@@ -313,7 +313,9 @@ in a listen's batch, which the failure says, `mayOvertake`. A call whose credent
 cannot carry fails before it goes, `DESTINATION_UNREACHABLE`, nothing tried and its credential kept:
 an `ELSEWHERE` over a transport that carries none, or, over a WebSocket, other bytes than its
 upgrade carried, a `JWT` or an `ELSEWHERE` over one that is not secure, since a bearer credential
-crosses only TLS off the machine (RFC 6750 §5.3).
+crosses only TLS off the machine (RFC 6750 §5.3). A credential no call presents — a `JWT` with no
+token, an `ELSEWHERE` with nothing to carry, a scheme to come — is a `ProgrammerError`, before the
+call starts.
 
 ```ts
 const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });

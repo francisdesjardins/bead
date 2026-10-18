@@ -184,6 +184,9 @@ public sealed partial class RouterClientTests
 
         // a programmer's error, and a signal aborted already: neither is a call
         Assert.IsType<InvalidOperationException>(await Asked(RequestOf(new ScriptedNotification(Service))));
+        Assert.IsType<ArgumentException>(await Asked(RequestOf(null, Options with { Credential = Credential.Jwt("") })));
+        Assert.IsType<ArgumentException>(await Asked(RequestOf(null, Options with { Credential = Credential.Elsewhere() })));
+        Assert.IsType<ArgumentException>(await Asked(RequestOf(null, Options with { Credential = Credential.Of((CredentialScheme)4, [1]) })));
         Assert.IsType<ArgumentOutOfRangeException>(await Asked(RequestOf(null, Options with { Timeout = TimeSpan.Zero })));
         Assert.IsType<OperationCanceledException>(await Asked(RequestOf(null, Options with { CancellationToken = aborted.Token })));
         Assert.Contains(MadeOf("started_total{} 2"), CallCountsOf(registry));
@@ -193,6 +196,46 @@ public sealed partial class RouterClientTests
             {
                 return Assert.IsType<FailureException>(reason).Code;
             }));
+    }
+
+    // debugging 9.3, spec 13.4
+    [Fact]
+    public async Task Counts_a_call_that_would_present_a_withdrawn_default_as_started_and_ended_in_the_turn_it_started_SESSION_REQUIRED()
+    {
+        var registry = new MetricsRegistry();
+
+        using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = Credential.Jwt("a.b.c"), MetricsRegistry = registry });
+
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var series = router.DeclareRequester(Service);
+
+        Task<RouterResult> Call()
+        {
+            return router.Request(ReadOnlyMemory<byte>.Empty, RequestOf() with { Series = series });
+        }
+
+        var refused = Call();
+
+        await scripted.Settle();
+        transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
+        await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return refused.WaitAsync(Patience, Cancelled);
+        });
+
+        var withdrawn = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return Call().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("the default credential was withdrawn", withdrawn.Failure.Detail);
+        Assert.Equal(
+            [MadeOf("duration_seconds_count{} 2"), MadeOf("handled_total{outcome=\"failure\",code=\"SESSION_REQUIRED\"} 2"), MadeOf("started_total{} 2")],
+            CallCountsOf(registry).Where((line) =>
+            {
+                return line.Contains("procedure=\"echo\"", StringComparison.Ordinal);
+            }).Order(StringComparer.Ordinal));
+        Assert.Single(transport.Sent);
     }
 
     // debugging 9.6.11

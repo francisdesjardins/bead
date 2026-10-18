@@ -305,7 +305,9 @@ public sealed record RequestOptions
     /// a client's, the session it learned — and binds the call to it: a call made once that session
     /// ended, or was opened anew under a new token, is refused SESSION_REQUIRED rather than run in
     /// whatever session the connection holds. A side that knows no session fails such a call before
-    /// it goes, with SESSION_REQUIRED, and draws nothing.
+    /// it goes, with SESSION_REQUIRED, and draws nothing. A JWT with no token, an
+    /// <see cref="Credential.Elsewhere()"/> with nothing for its transport to carry, and a scheme to
+    /// come are an <see cref="ArgumentException"/>, before the call starts (spec 13.4).
     /// </summary>
     public Credential? Credential { get; init; }
 }
@@ -378,6 +380,12 @@ public sealed record CoreRequest
 
     /// <summary>The series it counts into, its requester's; none counts under <c>_OTHER</c>.</summary>
     public ProcedureSeries? Series { get; init; }
+
+    /// <summary>
+    /// What its router refused it with before handing it on: once the call starts it fails with it,
+    /// counted, nothing sent — a client's default credential withdrawn (spec 13.4).
+    /// </summary>
+    internal Failure? Refusal { get; init; }
 }
 
 /// <summary>What a router did: sent or took a request, a response, or a notification.</summary>

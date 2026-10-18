@@ -171,7 +171,9 @@ share.
   carries none, whatever its `Authorization`: a page's browser writes its own authentication on it.
   One connection carries one credential: a client presents another by connecting again, and gives
   its router's default the same bytes, from one source; between the two, a call fails before it
-  goes, `DESTINATION_UNREACHABLE`.
+  goes, `DESTINATION_UNREACHABLE`. A call's options present `Credential.Elsewhere(carried)`: the
+  header's `Credential.Elsewhere()`, nothing to carry, a JWT with no token and a scheme to come are
+  an `ArgumentException`, before the call starts (spec 13.4).
 
   ```csharp
   // one source for the upgrade's credential and the router's default, renewed together

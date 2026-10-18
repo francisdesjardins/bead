@@ -708,6 +708,11 @@ that answer (section 15.9), since a session the application ended leaves a crede
 hold. A client receiving a command resolves its credential as a server does (section 9.2, step 5),
 the session it learned standing for its connection's.
 
+A call presents none, `NONE`, `OPAQUE`, a `JWT` with its token, or an `ELSEWHERE` with what its
+transport is to carry beside it. Any other — an `ELSEWHERE` that gives nothing to carry, a `JWT`
+with no token, a scheme to come — is the application's fault, refused before the call starts and
+not counted (`debugging.md` 9.3), and no failure: nothing was asked of its transport.
+
 A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
 credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry

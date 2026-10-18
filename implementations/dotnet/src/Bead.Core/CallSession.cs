@@ -111,6 +111,36 @@ public sealed record CallSession
     }
 
     /// <summary>
+    /// Throws an <see cref="ArgumentException"/> for a credential no call presents, its
+    /// application's error, before the call starts and is counted (spec 13.4; spec/debugging.md
+    /// 9.3): a <see cref="CredentialScheme.Jwt"/> with no token; an
+    /// <see cref="CredentialScheme.Elsewhere"/> that gives nothing for its transport to carry, as a
+    /// header's <see cref="Credential.Elsewhere()"/> holds nothing to present; and a scheme to come.
+    /// A call presents none, <see cref="CredentialScheme.None"/>, <see cref="CredentialScheme.Opaque"/>,
+    /// a JWT with its token, or an ELSEWHERE with its bytes.
+    /// </summary>
+    internal static void AssertPresentable(Credential? asked)
+    {
+        switch (asked)
+        {
+            case null or { Scheme: CredentialScheme.None or CredentialScheme.Opaque }:
+                break;
+            case { Scheme: CredentialScheme.Jwt, Token: null or "" }:
+                throw new ArgumentException("a call that presents a JWT gives its token", nameof(asked));
+            case { Scheme: CredentialScheme.Jwt }:
+                break;
+            case { Scheme: CredentialScheme.Elsewhere, Carried: null }:
+                throw new ArgumentException(
+                    "a call that presents ELSEWHERE gives what its transport carries: a header's ELSEWHERE holds nothing to present",
+                    nameof(asked));
+            case { Scheme: CredentialScheme.Elsewhere }:
+                break;
+            case { } toCome:
+                throw new ArgumentException($"a call presents NONE, OPAQUE, JWT or ELSEWHERE, not scheme {(ushort)toCome.Scheme}", nameof(asked));
+        }
+    }
+
+    /// <summary>
     /// The failure of a call presenting <paramref name="presented"/> that its transport cannot carry
     /// (spec 13.4): DESTINATION_UNREACHABLE, nothing tried, for an
     /// <see cref="CredentialScheme.Elsewhere"/> over a transport that does not carry the credential

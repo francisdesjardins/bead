@@ -374,8 +374,8 @@ _Metrics: `spec/metrics.json`._
 counted at its hand-off, and the refusal is reported (`spec.md` 9.0).
 
 9.3. A router takes a call it makes in this order: first what makes it a programmer's error, a
-timeout or a payload's limit that does not hold, a credential no header of its request holds
-(`spec.md` 4.4), a subscription its router does not hold, a command that names no connection, and
+timeout or a payload's limit that does not hold, a credential no call presents (`spec.md` 13.4)
+and one no header of its request holds (`spec.md` 4.4), a subscription its router does not hold, a command that names no connection, and
 a signal aborted already, each refused and not counted; then the call starts; then every check that
 can refuse it, each ending it in the turn it started. A request whose header does not read,
 answered at the gate (`spec.md` 9.6.2), starts and ends in one turn too, under `_OTHER`.
@@ -413,7 +413,7 @@ subscription and is refused in its own answer, its queue past its bounds before 
 
 | A call this side makes                                                                                                                                                        | `outcome`   | `code`                            |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
-| it asks for `OPAQUE` and its side knows no session, before it goes (13.4)                                                                                                     | `failure`   | `SESSION_REQUIRED`                |
+| it asks for `OPAQUE` and its side knows no session, or would present a default withdrawn, before it goes (13.4)                                                               | `failure`   | `SESSION_REQUIRED`                |
 | it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                    | `failure`   | `DESTINATION_UNREACHABLE`         |
 | no call id is free (9.1)                                                                                                                                                      | `failure`   | `CAPACITY_EXCEEDED`               |
 | its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3) | `failure`   | `PAYLOAD_TOO_LARGE`               |
