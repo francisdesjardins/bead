@@ -192,15 +192,15 @@ that a test of each side does:
   (`calls each listener though one throws, reporting the throw with its connection`) and
   `Bead.Core.Tests/ListenerGuardTests`; `http-transport-server.test.ts` and
   `Bead.Transport.Http.Tests/HttpTransportServerTests` (`draws a connection whose connection
-listener throws, …`, `hands on a request whose message listener throws, …`, `stops though a close
-listener throws, …`, `closes a connection idle past its timeout though a close listener throws,
-…`); `ws-transport-server.test.ts` and `WebSocketTransportServerTests` (`keeps a connection whose
-connection listener throws, …`, `hears the next message after a message listener throws, …`);
+  listener throws, …`, `hands on a request whose message listener throws, …`, `stops though a close
+  listener throws, …`, `closes a connection idle past its timeout though a close listener throws,
+  …`); `ws-transport-server.test.ts` and `WebSocketTransportServerTests` (`keeps a connection whose
+  connection listener throws, …`, `hears the next message after a message listener throws, …`);
   `transport/client/__tests__/ws-transport-client.test.ts` and `WebSocketTransportClientTests`
   (`hears the next message after a message listener throws, the throw reported`;
   `reconnects though a reconnect listener throws, the throw reported, the next listener told`);
   `http-transport-client.test.ts` and `HttpTransportClientTests` (`hears the rest of a batch when a
-listener throws, the throw reported`; `reconnects though a reconnect listener throws, …`), each twin
+  listener throws, the throw reported`; `reconnects though a reconnect listener throws, …`), each twin
   named by the same sentence; and the server's transport, as the server gives it, carrying `error`
   and `refusal` alike: `server/__tests__/server.test.ts` and `Bead.Core.Tests/ServerTests`
   (`hears its transport's error and refusal through the server's transport`);
@@ -208,42 +208,42 @@ listener throws, the throw reported`; `reconnects though a reconnect listener th
   15.6), which no step can send into (spec 15.2.8, 15.3, 15.6 rows 6 and 13, 15.7; decision 0023):
   `transport/server/__tests__/http-transport-server.test.ts`
   and `HttpTransportServerTests` (`refuses a connect that comes as it stops, busy, told when to come
-back, drawing nothing`; `answers the 404 marked connection-unknown an exchange that comes as it
-stops, its connection not yet closed, nothing handed on`); `ws-transport-server.test.ts` and
+  back, drawing nothing`; `answers the 404 marked connection-unknown an exchange that comes as it
+  stops, its connection not yet closed, nothing handed on`); `ws-transport-server.test.ts` and
   `WebSocketTransportServerTests` (`refuses an upgrade that comes as it stops, 503 busy, told when to
-come back`; `closes going away a connection whose accept a stop crossed`), each twin named by the
+  come back`; `closes going away a connection whose accept a stop crossed`), each twin named by the
   same sentence;
 - a connection's handle, drawn as it is taken and given once, two sockets from one address and port
   two connections (spec 15.1; decision 0025), which no step opens: `ws-transport-server.test.ts` and
   `WebSocketTransportServerTests` (`names each connection by its peer’s port and the rank it came at,
-…`, `closes each of two sockets from one address and port on its own, …`);
+  …`, `closes each of two sockets from one address and port on its own, …`);
   `server/__tests__/ws-server.test.ts` and `WebSocketServerTests` (`keeps two sockets from one
-address and port, to two of its addresses, as two connections, …`), on Linux, the C# one on Windows
+  address and port, to two of its addresses, as two connections, …`), on Linux, the C# one on Windows
   too; `http-transport-server.test.ts`, `ws-transport-server.test.ts`, `HttpTransportServerTests` and
   `WebSocketTransportServerTests` (`names a client that comes over IPv4 to a dual-stack listener by
-its IPv4 address`), each twin named by the same sentence;
+  its IPv4 address`), each twin named by the same sentence;
 - a request's authority over HTTP/2, its `:authority` before a `host`, and its stream reset when it
   is no host (spec 15.12; decision 0024), which no step sends, the steps being HTTP/1.x heads:
   `http-transport-server.test.ts` and `HttpTransportServerTests` (`names its host over HTTP/2 by its
-:authority, …`, `resets over HTTP/2 the stream of a request whose :authority is no host, …`); and a
+  :authority, …`, `resets over HTTP/2 the stream of a request whose :authority is no host, …`); and a
   `hosts` or an `origins` entry refused as a server is built (spec 15.12; decision 0024), which no
   step builds: `transport/server/__tests__/hosts-and-origins.test.ts` and
   `Bead.Core.Tests/HostsAndOriginsTests` (`refuses a hosts entry with a port, an empty one, one that
-is no host, and * beside another`, `refuses an origins entry that is * or null, or not an origin
-as RFC 6454 serializes it`), `http-transport-server.test.ts`, `ws-transport-server.test.ts`,
+  is no host, and * beside another`, `refuses an origins entry that is * or null, or not an origin
+  as RFC 6454 serializes it`), `http-transport-server.test.ts`, `ws-transport-server.test.ts`,
   `HttpTransportServerTests` and `WebSocketTransportServerTests` (`refuses as it is built a hosts
-entry with a port, and an origins entry that is * or null`), each twin named by the same sentence;
+  entry with a port, and an origins entry that is * or null`), each twin named by the same sentence;
 - the own origin a server takes by its request's authority only when it takes that host by name
   (spec 15.12; decision 0024), which the cases under `*` play on the wire and no step reaches
   function by function: `hosts-and-origins.test.ts` and `HostsAndOriginsTests` (`ownAuthorityOf
-gives the authority of a host taken by name, every server's or one listed, and none of one only *
-takes`), `ws-handshake.test.ts` and `WebSocketHandshakeTests` (`takes whatever its hosts the hosts
-every server takes and any page of its own by a host it takes by name, …`), each twin named by the
+  gives the authority of a host taken by name, every server's or one listed, and none of one only *
+  takes`), `ws-handshake.test.ts` and `WebSocketHandshakeTests` (`takes whatever its hosts the hosts
+  every server takes and any page of its own by a host it takes by name, …`), each twin named by the
   same sentence;
 - the CORS answer as a browser reads it, its preflight over HTTP/2, and the listed origin's
   predicate (spec 15.12; decision 0027), which no step reaches, the steps being HTTP/1.x heads sent
   by no browser: `http-transport-server.test.ts` and `HttpTransportServerTests` (`answers a
-preflight over HTTP/2 as over HTTP/1.1`), `hosts-and-origins.test.ts` and `HostsAndOriginsTests`
+  preflight over HTTP/2 as over HTTP/1.1`), `hosts-and-origins.test.ts` and `HostsAndOriginsTests`
   (`isListedOrigin takes an Origin that origins names exactly, …`, `IsListedOrigin_…`), each twin
   named by the same sentence; and a page of another origin in Chromium, the HTTP client bundled
   for it, connecting, calling, listening and disconnecting against both servers, and listening
@@ -263,30 +263,30 @@ preflight over HTTP/2 as over HTTP/1.1`), `hosts-and-origins.test.ts` and `Hosts
   (`parses an Item as RFC 9651 does: …`); the client listening at its connection's URL alone and
   reading the 201's `bead-listen` and a batch's `bead-sequence` as Items,
   `http-transport-client.test.ts` and `HttpTransportClientTests` (`listens at its connection's URL alone, its cursor in bead-after
-and its wait in bead-wait`, `reads the 201's bead-listen and a batch's bead-sequence as RFC 9651
-Items, their parameters ignored`); the server reading them, `http-transport-server.test.ts` and
+  and its wait in bead-wait`, `reads the 201's bead-listen and a batch's bead-sequence as RFC 9651
+  Items, their parameters ignored`); the server reading them, `http-transport-server.test.ts` and
   `HttpTransportServerTests` (`reads a listen's counts from bead-after and bead-wait, a field given
-as several lines joined, and refuses 400 a listen without bead-after, whatever its target holds`);
+  as several lines joined, and refuses 400 a listen without bead-after, whatever its target holds`);
   and a field value padded at either end over HTTP/2, which no step sends, the steps being HTTP/1.x
   heads whose parsers strip it: the same files (`resets over HTTP/2 the stream of a request with a
-field whose value starts or ends with a space or a tab, PROTOCOL_ERROR, …`), each twin named by
+  field whose value starts or ends with a space or a tab, PROTOCOL_ERROR, …`), each twin named by
   the same sentence;
 - the address a server listens on, `localhost` by default, both loopbacks, or an IP address written
   bare, and 13.4's judgement of it (spec 13.4, 15.12; decision 0024), which no step starts, every
   runner starting on `127.0.0.1`: `http-transport-server.test.ts`,
   `ws-transport-server.test.ts`, `HttpTransportServerTests` and `WebSocketTransportServerTests`
   (`listens on localhost when given no address, both loopbacks on one port, reached by 127.0.0.1, by
-[::1] and by localhost, reports localhost, and is secure there`, `refuses to start on localhost
-when another socket holds the other loopback's port, ending closed`, `draws a port on localhost
-again when the IPv6 loopback holds the one drawn on IPv4`, `listens on 127.0.0.1 alone where the
-IPv6 loopback is absent, and reports 127.0.0.1`, `refuses to start on an address that is no bare
-IP address, ending closed`, `is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not
-on a wildcard`), the C# twins of the first writing `the_IPv6_loopback` for `[::1]`, which no
+  [::1] and by localhost, reports localhost, and is secure there`, `refuses to start on localhost
+  when another socket holds the other loopback's port, ending closed`, `draws a port on localhost
+  again when the IPv6 loopback holds the one drawn on IPv4`, `listens on 127.0.0.1 alone where the
+  IPv6 loopback is absent, and reports 127.0.0.1`, `refuses to start on an address that is no bare
+  IP address, ending closed`, `is secure on the IPv6 loopback or an address in 127.0.0.0/8, and not
+  on a wildcard`), the C# twins of the first writing `the_IPv6_loopback` for `[::1]`, which no
   identifier holds, `ws-transport-server.test.ts` and `WebSocketTransportServerTests` (`listens on
-localhost, port 80, and beats every 30 seconds when told nothing`), the TypeScript HTTP
+  localhost, port 80, and beats every 30 seconds when told nothing`), the TypeScript HTTP
   transport's `calls the application’s createServer once per address it binds, 127.0.0.1 then ::1 on
-localhost, each told its address` beside the C# one's `serves every address it binds by one
-configuration`, `hosts-and-origins.test.ts` and `HostsAndOriginsTests`
+  localhost, each told its address` beside the C# one's `serves every address it binds by one
+  configuration`, `hosts-and-origins.test.ts` and `HostsAndOriginsTests`
   (`isIPAddress takes a bare IP address …`, `IsIpAddress_…`), each twin named by the same
   sentence;
 - a client naming the refusal it reads, and connecting by a name to a server on one loopback family

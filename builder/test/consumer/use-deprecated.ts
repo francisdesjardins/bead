@@ -107,7 +107,6 @@ export const serviceUses = (): readonly unknown[] => {
   // reported: `OldCommentsResolvers` is deprecated. Use CommentsService.
   const escapes: OldCommentsResolvers['escapes'] | undefined = undefined;
 
-  // a constant's report names no reason: the lint reads none off its statement's doc comment
-  // reported: `OldCommentsProcedures` is deprecated.
+  // reported: `OldCommentsProcedures` is deprecated. Use CommentsService.
   return [old, escapes, OldCommentsProcedures];
 };
