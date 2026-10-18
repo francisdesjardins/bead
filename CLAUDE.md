@@ -111,7 +111,7 @@ titles that hold one write it `’`, and the citation does the same.
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
   indexers and lambdas, never an expression body; a block for every branch;
 - at most two parameters to a function, then at most one options record, always last (`TOptions?
-options = null` when every member is optional, a `CancellationToken` inside it); a third
+  options = null` when every member is optional, a `CancellationToken` inside it); a third
   essential thing is a design to revisit, never a third parameter;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;

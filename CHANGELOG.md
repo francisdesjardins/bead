@@ -26,6 +26,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same: the C# side writes a string that holds no escape as its bytes, and the TypeScript side
   finds the end of a string by search rather than character by character. A 64 KiB echo over a
   WebSocket goes in a twelfth of the time on the C# side, a 20 MiB transfer in an eighth.
+- The toolchain is current: buf 1.74.0, Playwright 1.64.1, oxfmt 0.73.0, oxlint 1.88, Roslyn 5.9.0,
+  xunit.v3 4.0.2, and OSV-Scanner 2.7.0 and Semgrep 1.181.0 in CI; the floors stay (protobuf-es 2.13,
+  Node 24.9).
 
 ### Fixed
 
@@ -455,7 +458,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - beadc makes its temporary folders, `breaking`'s and protoc's, under the project's `.beadc/` where a
   `beadc.yaml` is read, which `init`'s `.gitignore` and the repository's ignore.
 - An earlier's root that holds no `.proto` is refused, named as its `beadc.yaml` names it, `git
-archive` writing a submodule as an empty folder.
+  archive` writing a submodule as an empty folder.
 - An archive's pax `size` overrides its ustar size, as GNU tar and bsdtar read it; an empty or NUL
   path, and an entry over an earlier one, are refused.
 - buf's finding on a deleted file is placed at the earlier's path, and a `buf:` waiver is held to the
@@ -1113,7 +1116,7 @@ archive` writing a submodule as an empty folder.
   and `LastActivityChanged`, and a session manager's update `updateLastActivity` and
   `UpdateLastActivity`. The TypeScript side's `timestamp()` and `ITimestamp` go.
 - A trace tells `startedAt` and `duration`, flat on its event, where it told `timestamp: { event,
-duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
+  duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `TimeSpan?` in
   whole milliseconds, and `DebugTimestamp` goes. A notification's one step starts as it is sent or
   heard, and a failed notify tells its failure at that same start.
 - The banned-API analyzer (RS0030) on the C# side, and oxlint's `no-restricted-globals` and

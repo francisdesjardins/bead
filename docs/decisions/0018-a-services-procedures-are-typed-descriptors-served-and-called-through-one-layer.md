@@ -499,7 +499,9 @@ library reads them: what it writes, and what a `proto` payload is, are
 ```ts
 /** Who may call a procedure: every call, a call with a session, or a hook the server is given by name. */
 export type AdmissionRule<Hook extends string = string> =
-  'none' | 'session' | { readonly hook: Hook };
+  | 'none'
+  | 'session'
+  | { readonly hook: Hook };
 
 /** A hook: whether a call may reach its resolver, on its header and its call's session, present or not. */
 export interface IAdmissionHook<Handle extends string = ConnectionHandle> {

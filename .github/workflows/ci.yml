@@ -538,7 +538,7 @@ jobs:
       - name: The dependencies, against the known advisories
         run: >-
           docker run --rm -v "$PWD:/src:ro"
-          ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+          ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
           scan source --recursive /src
       # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
       # its digest, the generated folders and the goldens left out: a blocking finding fails the
@@ -547,7 +547,7 @@ jobs:
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
-          semgrep/semgrep:1.178.0@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+          semgrep/semgrep:1.181.0@sha256:81474464c1f07483ba0682a44787fd93c91397419762a04abe2bafaae396304b
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude
