@@ -82,7 +82,8 @@ public readonly record struct Credential
 
     /// <summary>
     /// <see cref="CredentialScheme.Elsewhere"/> as a header carries it: the block says the credential
-    /// is its transport's, and holds nothing.
+    /// is its transport's, and holds nothing. A call's options take <see cref="Elsewhere(string)"/>:
+    /// one that presents this, nothing to carry, is an <see cref="ArgumentException"/> (spec 13.4).
     /// </summary>
     public static Credential Elsewhere()
     {

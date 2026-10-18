@@ -3,8 +3,9 @@
 //
 //   node tools/bench.mjs [--seconds 3] [--json]
 //
-// Three layers. The envelope codec, a request written and read back, at payloads of 0 B, 1 KiB and
-// 64 KiB: nanoseconds a round trip. A call, a request answered by a resolver that echoes its JSON, over a
+// Four layers. The envelope codec, a request written and read back, and the json payload codec, a
+// string of the payload's size encoded and decoded, at payloads of 0 B, 1 KiB and 64 KiB: nanoseconds
+// a round trip. A call, a request answered by a resolver that echoes its JSON, over a
 // WebSocket on the loopback of the machine it runs on: its latency one call at a time (p50, p95,
 // p99, in microseconds) and its throughput 32 calls at a time; and a transfer, the same echo of 20 MiB,
 // past one envelope, as chunks both ways. The C# side's
@@ -31,7 +32,8 @@ const entry = `
   import { createWSServer } from './src/server/ws-server.ts';
   import { EnvelopeKind, SERVER_FAILURES } from './src/router/shared/constants.ts';
   import { bytesOf, readEnvelope, writeEnvelope } from './src/router/shared/envelope.ts';
-  export { WebSocket, WebSocketServer, createWSClient, createWSServer, EnvelopeKind, SERVER_FAILURES, bytesOf, readEnvelope, writeEnvelope };
+  import { PAYLOAD_CODECS } from './src/router/shared/payloads.ts';
+  export { WebSocket, WebSocketServer, createWSClient, createWSServer, EnvelopeKind, SERVER_FAILURES, PAYLOAD_CODECS, bytesOf, readEnvelope, writeEnvelope };
 `;
 
 const folder = mkdtempSync(join(process.env.BEAD_SCRATCH ?? tmpdir(), 'bench-'));
@@ -97,17 +99,33 @@ const codec = (reader, size) => {
   return ((performance.now() - started) * 1_000_000) / rounds;
 };
 
+const json = (reader, size) => {
+  const value = 'x'.repeat(size);
+  const once = () => {
+    return reader.PAYLOAD_CODECS.json.decode(reader.PAYLOAD_CODECS.json.encode(value));
+  };
+
+  for (let index = 0; index < 5_000; index++) {
+    once();
+  }
+
+  let rounds = 0;
+  const started = performance.now();
+
+  while (performance.now() - started < seconds * 1_000) {
+    for (let index = 0; index < 100; index++) {
+      once();
+    }
+    rounds += 100;
+  }
+
+  return ((performance.now() - started) * 1_000_000) / rounds;
+};
+
 const transfer = async (reader) => {
   const MIB = 1_048_576;
   const limits = { maximumPayloadBytes: 32 * MIB };
-  const text = {
-    decode: (bytes) => {
-      return JSON.parse(new TextDecoder().decode(bytes));
-    },
-    encode: (value) => {
-      return new TextEncoder().encode(JSON.stringify(value));
-    },
-  };
+  const serializer = reader.PAYLOAD_CODECS.json;
   const echo = { procedureId: 2, procedureName: 'echo', serviceId: 1, serviceRevision: 1 };
   const server = reader.createWSServer({
     limits,
@@ -118,12 +136,12 @@ const transfer = async (reader) => {
   const echoes = 5;
 
   try {
-    server.services.getRequestResolver(echo, { serializer: text })((request, response) => {
+    server.services.getRequestResolver(echo, { serializer })((request, response) => {
       return response(request.payload);
     });
     await client.connect({ host: '127.0.0.1', port });
 
-    const call = client.services.getRequest(echo, { serializer: text })('x'.repeat(20 * MIB));
+    const call = client.services.getRequest(echo, { serializer })('x'.repeat(20 * MIB));
 
     await call();
 
@@ -143,15 +161,8 @@ const transfer = async (reader) => {
 };
 
 const calls = async (reader) => {
-  // JSON, as the C# side's echo carries it
-  const text = {
-    decode: (bytes) => {
-      return JSON.parse(new TextDecoder().decode(bytes));
-    },
-    encode: (value) => {
-      return new TextEncoder().encode(JSON.stringify(value));
-    },
-  };
+  // the json codec, as the C# side's echo carries it
+  const serializer = reader.PAYLOAD_CODECS.json;
   const echo = { procedureId: 2, procedureName: 'echo', serviceId: 1, serviceRevision: 1 };
   const server = reader.createWSServer({ transport: { WebSocketServer: reader.WebSocketServer } });
   const { port } = await server.transport.start({ address: '127.0.0.1', findOpenPort: true });
@@ -159,12 +170,12 @@ const calls = async (reader) => {
   const rows = [];
 
   try {
-    server.services.getRequestResolver(echo, { serializer: text })((request, response) => {
+    server.services.getRequestResolver(echo, { serializer })((request, response) => {
       return response(request.payload);
     });
     await client.connect({ host: '127.0.0.1', port });
 
-    const request = client.services.getRequest(echo, { serializer: text });
+    const request = client.services.getRequest(echo, { serializer });
 
     for (const size of SIZES) {
       const body = 'x'.repeat(size);
@@ -233,6 +244,9 @@ try {
     codec: SIZES.map((size) => {
       return { size, nanosecondsPerRoundTrip: codec(reader, size) };
     }),
+    json: SIZES.map((size) => {
+      return { size, nanosecondsPerRoundTrip: json(reader, size) };
+    }),
     calls: await calls(reader),
     transfer: await transfer(reader),
   };
@@ -245,6 +259,12 @@ try {
       'codec, a request written and read back\n\n| payload | ns per round trip |\n| --- | --- |'
     );
     for (const row of result.codec) {
+      console.log(`| ${String(row.size)} B | ${row.nanosecondsPerRoundTrip.toFixed(0)} |`);
+    }
+    console.log(
+      '\njson payload codec, a string encoded and decoded\n\n| payload | ns per round trip |\n| --- | --- |'
+    );
+    for (const row of result.json) {
       console.log(`| ${String(row.size)} B | ${row.nanosecondsPerRoundTrip.toFixed(0)} |`);
     }
     console.log(

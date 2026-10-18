@@ -613,6 +613,29 @@ public sealed partial class RouterServerTests
         Assert.Empty(Reported());
     }
 
+    // spec 13.4, spec/debugging.md 9.3
+    [Fact]
+    public async Task Refuses_a_command_presenting_a_JWT_with_no_token_an_ELSEWHERE_that_gives_nothing_for_its_transport_to_carry_or_a_scheme_to_come_as_a_programmer_s_error_nothing_sent()
+    {
+        Start();
+        _transport.Open(First);
+
+        foreach (var credential in new[] { Credential.Jwt(""), Credential.Elsewhere(), Credential.Of((CredentialScheme)4, [1]) })
+        {
+            var request = CommandOf(First);
+
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return Router.Request(BytesOf("hi"), request with { Options = request.Options with { Credential = credential } })
+                    .WaitAsync(Patience, Cancelled);
+            });
+        }
+
+        await Settle();
+
+        Assert.Empty(SentSince());
+    }
+
     [Fact]
     public void Refuses_as_it_is_built_limits_that_hold_no_header_of_1020_bytes_once_it_takes_a_JWT()
     {

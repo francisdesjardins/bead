@@ -16,6 +16,7 @@ import type {
   IRequestHeader,
   IRequestResolverProps,
   OutgoingEnvelope,
+  RequestCredential,
 } from '../../shared/types';
 import {
   createTestClock,
@@ -2667,6 +2668,13 @@ test.describe('createRouterClient', () => {
       const refused = await Promise.all([
         ask({ subscribes: notificationOf([]) }),
         ask({ options: { ...options, credential: { scheme: CredentialScheme.JWT, token: '' } } }),
+        ask({
+          options: {
+            ...options,
+            credential: { scheme: CredentialScheme.ELSEWHERE } as unknown as RequestCredential,
+          },
+        }),
+        ask({ options: { ...options, credential: { scheme: 4 } as unknown as RequestCredential } }),
         ask({ options: { ...options, timeout: 0 } }),
         ask({ options: { ...options, signal: AbortSignal.abort() } }),
       ]);
@@ -2675,13 +2683,50 @@ test.describe('createRouterClient', () => {
         refused.map((reason) => {
           return (reason as Error).name;
         })
-      ).toEqual(['ProgrammerError', 'ProgrammerError', 'ProgrammerError', 'CancelError']);
+      ).toEqual([
+        'ProgrammerError',
+        'ProgrammerError',
+        'ProgrammerError',
+        'ProgrammerError',
+        'ProgrammerError',
+        'CancelError',
+      ]);
       expect(countedOf(metricsRegistry)).toContain(made('started_total{} 2'));
       expect(
         (await Promise.all([noSession, uncarried])).map((reason) => {
           return (reason as FailureError).code;
         })
       ).toEqual([ProtocolCode.SESSION_REQUIRED, ProtocolCode.DESTINATION_UNREACHABLE]);
+    });
+
+    // debugging 9.3, spec 13.4
+    test('counts a call that would present a withdrawn default as started and ended in the turn it started, SESSION_REQUIRED', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const scripted = createScriptedTransport();
+      using router = createRouterClient(scripted.transport, {
+        clock: createTestClock(),
+        credential: JWT,
+        metricsRegistry,
+      });
+      const series = router.declareRequester(service);
+      const call = () => {
+        return router.request(new Uint8Array(0), { options, procedure: service, series });
+      };
+      const refused = call();
+
+      scripted.deliver(sessionRequiredOf(1));
+      await expect(refused).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      await expect(call()).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        detail: 'the default credential was withdrawn',
+      });
+
+      expect(countedOf(metricsRegistry)).toEqual([
+        made('duration_seconds_count{} 2'),
+        made('handled_total{outcome="failure",code="SESSION_REQUIRED"} 2'),
+        made('started_total{} 2'),
+      ]);
+      expect(scripted.sent).toHaveLength(1);
     });
 
     // debugging 9.6.11

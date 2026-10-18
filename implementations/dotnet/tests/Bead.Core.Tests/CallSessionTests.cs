@@ -64,6 +64,14 @@ public sealed class CallSessionTests
         Assert.Equal(
             (Credential.Elsewhere(), "Interop sub=ada", null),
             CallSession.PresentedCredentialOf(Credential.Elsewhere("Interop sub=ada"), null));
+
+        foreach (var refused in new[] { Credential.Jwt(""), Credential.Elsewhere(), Credential.Of((CredentialScheme)4, [1]) })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                CallSession.AssertPresentable(refused);
+            });
+        }
     }
 
     [Fact]

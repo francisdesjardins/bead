@@ -21,6 +21,7 @@ import type {
   INotificationLike,
   IProcedure,
   OutgoingEnvelope,
+  RequestCredential,
   RouterLimitsOptions,
   SessionOf,
 } from '../../shared/types';
@@ -2684,6 +2685,39 @@ test.describe('createRouterServer, credentials', () => {
         expect(sent).toEqual([]);
       }
     }
+  });
+
+  // spec 13.4, spec/debugging.md 9.3
+  test('refuses a command presenting a JWT with no token, an ELSEWHERE that gives nothing for its transport to carry, or a scheme to come, as a programmer’s error, nothing sent', async () => {
+    const { open, sent, transport } = createScriptedTransport({
+      carriesCredential: true,
+      isSecure: true,
+    });
+
+    using router = createRouterServer(transport);
+
+    open(first);
+
+    for (const credential of [
+      { scheme: CredentialScheme.JWT, token: '' },
+      { scheme: CredentialScheme.ELSEWHERE },
+      { scheme: 4 },
+    ]) {
+      await expect(
+        router.request(new Uint8Array(0), {
+          options: {
+            ...options,
+            connectionHandle: first,
+            credential: credential as unknown as RequestCredential,
+          },
+          procedure: echo,
+        })
+      ).rejects.toBeInstanceOf(ProgrammerError);
+    }
+
+    await sleep(0);
+
+    expect(sent).toEqual([]);
   });
 
   test('refuses as it is built limits that hold no header of 1020 bytes once it takes a JWT', () => {

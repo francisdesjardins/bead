@@ -636,13 +636,25 @@ public sealed class RouterCore : IDisposable
         var options = request.Options;
         var procedure = request.Procedure;
 
+        // * a refusal its router judged before the call came, then its credential's, come before the
+        // connection's state, as on the TypeScript side, whose router judges both before its core
+        if (request.Refusal is { } judged)
+        {
+            throw new FailureException(judged, new FailureException.Raised(FailureOrigin.Local, _side))
+            {
+                DestinationId = options.DestinationId,
+                ProcedureAddress = procedure.Address,
+            };
+        }
+
+        var (credential, carried) = PresentedOf(request);
+
         // a call to a connection not open fails as one whose connection closes: one race with a close
         if (!_port.IsOpen(request.ConnectionHandle))
         {
             throw new DisconnectException($"{request.ConnectionHandle} is not an open connection");
         }
 
-        var (credential, carried) = PresentedOf(request);
         var callId = _pendingCalls.Draw(request.ConnectionHandle)
             ?? throw new FailureException(
                 ProtocolFailureOf(ProtocolCode.CapacityExceeded, $"every call id of {request.ConnectionHandle} is in use"),
@@ -678,9 +690,9 @@ public sealed class RouterCore : IDisposable
         return (header, outgoing, carried);
     }
 
-    // lays out the header `request` goes out with, its call id aside: a credential whose bytes its
-    // caller gives, a JWT or a scheme to come, may be longer than any header holds; OPAQUE, 16
-    // bytes, and ELSEWHERE, none, always fit, OPAQUE's token known only once the call starts.
+    // lays out the header `request` goes out with, its call id aside: a JWT, whose token its caller
+    // gives, may be longer than any header holds; OPAQUE, 16 bytes, and ELSEWHERE, none, always fit,
+    // OPAQUE's token known only once the call starts.
     // Throws an ArgumentException past 1,020 bytes
     private static void AssertHeaderHolds(CoreRequest request)
     {
@@ -717,6 +729,10 @@ public sealed class RouterCore : IDisposable
 
         // held, which its timer, its reservation and its TimeoutException all take
         var timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), options.Timeout);
+
+        // ! a credential no call presents is a programmer's error, before a token cancelled already,
+        // as the TypeScript side reads a call's credential before its signal (spec/debugging.md 9.3)
+        CallSession.AssertPresentable(options.Credential);
 
         // drawn once the call starts: a cancelled token draws nothing
         token.ThrowIfCancellationRequested();

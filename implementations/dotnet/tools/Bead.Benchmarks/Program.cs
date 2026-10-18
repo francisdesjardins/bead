@@ -10,11 +10,13 @@ namespace Bead.Benchmarks;
 
 /// <summary>
 /// A measurement of the C# side, in the units of the TypeScript side's <c>tools/bench.mjs</c>: the
-/// envelope codec, a request written and read back, at payloads of 0 B, 1 KiB and 64 KiB, in
-/// nanoseconds a round trip; and a call, the interop service's <c>echo</c> over a WebSocket on the
-/// loopback, its latency one call at a time (p50, p95, p99, in microseconds) and its throughput 32
-/// calls at a time. The echo carries a JSON string of the payload's size, as the TypeScript side's
-/// does. Run with <c>dotnet run -c Release -- [--seconds 3]</c>.
+/// envelope codec, a request written and read back, and the json payload codec, a string of the
+/// payload's size encoded and decoded, at payloads of 0 B, 1 KiB and 64 KiB, in nanoseconds a round
+/// trip; a call, the interop service's <c>echo</c> over a WebSocket on the loopback, its latency
+/// one call at a time (p50, p95, p99, in microseconds), its throughput 32 calls at a time and the
+/// bytes it allocates; and a transfer, the same echo of 20 MiB. The echo carries a JSON string of
+/// the payload's size through the json codec, as the TypeScript side's does. Run with
+/// <c>dotnet run -c Release -- [--seconds 3]</c>.
 /// </summary>
 internal static class Program
 {
@@ -55,6 +57,32 @@ internal static class Program
             }
 
             rounds += 1_000;
+        }
+
+        return clock.Elapsed.TotalMilliseconds * 1_000_000 / rounds;
+    }
+
+    private static double JsonNanoseconds(int size, int seconds)
+    {
+        using var document = JsonDocument.Parse($"\"{new string('x', size)}\"");
+        var value = document.RootElement.Clone();
+
+        for (var index = 0; index < 5_000; index++)
+        {
+            _ = PayloadCodecs.Json.Decode(PayloadCodecs.Json.Encode(value));
+        }
+
+        var rounds = 0L;
+        var clock = Stopwatch.StartNew();
+
+        while (clock.Elapsed.TotalSeconds < seconds)
+        {
+            for (var index = 0; index < 100; index++)
+            {
+                _ = PayloadCodecs.Json.Decode(PayloadCodecs.Json.Encode(value));
+            }
+
+            rounds += 100;
         }
 
         return clock.Elapsed.TotalMilliseconds * 1_000_000 / rounds;
@@ -185,6 +213,17 @@ internal static class Program
         foreach (var size in Sizes)
         {
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"| {size} B | {CodecNanoseconds(size, seconds):F0} |"));
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("json payload codec, a string encoded and decoded");
+        Console.WriteLine();
+        Console.WriteLine("| payload | ns per round trip |");
+        Console.WriteLine("| --- | --- |");
+
+        foreach (var size in Sizes)
+        {
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"| {size} B | {JsonNanoseconds(size, seconds):F0} |"));
         }
 
         Console.WriteLine();
