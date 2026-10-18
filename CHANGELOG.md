@@ -27,8 +27,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   finds the end of a string by search rather than character by character. A 64 KiB echo over a
   WebSocket goes in a twelfth of the time on the C# side, a 20 MiB transfer in an eighth.
 - The toolchain is current: buf 1.74.0, Playwright 1.64.1, oxfmt 0.73.0, oxlint 1.88, Roslyn 5.9.0,
-  xunit.v3 4.0.2, and OSV-Scanner 2.7.0 and Semgrep 1.181.0 in CI; the floors stay (protobuf-es 2.13,
-  Node 24.9).
+  xunit.v3 4.0.2, and OSV-Scanner 2.7.0 and Semgrep 1.181.0 in CI; beadc's image is on Node 26.12.0.
+  The floors stay (protobuf-es 2.13, Node 24.9).
 
 ### Fixed
 
