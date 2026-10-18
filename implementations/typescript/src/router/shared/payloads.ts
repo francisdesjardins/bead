@@ -72,13 +72,27 @@ const BYTE_ORDER_MARK = 0xfeff;
 
 /** The index of the quotation mark that closes the string opening at `index`; the length when none does. */
 const endOfString = (text: string, index: number): number => {
-  let end = index + 1;
+  // * found by indexOf, not read character by character: a quote closes the string unless an odd
+  // run of backslashes escapes it, and the run stops at the opening quote at the latest
+  for (let from = index + 1; ;) {
+    const quote = text.indexOf('"', from);
 
-  while (end < text.length && text.charCodeAt(end) !== QUOTE) {
-    end += text.charCodeAt(end) === BACKSLASH ? 2 : 1;
+    if (quote === -1) {
+      return text.length;
+    }
+
+    let backslashes = 0;
+
+    while (text.charCodeAt(quote - 1 - backslashes) === BACKSLASH) {
+      backslashes += 1;
+    }
+
+    if (backslashes % 2 === 0) {
+      return quote;
+    }
+
+    from = quote + 1;
   }
-
-  return end;
 };
 
 /**
@@ -161,17 +175,19 @@ const scanNames = (text: string): { isEscaped: boolean; isOnce: boolean } => {
   const scopes: (Set<string> | undefined)[] = [];
   let expectsName = false;
   let hasEscape = false;
+  // the next backslash at or past where the scan is, -1 for none: found again once passed, so the
+  // text is searched once
+  let backslash = text.indexOf('\\');
 
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
 
     if (code === QUOTE) {
-      let end = index + 1;
-      let isEscaped = false;
+      const end = endOfString(text, index);
+      const isEscaped = backslash !== -1 && backslash < end;
 
-      while (end < text.length && text.charCodeAt(end) !== QUOTE) {
-        isEscaped ||= text.charCodeAt(end) === BACKSLASH;
-        end += text.charCodeAt(end) === BACKSLASH ? 2 : 1;
+      if (isEscaped) {
+        backslash = text.indexOf('\\', end);
       }
 
       const names = scopes.at(-1);

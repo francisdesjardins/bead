@@ -338,17 +338,19 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 ## Measurement
 
-Each side measures the same two layers in the same units, run by hand on a quiet machine:
+Each side measures the same four layers in the same units, run by hand on a quiet machine:
 
 - `node implementations/typescript/tools/bench.mjs [--seconds 3] [--json]`;
 - `dotnet run -c Release --project implementations/dotnet/tools/Bead.Benchmarks -- --seconds 3`.
 
-The envelope codec: a request written and read back, at payloads of 0 B, 1 KiB and 64 KiB, in
-nanoseconds a round trip. A call: the interop service's `echo` of a JSON string over a WebSocket on
-the loopback, its latency one call at a time (p50, p95 and p99, in microseconds) and its throughput
+The envelope codec, a request written and read back, and the `json` payload codec, a string
+encoded and decoded, at payloads of 0 B, 1 KiB and 64 KiB, in nanoseconds a round trip. A call:
+the interop service's `echo` of a JSON string over a WebSocket on the loopback, through each side's
+`json` codec, its latency one call at a time (p50, p95 and p99, in microseconds) and its throughput
 32 calls at a time, and on the C# side the bytes it allocates; a transfer, the same echo of 20 MiB,
 past one envelope. A number is its machine's, run's and runtime's: it compares one side with the
-other and a run with the same machine's earlier one, never one machine with another.
+other and a run with the same machine's earlier one, never one machine with another. A run of 3
+seconds warms the C# side's first payload less than one of 10.
 
 ## Support
 

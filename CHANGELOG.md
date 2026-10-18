@@ -10,14 +10,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - `implementations/typescript/tools/bench.mjs` and `implementations/dotnet/tools/Bead.Benchmarks`: the
-  same two layers measured on each side in the same units, the envelope codec and an echo over a
-  WebSocket on the loopback, by hand (README, Measurement).
+  same four layers measured on each side in the same units, the envelope codec, the `json` payload
+  codec, an echo over a WebSocket on the loopback and a transfer of 20 MiB, by hand (README,
+  Measurement).
 - `tools/check-details.mjs`, in CI: no exception's message goes into a failure's detail but at
   the sites that report alone, or where the error is the side's own (spec 9.0), on either side
   (decision 0006).
 - Each side's envelope readers are fuzzed in its suite: seeded mutations of `spec/vectors.json`'s
   bytes, each read returning or refusing with a failure within a second; `BEAD_FUZZ_INPUTS` draws
   more for a longer run.
+
+### Changed
+
+- The `json` codec reads and writes a large payload in a fraction of the time, its output the
+  same: the C# side writes a string that holds no escape as its bytes, and the TypeScript side
+  finds the end of a string by search rather than character by character. A 64 KiB echo over a
+  WebSocket goes in a twelfth of the time on the C# side, a 20 MiB transfer in an eighth.
 
 ### Fixed
 

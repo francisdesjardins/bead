@@ -135,7 +135,8 @@ internal static class Payloads
 
         using (document)
         {
-            var canonical = new Canonical(Read);
+            // the canonical form is about as long as the payload, so its buffer grows rarely
+            var canonical = new Canonical(Read, Math.Max(payload.Length, 1));
 
             canonical.Write(document.RootElement, 0);
 
@@ -159,7 +160,8 @@ internal static class Payloads
     /// </summary>
     public static ReadOnlyMemory<byte> WriteJson(JsonElement value)
     {
-        var canonical = new Canonical(Written);
+        // about as long as the value as written, which an element of kind Undefined has none of
+        var canonical = new Canonical(Written, value.ValueKind == JsonValueKind.Undefined ? 1 : Math.Max(JsonMarshal.GetRawUtf8Value(value).Length, 1));
 
         canonical.Write(value, 0);
 
@@ -225,9 +227,9 @@ internal static class Payloads
 
     // one canonical write (RFC 8785 §3.2), by hand into bytes: no Utf8JsonWriter and no encoder of
     // the platform's, whose escapes differ from release to release
-    private sealed class Canonical(Refusals refusals)
+    private sealed class Canonical(Refusals refusals, int capacity = 256)
     {
-        private readonly ArrayBufferWriter<byte> _written = new();
+        private readonly ArrayBufferWriter<byte> _written = new(capacity);
 
         public ReadOnlyMemory<byte> Bytes
         {
@@ -304,7 +306,7 @@ internal static class Payloads
                     WriteNumber(value);
                     break;
                 case JsonValueKind.String:
-                    WriteString(TextOf(value));
+                    WriteStringOf(value);
                     break;
                 case JsonValueKind.Array:
                     WriteArray(value, depth);
@@ -350,6 +352,23 @@ internal static class Payloads
             catch (InvalidOperationException reason)
             {
                 throw new FormatException(refusals.SurrogateAlone, reason);
+            }
+        }
+
+        // * a string whose bytes, as written, hold no escape and are UTF-8 is in its canonical form
+        // already, its quotes included: a reader takes no control character unescaped, and the form
+        // escapes nothing else
+        private void WriteStringOf(JsonElement value)
+        {
+            var written = JsonMarshal.GetRawUtf8Value(value);
+
+            if (!written.Contains((byte)'\\') && Utf8.IsValid(written))
+            {
+                Append(written);
+            }
+            else
+            {
+                WriteString(TextOf(value));
             }
         }
 
