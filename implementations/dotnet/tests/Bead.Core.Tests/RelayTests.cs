@@ -157,6 +157,28 @@ public sealed class RelayTests
     }
 
     [Fact]
+    public void Answers_an_ELSEWHERE_whose_transport_carried_nothing_DESTINATION_UNREACHABLE_to_a_leg_B_that_carries_a_credential_as_to_any_other()
+    {
+        var relay = new TestRelay(null, true).Relay;
+
+        relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "bead-interop", DestinationId = 9 });
+        relay.Register(new ConnectionTarget(Device), new DestinationOptions { Audience = "bead-interop", DestinationId = 10 });
+
+        ushort? CodeOf(uint destinationId, string? carried)
+        {
+            var header = HeaderOf(1, destinationId) with { Credential = Credential.Elsewhere() };
+
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = carried })?.Code;
+        }
+
+        Assert.All(new uint[] { 9, 10 }, (destinationId) =>
+        {
+            Assert.Equal((ushort)ProtocolCode.DestinationUnreachable, CodeOf(destinationId, null));
+            Assert.Null(CodeOf(destinationId, "Interop sub=ada"));
+        });
+    }
+
+    [Fact]
     public void Forwards_a_credential_unresolved_unless_it_verifies_as_each_of_its_handlers_says_to_a_destination_registered_or_not()
     {
         var forwarding = new TestRelay().Relay;
@@ -980,11 +1002,20 @@ public sealed class RelayTests
     // it makes, and each error it reports, as its message and whether leg A's connection came with it
     private sealed class TestRelay
     {
-        public TestRelay(RelayOptions? options = null)
+        // `isCarrying`: a connection of the relay's own carries a credential, and is secure
+        public TestRelay(RelayOptions? options = null, bool isCarrying = false)
         {
             Relay = new Relay(
                 new RelayRouter
                 {
+                    CarriesCredential = (_) =>
+                    {
+                        return isCarrying;
+                    },
+                    IsSecure = (_) =>
+                    {
+                        return isCarrying;
+                    },
                     IsTwoWay = (_) =>
                     {
                         return true;

@@ -448,9 +448,12 @@ internal sealed class Relay
         var carried = request.TransportCredential;
         var destinationId = registration.Destination.DestinationId;
         var target = registration.Target;
+
+        // * an ELSEWHERE that leg A's transport carried nothing for crosses to no leg B, whichever
+        // kind of target it is: nothing is presented for it
         var (carries, isSecure) = target is IRouterTarget router
             ? (carried is { } bytes && router.Carries(bytes), router.IsSecure)
-            : (_router.CarriesCredential(((ConnectionTarget)target).ConnectionHandle), _router.IsSecure(((ConnectionTarget)target).ConnectionHandle));
+            : (carried is not null && _router.CarriesCredential(((ConnectionTarget)target).ConnectionHandle), _router.IsSecure(((ConnectionTarget)target).ConnectionHandle));
 
         return header.Credential switch
         {

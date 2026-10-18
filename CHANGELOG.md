@@ -32,6 +32,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On the C# side, a relay refuses an `ELSEWHERE` that leg A's transport carried nothing for, to a
+  connection of its own as to any other leg B, `DESTINATION_UNREACHABLE`, as the TypeScript side does;
+  no transport reaches it today.
 - On the C# side, a call or a command presenting `Credential.Elsewhere()`, nothing for its
   transport to carry, a JWT with no token, or a scheme to come is an `ArgumentException` before the
   call starts, not counted, as the TypeScript side's `ProgrammerError` is; it failed counted,

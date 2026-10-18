@@ -323,6 +323,25 @@ test.describe('createRelay, credentials', () => {
     ]);
   });
 
+  test('answers an ELSEWHERE whose transport carried nothing DESTINATION_UNREACHABLE, to a leg B that carries a credential as to any other', () => {
+    const { relay } = createCarryingRelay();
+
+    relay.register({ connectionHandle: device }, { audience: 'bead-interop', destinationId: 10 });
+
+    const codeOf = (transportCredential: string | undefined) => {
+      return relay.handlerOf(10)?.admit?.({
+        connectionHandle: first,
+        header: presentingOf(1, { credential: ELSEWHERE, destinationId: 10 }),
+        ...(transportCredential === undefined ? {} : { transportCredential }),
+      })?.code;
+    };
+
+    expect([codeOf(undefined), codeOf(CARRIED)]).toEqual([
+      ProtocolCode.DESTINATION_UNREACHABLE,
+      undefined,
+    ]);
+  });
+
   test('answers an ELSEWHERE DESTINATION_UNREACHABLE over a leg B whose upgrade carried the relay’s own credential', async () => {
     // leg B: a router over a WebSocket whose upgrade carried the relay's own credential, which its
     // transport carries alone
