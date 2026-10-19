@@ -27,6 +27,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The README says why nothing is published before 1.0.0: the wire, the names and the API change
+  freely until then, with no deprecation cycle.
 - The DevTools panel reads larger, on penumbra's type scale and spacing under a skin of DevTools'
   own colours: its controls and tabs are of one look in both themes, and its bar holds on one line
   on a wide panel. Its tabs move on the arrow keys, Home and End, its filter's syntax opens from a

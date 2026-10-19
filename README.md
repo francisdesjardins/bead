@@ -20,7 +20,9 @@ This repository holds the protocol and its implementations, side by side:
 - **an interop service** each side offers, which the other side's client calls over both
   transports.
 
-Nothing is published.
+**Nothing is published before 1.0.0.** No package goes to npm or NuGet, and no image to a
+registry, so that the wire, the names and the API can change freely until then, with no deprecation
+cycle. Build on a commit, pinned.
 
 ## Why Bead
 
