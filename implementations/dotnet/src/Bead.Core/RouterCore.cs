@@ -6,7 +6,7 @@ using System.Text;
 namespace Bead;
 
 /// <summary>How a router's core is built, beyond its port.</summary>
-public sealed record RouterCoreOptions
+internal sealed record RouterCoreOptions
 {
     /// <summary>What it reads, writes and holds by; <see cref="RouterLimits.Default"/> when none.</summary>
     public RouterLimits? Limits { get; init; }
@@ -41,7 +41,7 @@ public sealed record RouterCoreOptions
 /// Everything it holds is touched on its own serial scheduler, as Bead's TypeScript core is on its one thread;
 /// its public methods may be called from any thread.
 /// </summary>
-public sealed partial class RouterCore : IDisposable
+internal sealed partial class RouterCore : IDisposable
 {
     // constants
 
@@ -768,10 +768,16 @@ public sealed partial class RouterCore : IDisposable
         }
     }
 
-    private void ReceiveRequest(RequestHeader header, (string ConnectionHandle, ReadOnlyMemory<byte> Payload, string? TransportCredential) received)
+    private void ReceiveRequest(RequestHeader arrived, (string ConnectionHandle, ReadOnlyMemory<byte> Payload, string? TransportCredential) received)
     {
         var (connectionHandle, payload, _) = received;
-        var callId = header.CallId;
+        var callId = arrived.CallId;
+
+        // ! no bearer credential reaches a procedure (spec 13.1): one routed to a resolver of this
+        // side's is handed a header its JWT's scheme alone, made once, here, the call's header from
+        // now on, which every key the core holds of the call is; one that names a destination keeps
+        // its header as it came, which its relay checks and moves to leg B (spec 14.2)
+        var header = arrived.DestinationId is null ? CallSession.HandedHeaderOf(arrived) : arrived;
         var target = new AnswerTarget(connectionHandle, header);
 
         // a request of this side's own parity, or on a call id in use, would answer another call
@@ -795,10 +801,13 @@ public sealed partial class RouterCore : IDisposable
         var dispatched = (target, answering);
 
         // ! what its transport carried stands for ELSEWHERE alone, and stays here for any other: its
-        // SessionOf, its admission and its resolver are handed nothing beside it (spec 15.1)
-        if (header.Credential?.Scheme == CredentialScheme.Elsewhere)
+        // SessionOf alone is handed it, and a destination's handler, which the call keeps it for; a
+        // resolver and its admission are handed nothing beside it (spec 13.1, 15.1)
+        var carried = header.Credential?.Scheme == CredentialScheme.Elsewhere ? received.TransportCredential : null;
+
+        if (header.DestinationId is not null)
         {
-            answering.TransportCredential = received.TransportCredential;
+            answering.TransportCredential = carried;
         }
 
         // one that names a destination goes to the handler this side has for it — a relay's
@@ -839,7 +848,7 @@ public sealed partial class RouterCore : IDisposable
         }
 
         _handlers.AddOrUpdate(header, resolver);
-        Resolve(resolver, new Arrival(target, answering, payload) { TransportCredential = answering.TransportCredential });
+        Resolve(resolver, new Arrival(target, answering, payload) { Arrived = arrived, TransportCredential = carried });
     }
 
     // whether a request whose credential resolves is still its call's: a cancel, its connection
@@ -871,8 +880,9 @@ public sealed partial class RouterCore : IDisposable
         var (connectionHandle, header) = target;
         var credential = header.Credential;
 
-        // a relay that does not verify forwards a JWT and an ELSEWHERE, which it resolves not
-        var isForwarded = resolver.ForwardsCredentials;
+        // a relay that does not verify forwards a JWT and an ELSEWHERE, which it resolves not: a
+        // destination's handler alone, never a procedure, which resolves its call's credential here
+        var isForwarded = header.DestinationId is not null && resolver is IDestinationHandler { ForwardsCredentials: true };
         var schemes = isForwarded ? ForwardedSchemes : _port.CredentialSchemes;
 
         if (credential is { } presented && !schemes.Contains(presented.Scheme))
@@ -918,7 +928,7 @@ public sealed partial class RouterCore : IDisposable
         try
         {
             resolving = _port.SessionOf(
-                new SessionRequest { ConnectionHandle = connectionHandle, Header = header, TransportCredential = arrival.TransportCredential },
+                new SessionRequest { ConnectionHandle = connectionHandle, Header = arrival.Arrived, TransportCredential = arrival.TransportCredential },
                 answering.Source.Token);
         }
         catch (Exception reason)
@@ -1659,18 +1669,21 @@ public sealed partial class RouterCore : IDisposable
     private sealed record Registered(IRequestResolver Resolver, ResolverSeries? Series);
 
     // a request of the peer's, routed: where it is answered, its call, its payload — a transfer's
-    // opening, for one — and the credential its transport carried beside it
+    // opening, for one — and what its credential resolves from, which the call keeps not: its header
+    // as it came, and the credential its transport carried beside it
     private sealed record Arrival(AnswerTarget Target, AnsweringCall Answering, ReadOnlyMemory<byte> Payload)
     {
+        public required RequestHeader Arrived { get; init; }
+
         public string? TransportCredential { get; init; }
 
         // every member as the compiler writes it, but the credential, of which whether one was
-        // carried
+        // carried; a header writes its credential's scheme alone
         private bool PrintMembers(StringBuilder builder)
         {
             // ! a credential's own string reaches no log, no exception's message and no debugger
             // (spec 15.1): whether there is one, alone
-            builder.Append(CultureInfo.CurrentCulture, $"Target = {Target}, Answering = {Answering}, Payload = {Payload}, TransportCredential = ");
+            builder.Append(CultureInfo.CurrentCulture, $"Target = {Target}, Answering = {Answering}, Payload = {Payload}, Arrived = {Arrived}, TransportCredential = ");
             builder.Append(TransportCredential is null ? "none" : "carried");
 
             return true;

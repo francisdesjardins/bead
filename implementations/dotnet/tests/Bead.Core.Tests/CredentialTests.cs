@@ -73,7 +73,7 @@ public sealed class CredentialTests
     }
 
     [Fact]
-    public void A_session_request_writes_whether_its_transport_carried_a_credential_never_the_credential()
+    public void A_session_request_writes_no_transport_credential_nor_whether_one_was_carried()
     {
         var request = new SessionRequest
         {
@@ -82,10 +82,11 @@ public sealed class CredentialTests
             TransportCredential = "Bearer SECRET",
         };
 
+        // its public members alone, as the compiler writes them: the credential is the side's own
         Assert.StartsWith("SessionRequest { ConnectionHandle = first, Header = ", request.ToString(), StringComparison.Ordinal);
-        Assert.EndsWith(", TransportCredential = carried }", request.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("TransportCredential", request.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("SECRET", request.ToString(), StringComparison.Ordinal);
-        Assert.EndsWith(", TransportCredential = none }", (request with { TransportCredential = null }).ToString(), StringComparison.Ordinal);
+        Assert.Equal(request.ToString(), (request with { TransportCredential = null }).ToString());
     }
 
     [Fact]

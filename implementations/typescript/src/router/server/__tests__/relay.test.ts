@@ -17,6 +17,7 @@ import {
 import { DisconnectError, FailureError } from '../../shared/errors';
 import type {
   Credential,
+  IAdmissionRequest,
   IFailure,
   IProcedure,
   IRequestHeader,
@@ -24,6 +25,7 @@ import type {
   IResolvedRequestOptions,
   IRouterLimits,
   IRouterResult,
+  ITransportCarried,
   RouterAnswer,
 } from '../../shared/types';
 import { createRouterClient } from '../../client/router-client';
@@ -100,7 +102,10 @@ const headerOf = (
   };
 };
 
-/** The props a router hands a handler: admitted, unless told, with a signal of their own. */
+/**
+ * The props a router hands a destination's handler, its header as it came: admitted, unless told,
+ * with a signal of their own.
+ */
 const propsOf = (
   header: IRequestHeader,
   {
@@ -108,7 +113,7 @@ const propsOf = (
     payload = Uint8Array.of(1, 2, 3),
     signal = new AbortController().signal,
   }: { isAdmitted?: boolean; payload?: Uint8Array; signal?: AbortSignal } = {}
-): IRequestResolverProps<Handle> => {
+): IRequestResolverProps<Handle> & ITransportCarried => {
   return {
     connectionHandle: first,
     header,
@@ -615,7 +620,7 @@ test.describe('createRelay', () => {
     const asked: string[] = [];
     const { relay } = createTestRelay({
       beforeRoute: Object.assign(
-        ({ connectionHandle, header }: { connectionHandle: Handle; header: IRequestHeader }) => {
+        ({ connectionHandle, header }: IAdmissionRequest<Handle>) => {
           asked.push(
             `${connectionHandle === first ? 'first' : 'device'} ${String(header.destinationId)}`
           );

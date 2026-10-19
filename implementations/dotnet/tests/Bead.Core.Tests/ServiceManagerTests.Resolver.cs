@@ -801,6 +801,33 @@ public sealed partial class ServiceManagerTests
         }
     }
 
+    // spec 13.1
+    [Fact]
+    public void Hands_before_request_the_connection_the_header_and_the_call_s_session_alone_never_a_bearer_credential_its_call_came_with()
+    {
+        var handed = new List<AdmissionRequest>();
+        var beforeRequest = new BeforeRequest((request) =>
+        {
+            handed.Add(request);
+
+            return true;
+        });
+        var session = new CallSession { Data = "ada" };
+
+        Assert.Null(beforeRequest.RefusalOf(new AdmissionRequest(Handle, Header with { Credential = Credential.Jwt("a.b.c") })
+        {
+            Session = session,
+            TransportCredential = "Bearer e",
+        }));
+
+        // the connection, the header with its JWT's scheme alone, the session: nothing else
+        var request = Assert.Single(handed);
+
+        Assert.Equal(new AdmissionRequest(Handle, Header with { Credential = Credential.SchemeOf(CredentialScheme.Jwt) }) { Session = session }, request);
+        Assert.Null(request.Header.Credential?.Token);
+        Assert.Null(request.TransportCredential);
+    }
+
     // debugging 4.2; the C# side's alone, whose router answers in its resolver's place on its own
     // thread while the resolver's answer goes to it
     [Fact]

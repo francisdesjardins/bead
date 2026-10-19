@@ -3,11 +3,18 @@ import { ProgrammerError } from '../../../transport/shared/errors';
 import {
   connectionSessionOf,
   credentialSchemesDetailOf,
+  handedHeaderOf,
   presentedCredentialOf,
   sessionKeyOf,
   uncarriedOf,
 } from '../call-session';
-import { CLIENT_FAILURES, CredentialScheme, ProtocolCode, SERVER_FAILURES } from '../constants';
+import {
+  CLIENT_FAILURES,
+  CredentialScheme,
+  EnvelopeKind,
+  ProtocolCode,
+  SERVER_FAILURES,
+} from '../constants';
 import { FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
 import type { RequestCredential } from '../types';
@@ -61,6 +68,29 @@ test.describe('connectionSessionOf', () => {
 
     // what the session holds is asked once it holds, and only then
     expect(asked).toEqual(['data', 'data']);
+  });
+});
+
+test.describe('handedHeaderOf', () => {
+  test('keeps of a JWT its scheme alone, in a copy, and hands any other header as it came', () => {
+    const header = { callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 };
+    const jwt = { ...header, credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } };
+    const handed = handedHeaderOf(jwt);
+
+    expect(handed).toStrictEqual({ ...header, credential: { scheme: CredentialScheme.JWT } });
+    // the header as it came keeps its token, for its verifier; one made already is made to itself
+    expect(jwt.credential.token).toBe('a.b.c');
+    expect(handedHeaderOf(handed)).toBe(handed);
+
+    for (const credential of [
+      undefined,
+      { scheme: CredentialScheme.OPAQUE, token: TOKEN },
+      { scheme: CredentialScheme.ELSEWHERE },
+    ] as const) {
+      const other = { ...header, credential };
+
+      expect(handedHeaderOf(other)).toBe(other);
+    }
   });
 });
 

@@ -19,13 +19,14 @@ import type {
   Credential,
   DestinationId,
   IAdmissionRequest,
+  IDestinationHandler,
   IFailure,
   IProcedure,
-  IRequestHandler,
   IRequestHeader,
   IRequestResolverProps,
   IRouterFailures,
   IRouterLimits,
+  ITransportCarried,
   RequestCredential,
   RouterAnswer,
 } from '../shared/types';
@@ -81,18 +82,24 @@ export interface IRelay {
    */
   gauges(): IGauges<TransportServerConnectionHandle>;
   /**
-   * The handler of a request to `destinationId`, bound to the destination as it is now; `undefined`
-   * while none is registered at all: this router relays nothing.
+   * The handler of a request to `destinationId`, bound to the destination as it is now, handed what
+   * the request came with; `undefined` while none is registered at all: this router relays nothing.
    */
   handlerOf(
     destinationId: DestinationId
-  ): IRequestHandler<TransportServerConnectionHandle> | undefined;
+  ): IDestinationHandler<TransportServerConnectionHandle> | undefined;
   register(target: RelayTarget, options?: IDestinationOptions): IDestinationRegistration;
 }
 
 // types
 
 type Handle = TransportServerConnectionHandle;
+
+/** A request as a destination's handler admits it: with what it came with. */
+type CarriedAdmission = IAdmissionRequest<Handle> & ITransportCarried;
+
+/** A request as a destination's handler is handed it: with what it came with. */
+type CarriedRequest = IRequestResolverProps<Handle> & ITransportCarried;
 
 // helpers
 
@@ -257,7 +264,7 @@ export const createRelay = ({
   // ! an ELSEWHERE goes only where leg B carries the very bytes leg A's transport carried — never
   // over a WebSocket whose upgrade carried the relay's own, which it would present for leg A's
   const uncarriedOf = (
-    { header: { credential }, transportCredential }: IAdmissionRequest<Handle>,
+    { header: { credential }, transportCredential }: CarriedAdmission,
     { audience, destinationId, target }: IRegistration
   ): IFailure | undefined => {
     if (credential?.scheme === CredentialScheme.JWT && 'token' in credential) {
@@ -292,10 +299,7 @@ export const createRelay = ({
 
   // what leg B presents: a JWT, as leg A does; an ELSEWHERE, with what leg A's transport carried;
   // none, said so, for none or OPAQUE, whatever a router it calls through presents by default
-  const legCredentialOf = ({
-    header,
-    transportCredential,
-  }: IRequestResolverProps<Handle>): RequestCredential => {
+  const legCredentialOf = ({ header, transportCredential }: CarriedRequest): RequestCredential => {
     const { credential } = header;
 
     if (credential?.scheme === CredentialScheme.JWT && 'token' in credential) {
@@ -353,7 +357,7 @@ export const createRelay = ({
   // `undefined` once leg A ended
   const answerOf = async (
     { destinationId, target, timeout }: IRegistration,
-    props: IRequestResolverProps<Handle>
+    props: CarriedRequest
   ): Promise<RouterAnswer | undefined> => {
     const { connectionHandle, header, payload, signal } = props;
     const { procedureId, serviceId } = header;
@@ -412,10 +416,7 @@ export const createRelay = ({
 
   // leg B, then leg A's answer; a connection that closed while the payload came takes nothing, and
   // a payload that came whole past what leg B takes behind its header goes nowhere
-  const forward = async (
-    registration: IRegistration,
-    props: IRequestResolverProps<Handle>
-  ): Promise<void> => {
+  const forward = async (registration: IRegistration, props: CarriedRequest): Promise<void> => {
     const tooLarge = tooLargeOf(props.payload.length, { header: props.header, registration });
     const answer = registration.isClosed
       ? { failure: unreachableOf(registration.destinationId, 'its connection closed') }
@@ -536,7 +537,7 @@ export const createRelay = ({
 
       // a router that asks no admission leaves it to the handler, as to a resolver
       if (registration === undefined) {
-        const refusalOf = (admissionRequest: IAdmissionRequest<Handle>): IFailure => {
+        const refusalOf = (admissionRequest: CarriedAdmission): IFailure => {
           return (
             admission(admissionRequest) ?? {
               ...failures.destinationUnknown,
@@ -546,7 +547,7 @@ export const createRelay = ({
         };
 
         return Object.assign(
-          (props: IRequestResolverProps<Handle>) => {
+          (props: CarriedRequest) => {
             return respond({ failure: refusalOf(props) }, props);
           },
           { admit: refusalOf, forwardsCredentials: !verifies }
@@ -554,7 +555,7 @@ export const createRelay = ({
       }
 
       // what refuses an admitted request to this destination: nothing, for one that goes on
-      const refusalOfRoute = (request: IAdmissionRequest<Handle>): IFailure | undefined => {
+      const refusalOfRoute = (request: CarriedAdmission): IFailure | undefined => {
         const { header } = request;
         const { opensSubscription, total } = header;
         const { target } = registration;
@@ -581,12 +582,12 @@ export const createRelay = ({
         );
       };
 
-      const admit = (admissionRequest: IAdmissionRequest<Handle>): IFailure | undefined => {
+      const admit = (admissionRequest: CarriedAdmission): IFailure | undefined => {
         return admission(admissionRequest) ?? refusalOfRoute(admissionRequest);
       };
 
       return Object.assign(
-        (props: IRequestResolverProps<Handle>) => {
+        (props: CarriedRequest) => {
           const refusal = props.isAdmitted === true ? undefined : admit(props);
 
           return refusal === undefined

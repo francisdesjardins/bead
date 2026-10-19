@@ -60,29 +60,17 @@ test.describe('createServiceServer', () => {
       await expect(client.request.sayHello('Bead')()).resolves.toBe('Hello, Bead!');
     });
 
-    test('refuses a call in no session SESSION_REQUIRED, and one that presented a credential ACCESS_DENIED', async () => {
+    test('refuses a call in no session SESSION_REQUIRED', async () => {
       await using connected = await connectWorker();
-      const { router } = connected.server;
-      const registerResolver = router.registerResolver;
       const greeter = greeterOf();
       const client = createServiceClient(GreeterProcedures, connected.client);
 
-      // * a resolver that forwards a credential unresolved reaches its admission in no session: the
-      // one way a call that presented one meets the session rule there (spec 9.2, step 5)
-      router.registerResolver = (resolver: IRequestResolver) => {
-        registerResolver(Object.assign(resolver, { forwardsCredentials: true }));
-      };
       greeter.on('whoami', (request, response) => {
         return response(request.payload);
       });
       greeter.offer(connected.server);
 
       expect(await codeOf(client.request.whoami('who')())).toBe(ProtocolCode.SESSION_REQUIRED);
-      expect(
-        await codeOf(
-          client.request.whoami('who')({ credential: { scheme: 2, token: 'a.b.c' } as const })
-        )
-      ).toBe(ProtocolCode.ACCESS_DENIED);
     });
 
     test("refuses with a hook's detail ACCESS_DENIED, in a session or in none", async () => {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createTestClock, hasRef, timersBy } from '../../../transport/shared/__tests__/fixtures';
@@ -15,7 +16,10 @@ import {
 } from '../constants';
 import { CapacityError, DisconnectError, FailureError } from '../errors';
 import { createMetricsRegistry } from '../metrics-registry';
+import * as routerClient from '../../client/router-client';
+import * as routerServer from '../../server/router-server';
 import { createRouterCore } from '../router-core';
+import * as serviceManager from '../service-manager';
 import type {
   Envelope,
   IAdmissionRequest,
@@ -24,10 +28,13 @@ import type {
   IFailure,
   INotificationHeader,
   IProcedure,
+  IDestinationHandler,
   IRequestHandler,
   IRequestHeader,
+  IRequestResolver,
   IRequestResolverProps,
   ISessionRequest,
+  ITransportCarried,
   OutgoingEnvelope,
 } from '../types';
 import { callIdsOf, countedOf, createLoopback, digestOf, envelopeOf, patternOf } from './fixtures';
@@ -58,6 +65,12 @@ import {
   resultOpeningOf,
   settledOf,
 } from './router-core-fixtures';
+
+// constants
+
+const PACKAGE = JSON.parse(
+  readFileSync(new URL('../../../../package.json', import.meta.url), 'utf8')
+) as { exports: Record<string, string> };
 
 // definition
 
@@ -1255,26 +1268,37 @@ test.describe('createRouterCore', () => {
           return undefined;
         },
       });
-      using core = createRouterCore(port);
-
-      core.registerResolver(
-        Object.assign(resolverOf(echo), {
+      const forwarding: IDestinationHandler<Handle> = Object.assign(
+        () => {
+          return Promise.resolve();
+        },
+        {
           admit: ({ header }: IAdmissionRequest<Handle>) => {
             admitted.push(header.callId);
 
             return undefined;
           },
           forwardsCredentials: true,
-        })
+        }
       );
-      // one turn: a JWT, none, an ELSEWHERE its transport carried, none
-      core.receive(requestOf(1, { credential: JWT }), 'a');
-      core.receive(requestOf(3), 'a');
+
+      port.handlerOfDestination = () => {
+        return forwarding;
+      };
+
+      using core = createRouterCore(port);
+
+      // one turn, to a destination: a JWT, none, an ELSEWHERE its transport carried, none
+      core.receive(requestOf(1, { credential: JWT, destinationId: 9 }), 'a');
+      core.receive(requestOf(3, { destinationId: 9 }), 'a');
       core.receive(
-        { credential: 'Bearer mF_9.B5f-4.1JqM', data: requestOf(5, { credential: ELSEWHERE }) },
+        {
+          credential: 'Bearer mF_9.B5f-4.1JqM',
+          data: requestOf(5, { credential: ELSEWHERE, destinationId: 9 }),
+        },
         'a'
       );
-      core.receive(requestOf(7), 'a');
+      core.receive(requestOf(7, { destinationId: 9 }), 'a');
 
       expect(admitted).toEqual([3, 7]);
 
@@ -1287,37 +1311,141 @@ test.describe('createRouterCore', () => {
       expect(sent).toEqual([]);
     });
 
-    test('hands its resolver what its transport carried for an ELSEWHERE alone, what came beside any other staying here', async () => {
-      const seen: IRequestResolverProps<Handle>[] = [];
-      const { port, reported } = createPort({
+    // spec 13.1
+    test('hands a destination’s handler the bearer credentials its call came with, and a resolver neither, its admission neither', async () => {
+      const resolved: IRequestResolverProps<Handle>[] = [];
+      const admitted: IAdmissionRequest<Handle>[] = [];
+      const relayed: (IRequestResolverProps<Handle> & ITransportCarried)[] = [];
+      const relayAdmitted: (IAdmissionRequest<Handle> & ITransportCarried)[] = [];
+      const destination: IDestinationHandler<Handle> = Object.assign(
+        (props: IRequestResolverProps<Handle> & ITransportCarried) => {
+          relayed.push(props);
+
+          return Promise.resolve();
+        },
+        {
+          admit: (request: IAdmissionRequest<Handle> & ITransportCarried) => {
+            relayAdmitted.push(request);
+
+            return undefined;
+          },
+          forwardsCredentials: true,
+        }
+      );
+      const { port, reported, sent } = createPort({
         credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+        handlerOfDestination: () => {
+          return destination;
+        },
         sessionOf: () => {
           return SESSION;
         },
       });
       using core = createRouterCore(port);
+      const resolver: IRequestResolver<Handle> = Object.assign(resolverOf(echo, resolved), {
+        admit: (request: IAdmissionRequest<Handle>) => {
+          admitted.push(request);
 
-      core.registerResolver(resolverOf(echo, seen));
-      core.receive({ credential: 'Bearer a', data: requestOf(1) }, 'a');
-      core.receive({ credential: 'Bearer b', data: requestOf(3, { credential: JWT }) }, 'a');
-      core.receive({ credential: 'Bearer c', data: requestOf(5, { credential: ELSEWHERE }) }, 'a');
+          return undefined;
+        },
+      });
+
+      core.registerResolver(resolver);
+
+      // each beside what its transport carried: none, a JWT and an ELSEWHERE to a resolver; a JWT
+      // and an ELSEWHERE to a destination whose handler forwards them
+      for (const data of [
+        requestOf(1),
+        requestOf(3, { credential: JWT }),
+        requestOf(5, { credential: ELSEWHERE }),
+        requestOf(7, { credential: JWT, destinationId: 9 }),
+        requestOf(9, { credential: ELSEWHERE, destinationId: 9 }),
+      ]) {
+        core.receive({ credential: 'Bearer e', data }, 'a');
+      }
 
       await sleep(0);
 
-      expect(
-        seen
-          .map(({ header, transportCredential }) => {
-            return [header.callId, transportCredential];
+      /** What a handler was handed of its call's credentials, call by call. */
+      const credentialsOf = (
+        requests: (IAdmissionRequest<Handle> & { transportCredential?: string | undefined })[]
+      ): unknown[] => {
+        return requests
+          .map(({ header: { callId, credential }, session, transportCredential }) => {
+            return [callId, credential, transportCredential, session];
           })
           .toSorted(([a], [b]) => {
             return Number(a) - Number(b);
-          })
-      ).toEqual([
-        [1, undefined],
-        [3, undefined],
-        [5, 'Bearer c'],
-      ]);
+          });
+      };
+      // a resolver and its admission: no transport's credential, a JWT's scheme alone, its call in
+      // the session its JWT resolved to
+      const procedure = [
+        [1, undefined, undefined, SESSION],
+        [3, { scheme: CredentialScheme.JWT }, undefined, SESSION],
+        [5, ELSEWHERE, undefined, SESSION],
+      ];
+
+      expect(credentialsOf(resolved)).toStrictEqual(procedure);
+      expect(credentialsOf(admitted)).toStrictEqual(procedure);
+      expect(
+        [...resolved, ...admitted].some((request) => {
+          return 'transportCredential' in request;
+        })
+      ).toBe(false);
+
+      // a destination's handler and its admission: the JWT's token whole, what an ELSEWHERE's
+      // transport carried, each forwarded unresolved
+      const relaying = [
+        [7, JWT, undefined, undefined],
+        [9, ELSEWHERE, 'Bearer e', undefined],
+      ];
+
+      expect(credentialsOf(relayed)).toStrictEqual(relaying);
+      expect(credentialsOf(relayAdmitted)).toStrictEqual(relaying);
       expect(reported).toEqual([]);
+      expect(sent).toEqual([]);
+    });
+
+    // spec 13.1: the TypeScript side's surface, by its entry points and its types, which the C#
+    // side's twin holds by reflection
+    test('keeps the router core and the transport’s credential out of the public surface', () => {
+      // no entry point is the core, nor exports it
+      expect(Object.values(PACKAGE.exports)).not.toContain('./src/router/shared/router-core.ts');
+
+      for (const entry of [routerClient, routerServer, serviceManager]) {
+        expect(Object.keys(entry)).not.toContain('createRouterCore');
+      }
+
+      // ! none of the public types carries a bearer credential, nor a resolver the flag that would
+      // forward one
+      const resolver: IRequestResolver<Handle> = resolverOf(echo);
+      const props: IRequestResolverProps<Handle> = {
+        connectionHandle: 'a',
+        header: headerOf(1),
+        payload: new Uint8Array(),
+        signal: new AbortController().signal,
+      };
+      const request: IAdmissionRequest<Handle> = { connectionHandle: 'a', header: headerOf(1) };
+      const sessionRequest: ISessionRequest<Handle> = {
+        connectionHandle: 'a',
+        header: headerOf(1),
+      };
+
+      // @ts-expect-error a resolver is handed no transport's credential
+      void props.transportCredential;
+      // @ts-expect-error an admission is handed no transport's credential
+      void request.transportCredential;
+      // @ts-expect-error what sessionOf is asked carries no transport's credential, but the core's
+      void sessionRequest.transportCredential;
+      // @ts-expect-error a resolver forwards nothing: a destination's handler does
+      void resolver.forwardsCredentials;
+      expect(
+        [props, request, sessionRequest].some((handed) => {
+          return 'transportCredential' in handed;
+        })
+      ).toBe(false);
+      expect('forwardsCredentials' in resolver).toBe(false);
     });
 
     test('hands sessionOf what its transport carried for an ELSEWHERE alone, what came beside any other staying here', async () => {

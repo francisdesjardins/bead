@@ -79,26 +79,19 @@ public sealed class ServiceServerTests
     }
 
     [Fact]
-    public async Task Refuses_a_call_in_no_session_SESSION_REQUIRED_and_one_that_presented_a_credential_ACCESS_DENIED()
+    public async Task Refuses_a_call_in_no_session_SESSION_REQUIRED()
     {
         await using var link = new ServiceLink();
-        var server = new InterceptedServer(link.Server);
         var greeter = GreeterOf();
         var client = ClientOf(link);
 
-        // * a resolver that forwards a credential unresolved reaches its admission in no session: the
-        // one way a call that presented one meets the session rule there (spec 9.2, step 5)
-        server.Intercepted.ForwardsCredentials = true;
         greeter.On(GreeterProcedures.Whoami, (request, response) =>
         {
             return response.Answer(request.Payload);
         });
-        greeter.Offer(server);
+        greeter.Offer(link.Server);
 
-        var whoami = client.RequesterOf(GreeterProcedures.Whoami);
-
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(whoami("who")()));
-        Assert.Equal((ushort)ProtocolCode.AccessDenied, await CodeOf(whoami("who")(new RequestOptions { Credential = Credential.Jwt("a.b.c") })));
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, await CodeOf(client.RequesterOf(GreeterProcedures.Whoami)("who")()));
     }
 
     [Fact]

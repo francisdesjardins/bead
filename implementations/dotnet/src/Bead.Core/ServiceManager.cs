@@ -141,7 +141,10 @@ public interface IRequestSerializerServer<TRequest, TResponse>
 /// anything else refuses it, with <see cref="Refusal"/>, or with
 /// <see cref="ProtocolCode.AccessDenied"/>. The router answers a refusal SESSION_REQUIRED of a
 /// call that presented a credential ACCESS_DENIED, its detail kept: the credential may hold, and
-/// its requester would withdraw it (spec 9.2, step 5).
+/// its requester would withdraw it (spec 9.2, step 5). It is handed the request's connection, its
+/// header and its call's session alone, never a bearer credential its call came with: what its
+/// transport carried stays with the side, and a <see cref="CredentialScheme.Jwt"/> says its scheme
+/// alone (spec 13.1).
 /// </summary>
 public sealed class BeforeRequest
 {
@@ -190,7 +193,13 @@ public sealed class BeforeRequest
     /// </summary>
     internal Failure? RefusalOf(AdmissionRequest request)
     {
-        if (Admits(request))
+        // ! the connection, the header and the call's session alone, never a bearer credential its
+        // call came with (spec 13.1): what its transport carried stays here, and a JWT says its
+        // scheme alone. A procedure's header is made so at its reception already; a relay's
+        // beforeRoute is handed the request its handler keeps whole, for leg B
+        var handed = request with { Header = CallSession.HandedHeaderOf(request.Header), TransportCredential = null };
+
+        if (Admits(handed))
         {
             return null;
         }

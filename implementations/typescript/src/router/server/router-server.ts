@@ -25,8 +25,9 @@ import type {
   ICallAddress,
   ICallSession,
   IFailure,
-  IRequestHeader,
+  IHandedRequestHeader,
   ISessionRequest,
+  ITransportCarried,
   SessionIdentifier,
   SessionOf,
 } from '../shared/types';
@@ -85,6 +86,7 @@ export type {
   DestinationId,
   EnvelopeHeader,
   FailureOrigin,
+  HandedCredential,
   IAdmissionRequest,
   IBeforeRequest,
   ICallSession,
@@ -100,6 +102,7 @@ export type {
   IFailureHeader,
   INotificationHeader,
   IProtocolFailure,
+  IHandedRequestHeader,
   IRequestHeader,
   IResultHeader,
   IRouterResult,
@@ -217,7 +220,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   const { notifications } = credentialSessions;
   // the request of each paced subscription its resolver subscribed in flight, so one whose queue
   // goes past its bounds before the answer is answered with that failure; gone with the pacing
-  const requests = new WeakMap<IPacing, IRequestHeader>();
+  const requests = new WeakMap<IPacing, IHandedRequestHeader>();
   // the connections this router sends on, by the handle as a string, so a request's option finds
   // the connection it names; a server keeps its own, which hears of each connection first
   const connections = new Map<string, TransportServerConnectionHandle>();
@@ -256,10 +259,11 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
     };
   };
 
-  // the call's session: none and OPAQUE as the options say; a JWT or an ELSEWHERE by the router's
-  // credentials, to a destination against its relay's audiences, a session kept taking the later end
+  // the call's session: none and OPAQUE as the options say, handed nothing its transport carried;
+  // a JWT or an ELSEWHERE by the router's credentials, to a destination against its relay's
+  // audiences, a session kept taking the later end
   const sessionOf = (
-    request: ISessionRequest<TransportServerConnectionHandle>,
+    request: ISessionRequest<TransportServerConnectionHandle> & ITransportCarried,
     signal: AbortSignal
   ): ReturnType<SessionOf<TransportServerConnectionHandle>> => {
     const { connectionHandle, header, transportCredential } = request;
@@ -269,7 +273,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       credential?.scheme !== CredentialScheme.JWT &&
       credential?.scheme !== CredentialScheme.ELSEWHERE
     ) {
-      return options?.sessionOf?.(request, signal);
+      return options?.sessionOf?.({ connectionHandle, header }, signal);
     }
 
     return credentials

@@ -255,9 +255,6 @@ internal sealed class InterceptingRouter(IRouterLike router) : IRouterLike
     /// <summary>Each declaration, as <c>requester name</c> or <c>resolver name</c>.</summary>
     public List<string> Declared { get; } = [];
 
-    /// <summary>Whether each resolver registered forwards a credential unresolved, as a relay's does.</summary>
-    public bool ForwardsCredentials { get; set; }
-
     public RouterSide Side
     {
         get
@@ -281,7 +278,7 @@ internal sealed class InterceptingRouter(IRouterLike router) : IRouterLike
             Declared.Add($"resolver {resolver.Procedure.ProcedureName}");
         }
 
-        router.RegisterResolver(ForwardsCredentials ? new Forwarding(resolver) : resolver);
+        router.RegisterResolver(resolver);
     }
 
     public Task Respond(RouterAnswer response, AnswerTarget target)
@@ -342,44 +339,5 @@ internal sealed class InterceptingRouter(IRouterLike router) : IRouterLike
     public Task UnregisterNotification(INotificationLike notification, bool cancel = true)
     {
         return router.UnregisterNotification(notification, cancel);
-    }
-
-    // a resolver that forwards a credential unresolved: a call presenting one reaches its admission
-    // in no session, the one way such a call meets a session's rule there (spec 9.2, step 5)
-    private sealed class Forwarding(IRequestResolver resolver) : IRequestResolver
-    {
-        public Procedure Procedure
-        {
-            get
-            {
-                return resolver.Procedure;
-            }
-        }
-
-        public int? MaximumPayloadBytes
-        {
-            get
-            {
-                return resolver.MaximumPayloadBytes;
-            }
-        }
-
-        public bool ForwardsCredentials
-        {
-            get
-            {
-                return true;
-            }
-        }
-
-        public Failure? Admit(AdmissionRequest request)
-        {
-            return resolver.Admit(request);
-        }
-
-        public Task Handle(RequestResolverProps props)
-        {
-            return resolver.Handle(props);
-        }
     }
 }

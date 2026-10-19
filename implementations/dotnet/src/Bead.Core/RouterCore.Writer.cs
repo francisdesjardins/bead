@@ -1,6 +1,6 @@
 namespace Bead;
 
-public sealed partial class RouterCore
+internal sealed partial class RouterCore
 {
     // what goes to the transport, and the session each connection was last told of
     private sealed class RouterWriter

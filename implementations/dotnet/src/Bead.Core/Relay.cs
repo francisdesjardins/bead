@@ -270,7 +270,7 @@ internal sealed class Relay
     /// The handler of a request to <paramref name="destinationId"/> presenting none, as
     /// <see cref="HandlerOf(RequestHeader)"/> gives it.
     /// </summary>
-    public IRequestHandler? HandlerOf(uint destinationId)
+    public IDestinationHandler? HandlerOf(uint destinationId)
     {
         return HandlerOf(new RequestHeader { CallId = 1, DestinationId = destinationId, ProcedureId = 1, ServiceId = 1 });
     }
@@ -279,7 +279,7 @@ internal sealed class Relay
     /// The handler of a request that names a destination, its header given, bound to the destination
     /// as it is now; none while none is registered at all: the router relays nothing.
     /// </summary>
-    public IRequestHandler? HandlerOf(RequestHeader header)
+    public IDestinationHandler? HandlerOf(RequestHeader header)
     {
         var destinationId = header.DestinationId!.Value;
         Registration? registration;
@@ -615,7 +615,7 @@ internal sealed class Relay
     }
 
     // the handler of a request to a destination not registered: refused by its admission, or as unknown
-    private sealed class Unknown(Relay relay, uint destinationId) : IRequestHandler
+    private sealed class Unknown(Relay relay, uint destinationId) : IDestinationHandler
     {
         public int? MaximumPayloadBytes
         {
@@ -652,7 +652,7 @@ internal sealed class Relay
 
     // the handler of a request to a destination registered, its header given: admitted and routed,
     // then forwarded
-    private sealed class Route(Relay relay, (Registration Registration, RequestHeader Header) routed) : IRequestHandler
+    private sealed class Route(Relay relay, (Registration Registration, RequestHeader Header) routed) : IDestinationHandler
     {
         private readonly Registration _registration = routed.Registration;
 

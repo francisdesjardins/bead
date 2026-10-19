@@ -15,6 +15,12 @@ public sealed partial class RouterCoreTests
         return new Envelope { Header = RequestOf(callId) with { Credential = credential }, Payload = new byte[] { 1 } };
     }
 
+    // a request of echo to destination 7 on a call id, presenting a credential, as a relay is handed one
+    private static Envelope DestinedOf(uint callId, Credential? credential)
+    {
+        return new Envelope { Header = RequestOf(callId) with { Credential = credential, DestinationId = 7 }, Payload = new byte[] { 1 } };
+    }
+
     // a call of echo, presenting what its options give
     private static CoreRequest PresentingCallOf(Credential? credential)
     {
@@ -307,11 +313,15 @@ public sealed partial class RouterCoreTests
     public async Task A_credential_of_a_JWT_or_an_ELSEWHERE_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
     {
         var server = new Peer(RouterSide.Server);
-        var resolver = new Held(server.Core) { ForwardsCredentials = true };
+        var handler = new Held(server.Core) { ForwardsCredentials = true };
         var admitted = new List<uint>();
 
-        server.Core.RegisterResolver(resolver);
-        resolver.Admission = (request) =>
+        // a destination's handler, a relay's that does not verify: the one handler that forwards
+        server.Destination = (_) =>
+        {
+            return handler;
+        };
+        handler.Admission = (request) =>
         {
             admitted.Add(request.Header.CallId);
 
@@ -321,10 +331,10 @@ public sealed partial class RouterCoreTests
         // ! in one turn of the router's scheduler, as one read brings them
         server.Loop.Post(() =>
         {
-            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
-            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, null)), Handle);
-            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere())), false) { Credential = "Bearer a.b.c" }, Handle);
-            server.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(7, null)), Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(DestinedOf(1, Credential.Jwt("a.b.c"))), Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(DestinedOf(3, null)), Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(DestinedOf(5, Credential.Elsewhere())), false) { Credential = "Bearer a.b.c" }, Handle);
+            server.Core.Receive(EnvelopeCodec.WriteEnvelope(DestinedOf(7, null)), Handle);
         });
         await server.Settle();
 
@@ -338,34 +348,124 @@ public sealed partial class RouterCoreTests
             }));
     }
 
+    // spec 13.1
     [Fact]
-    public async Task Hands_its_resolver_what_its_transport_carried_for_an_ELSEWHERE_alone_what_came_beside_any_other_staying_here()
+    public async Task Hands_a_destination_s_handler_the_bearer_credentials_its_call_came_with_and_a_resolver_neither_its_admission_neither()
     {
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
         var resolver = server.Resolve();
+        var handler = new Held(server.Core) { ForwardsCredentials = true };
+        var resolverAdmitted = new List<AdmissionRequest>();
+        var handlerAdmitted = new List<AdmissionRequest>();
+        var session = new CallSession { Data = "ada" };
 
+        server.Destination = (_) =>
+        {
+            return handler;
+        };
         server.Resolution = (_, _) =>
         {
-            return ValueTask.FromResult<CallSession?>(new CallSession());
+            return ValueTask.FromResult<CallSession?>(session);
         };
+        resolver.Admission = (request) =>
+        {
+            resolverAdmitted.Add(request);
+
+            return null;
+        };
+        handler.Admission = (request) =>
+        {
+            handlerAdmitted.Add(request);
+
+            return null;
+        };
+
+        // each with what its transport carried: none, a JWT and an ELSEWHERE to a resolver; a JWT and
+        // an ELSEWHERE to a destination whose handler forwards
         server.Loop.Post(() =>
         {
-            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(1, null)), false) { Credential = "Bearer a" }, Handle);
-            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(3, Credential.Jwt("a.b.c"))), false) { Credential = "Bearer b" }, Handle);
-            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere())), false) { Credential = "Bearer c" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(1, null)), false) { Credential = "Bearer e" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(3, Credential.Jwt("a.b.c"))), false) { Credential = "Bearer e" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(5, Credential.Elsewhere())), false) { Credential = "Bearer e" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(DestinedOf(7, Credential.Jwt("a.b.c"))), false) { Credential = "Bearer e" }, Handle);
+            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(DestinedOf(9, Credential.Elsewhere())), false) { Credential = "Bearer e" }, Handle);
         });
         await server.Settle();
 
+        // a resolver and its admission: nothing its transport carried, and a JWT's scheme alone
         Assert.Equal(
-            [(1u, null), (3u, null), (5u, "Bearer c")],
+            [(1u, null, null, null), (3u, CredentialScheme.Jwt, null, null), (5u, CredentialScheme.Elsewhere, null, null)],
+            resolverAdmitted.Select((request) =>
+            {
+                return (request.Header.CallId, request.Header.Credential?.Scheme, request.Header.Credential?.Token, request.TransportCredential);
+            }).OrderBy((handed) =>
+            {
+                return handed.CallId;
+            }));
+        Assert.Equal(
+            [(1u, null, null, null), (3u, CredentialScheme.Jwt, null, null), (5u, CredentialScheme.Elsewhere, null, null)],
             resolver.Requests.Select((props) =>
             {
-                return (props.Header.CallId, props.TransportCredential);
+                return (props.Header.CallId, props.Header.Credential?.Scheme, props.Header.Credential?.Token, props.TransportCredential);
+            }).OrderBy((handed) =>
+            {
+                return handed.CallId;
+            }));
+
+        // the JWT's call runs all the same in the session its token resolved to
+        Assert.Same(
+            session,
+            resolver.Requests.Single((props) =>
+            {
+                return props.Header.CallId == 3;
+            }).Session);
+
+        // a destination's handler, its admission and its call: a JWT's token whole, and what its
+        // transport carried for an ELSEWHERE alone
+        Assert.Equal(
+            [(7u, "a.b.c", null), (9u, null, "Bearer e")],
+            handlerAdmitted.Select((request) =>
+            {
+                return (request.Header.CallId, request.Header.Credential?.Token, request.TransportCredential);
+            }).OrderBy((handed) =>
+            {
+                return handed.CallId;
+            }));
+        Assert.Equal(
+            [(7u, "a.b.c", null), (9u, null, "Bearer e")],
+            handler.Requests.Select((props) =>
+            {
+                return (props.Header.CallId, props.Header.Credential?.Token, props.TransportCredential);
             }).OrderBy((handed) =>
             {
                 return handed.CallId;
             }));
         Assert.Empty(server.Reports);
+    }
+
+    // spec 13.1: the C# side's surface, by reflection, which the TypeScript side's twin holds by its
+    // entry points and its types
+    [Fact]
+    public void Keeps_the_router_core_and_the_transport_s_credential_out_of_the_public_surface()
+    {
+        Assert.All(
+            new[] { typeof(RouterCore), typeof(RouterCoreOptions), typeof(IRouterCorePort), typeof(CoreRequest), typeof(AnswerInfo) },
+            (type) =>
+            {
+                Assert.False(type.IsVisible, type.Name);
+            });
+        Assert.All(
+            new[] { typeof(AdmissionRequest), typeof(RequestResolverProps), typeof(SessionRequest) },
+            (type) =>
+            {
+                Assert.Null(type.GetProperty(nameof(SessionRequest.TransportCredential)));
+            });
+        Assert.All(
+            new[] { typeof(IRequestHandler), typeof(IRequestResolver) },
+            (type) =>
+            {
+                Assert.Null(type.GetProperty(nameof(IDestinationHandler.ForwardsCredentials)));
+            });
     }
 
     [Fact]

@@ -1061,7 +1061,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
 
         // a request that names a destination goes on through the relay
-        public IRequestHandler? HandlerOfDestination(RequestHeader header)
+        public IDestinationHandler? HandlerOfDestination(RequestHeader header)
         {
             return server._relay.HandlerOf(header);
         }
