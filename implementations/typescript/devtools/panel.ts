@@ -48,6 +48,12 @@ import { bytesOfContent, isBeadType, readBody } from './wire';
 
 type View = 'calls' | 'metrics' | 'state' | 'timeline' | 'wire';
 
+/** Where the detail sits: as the panel's shape says, right of the list, or under it. */
+type Layout = (typeof LAYOUTS)[number];
+
+/** Where the detail sits once `auto` is read. */
+type Placement = Exclude<Layout, 'auto'>;
+
 // constants
 
 /** The exchanges the Wire view keeps, newest first. */
@@ -62,6 +68,30 @@ const RECONNECT_MILLISECONDS = 1_000;
 /** How long a word the panel says, "Copied" say, stays. */
 const TOAST_MILLISECONDS = 1_600;
 
+/** The detail's layouts, as DevTools' Elements panel offers its own. */
+const LAYOUTS = Object.freeze(['auto', 'right', 'bottom'] as const);
+
+/** A panel `auto` stacks: narrower than 720 px, or taller than it is wide, as DevTools on a side. */
+const STACKED = '(max-width: 719.98px), (orientation: portrait)';
+
+/** The list's share of the split, in percent: by default, and a key's step. */
+const SHARE = Object.freeze({ default: 60, step: 5 });
+
+/** The least each side of the split keeps, in pixels, by where the detail sits. */
+const SIDES = Object.freeze({
+  bottom: Object.freeze({ detail: 160, list: 120 }),
+  right: Object.freeze({ detail: 260, list: 240 }),
+});
+
+/** What the panel's page keeps, under its own keys: its layout, and a share for each placement. */
+const KEPT = Object.freeze({
+  layout: 'bead-devtools-layout',
+  share: Object.freeze({
+    bottom: 'bead-devtools-share-bottom',
+    right: 'bead-devtools-share-right',
+  }),
+});
+
 // helpers
 
 const elementOf = (id: string): HTMLElement => {
@@ -72,6 +102,38 @@ const elementOf = (id: string): HTMLElement => {
   }
 
   return element;
+};
+
+/** What the panel's page keeps under `key`, or nothing where its storage is absent or refuses. */
+const readKept = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+/** Keeps `value` under `key`; a storage that refuses leaves the choice to this page alone. */
+const keep = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // the choice holds until the panel closes
+  }
+};
+
+const layoutOf = (kept: string | null): Layout => {
+  return (
+    LAYOUTS.find((layout) => {
+      return layout === kept;
+    }) ?? 'auto'
+  );
+};
+
+const shareOf = (kept: string | null): number => {
+  const share = kept === null ? Number.NaN : Number(kept);
+
+  return Number.isFinite(share) && share > 0 && share < 100 ? share : SHARE.default;
 };
 
 const isTyping = (target: EventTarget | null): boolean => {
@@ -89,6 +151,7 @@ export const startPanel = (host: IPanelHost): void => {
   const shown = {
     calls: elementOf('calls'),
     callsTable: elementOf('calls-table'),
+    callsView: elementOf('calls-view'),
     clear: elementOf('clear') as HTMLButtonElement,
     detail: elementOf('detail'),
     empty: elementOf('empty'),
@@ -102,6 +165,7 @@ export const startPanel = (host: IPanelHost): void => {
     footer: elementOf('footer'),
     import: elementOf('import') as HTMLButtonElement,
     importFile: elementOf('import-file') as HTMLInputElement,
+    layout: elementOf('layout') as HTMLSelectElement,
     list: elementOf('list'),
     menu: elementOf('menu'),
     metrics: elementOf('metrics'),
@@ -109,6 +173,7 @@ export const startPanel = (host: IPanelHost): void => {
     range: elementOf('range'),
     record: elementOf('record') as HTMLButtonElement,
     source: elementOf('source') as HTMLSelectElement,
+    splitter: elementOf('splitter'),
     state: elementOf('state'),
     status: elementOf('status'),
     timeline: elementOf('timeline'),
@@ -139,6 +204,80 @@ export const startPanel = (host: IPanelHost): void => {
   };
   let port: IHostPort | undefined;
   let isDrawing = false;
+
+  // the detail's place and the split, kept by the panel's page
+  const split = {
+    layout: layoutOf(readKept(KEPT.layout)),
+    shares: {
+      bottom: shareOf(readKept(KEPT.share.bottom)),
+      right: shareOf(readKept(KEPT.share.right)),
+    } satisfies Record<Placement, number>,
+  };
+  const stacked = matchMedia(STACKED);
+
+  const placementOf = (): Placement => {
+    if (split.layout === 'auto') {
+      return stacked.matches ? 'bottom' : 'right';
+    }
+
+    return split.layout;
+  };
+
+  /** The list's least and greatest share, in percent, that leave each side its least. */
+  const limitsOf = (placement: Placement): { max: number; min: number } => {
+    const box = shown.callsView.getBoundingClientRect();
+    const size = (placement === 'right' ? box.width : box.height) - 1;
+    const sides = SIDES[placement];
+
+    if (size <= sides.list + sides.detail) {
+      const share = Math.round((sides.list / (sides.list + sides.detail)) * 100);
+
+      return { max: share, min: share };
+    }
+
+    return {
+      max: Math.floor((1 - sides.detail / size) * 100),
+      min: Math.ceil((sides.list / size) * 100),
+    };
+  };
+
+  const shareShown = (placement: Placement): number => {
+    const { max, min } = limitsOf(placement);
+
+    return Math.min(max, Math.max(min, split.shares[placement]));
+  };
+
+  const layOut = (): void => {
+    const placement = placementOf();
+    const { max, min } = limitsOf(placement);
+    const share = shareShown(placement);
+    const tracks = `minmax(0, ${String(share)}fr) 1px minmax(0, ${String(100 - share)}fr)`;
+
+    shown.callsView.dataset['layout'] = placement;
+    shown.callsView.style.gridTemplate =
+      placement === 'right' ? `minmax(0, 1fr) / ${tracks}` : `${tracks} / minmax(0, 1fr)`;
+    shown.splitter.setAttribute(
+      'aria-orientation',
+      placement === 'right' ? 'vertical' : 'horizontal'
+    );
+    shown.splitter.setAttribute('aria-valuemin', String(min));
+    shown.splitter.setAttribute('aria-valuemax', String(max));
+    shown.splitter.setAttribute('aria-valuenow', String(share));
+    shown.layout.value = split.layout;
+  };
+
+  const moveSplit = (value: number, { isKept }: { isKept: boolean }): void => {
+    const placement = placementOf();
+    const { max, min } = limitsOf(placement);
+
+    split.shares[placement] = Math.round(Math.min(max, Math.max(min, value)) * 10) / 10;
+
+    if (isKept) {
+      keep(KEPT.share[placement], String(split.shares[placement]));
+    }
+
+    layOut();
+  };
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   const sideOf = (source: number): string | undefined => {
@@ -538,6 +677,7 @@ export const startPanel = (host: IPanelHost): void => {
       });
 
       if (state.view === 'calls') {
+        layOut();
         drawCalls();
       } else if (state.view === 'state') {
         // a cursor being moved keeps its place: it redraws what it reads itself
@@ -1002,6 +1142,67 @@ export const startPanel = (host: IPanelHost): void => {
   });
   window.addEventListener('resize', closeFilterHelp);
 
+  shown.layout.addEventListener('change', () => {
+    split.layout = layoutOf(shown.layout.value);
+    keep(KEPT.layout, split.layout);
+    layOut();
+  });
+  stacked.addEventListener('change', layOut);
+  window.addEventListener('resize', layOut);
+
+  // * the splitter is WAI-ARIA APG's Window Splitter: a separator whose value is the list's
+  // share, moved by its arrows, sent to its limits by Home and End, and restored by Enter
+  shown.splitter.addEventListener('keydown', (event) => {
+    const placement = placementOf();
+    const { max, min } = limitsOf(placement);
+    const now = shareShown(placement);
+    const [less, more] =
+      placement === 'right' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    const next =
+      event.key === less
+        ? now - SHARE.step
+        : event.key === more
+          ? now + SHARE.step
+          : event.key === 'Home'
+            ? min
+            : event.key === 'End'
+              ? max
+              : event.key === 'Enter'
+                ? SHARE.default
+                : undefined;
+
+    if (next !== undefined) {
+      event.preventDefault();
+      moveSplit(next, { isKept: true });
+    }
+  });
+
+  shown.splitter.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    shown.splitter.setPointerCapture(event.pointerId);
+    shown.splitter.classList.add('is-dragging');
+  });
+
+  shown.splitter.addEventListener('pointermove', (event) => {
+    if (!shown.splitter.hasPointerCapture(event.pointerId)) {
+      return;
+    }
+
+    const box = shown.callsView.getBoundingClientRect();
+
+    moveSplit(
+      placementOf() === 'right'
+        ? ((event.clientX - box.left) / box.width) * 100
+        : ((event.clientY - box.top) / box.height) * 100,
+      { isKept: false }
+    );
+  });
+
+  shown.splitter.addEventListener('lostpointercapture', () => {
+    shown.splitter.classList.remove('is-dragging');
+    keep(KEPT.share[placementOf()], String(split.shares[placementOf()]));
+  });
+
   for (const nav of document.querySelectorAll<HTMLElement>('[role="tablist"]')) {
     nav.addEventListener('keydown', (event) => {
       const tabs = [...nav.querySelectorAll<HTMLElement>('[role="tab"]')];
@@ -1026,6 +1227,11 @@ export const startPanel = (host: IPanelHost): void => {
 
       if (next !== undefined) {
         event.preventDefault();
+
+        // ! the tab stop moves now, not at the next drawing: a Tab pressed before it leaves the bar
+        tabs.forEach((tab, at) => {
+          tab.tabIndex = at === next ? 0 : -1;
+        });
         tabs[next]?.click();
         tabs[next]?.focus();
       }

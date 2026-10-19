@@ -21,6 +21,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's envelope readers are fuzzed in its suite: seeded mutations of `spec/vectors.json`'s
   bytes, each read returning or refusing with a failure within a second; `BEAD_FUZZ_INPUTS` draws
   more for a longer run.
+- The DevTools panel places its detail right of the list, under it, or as the panel's shape says,
+  and a splitter between them sizes both; the panel keeps both choices.
 
 ### Changed
 

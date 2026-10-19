@@ -387,19 +387,51 @@
         opacity: 0.6;
       }
 
+      /* the detail right of the list, or under it, a splitter between them; the panel sets each
+         side's share, and the side the detail takes, as its layout says */
       .split {
         display: grid;
-        grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+        grid-template: minmax(0, 1fr) / minmax(0, 3fr) 1px minmax(0, 2fr);
         overflow: hidden;
       }
 
-      .split > div {
+      .split[data-layout='bottom'] {
+        grid-template: minmax(0, 3fr) 1px minmax(0, 2fr) / minmax(0, 1fr);
+      }
+
+      #list,
+      .detail {
+        min-width: 0;
         min-height: 0;
         overflow: auto;
       }
 
-      .detail {
-        border-left: 1px solid var(--app-divider);
+      #splitter {
+        position: relative;
+        z-index: 2;
+        background: var(--app-divider);
+        cursor: col-resize;
+        touch-action: none;
+      }
+
+      .split[data-layout='bottom'] #splitter {
+        cursor: row-resize;
+      }
+
+      /* ! the line is a pixel; what the pointer catches reaches past it on each side */
+      #splitter::before {
+        position: absolute;
+        inset: 0 calc(-1 * var(--app-space-1));
+        content: '';
+      }
+
+      .split[data-layout='bottom'] #splitter::before {
+        inset: calc(-1 * var(--app-space-1)) 0;
+      }
+
+      #splitter:hover,
+      #splitter.is-dragging {
+        background: var(--app-accent);
       }
 
       .rows {
@@ -415,18 +447,6 @@
       @container (max-width: 520px) {
         .mid {
           display: none;
-        }
-      }
-
-      @media (max-width: 720px) {
-        .split {
-          grid-template-columns: minmax(0, 1fr);
-          grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
-        }
-
-        .detail {
-          border-top: 1px solid var(--app-divider);
-          border-left: 0;
         }
       }
 
@@ -1134,6 +1154,7 @@
       .statusbar {
         display: flex;
         flex-wrap: wrap;
+        align-items: center;
         gap: 2px var(--app-space-3);
         padding: 2px var(--app-space-2);
         border-top: 1px solid var(--app-divider);
@@ -1145,6 +1166,26 @@
       .statusbar b {
         color: var(--app-text);
         font-weight: 600;
+      }
+
+      #footer {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        gap: 2px var(--app-space-3);
+        align-items: center;
+        min-width: 0;
+      }
+
+      .statusbar > label {
+        margin-left: auto;
+      }
+
+      #layout {
+        min-width: 0;
+        min-height: var(--app-space-6);
+        padding-block: 0;
+        font-size: var(--app-text-sm);
       }
 
       #menu {
@@ -1551,6 +1592,17 @@
           </table>
           <div id="empty"></div>
         </div>
+        <div
+          id="splitter"
+          role="separator"
+          tabindex="0"
+          aria-label="Size of the list and the detail"
+          aria-controls="list"
+          aria-orientation="vertical"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="60"
+        ></div>
         <div class="detail">
           <nav class="detail-tabs" role="tablist" aria-label="Detail">
             <button
@@ -1641,7 +1693,17 @@
         hidden
       ></section>
     </main>
-    <footer id="footer" class="statusbar" aria-live="polite"></footer>
+    <footer class="statusbar">
+      <div id="footer" aria-live="polite"></div>
+      <label
+        >Detail
+        <select id="layout">
+          <option value="auto">Auto</option>
+          <option value="right">Right</option>
+          <option value="bottom">Bottom</option>
+        </select>
+      </label>
+    </footer>
     <div id="menu" role="menu" hidden></div>
     <div id="toast" role="status" hidden></div>
     <script src="panel.js"></script>

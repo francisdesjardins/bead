@@ -147,6 +147,42 @@ const outlineOf = (page: Page, selector: string) => {
   });
 };
 
+/** Where the detail sits against the list, and each side's size along the split, in pixels. */
+const splitOf = (page: Page) => {
+  return page.evaluate(() => {
+    const list = document.getElementById('list')?.getBoundingClientRect();
+    const detail = document.querySelector('.detail')?.getBoundingClientRect();
+
+    if (list === undefined || detail === undefined) {
+      return { detail: 0, list: 0, placement: 'none' };
+    }
+
+    const isRight = detail.left >= list.right;
+
+    return {
+      detail: isRight ? detail.width : detail.height,
+      list: isRight ? list.width : list.height,
+      placement: isRight ? 'right' : detail.top >= list.bottom ? 'bottom' : 'none',
+    };
+  });
+};
+
+const placementOf = async (page: Page): Promise<string> => {
+  return (await splitOf(page)).placement;
+};
+
+/** The splitter's value and its limits, as its ARIA attributes say. */
+const splitterOf = (page: Page) => {
+  return page.locator('#splitter').evaluate((splitter) => {
+    return {
+      max: Number(splitter.getAttribute('aria-valuemax')),
+      min: Number(splitter.getAttribute('aria-valuemin')),
+      now: Number(splitter.getAttribute('aria-valuenow')),
+      orientation: splitter.getAttribute('aria-orientation'),
+    };
+  });
+};
+
 /** Bytes as text whose every character is one of them, as DevTools may give a request's body. */
 const latin1Of = (bytes: Uint8Array): string => {
   return String.fromCharCode(...bytes);
@@ -316,6 +352,181 @@ test.describe('the panel', () => {
       isInside: true,
       style: 'solid',
     });
+  });
+
+  test('places its detail right of the list or under it as the panel’s shape says, and where its Detail choice says', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openWithTraffic(page);
+
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+    expect((await splitterOf(page)).orientation).toBe('vertical');
+
+    await page.setViewportSize({ height: 900, width: 600 });
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+    expect((await splitterOf(page)).orientation).toBe('horizontal');
+
+    await page.setViewportSize({ height: 500, width: 700 });
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('right');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+  });
+
+  test('moves its splitter by keyboard and by pointer, within the least each side keeps', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openWithTraffic(page);
+
+    const splitter = page.getByRole('separator', { name: 'Size of the list and the detail' });
+
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+    await splitter.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '55');
+
+    await page.keyboard.press('Home');
+
+    const atLeast = await splitterOf(page);
+
+    expect(atLeast.now).toBe(atLeast.min);
+    expect((await splitOf(page)).list).toBeGreaterThanOrEqual(240);
+    expect((await splitOf(page)).list).toBeLessThan(240 + 13);
+
+    await page.keyboard.press('End');
+
+    const atMost = await splitterOf(page);
+
+    expect(atMost.now).toBe(atMost.max);
+    expect((await splitOf(page)).detail).toBeGreaterThanOrEqual(260);
+    await page.keyboard.press('Enter');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+
+    const box = await splitter.boundingBox();
+
+    if (box === null) {
+      throw new Error('the splitter has no box');
+    }
+
+    await page.mouse.move(box.x, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(400, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+    expect(Math.abs((await splitOf(page)).list - 400)).toBeLessThan(3);
+
+    await page.mouse.move(400, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(1270, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+
+    const dragged = await splitterOf(page);
+
+    expect(dragged.now).toBe(dragged.max);
+    expect((await splitOf(page)).detail).toBeGreaterThanOrEqual(260);
+
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await splitter.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+    await page.keyboard.press('ArrowDown');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+  });
+
+  test('keeps its layout and each placement’s split across a reload of its page', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openPanel(page);
+
+    const splitter = page.locator('#splitter');
+
+    await splitter.focus();
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await splitter.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('bottom');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('right');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+  });
+
+  test('keeps its defaults, and its choices for the page’s life, when its storage refuses', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        get: () => {
+          throw new DOMException('refused', 'SecurityError');
+        },
+      });
+    });
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openPanel(page);
+
+    const splitter = page.locator('#splitter');
+
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+    await splitter.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
   });
 
   test('moves between views and detail tabs with arrows and Home and End, keeping one tab stop in each', async ({

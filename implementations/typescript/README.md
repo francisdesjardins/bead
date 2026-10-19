@@ -1579,7 +1579,11 @@ The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
 `←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
 snippet that makes it again by the page's own service manager, and hides or shows its procedure
 alone. `←`, `→`, `Home` and `End` move across the view tabs and a call's tabs, and the `?` beside
-the filter opens its syntax, which `Escape` closes.
+the filter opens its syntax, which `Escape` closes. Its status bar's Detail choice puts a call's
+detail right of the list, under it, or, at Auto, under it in a panel narrower than 720 px or taller
+than it is wide; the splitter between them follows the pointer, or, focused, `←` and `→` (`↑` and
+`↓` when stacked), `Home` and `End` to its limits and `Enter` to its default, and the panel's page
+keeps both choices.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
 nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —
