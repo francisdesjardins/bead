@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { LIMIT_DEFAULTS } from '../constants';
 import { createRouterCore } from '../router-core';
-import { createPort } from './router-core-fixtures';
+import { limitsOf } from '../router-limits';
+import { createPort, limits } from './router-core-fixtures';
 
 // definition
 
@@ -61,5 +63,18 @@ test.describe('createRouterCore', () => {
         using _shortest = createRouterCore(port, { limits: { transferInactivityTimeout: 1 } });
       }).not.toThrow();
     });
+  });
+});
+
+test.describe('limitsOf', () => {
+  test('holds the limits given over the defaults, frozen, and refuses limits that do not hold together', () => {
+    const held = limitsOf(limits);
+
+    expect(limitsOf(undefined)).toEqual(LIMIT_DEFAULTS);
+    expect(held).toEqual({ ...LIMIT_DEFAULTS, ...limits });
+    expect(Object.isFrozen(held)).toBe(true);
+    expect(() => {
+      return limitsOf({ ...limits, windowBytes: 64 });
+    }).toThrow(/^the router's limits do not hold together: a window holds two chunks at least/);
   });
 });

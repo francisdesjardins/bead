@@ -14,6 +14,7 @@ import {
   SEQUENCE_HEADER,
   WAIT_HEADER,
 } from '../http-transport-server';
+import { countOf, hasBody, headerOf, linesOf, listeningOf } from '../http-server-fields';
 import type { TransportServerConnectionHandle } from '../types';
 import {
   BEARER,
@@ -29,6 +30,7 @@ import {
   rawAnswerOf,
   rawConnectOf,
   refusalsOf,
+  requestLikeOf,
   startScripted,
   startTransport,
 } from './http-transport-server-fixtures';
@@ -659,5 +661,60 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
         status: 403,
       },
     ]);
+  });
+});
+
+test.describe('the fields a request carries', () => {
+  test('reads a field by its first line or all of them, a count and a listen as RFC 9651 Items, and a body as its length or its coding says', () => {
+    const counted = (values: string[]) => {
+      return countOf(
+        requestLikeOf(
+          values.map((value) => {
+            return [AFTER_HEADER, value] as const;
+          })
+        ),
+        AFTER_HEADER
+      );
+    };
+    const listening = (values: string[]) => {
+      return listeningOf(
+        requestLikeOf(
+          values.map((value) => {
+            return [LISTEN_HEADER, value] as const;
+          })
+        )
+      );
+    };
+    const twice = requestLikeOf([
+      ['Authorization', BEARER],
+      ['authorization', 'Basic'],
+    ]);
+
+    expect(headerOf(twice, 'authorization')).toBe(BEARER);
+    expect(linesOf(twice, 'authorization')).toEqual([BEARER, 'Basic']);
+    expect([
+      counted(['3']),
+      counted(['0;p=1']),
+      counted([]),
+      counted(['-1']),
+      counted(['1', '2']),
+    ]).toEqual([3, 0, 0, undefined, undefined]);
+    expect(countOf(requestLikeOf([]), AFTER_HEADER, { isRequired: true })).toBeUndefined();
+    expect([listening(['?1']), listening(['?0']), listening([]), listening(['1'])]).toEqual([
+      true,
+      false,
+      false,
+      undefined,
+    ]);
+    expect(
+      [
+        [['Content-Length', '0']],
+        [['Content-Length', '8']],
+        [['Transfer-Encoding', 'chunked']],
+        [],
+      ].map((fields) => {
+        return hasBody(requestLikeOf(fields as [string, string][]));
+      })
+    ).toEqual([false, true, true, false]);
   });
 });

@@ -7,8 +7,12 @@ import {
   ProtocolCode,
   SERVER_FAILURES,
 } from '../constants';
+import { DisconnectError, FailureError } from '../errors';
 import { toSessionToken } from '../identifiers';
+import { createPayloadPlacement } from '../payload-placement';
 import { createRouterCore } from '../router-core';
+import { limitsOf } from '../router-limits';
+import { createRouterWriter, DISPOSED } from '../router-writer';
 import type { OutgoingEnvelope, SessionToken } from '../types';
 import { envelopeOf } from './fixtures';
 import {
@@ -313,5 +317,44 @@ test.describe('createRouterCore', () => {
 
       expect(piecesOf(sent)).toEqual([[EnvelopeKind.NOTIFICATION, 2]]);
     });
+  });
+});
+
+test.describe('createRouterWriter', () => {
+  test('hands an envelope within its limits to its port’s transport, traced, refuses one past them, and sends nothing once its router is disposed', async () => {
+    const { port, sent, traced } = createPort();
+    const routerLimits = limitsOf(limits);
+    let isDisposed = false;
+    const writer = createRouterWriter(port, {
+      isDisposed: () => {
+        return isDisposed;
+      },
+      limits: routerLimits,
+      tooLargeOf: createPayloadPlacement(SERVER_FAILURES, routerLimits).tooLargeOf,
+    });
+    const requestWith = (length: number): OutgoingEnvelope => {
+      return { header: headerOf(1), kind: EnvelopeKind.REQUEST, payload: new Uint8Array(length) };
+    };
+
+    await writer.deliver(requestWith(4), { connectionHandle: 'a' });
+    expect(piecesOf(sent)).toEqual([[EnvelopeKind.REQUEST, 1, undefined, 4]]);
+    expect(traced).toEqual(['tx 10 1 a']);
+
+    for (const length of [100, 2_000]) {
+      const refused: unknown = await writer
+        .deliver(requestWith(length), { connectionHandle: 'a' })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+
+      expect(refused).toBeInstanceOf(FailureError);
+      expect(refused).toEqual(expect.objectContaining({ code: ProtocolCode.PAYLOAD_TOO_LARGE }));
+    }
+
+    isDisposed = true;
+    await expect(writer.deliver(requestWith(4), { connectionHandle: 'a' })).rejects.toEqual(
+      new DisconnectError(DISPOSED)
+    );
+    expect(sent).toHaveLength(1);
   });
 });

@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
+import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
+import { noop } from '../../../transport/shared/noop';
 import {
   CLIENT_FAILURES,
   createServiceManager,
@@ -10,6 +12,8 @@ import {
   type IBeforeRequest,
   type IProtocolFailure,
 } from '../service-manager';
+import { createServiceResolver, type IServiceResolverOptions } from '../service-resolver';
+import { createServiceTrace } from '../service-trace';
 import {
   type IText,
   connectionHandle,
@@ -990,5 +994,44 @@ test.describe('createServiceManager', () => {
         );
       }).toThrow(ProgrammerError);
     });
+  });
+});
+
+test.describe('createServiceResolver', () => {
+  test('makes a resolver named after its procedure that answers its callback’s response through its router, and leaves its registration to its manager', async () => {
+    const { calls, router } = createFakeRouter();
+    const nameAfter: IServiceResolverOptions<string>['nameAfter'] = (resolver, procedure) => {
+      return Object.assign(resolver, { ...procedure });
+    };
+    const trace = createServiceTrace<string>(
+      {
+        emit: noop,
+        isDebugging: () => {
+          return false;
+        },
+      },
+      {
+        clock: PLATFORM_CLOCK,
+        side: () => {
+          return 'server';
+        },
+      }
+    );
+    const { createResolver } = createServiceResolver(router, { nameAfter, trace });
+
+    const resolver = createResolver<IText, IText, never>(echo, {
+      callback: (request, response) => {
+        return response({ text: `${request.payload.text}!` });
+      },
+      dependencies: { serializer: serverSerializer },
+      type: 'request',
+    });
+    await resolver(propsOf(encode({ text: 'hi' })));
+
+    expect(resolver.procedureName).toBe('echo');
+    expect(calls.respond).toEqual([
+      { request: { connectionHandle, header }, response: { payload: encode({ text: 'hi!' }) } },
+    ]);
+    expect(calls.registerResolver).toEqual([]);
   });
 });

@@ -53,7 +53,7 @@ public sealed partial class RouterCoreTests
                 var outgoing = core.Request(ReadOnlyMemory<byte>.Empty, CallOf(Handle, (Echo, Timeout.InfiniteTimeSpan)));
 
                 // an incoming result held for credit gives Abort its synchronous OnAbort work,
-                // while the resolver still awaits its outgoing call.
+                // while the resolver still awaits its outgoing call
                 answer = core.Respond(RouterAnswer.OfPayload(PatternOf(200)), new AnswerTarget(Handle, request.Header));
                 entered.SetResult();
 
@@ -141,7 +141,7 @@ public sealed partial class RouterCoreTests
         Assert.True(cancelledAtMarker);
         Assert.Equal(["incoming-ended", "outgoing-ended", "incoming-aborted", "incoming-await-rejected"], steps);
 
-        // neither the resolver unwinding nor another close ends its incoming metrics again.
+        // neither the resolver unwinding nor another close ends its incoming metrics again
         core.RejectPending("closed again", Handle);
         await port.Loop.WhenIdle();
         var counts = MetricsTests.CountsOf(registry);

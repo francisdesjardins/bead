@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { tcpSocketsClosed } from '../../shared/__tests__/fixtures';
+import { createHTTPRequestExchange, type IHTTPRequestExchangePort } from '../http-request-exchange';
+import type { IEnd } from '../http-server-fields';
 import {
   BEAD_MEDIA_TYPE,
   CONNECTION_TOKEN_HEADER,
@@ -7,6 +9,7 @@ import {
   REFUSAL_HEADER,
   REFUSALS,
 } from '../http-transport-server';
+import type { IHTTPResponseLike } from '../types';
 import {
   BEARER,
   connect,
@@ -14,6 +17,7 @@ import {
   namesOf,
   post,
   refusalOf,
+  requestLikeOf,
   startScripted,
   startTransport,
 } from './http-transport-server-fixtures';
@@ -186,5 +190,46 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect(namesOf(events, 'message')).toEqual([]);
     await server.stop();
+  });
+});
+
+test.describe('createHTTPRequestExchange', () => {
+  test('finishes an exchange with two Authorization fields 400, one declared past its limit 413, and one its connection cannot take 429, before it reads a byte', () => {
+    const asked: string[] = [];
+    const ends: IEnd[] = [];
+    // a port that records what is asked of it, takes no exchange, and records how each is finished
+    const port = new Proxy({} as IHTTPRequestExchangePort<string>, {
+      get: (_target, name) => {
+        return (_first: unknown, second: unknown) => {
+          asked.push(String(name));
+
+          if (name === 'finish') {
+            ends.push(second as IEnd);
+          }
+
+          return false;
+        };
+      },
+    });
+    const { receive } = createHTTPRequestExchange(port, { maximumBodyBytes: 16 });
+    const response = {} as IHTTPResponseLike;
+
+    for (const fields of [
+      [
+        ['Authorization', BEARER],
+        ['Authorization', BEARER],
+      ],
+      [['Content-Length', '17']],
+      [['Content-Length', '16']],
+    ] as const) {
+      receive({ request: requestLikeOf(fields), response }, 'a');
+    }
+
+    expect(ends).toEqual([
+      { reason: REFUSALS.MALFORMED, status: 400 },
+      { reason: REFUSALS.TOO_LARGE, status: 413 },
+      { reason: REFUSALS.BUSY, status: 429 },
+    ]);
+    expect(asked).toEqual(['finish', 'finish', 'admitExchange', 'finish']);
   });
 });

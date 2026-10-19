@@ -13,7 +13,11 @@ import {
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
-import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
+import type {
+  IHTTPRequestLike,
+  ITransportServerRefusal,
+  TransportServerConnectionHandle,
+} from '../types';
 import { createFakeHTTPServer } from './fake-http-server';
 
 /**
@@ -24,6 +28,32 @@ import { createFakeHTTPServer } from './fake-http-server';
 // helpers
 
 export const host = '127.0.0.1';
+
+/**
+ * A request as Node hands it over, of `fields` in their order and nothing else: `headers` keeps a
+ * field's first line, `rawHeaders` every one.
+ */
+export const requestLikeOf = (fields: readonly (readonly [string, string])[]): IHTTPRequestLike => {
+  const headers: Record<string, string> = {};
+
+  for (const [name, value] of fields) {
+    headers[name.toLowerCase()] ??= value;
+  }
+
+  return {
+    destroy: () => {
+      return undefined;
+    },
+    headers,
+    httpVersion: '1.1',
+    httpVersionMajor: 1,
+    on: () => {
+      return undefined;
+    },
+    rawHeaders: fields.flat(),
+    socket: {},
+  };
+};
 
 /** A bearer credential, RFC 6750's own example, its auth-scheme included. */
 export const BEARER = 'Bearer mF_9.B5f-4.1JqM';

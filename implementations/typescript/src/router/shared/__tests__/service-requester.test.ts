@@ -8,12 +8,11 @@ import {
   DisconnectError,
   FailureError,
   FailureScope,
-  REQUEST_DEFAULTS,
-  resolveRequestOptions,
   type IProcedure,
   type IProcedureSeries,
   type IRouterLike,
 } from '../service-manager';
+import { REQUEST_DEFAULTS, resolveRequestOptions } from '../service-requester';
 import {
   connectionHandle,
   createFakeRouter,

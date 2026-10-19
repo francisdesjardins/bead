@@ -3,12 +3,15 @@ import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { type IClock } from '../../../transport/shared/clock';
+import { SERVER_CONNECTION_HANDLE } from '../constants';
 import {
   CLIENT_FAILURES,
   createServiceManager,
   FailureError,
   type IRouterLike,
 } from '../service-manager';
+import { createServiceTrace, tracedFailureOf } from '../service-trace';
+import type { IDebugEvent } from '../types';
 import {
   answerOf,
   connectionHandle,
@@ -423,5 +426,70 @@ test.describe('createServiceManager', () => {
       });
       expect(seen[0]?.info.tx).toBe(odd);
     });
+  });
+});
+
+test.describe('createServiceTrace', () => {
+  test('tells its observer each step while someone listens, the server named on a client, its duration once answered, and nothing while nobody does', async () => {
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const emitted: { connectionHandle: string | undefined; error: unknown; info: IDebugEvent }[] =
+      [];
+    let isListening = false;
+    const serviceTrace = createServiceTrace<string>(
+      {
+        emit: (event) => {
+          emitted.push(event);
+        },
+        isDebugging: () => {
+          return isListening;
+        },
+      },
+      {
+        clock,
+        side: () => {
+          return 'client';
+        },
+      }
+    );
+    const started = serviceTrace.startedNow();
+
+    serviceTrace.trace(echo, {
+      callId: 1,
+      direction: 'tx',
+      started,
+      tx: { text: 'hi' },
+      type: 'request',
+    });
+    expect(serviceTrace.isDebugging()).toBe(false);
+    expect(emitted).toEqual([]);
+
+    isListening = true;
+    await clock.tickAsync(250);
+    serviceTrace.trace(echo, {
+      callId: 1,
+      direction: 'rx',
+      isAnswered: true,
+      rx: { text: 'hi!' },
+      started,
+      type: 'request',
+    });
+
+    expect(serviceTrace.isDebugging()).toBe(true);
+    expect(emitted).toEqual([
+      {
+        connectionHandle: undefined,
+        error: null,
+        info: expect.objectContaining({
+          callId: 1,
+          connectionHandle: SERVER_CONNECTION_HANDLE,
+          direction: 'rx',
+          duration: 250,
+          procedureName: 'echo',
+          rx: { text: 'hi!' },
+          startedAt: Date.UTC(2026, 0, 1),
+        }),
+      },
+    ]);
+    expect(tracedFailureOf(new Error('no failure'))).toBeUndefined();
   });
 });

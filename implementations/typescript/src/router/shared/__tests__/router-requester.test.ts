@@ -7,17 +7,26 @@ import {
   timersUntil,
 } from '../../../transport/shared/__tests__/fixtures';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
+import { noop } from '../../../transport/shared/noop';
 import {
   CLIENT_FAILURES,
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
   ProtocolCode,
+  SERVER_FAILURES,
 } from '../constants';
+import { readEnvelope } from '../envelope';
 import { DisconnectError, FailureError } from '../errors';
 import { createMetricsRegistry } from '../metrics-registry';
+import { createPayloadPlacement } from '../payload-placement';
+import { createReceivingTransfers } from '../receiving-transfers';
 import { createRouterCore } from '../router-core';
-import type { IRequestResolverProps, IRouterCore } from '../types';
+import { limitsOf } from '../router-limits';
+import { createRouterRequester } from '../router-requester';
+import { createRouterWriter } from '../router-writer';
+import { createSendingTransfers } from '../sending-transfers';
+import type { IFailure, IRequestResolverProps, IRouterCore } from '../types';
 import { countedOf, envelopeOf, patternOf } from './fixtures';
 import {
   type Handle,
@@ -1724,5 +1733,93 @@ test.describe('createRouterCore', () => {
         made('started_total{} 6'),
       ]);
     });
+  });
+});
+
+test.describe('createRouterRequester', () => {
+  test('sends a call on a call id of its side, settles it with the answer paired to it, and hands its port an answer no call waits on', async () => {
+    const { port, reported, sent } = createPort();
+    const clock = createTestClock();
+    const routerLimits = limitsOf(limits);
+    const placement = createPayloadPlacement(SERVER_FAILURES, routerLimits);
+    const writer = createRouterWriter(port, {
+      isDisposed: () => {
+        return false;
+      },
+      limits: routerLimits,
+      tooLargeOf: placement.tooLargeOf,
+    });
+    const raised: IFailure[] = [];
+    const requester = createRouterRequester<Handle>(
+      {
+        activity: port.activity,
+        failures: SERVER_FAILURES,
+        isCallIdInUse: () => {
+          return false;
+        },
+        isDisposed: () => {
+          return false;
+        },
+        onAnswerReceived: noop,
+        onUnpairedFailure: () => {
+          return false;
+        },
+        receiveUnplaced: noop,
+        report: port.report,
+        reportFailure: (failure) => {
+          raised.push(failure);
+        },
+      },
+      {
+        clock,
+        limits: routerLimits,
+        placement,
+        receivings: createReceivingTransfers<Handle>({
+          clock,
+          failures: SERVER_FAILURES,
+          limits: routerLimits,
+          payloadBytesPerChunk: placement.payloadBytesPerChunk,
+          sendCredit: noop,
+        }),
+        sendings: createSendingTransfers<Handle>(),
+        writer,
+      }
+    );
+    const answerFor = (callId: number) => {
+      const envelope = readEnvelope(resultOf(callId, new Uint8Array([7])), {
+        failures: SERVER_FAILURES,
+        maximumEnvelopeBytes: routerLimits.maximumEnvelopeBytes,
+      });
+
+      if (envelope?.kind !== EnvelopeKind.RESULT) {
+        throw new Error('a result reads as one');
+      }
+
+      return envelope;
+    };
+
+    const called = requester.request(new Uint8Array([1]), {
+      connectionHandle: 'a',
+      options,
+      procedure: echo,
+    });
+    await sleep(0);
+
+    const callId = sent[0]?.envelope?.header.callId ?? 0;
+
+    expect(
+      sent.map(({ connectionHandle, envelope }) => {
+        return [connectionHandle, envelope?.kind];
+      })
+    ).toEqual([['a', EnvelopeKind.REQUEST]]);
+    expect(callId % 2).toBe(0);
+    expect(requester.gauges().counts).toEqual(expect.objectContaining({ pendingCalls: 1 }));
+
+    requester.receiveAnswer(answerFor(callId), { connectionHandle: 'a', mayOvertake: false });
+    expect((await called).payload).toEqual(new Uint8Array([7]));
+
+    requester.receiveAnswer(answerFor(callId), { connectionHandle: 'a', mayOvertake: false });
+    expect(raised).toEqual([SERVER_FAILURES.callUnknown]);
+    expect(reported).toEqual([]);
   });
 });

@@ -1,7 +1,10 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { EnvelopeKind, ProtocolCode, SERVER_FAILURES } from '../constants';
+import { headerBytesOf } from '../header';
+import { createPayloadPlacement, isPayloadLimit } from '../payload-placement';
 import { createRouterCore } from '../router-core';
+import { limitsOf } from '../router-limits';
 import type { IProcedure, IRequestResolverProps } from '../types';
 import { patternOf } from './fixtures';
 import {
@@ -205,5 +208,38 @@ test.describe('createRouterCore', () => {
       core[Symbol.dispose]();
       none.core[Symbol.dispose]();
     });
+  });
+});
+
+test.describe('createPayloadPlacement', () => {
+  test('places a payload whole up to its envelope, as a transfer past it, and refuses one past its limit, a procedure’s held within the router’s', () => {
+    const placement = createPayloadPlacement(SERVER_FAILURES, limitsOf(limits));
+    const header = headerOf(1);
+    const whole = placement.wholeBytes - headerBytesOf(header);
+
+    expect(placement.wholeBytes).toBe(64);
+    expect(
+      placement.transferOf(new Uint8Array(whole), { header, maximumPayloadBytes: 1_024 })
+    ).toBeUndefined();
+    expect(
+      placement.transferOf(new Uint8Array(whole + 1), { header, maximumPayloadBytes: 1_024 })
+    ).toEqual(expect.objectContaining({ total: whole + 1 }));
+    expect(placement.transferOf(new Uint8Array(9), { header, maximumPayloadBytes: 8 })).toEqual({
+      ...SERVER_FAILURES.payloadTooLarge,
+      detail: 'a payload is 8 bytes at most, not 9',
+    });
+    expect(
+      [{ maximumPayloadBytes: 8 }, { maximumPayloadBytes: 4_096 }, undefined].map(
+        placement.payloadLimitOf
+      )
+    ).toEqual([8, 1_024, 1_024]);
+    expect([undefined, 1, 8].map(isPayloadLimit)).toEqual([true, true, true]);
+    expect([0, -1, 1.5, '8', null].map(isPayloadLimit)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
   });
 });
