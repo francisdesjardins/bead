@@ -51,6 +51,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- In the DevTools panel's Envelopes mode, the call whose envelope is clicked stays selected, each of
+  its envelopes marked, as its row is in the Calls mode.
 - Spec 15.6 states that a send answered with a redirect is lost, as both sides play it, and that a
   page reads no status of a redirect; it said the send failed.
 - Both sides hand `sessionOf` what a transport carried beside a request presenting `ELSEWHERE`

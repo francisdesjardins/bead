@@ -518,6 +518,34 @@ test.describe('the panel', () => {
     await expect(page.locator('#envelopes tr')).toHaveCount(3);
   });
 
+  test('keeps the call whose envelope was clicked selected in the Envelopes mode, each of its envelopes marked', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await page.click('[data-mode="envelopes"]');
+    await page.locator('#envelopes tr', { hasText: 'download' }).last().click();
+
+    const selected = page.locator('#envelopes tr[aria-selected="true"]');
+    const backgroundOf = (row: ReturnType<Page['locator']>): Promise<string> => {
+      return row
+        .locator('td')
+        .first()
+        .evaluate((cell) => {
+          return getComputedStyle(cell).backgroundColor;
+        });
+    };
+
+    await expect(selected).toHaveCount(5);
+    await expect(selected).toContainText(
+      Array.from({ length: 5 }, () => {
+        return 'download';
+      })
+    );
+    expect(await backgroundOf(selected.first())).not.toBe(
+      await backgroundOf(page.locator('#envelopes tr[aria-selected="false"]').first())
+    );
+  });
+
   test('filters as the package’s filter does, keeps the last filter that held when one is refused, and says why', async ({
     page,
   }) => {

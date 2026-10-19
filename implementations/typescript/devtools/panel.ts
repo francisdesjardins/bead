@@ -396,6 +396,7 @@ export const startPanel = (host: IPanelHost): void => {
             }),
           isAllClients,
           nameOf,
+          selected: state.selected,
         })
       );
     }
