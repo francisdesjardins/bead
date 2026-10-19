@@ -426,6 +426,125 @@ test.describe('the panel', () => {
     await expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
+  test('gives each control edge at least 3:1 contrast against its surfaces in both themes', async ({
+    page,
+  }) => {
+    for (const themeName of THEMES) {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
+      await page.mouse.move(0, 0);
+      await page.keyboard.press('Tab');
+      await page.locator('#splitter').focus();
+
+      const edges = await page.evaluate(() => {
+        const channelsOf = (color: string): number[] => {
+          return (color.match(/[\d.]+/gu) ?? []).map(Number);
+        };
+        const blend = (color: number[], ground: number[]): number[] => {
+          const alpha = color[3] ?? 1;
+
+          return color.slice(0, 3).map((value, index) => {
+            return value * alpha + (ground[index] ?? 0) * (1 - alpha);
+          });
+        };
+        const backgroundOf = (element: Element | null): number[] => {
+          const layers: number[][] = [];
+
+          for (let held = element; held !== null; held = held.parentElement) {
+            layers.unshift(channelsOf(getComputedStyle(held).backgroundColor));
+          }
+
+          return layers.reduce(
+            (ground, color) => {
+              return blend(color, ground);
+            },
+            [255, 255, 255]
+          );
+        };
+        const luminanceOf = (rgb: number[]): number => {
+          const [red = 0, green = 0, blue = 0] = rgb.map((value) => {
+            const share = value / 255;
+
+            return share <= 0.040_45 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+          });
+
+          return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+        };
+        const contrastOf = (color: number[], ground: number[]): number => {
+          const [darker = 0, lighter = 0] = [luminanceOf(color), luminanceOf(ground)].sort(
+            (one, other) => {
+              return one - other;
+            }
+          );
+
+          return (lighter + 0.05) / (darker + 0.05);
+        };
+
+        return [...document.querySelectorAll('button, input, select, #splitter')].flatMap(
+          (element) => {
+            if (element.getClientRects().length === 0) {
+              return [];
+            }
+
+            const style = getComputedStyle(element);
+            const inside = backgroundOf(element);
+            const outside = backgroundOf(element.parentElement);
+            const properties = ['border-top', 'border-right', 'border-bottom', 'border-left'];
+
+            if (element.id === 'splitter' && element.matches(':focus-visible')) {
+              properties.push('outline');
+            }
+
+            return properties.flatMap((property) => {
+              const color = channelsOf(style.getPropertyValue(`${property}-color`));
+              const width = Number.parseFloat(style.getPropertyValue(`${property}-width`));
+              const edgeStyle = style.getPropertyValue(`${property}-style`);
+
+              if (width === 0 || edgeStyle === 'none' || (color[3] ?? 1) === 0) {
+                return [];
+              }
+
+              const edge = blend(color, inside);
+
+              return [
+                {
+                  id: element.id,
+                  inside: contrastOf(edge, inside),
+                  name: `${element.id || element.textContent.trim()} ${property}`,
+                  outside: contrastOf(edge, outside),
+                },
+              ];
+            });
+          }
+        );
+      });
+
+      await test.info().attach(`control-edges-${themeName}`, {
+        body: JSON.stringify(edges, null, 2),
+        contentType: 'application/json',
+      });
+
+      for (const id of ['record', 'clear', 'source', 'filter', 'layout', 'splitter']) {
+        expect(
+          edges.some((edge) => {
+            return edge.id === id;
+          }),
+          `${themeName}: ${id} has a measured edge`
+        ).toBe(true);
+      }
+
+      for (const edge of edges) {
+        expect(edge.inside, `${themeName}: ${edge.name} against its fill`).toBeGreaterThanOrEqual(
+          3
+        );
+        expect(
+          edge.outside,
+          `${themeName}: ${edge.name} against its surround`
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
   for (const themeName of THEMES) {
     test(`keeps a hovered tab apart from the selected one, and the selected one as it is under the mouse, in DevTools’ ${themeName} theme`, async ({
       page,
