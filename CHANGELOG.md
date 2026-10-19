@@ -31,6 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The DevTools panel uses penumbra's spacing grid and a shared radius scale, with comments for
+  measured glyphs, strokes and native slider alignment.
+
 - Both sides close a closing connection's sending transfers with its receiving ones, before they
   settle its calls: every transfer of the connection ends, and every call of it is taken out, before
   any of its calls is counted.
