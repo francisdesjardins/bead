@@ -20,10 +20,10 @@ import { execFileSync } from 'node:child_process';
 export const ALLOWED = Object.freeze({
   'implementations/typescript/src/router/shared/notification.ts': 1,
   'implementations/typescript/src/router/shared/router-core.ts': 2,
-  'implementations/typescript/src/router/shared/service-manager.ts': 1,
+  'implementations/typescript/src/router/shared/service-requester.ts': 1,
   'implementations/dotnet/src/Bead.Core/Notification.cs': 1,
   'implementations/dotnet/src/Bead.Core/RouterCore.cs': 2,
-  'implementations/dotnet/src/Bead.Core/ServiceManager.cs': 1,
+  'implementations/dotnet/src/Bead.Core/ServiceManager.Requester.cs': 1,
 });
 
 const TYPESCRIPT = /\bdetail\s*(?::|=)\s*[^,;\n]*\.message\b/;
