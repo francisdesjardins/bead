@@ -1599,6 +1599,35 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
+    test('hands sessionOf what its transport carried for an ELSEWHERE alone, what came beside any other staying here', async () => {
+      const carried: unknown[] = [];
+      const { port, reported } = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
+        sessionOf: ({ header, transportCredential }) => {
+          carried.push([header.callId, transportCredential]);
+
+          return SESSION;
+        },
+      });
+      using core = createRouterCore(port);
+
+      core.registerResolver(resolverOf(echo));
+      core.receive({ credential: 'Bearer a', data: requestOf(1) }, 'a');
+      core.receive({ credential: 'Bearer b', data: requestOf(3, { credential: OPAQUE }) }, 'a');
+      core.receive({ credential: 'Bearer c', data: requestOf(5, { credential: JWT }) }, 'a');
+      core.receive({ credential: 'Bearer d', data: requestOf(7, { credential: ELSEWHERE }) }, 'a');
+
+      await sleep(0);
+
+      expect(carried).toEqual([
+        [1, undefined],
+        [3, undefined],
+        [5, undefined],
+        [7, 'Bearer d'],
+      ]);
+      expect(reported).toEqual([]);
+    });
+
     test('resolving, its call’s cancel or its connection’s close tells sessionOf by the call’s signal, and what it settles to then is dropped', async () => {
       const pending = new Map<number, PromiseWithResolvers<ICallSession | undefined>>();
       const signals = new Map<number, AbortSignal>();

@@ -1499,7 +1499,8 @@ public sealed class RouterCore : IDisposable
         var answering = _answeringCalls.Open(target);
         var dispatched = (target, answering);
 
-        // what its transport carried stands for ELSEWHERE alone, and stays here for any other
+        // ! what its transport carried stands for ELSEWHERE alone, and stays here for any other: its
+        // SessionOf, its admission and its resolver are handed nothing beside it (spec 15.1)
         if (header.Credential?.Scheme == CredentialScheme.Elsewhere)
         {
             answering.TransportCredential = received.TransportCredential;
@@ -1543,7 +1544,7 @@ public sealed class RouterCore : IDisposable
         }
 
         _handlers.AddOrUpdate(header, resolver);
-        Resolve(resolver, new Arrival(target, answering, payload) { TransportCredential = received.TransportCredential });
+        Resolve(resolver, new Arrival(target, answering, payload) { TransportCredential = answering.TransportCredential });
     }
 
     // whether a request whose credential resolves is still its call's: a cancel, its connection
