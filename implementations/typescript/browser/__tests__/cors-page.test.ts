@@ -5,6 +5,8 @@
 // keeps it for every exchange at the connection's one URL (spec 15.9; decision 0029), which the
 // conformance cases hold on the wire alone. The C# server is built and started by .NET: where
 // .NET is not installed, its half is skipped, saying so, or fails where `BEAD_INTEROP_REQUIRED=1`.
+// A page of its server's own origin, that server answering its connect with a redirect, shows what
+// a page's fetch reads of one: no status (spec 15.6).
 
 // dependencies
 
@@ -54,8 +56,11 @@ const SERVERS = [
 
 // helpers
 
-/** The page, its script bundled for the browser, served on this machine; what closes it. */
-const servePage = async () => {
+/**
+ * The page, its script bundled for the browser, served on this machine, and, given `redirectTo`, a
+ * port, its own `/bead` answered with a 307 to that port's; what closes it.
+ */
+const servePage = async ({ redirectTo }: { redirectTo?: number } = {}) => {
   const { outputFiles } = await build({
     bundle: true,
     entryPoints: [fileURLToPath(new URL('../cors-page.ts', import.meta.url))],
@@ -66,6 +71,14 @@ const servePage = async () => {
   });
   const script = outputFiles[0]?.contents ?? new Uint8Array();
   const server = createServer((request, reply) => {
+    if (redirectTo !== undefined && request.url === '/bead') {
+      request.resume();
+      reply.writeHead(307, { location: `http://${HOST}:${String(redirectTo)}/bead` });
+      reply.end();
+
+      return;
+    }
+
     if (request.url === '/cors-page.js') {
       reply.writeHead(200, { 'content-type': 'text/javascript' });
       reply.end(script);
@@ -283,3 +296,48 @@ for (const each of SERVERS) {
     });
   });
 }
+
+test.describe('a page of its server’s own origin', () => {
+  test('names no status of a redirect answered to a page of its server’s own origin', async ({
+    page,
+  }) => {
+    // where the redirect points: a listener that notes every request
+    const heard: string[] = [];
+    const target = createServer((request, reply) => {
+      heard.push(request.method ?? '');
+      request.resume();
+      reply.writeHead(404);
+      reply.end();
+    });
+
+    target.listen(0, HOST);
+    await once(target, 'listening');
+
+    const served = await servePage({ redirectTo: (target.address() as AddressInfo).port });
+
+    try {
+      await page.goto(`http://localhost:${String(served.port)}/`);
+      await page.waitForFunction(() => {
+        return 'connectToOwnOrigin' in globalThis;
+      });
+
+      const report = await page.evaluate(() => {
+        const { connectToOwnOrigin } = globalThis as unknown as {
+          connectToOwnOrigin: () => Promise<ICrossOriginReport>;
+        };
+
+        return connectToOwnOrigin();
+      });
+
+      // an opaque redirect, of status 0, never followed
+      expect([report, heard]).toEqual([
+        { connectFailure: 'ConnectError: the server drew no connection: a redirect' },
+        [],
+      ]);
+    } finally {
+      served.close();
+      target.close();
+      target.closeAllConnections();
+    }
+  });
+});

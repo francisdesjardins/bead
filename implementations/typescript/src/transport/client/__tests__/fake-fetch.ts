@@ -2,8 +2,9 @@ import type { FetchLike, IFetchInit, IFetchResponseLike } from '../http-transpor
 
 /**
  * A `fetch` a test scripts by hand, for what a real server does not do on demand: a network that
- * fails, a 404 from something on the way, an answer of the wrong type or too large, a fetch that
- * settles synchronously. Each call waits on the answer its test gives, or on its signal.
+ * fails, a 404 from something on the way, an answer of the wrong type or too large, a page's opaque
+ * redirect, a fetch that followed one, a fetch that settles synchronously. Each call waits on the
+ * answer its test gives, or on its signal.
  */
 
 export interface IFakeCall {
@@ -21,6 +22,8 @@ export interface IFakeCall {
     later?: Promise<Uint8Array>;
     /** Its body as a stream reads it, piece by piece; an error cuts it there. */
     pieces?: readonly (Error | Uint8Array)[];
+    /** It says its fetch followed a redirect, as one given may all the same. */
+    redirected?: boolean;
     status: number;
   }): void;
   /** Settles the call as a network that failed. */
@@ -34,6 +37,7 @@ export const responseOf = ({
   isBodyLost = false,
   later,
   pieces,
+  redirected,
   status,
 }: {
   body?: Uint8Array;
@@ -42,6 +46,7 @@ export const responseOf = ({
   isBodyLost?: boolean;
   later?: Promise<Uint8Array>;
   pieces?: readonly (Error | Uint8Array)[];
+  redirected?: boolean;
   status: number;
 }): IFetchResponseLike => {
   const lower = new Map(
@@ -95,6 +100,7 @@ export const responseOf = ({
     },
     body: isBodiless || status === 204 ? null : stream,
     ok: status >= 200 && status < 300,
+    redirected,
     status,
   };
 };
