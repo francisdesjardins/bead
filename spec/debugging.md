@@ -427,7 +427,8 @@ subscription and is refused in its own answer, its queue past its bounds before 
 
 9.7. A call to a connection that is not open fails with the type a connection that closes fails it
 with, `DisconnectError`, `DisconnectException`, and counts alike, `closed`: the two are one race with
-a close.
+a close. A call made on a connection that closes fails and counts so too, even when the signal it
+was given is that of a call the close ends: never as a cancel, `CancelError`, `OperationCanceledException`.
 
 9.8. The metrics count what the wire carried, and the trace tells what the side made of it. A result
 its requester cannot decode came as a result, and is counted so at both ends; the trace tells the

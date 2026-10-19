@@ -11236,6 +11236,129 @@
       ]
     },
     {
+      "name": "a call awaiting its command as their connection closes counts closed, and the command closed, each once",
+      "clauses": [
+        "9.4.18",
+        "9.6.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "counted": [
+            "bead_client_call_started_total{service=\"1\",procedure=\"clock\",type=\"command\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"ask\",type=\"request\"} 1"
+          ]
+        },
+        {
+          "close": true
+        },
+        {
+          "counted": [
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"1e-05\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"5e-05\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0001\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0003\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0006\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0008\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.001\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.002\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.003\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.004\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.005\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.006\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.008\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.01\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.013\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.016\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.02\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.025\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.03\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.04\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.05\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.065\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.08\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.1\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.13\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.16\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.2\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.25\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.3\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.4\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.5\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.65\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.8\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"1.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"2.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"5.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"10.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"20.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"50.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"100.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"+Inf\"} 1",
+            "bead_client_call_duration_seconds_count{service=\"1\",procedure=\"clock\",type=\"command\"} 1",
+            "bead_client_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"closed\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"ask\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"ask\",type=\"request\",outcome=\"closed\"} 1"
+          ]
+        }
+      ]
+    },
+    {
       "name": "a command answered counts among the client families, type command, beside the call that made it",
       "clauses": [
         "9.1.3",
