@@ -796,24 +796,57 @@ test.describe('the panel', () => {
     await expect(page.locator('#detail')).toBeFocused();
   });
 
-  test('filters by client through the styled select, including a client with no calls', async ({
-    page,
-  }) => {
-    await openWithTraffic(page);
-    await deliver(page, {
-      sources: [
-        { id: 1, protocol: 1, side: 'client' },
-        { id: 2, protocol: 1, side: 'client' },
-      ],
-      type: 'sources',
+  for (const themeName of THEMES) {
+    test(`filters by client through the styled select, including a client with no calls, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await deliver(page, {
+        sources: [
+          { id: 1, protocol: 1, side: 'client' },
+          { id: 2, protocol: 1, side: 'client' },
+        ],
+        type: 'sources',
+      });
+
+      const source = page.locator('#source');
+
+      await source.click();
+      await expect(page.locator('#source:open')).toBeVisible();
+
+      for (const name of ['All clients', 'Client 1', 'Client 2']) {
+        await expect(source.getByRole('option', { name, exact: true })).toBeVisible();
+      }
+
+      const picker = await source.evaluate((element) => {
+        const style = getComputedStyle(element, '::picker(select)');
+        const paper = getComputedStyle(document.body);
+
+        return {
+          background: style.backgroundColor,
+          border: style.borderTopStyle,
+          color: style.color,
+          paper: paper.backgroundColor,
+          shadow: style.boxShadow,
+          text: paper.color,
+        };
+      });
+
+      expect(picker.background).toBe(picker.paper);
+      expect(picker.color).toBe(picker.text);
+      expect(picker.border).toBe('solid');
+      expect(picker.shadow).not.toBe('none');
+      await source.getByRole('option', { name: 'Client 2', exact: true }).click();
+      await expect(page.locator('#source:open')).toHaveCount(0);
+      await expect(page.locator('#calls tr.call')).toHaveCount(0);
+      await source.click();
+      await source.getByRole('option', { name: 'Client 1', exact: true }).click();
+      await expect(page.locator('#calls tr.call')).toHaveCount(10);
+      await source.click();
+      await source.getByRole('option', { name: 'All clients', exact: true }).click();
+      await expect(page.locator('#calls tr.call')).toHaveCount(10);
     });
-    await page.locator('#source').selectOption('2');
-    await expect(page.locator('#calls tr.call')).toHaveCount(0);
-    await page.locator('#source').selectOption('1');
-    await expect(page.locator('#calls tr.call')).toHaveCount(10);
-    await page.locator('#source').selectOption('all');
-    await expect(page.locator('#calls tr.call')).toHaveCount(10);
-  });
+  }
 
   test('shows a call a row, newest first, its outcome in words, a command read the right way round', async ({
     page,
