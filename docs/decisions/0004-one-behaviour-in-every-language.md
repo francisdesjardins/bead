@@ -280,11 +280,15 @@ and the metrics' [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)
 **The surface is one too.** A name on one side is the same name on every other, in its language's
 case, and any language that can carry the protocol whole mirrors the surface almost name for name;
 each language's own mapping of terms is its implementation's record, as
-[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's. A test missing
-on one side is added to the other, and a term renamed on one side is renamed on every side where it
-applies. What couples transports stays outside the protocol: one public port for WebSocket and HTTP
-comes from a small local proxy in front, as the demo's `demo/relay.ts` is, never from a server the
-transports share, so no transport needs another's server in any language.
+[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's. A router's core,
+which both routers build on, is internal on every side: an application builds on the routers, and
+stands behind a destination by a router target of its own
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md), On what a procedure is handed of its
+call's credentials). A test missing on one side is added to the other, and a term renamed on one
+side is renamed on every side where it applies. What couples transports stays outside the
+protocol: one public port for WebSocket and HTTP comes from a small local proxy in front, as the
+demo's `demo/relay.ts` is, never from a server the transports share, so no transport needs
+another's server in any language.
 
 **A difference between languages is a row of the support matrix**, `docs/support.md`, with the test
 that shows it, and it stays a row until it closes. Normalising is always the aim: a difference that

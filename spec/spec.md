@@ -677,7 +677,9 @@ in the session its credential resolves to (section 9.2, step 5), its _call's ses
 presenting none, in its connection's session, in none when the connection has none; one presenting
 `OPAQUE`, in its connection's session, whose token it carries; one presenting `JWT` or `ELSEWHERE`,
 in a credential's, with its own credential's data. Its admission reads that session, and its
-resolver receives it.
+resolver receives it, never a bearer credential it came with — what its transport carried, or a
+`JWT`'s token, of which its header says the scheme alone — which its side verifies (sections 13.8,
+13.11) and a relay forwards to leg B (section 14.2).
 
 13.2. A connection's session's token is 16 bytes, drawn from a cryptographic source, never all
 zero, and held by no other connection.
