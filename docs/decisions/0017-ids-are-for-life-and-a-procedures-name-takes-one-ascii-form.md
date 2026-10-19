@@ -307,10 +307,11 @@ second revision counts into.
 revision of 0 or a service 0 fail as the side is built, on both sides alike.
 
 **A declaration pays a scan of its name, and a call that makes no requester pays nothing.** The
-service manager declares a requester at each `getRequest` (`service-manager.ts`), and the demo makes
-one at each login (`demo/page.ts`): there, each call scans its name's 1 to 63 characters, with no
-allocation and no lock. A registry's fold compares character by character, never building a folded
-string, and takes a name held at its address exactly as it is, unfolded (`MetricsRegistry.cs`).
+service manager declares a requester at each `getRequest` (`service-requester.ts`), and the demo
+makes one at each login (`demo/page.ts`): there, each call scans its name's 1 to 63 characters,
+with no allocation and no lock. A registry's fold compares character by character, never building
+a folded string, and takes a name held at its address exactly as it is, unfolded
+(`MetricsRegistry.cs`).
 
 **Uniqueness holds only where a side counts, and in a blueprint.** A side given no registry takes
 `1/1 echo` and `1/2 echo` both; its trace then shows the two, which is all that reads them. A side
