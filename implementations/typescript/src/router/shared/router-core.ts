@@ -1094,12 +1094,8 @@ export const createRouterCore = <Handle extends string>(
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
   ): void => {
-    const { connectionHandle, controller, header, payload, session } = dispatched;
-    // what its transport carried stands for ELSEWHERE alone, and stays here for any other
-    const transportCredential =
-      header.credential?.scheme === CredentialScheme.ELSEWHERE
-        ? dispatched.transportCredential
-        : undefined;
+    const { connectionHandle, controller, header, payload, session, transportCredential } =
+      dispatched;
     const fail = (reason: unknown): void => {
       const isAnswering = answeringCalls.isAnswering({ connectionHandle, header });
 
@@ -1301,13 +1297,8 @@ export const createRouterCore = <Handle extends string>(
   // nothing goes back, a payload past its limit, a transfer's opening refused — dispatched, or its
   // transfer opened, whose first credit goes only now
   const admitRouted = ({ dispatched, payload, resolver }: IRouted<Handle>): void => {
-    const { connectionHandle, header, session } = dispatched;
+    const { connectionHandle, header, session, transportCredential } = dispatched;
     const { callId, total } = header;
-    // what its transport carried stands for ELSEWHERE alone, as its resolver is handed it
-    const transportCredential =
-      header.credential?.scheme === CredentialScheme.ELSEWHERE
-        ? dispatched.transportCredential
-        : undefined;
     const refusal = refusalOf(resolver, {
       connectionHandle,
       header,
@@ -1528,10 +1519,14 @@ export const createRouterCore = <Handle extends string>(
       request,
       metrics === undefined ? undefined : (registered?.series?.calls ?? metrics.otherServer)
     );
+    // ! what its transport carried stands for ELSEWHERE alone, and stays here for any other: its
+    // sessionOf, its admission and its resolver are handed nothing beside it (spec 15.1)
+    const carried =
+      header.credential?.scheme === CredentialScheme.ELSEWHERE ? transportCredential : undefined;
     const dispatched: IDispatched<Handle> = {
       ...request,
       controller,
-      ...(transportCredential === undefined ? {} : { transportCredential }),
+      ...(carried === undefined ? {} : { transportCredential: carried }),
     };
     // one that names a destination goes to the handler this side has for it — a relay's
     const resolver =

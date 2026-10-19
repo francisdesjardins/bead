@@ -48,6 +48,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Spec 15.6 states that a send answered with a redirect is lost, as both sides play it, and that a
   page reads no status of a redirect; it said the send failed.
+- Both sides hand `sessionOf` what a transport carried beside a request presenting `ELSEWHERE`
+  alone, as spec 15.1 says; one presenting none, `OPAQUE` or a `JWT` came with it all the same.
 - On the C# side, a relay refuses an `ELSEWHERE` that leg A's transport carried nothing for, to a
   connection of its own as to any other leg B, `DESTINATION_UNREACHABLE`, as the TypeScript side does;
   no transport reaches it today.
