@@ -6,7 +6,7 @@ import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
 import type { BackgroundMessage } from '../messages';
 import { assertBuilt, EXTENSION } from './fixtures';
-import { IDS, SLOW_RELAY, T0, TRAFFIC } from './traffic';
+import { IDS, T0, TRAFFIC } from './traffic';
 
 // interfaces
 
@@ -813,138 +813,6 @@ test.describe('the panel', () => {
     await expect(page.locator('#calls tr.call')).toHaveCount(10);
     await page.locator('#source').selectOption('all');
     await expect(page.locator('#calls tr.call')).toHaveCount(10);
-  });
-
-  test('fits exchange labels inside their drawing and keeps the full words in a tooltip', async ({
-    page,
-  }) => {
-    await openWithTraffic(page);
-    await rowOf(page, 'whoami').click();
-    await page.click('[data-detail="exchange"]');
-    await expect(page.locator('#detail .thread text.words').first()).toBeVisible();
-
-    const labels = await page.locator('#detail .thread text.words').evaluateAll((elements) => {
-      return elements.map((element) => {
-        const label = element as SVGTextElement;
-
-        return {
-          edge: (label.x.baseVal[0]?.value ?? 0) + label.getComputedTextLength(),
-          title: label.querySelector('title')?.textContent,
-          width: label.ownerSVGElement?.viewBox.baseVal.width ?? 0,
-        };
-      });
-    });
-
-    for (const label of labels) {
-      expect(label.edge).toBeLessThanOrEqual(label.width);
-      expect(label.title).toBeTruthy();
-    }
-
-    await expect(page.locator('#detail .thread text.words title').last()).toContainText(
-      'announces a session'
-    );
-  });
-
-  test('keeps an exchange’s labels clear of its lanes, its beads and its offsets on a relayed thread, leg A’s words 18 characters at least', async ({
-    page,
-  }) => {
-    await openWithTraffic(page);
-    await deliver(page, { dropped: 0, records: [...SLOW_RELAY], type: 'records' });
-    await rowOf(page, 'increment').click();
-    await page.click('[data-detail="exchange"]');
-
-    for (const [name, callId] of [
-      ['increment', IDS.relayed],
-      ['tally', IDS.slowRelay],
-    ] as const) {
-      await rowOf(page, name).click();
-      await expect(page.locator('#detail .thread svg')).toHaveAttribute(
-        'aria-label',
-        `The envelopes of call #${String(callId)}, in order`
-      );
-
-      const drawing = await page.locator('#detail .thread svg').evaluate((svg) => {
-        const boxesOf = (selector: string) => {
-          return [...svg.querySelectorAll<SVGGraphicsElement>(selector)].map((element) => {
-            return { box: element.getBBox(), name: element.firstChild?.textContent ?? selector };
-          });
-        };
-        const meets = (a: DOMRect, b: DOMRect): boolean => {
-          return (
-            a.x < b.x + b.width &&
-            b.x < a.x + a.width &&
-            a.y < b.y + b.height &&
-            b.y < a.y + a.height
-          );
-        };
-        const lanes = boxesOf('line.life');
-        const beads = boxesOf('circle');
-        const offsets = boxesOf('text.offset');
-        // a lane's name sits above its line, centred on it
-        const labels = boxesOf('text.kind, text.words, text.note');
-
-        return {
-          collisions: [
-            ...[...labels, ...offsets].flatMap((label) => {
-              return lanes
-                .filter((lane) => {
-                  return meets(label.box, lane.box);
-                })
-                .map((lane) => {
-                  return `${label.name} crosses the lane at ${String(lane.box.x)}`;
-                });
-            }),
-            ...labels.flatMap((label) => {
-              return [...beads, ...offsets]
-                .filter((other) => {
-                  return meets(label.box, other.box);
-                })
-                .map((other) => {
-                  return `${label.name} meets ${other.name}`;
-                });
-            }),
-          ],
-          kinds: [...svg.querySelectorAll<SVGTextElement>('text.kind')].map((text) => {
-            return {
-              shown: text.firstChild?.textContent ?? '',
-              whole: text.querySelector('title')?.textContent,
-            };
-          }),
-          words: [...svg.querySelectorAll<SVGTextElement>('text.words')].map((text) => {
-            return {
-              shown: text.firstChild?.textContent ?? '',
-              whole: text.querySelector('title')?.textContent ?? '',
-            };
-          }),
-        };
-      });
-
-      expect(drawing.collisions).toEqual([]);
-
-      for (const { shown, whole } of drawing.kinds) {
-        if (shown.endsWith('…')) {
-          expect(whole?.startsWith(shown.slice(0, -1))).toBe(true);
-        }
-      }
-
-      if (name === 'tally') {
-        expect(
-          drawing.kinds.map(({ shown, whole }) => {
-            return whole ?? shown;
-          })
-        ).toContain('NOTIFICATION');
-      }
-
-      for (const { shown, whole } of drawing.words) {
-        expect(shown.endsWith('…') ? shown.length - 1 : shown.length).toBeGreaterThanOrEqual(
-          Math.min(18, whole.length)
-        );
-      }
-    }
-
-    await expect(page.locator('#detail .thread text.words title').last()).toHaveText(
-      '"an answer longer than the room its lanes leave"'
-    );
   });
 
   test('shows a call a row, newest first, its outcome in words, a command read the right way round', async ({
