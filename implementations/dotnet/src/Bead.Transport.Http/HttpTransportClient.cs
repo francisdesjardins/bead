@@ -10,8 +10,12 @@ public sealed record HttpTransportClientOptions
 {
     /// <summary>
     /// What its exchanges go through; a handler of its own when none, which follows no redirect and
-    /// races the address families of a name (RFC 8305), as Node's and a browser's do; one given
-    /// keeps its own behaviour. The tests' way, as the TypeScript side's give it a <c>fetch</c>.
+    /// races the address families of a name (RFC 8305), as Node's and a browser's do. One given
+    /// keeps its own behaviour, and follows no redirect: an <see cref="HttpClientHandler"/> or a
+    /// <see cref="SocketsHttpHandler"/>, innermost of the <see cref="DelegatingHandler"/>s given,
+    /// whose <c>AllowAutoRedirect</c> is true is refused as the client is built; an answer from
+    /// another URL than the one asked fails the connect, and loses the connection of a send or a
+    /// listen. The tests' way, as the TypeScript side's give it a <c>fetch</c>.
     /// </summary>
     public HttpMessageHandler? Handler { get; init; }
 
@@ -83,10 +87,12 @@ public sealed record HttpConnectOptions
 /// answer comes as a message when it does; a refusal the server marks fails, nothing having been
 /// tried, and the one that says the connection is gone closes it, once that failure is heard;
 /// anything else leaves the outcome unknown: it settles, and closes the connection, as a socket
-/// that drops does. Each send carries its credential, when it has one, in the <c>Authorization</c>
-/// field of its <c>POST</c>, as it is given; one that is no field's value — anything but visible
-/// ASCII, spaces and tabs — is refused before it goes. An answer, and what a listen brings back,
-/// carry none.
+/// that drops does. It follows no redirect (spec 15.6): one answered to its connect fails it, its
+/// status named, and one answered to a send or a listen is judged as any status nothing marks, its
+/// <c>bead-refusal</c> unread. Each send carries its credential, when it has one, in the
+/// <c>Authorization</c> field of its <c>POST</c>, as it is given; one that is no field's value —
+/// anything but visible ASCII, spaces and tabs — is refused before it goes. An answer, and what a
+/// listen brings back, carry none.
 /// </summary>
 /// <remarks>
 /// What the server sends of its own, a client that listens — the default, once the server says it
@@ -136,11 +142,18 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     /// <summary>
     /// A transport client, not yet connected, its durations held. An inactivity timeout neither
     /// infinite nor from 1 to <see cref="Clocks.LongestTimer"/> milliseconds, or a wait or a pause
-    /// neither zero nor in that range, is an <see cref="ArgumentOutOfRangeException"/>.
+    /// neither zero nor in that range, is an <see cref="ArgumentOutOfRangeException"/>; a handler
+    /// given that would follow a redirect, an <see cref="ArgumentException"/> naming
+    /// <c>AllowAutoRedirect</c>.
     /// </summary>
     public HttpTransportClient(HttpTransportClientOptions? options = null)
     {
         var given = options ?? new HttpTransportClientOptions();
+
+        if (given.Handler is { } handler && IsFollowing(handler))
+        {
+            throw new ArgumentException("a handler given would follow a redirect, which the client follows none of: its AllowAutoRedirect is true (spec 15.6)", nameof(options));
+        }
 
         // zero is at once for a delay: a listen again at once, and a listen the server answers at
         // once, which polls
@@ -535,6 +548,42 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         return response.Headers.TryGetValues(name, out var values) ? StructuredFields.ParseItem(string.Join(", ", values)) : null;
     }
 
+    // whether a handler given would follow a redirect: the platform's own, innermost of the
+    // delegating handlers around it, says so by its AllowAutoRedirect; one of another kind cannot be
+    // read, and is taken, the check of each answer standing behind it
+    private static bool IsFollowing(HttpMessageHandler handler)
+    {
+        var innermost = handler;
+
+        while (innermost is DelegatingHandler { InnerHandler: { } inner })
+        {
+            innermost = inner;
+        }
+
+        return innermost switch
+        {
+            HttpClientHandler platform => platform.AllowAutoRedirect,
+            SocketsHttpHandler platform => platform.AllowAutoRedirect,
+            _ => false,
+        };
+    }
+
+    // a redirect, by Fetch's redirect statuses: a 300 and a 304 are none, statuses like any other
+    private static bool IsRedirect(HttpResponseMessage response)
+    {
+        return response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Found or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect;
+    }
+
+    // ! whether a handler followed a redirect all the same: the request its answer names went
+    // elsewhere than `sent`, the URI the exchange was sent to, since a following handler moves the
+    // request's own in place. A handler that builds its own answer leaves RequestMessage null, the
+    // tests' among them, and reads as not followed; Uri's equality ignores a default port and the
+    // host's case
+    private static bool IsFollowed((HttpResponseMessage Response, Uri Sent) answered)
+    {
+        return answered.Response.RequestMessage?.RequestUri is { } went && went != answered.Sent;
+    }
+
     // how long to wait before listening again after `losses` listens lost in a row, drawn apart so
     // the clients one restart dropped together come back apart, as EventSource's do; in whole
     // milliseconds, as every wait of Bead's
@@ -719,6 +768,19 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
             using (response)
             {
+                // answered from a place it never judged: what was drawn there is none of its own,
+                // and ends by its own inactivity timeout
+                if (IsFollowed((response, uri)))
+                {
+                    throw new HttpRequestException("the server drew no connection: a redirect followed");
+                }
+
+                // a redirect is no refusal of the transport's own: its mark is left unread
+                if (IsRedirect(response))
+                {
+                    throw new HttpRequestException($"the server drew no connection: {(int)response.StatusCode}");
+                }
+
                 var connectionToken = HeaderOf(response, HttpTransport.ConnectionTokenHeader);
 
                 if (response.StatusCode != HttpStatusCode.Created || connectionToken is null)
@@ -826,6 +888,17 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             return;
         }
 
+        // followed all the same: nothing the other place answered is heard, and whether the server
+        // had it is not known
+        if (IsFollowed((response, connection.Uri)))
+        {
+            response.Dispose();
+            Lose(connection, true);
+            settled.SetResult();
+
+            return;
+        }
+
         if (response.IsSuccessStatusCode)
         {
             _ = Answering((connection, response));
@@ -836,9 +909,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         using (response)
         {
-            // a status nothing marked — a gateway's, a redirect's — says nothing of whether the server
-            // had it: lost
-            if (HeaderOf(response, HttpTransport.RefusalHeader) is not { } refusal)
+            // a status nothing marked — a gateway's — or a redirect, its mark unread, says nothing of
+            // whether the server had it: lost
+            if (IsRedirect(response) || HeaderOf(response, HttpTransport.RefusalHeader) is not { } refusal)
             {
                 Lose(connection, true);
                 settled.SetResult();
@@ -1024,11 +1097,24 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         using (response)
         {
+            // followed all the same: its batch is none of this connection's, and listening again
+            // would go through the same handler
+            if (IsFollowed((response, connection.Uri)))
+            {
+                return Listened.Broken;
+            }
+
             if (response.StatusCode != HttpStatusCode.OK || TypeOf(response) != HttpTransport.BatchMediaType)
             {
                 if (response.StatusCode == HttpStatusCode.NoContent)
                 {
                     return Listened.Nothing;
+                }
+
+                // a redirect, its mark unread, is lost as any status nothing marks
+                if (IsRedirect(response))
+                {
+                    return Listened.Lost;
                 }
 
                 var refusal = HeaderOf(response, HttpTransport.RefusalHeader);

@@ -407,8 +407,11 @@ export interface IFetchInit {
   /** Set on a DELETE, so it outlives a page that is closing. */
   keepalive?: boolean | undefined;
   method: 'DELETE' | 'GET' | 'POST';
-  /** Always `'error'`: a redirect would turn a POST into a GET, and drop its envelope. */
-  redirect: 'error';
+  /**
+   * Always `'manual'`: a redirect is judged as any status, never followed, since following it would
+   * carry the connection's token where it was not judged (spec 15.6).
+   */
+  redirect: 'manual';
   signal?: AbortSignal | undefined;
 }
 
@@ -418,6 +421,8 @@ export interface IFetchResponseLike {
   readonly body: ReadableStream<Uint8Array> | null;
   readonly headers: { get(name: string): string | null };
   readonly ok: boolean;
+  /** Whether the fetch followed a redirect, as `fetch`'s says; one that does not say followed none. */
+  readonly redirected?: boolean | undefined;
   readonly status: number;
   arrayBuffer(): Promise<ArrayBuffer>;
 }
@@ -430,7 +435,10 @@ export interface IHTTPTransportClientConnectOptions extends ITransportClientAddr
 }
 
 export interface IHTTPTransportClientOptions extends ITransportClientOptions {
-  /** Defaults to the global `fetch`. */
+  /**
+   * Defaults to the global `fetch`. One given honours `redirect`, and follows no redirect: one whose
+   * answer says it followed one fails the connect, and loses the connection of a send or a listen.
+   */
   fetch?: FetchLike | undefined;
   /**
    * Milliseconds the client goes on listening again, its listens lost, before it counts its

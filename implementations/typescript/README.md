@@ -887,6 +887,17 @@ from one alive, as a WebSocket's heartbeat does: a connection with no exchange u
 minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
 a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
+No client follows a redirect: one answered to a connect or an upgrade fails it, its status named,
+and one answered to a send or a listen is lost, its `bead-refusal` unread (spec 15.6), since no
+refusal of the transport's own is one; a listen so answered is listened again, as after any status
+nothing marked. Following it would carry the connection's token, and a send's envelope, where they
+were not judged. Each fetch is handed `redirect: 'manual'`: on Node, a connect names the status,
+"the server drew no connection: 302"; a page's fetch reads no status of a redirect, an opaque one of
+status 0, "the server drew no connection: a redirect", or, from another origin, a network error, its
+preflight failing. A `fetch` given follows no redirect; one that follows all the same says so in its
+answer's `redirected`, and is caught there: the connect fails, "the server drew no connection: a
+redirect followed", and a send or a listen loses its connection, nothing of the answer read.
+
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                           |

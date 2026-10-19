@@ -151,9 +151,16 @@ share.
   clear, it says `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
-  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: a 3xx
-  answered to a connect, a send or an upgrade fails it, its status named (spec 15.6), the
-  WebSocket client's handler built with `AllowAutoRedirect = false` as the HTTP client's is.
+  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: one
+  answered to a connect or an upgrade fails it, its status named, and one answered to a send or a
+  listen is lost, its `bead-refusal` unread (spec 15.6), each client's own handler built with
+  `AllowAutoRedirect = false`. A `Handler` given follows none either: an `HttpClientHandler` or a
+  `SocketsHttpHandler`, innermost of the `DelegatingHandler`s given, whose `AllowAutoRedirect` is
+  true is an `ArgumentException` naming it as the client is built, where the TypeScript side,
+  which cannot read a `fetch` before it answers, catches one at its first answer; a handler of
+  another kind that follows all the same is caught by its answer's `RequestMessage`, gone to
+  another URL than the one asked, which fails the connect, and loses the connection of a send or a
+  listen.
 - **The credential a transport carries** beside an envelope, which a call presenting `ELSEWHERE`
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision

@@ -31,9 +31,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The toolchain is current: buf 1.74.0, Playwright 1.64.1, oxfmt 0.73.0, oxlint 1.88, Roslyn 5.9.0,
   xunit.v3 4.0.2, and OSV-Scanner 2.7.0 and Semgrep 1.181.0 in CI; beadc's image is on Node 26.12.0.
   The floors stay (protobuf-es 2.13, Node 24.9).
+- A redirect, 301, 302, 303, 307 or 308, is judged as any status that is not 2xx, its
+  `bead-refusal` left unread, on both sides (spec 15.6): the C# side's listen counts a marked one
+  lost and listens again, and its send no longer rejects one. The TypeScript side's fetch receives
+  `redirect: 'manual'` (`IFetchInit.redirect`), so a connect answered with a redirect names its
+  status on Node, and `the server drew no connection: a redirect` in a page, which reads none.
+- A redirect followed all the same by a fetch or a handler given is caught at its answer, read from
+  `redirected` on the TypeScript side, which `IFetchResponseLike` may now say, and from the
+  response's `RequestMessage` on the C# side: its connect fails
+  `the server drew no connection: a redirect followed`, and a send or a listen loses its
+  connection, its answer never read. The C# side refuses at construction, with an
+  `ArgumentException` naming `AllowAutoRedirect`, a `Handler` whose innermost `HttpClientHandler`
+  or `SocketsHttpHandler` would follow.
 
 ### Fixed
 
+- Spec 15.6 states that a send answered with a redirect is lost, as both sides play it, and that a
+  page reads no status of a redirect; it said the send failed.
 - On the C# side, a relay refuses an `ELSEWHERE` that leg A's transport carried nothing for, to a
   connection of its own as to any other leg B, `DESTINATION_UNREACHABLE`, as the TypeScript side does;
   no transport reaches it today.

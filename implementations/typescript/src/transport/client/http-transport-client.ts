@@ -150,9 +150,24 @@ const isTrue = (value: string | null): boolean => {
   return bareItem?.type === BARE_ITEM_TYPES.BOOLEAN && bareItem.value;
 };
 
-// a body read only to let its socket go
+// a body left unread, cancelled so its socket goes: a gateway's page, a redirect's, is never read
+// whole; none at all — a 204's, a page's opaque redirect — needs nothing
 const drain = (response: IFetchResponseLike): void => {
-  response.arrayBuffer().catch(noop);
+  void response.body?.cancel().catch(noop);
+};
+
+// a redirect, Fetch's redirect statuses, judged as any status that is not 2xx, never followed: the
+// connection's token would go where it was not judged (spec 15.6). 0 is a page's opaque redirect,
+// which a fetch in `cors` mode hands back for nothing else, a network error rejecting
+const isRedirect = (status: number): boolean => {
+  return [0, 301, 302, 303, 307, 308].includes(status);
+};
+
+// ! whether a fetch followed a redirect all the same, which a given one may: its answer comes from
+// a place never judged, so nothing of it is read. Its URL is never compared with the one asked,
+// since Fetch's drops a default port and lowercases the host
+const isFollowed = (response: IFetchResponseLike): boolean => {
+  return response.redirected === true;
 };
 
 // the envelopes a chunk of a batch completes, in order, what is left of it kept for the next chunk;
@@ -231,6 +246,14 @@ const retryDelayOf = (losses: number): number => {
  * an answer of another type, a network that failed, a redirect — leaves the outcome unknown: it
  * resolves, and closes the connection, as a socket that drops does.
  *
+ * No redirect is followed: each fetch passes `redirect: 'manual'`, and a redirect is judged as any
+ * status that is not 2xx, its `bead-refusal` unread (spec 15.6). A connect answered with one fails,
+ * its status named — "the server drew no connection: 302"; a page's fetch, which reads none, "a
+ * redirect" — a send so answered is lost, and a listen listened again. A `fetch` given that follows
+ * all the same is caught at its answer, which says it followed: the connect fails, "the server drew
+ * no connection: a redirect followed", and a send or a listen loses its connection, nothing of what
+ * answered read.
+ *
  * What the server sends of its own, a client that listens — the default, once the server says it
  * back at connect — hears by a listen: a `GET` at the connection's one URL, which the server holds
  * up to `wait`, asked in `bead-wait`, and which brings back a batch of envelopes, numbered from its
@@ -282,7 +305,7 @@ export const createHTTPTransportClient = (
           headers: { [CONNECTION_TOKEN_HEADER]: connectionToken },
           keepalive: true,
           method: 'DELETE',
-          redirect: 'error',
+          redirect: 'manual',
         }).then(drain, noop);
       };
 
@@ -373,14 +396,17 @@ export const createHTTPTransportClient = (
               [WAIT_HEADER]: String(wait),
             },
             method: 'GET',
-            redirect: 'error',
+            redirect: 'manual',
             signal: connection.controller.signal,
           });
         } catch {
           return 'lost';
         }
 
-        const refusal = response.headers.get(REFUSAL_HEADER);
+        // followed all the same: its batch is never read, and listening again would go the same way
+        if (isFollowed(response)) {
+          return (drain(response), 'broken');
+        }
 
         if (response.status !== 200 || typeOf(response) !== BEAD_BATCH_MEDIA_TYPE) {
           drain(response);
@@ -388,6 +414,9 @@ export const createHTTPTransportClient = (
           if (response.status === 204) {
             return 'nothing';
           }
+
+          // a redirect's mark is left unread: no refusal of the transport's own is one
+          const refusal = isRedirect(response.status) ? null : response.headers.get(REFUSAL_HEADER);
 
           if (refusal === null) {
             return 'lost';
@@ -567,13 +596,34 @@ export const createHTTPTransportClient = (
                     ...(isListening ? { [LISTEN_HEADER]: '?1' } : {}),
                   },
                   method: 'POST',
-                  redirect: 'error',
+                  redirect: 'manual',
                   signal: attempt.signal,
                 }).then(
                   (response) => {
                     const connectionToken = response.headers.get(CONNECTION_TOKEN_HEADER);
 
                     drain(response);
+
+                    // what drew it, if anything did, is a place never judged: it ends by its own
+                    // inactivity timeout, nothing released
+                    if (isFollowed(response)) {
+                      return (
+                        reject(
+                          new ConnectError('the server drew no connection: a redirect followed')
+                        ),
+                        undefined
+                      );
+                    }
+
+                    // its status alone, its mark unread; a page reads none of an opaque redirect
+                    if (isRedirect(response.status)) {
+                      const named = response.status === 0 ? 'a redirect' : String(response.status);
+
+                      return (
+                        reject(new ConnectError(`the server drew no connection: ${named}`)),
+                        undefined
+                      );
+                    }
 
                     if (response.status !== 201 || connectionToken === null) {
                       // its status, and its reason where the server marked it (spec 15.6)
@@ -655,7 +705,7 @@ export const createHTTPTransportClient = (
                   headers: { [CONNECTION_TOKEN_HEADER]: connection.connectionToken },
                   keepalive: true,
                   method: 'DELETE',
-                  redirect: 'error',
+                  redirect: 'manual',
                   // oxlint-disable-next-line no-restricted-properties -- a disconnect's bound is the platform's
                   signal: AbortSignal.timeout(DISCONNECT_TIMEOUT),
                 })
@@ -698,21 +748,33 @@ export const createHTTPTransportClient = (
                 [CONNECTION_TOKEN_HEADER]: connection.connectionToken,
               },
               method: 'POST',
-              redirect: 'error',
+              redirect: 'manual',
               signal: connection.controller.signal,
             }).then(
               (response) => {
+                // followed all the same: whatever the other place answered goes unheard, and the
+                // connection whose token crossed is lost
+                if (isFollowed(response)) {
+                  drain(response);
+                  resolve();
+
+                  return (lose(connection, { isReleased: true }), undefined);
+                }
+
                 if (response.ok) {
                   resolve();
 
                   return readAnswer(connection, response);
                 }
 
-                const refusal = response.headers.get(REFUSAL_HEADER);
+                // a redirect's mark is left unread: no refusal of the transport's own is one
+                const refusal = isRedirect(response.status)
+                  ? null
+                  : response.headers.get(REFUSAL_HEADER);
 
                 drain(response);
 
-                // a status nothing marked — a gateway's, a redirect's — says nothing of whether the
+                // a status nothing marked — a gateway's — or a redirect says nothing of whether the
                 // server had it: lost
                 if (refusal === null) {
                   resolve();

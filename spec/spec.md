@@ -1254,11 +1254,17 @@ fails with, its connect's and its upgrade's among them, where its platform lets 
 ([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)); a page's WebSocket reads
 none, the [WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/) failing its connection
 with no detail, and its server's tell (section 15.1) is then what says why. A client follows no
-redirect: a 3xx answered to its connect, to a send or to its upgrade fails it, its status named, as
-a page's `fetch` under redirect mode `error` and a page's WebSocket fail
-([WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/)); a redirect would carry the
-request where its credential and its security were not judged. Any other status that is not 2xx — a
-gateway's 502, a proxy's 404 — may come after the request ran: the client counts the exchange lost.
+redirect, which [RFC 9110 §15.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.4) leaves to it:
+a redirect — 301, 302, 303, 307 or 308, [Fetch](https://fetch.spec.whatwg.org/#redirect-status)'s
+redirect statuses — is judged as any status that is not 2xx, its `bead-refusal` left unread, since
+no refusal of the transport's own is one. Following it would carry the request, the connection's
+token in its header and a send's envelope in its body, where its credential and its security were
+not judged. A page reads no status of a redirect: its `fetch`, under Fetch's redirect mode
+`manual`, gets an opaque redirect, of status 0, or a network error from another origin, whose
+preflight a redirect fails; its WebSocket fails one with no detail
+([WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/)). A status that is not 2xx and
+that nothing marks — a gateway's 502, a proxy's 404 — or a redirect, its mark unread, may come after
+the request ran: the client counts the exchange lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                         |
 | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

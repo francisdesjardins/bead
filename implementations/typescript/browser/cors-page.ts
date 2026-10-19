@@ -3,7 +3,8 @@
 // The script of a page a browser loads from an origin of its own: the HTTP client, bundled for the
 // browser, calls the interop service's HTTP server at another origin, whose answers the browser
 // hands it only as CORS lets it (spec 15.12; decision 0027), and whose preflight it caches by the
-// connection's one URL (spec 15.9; decision 0029).
+// connection's one URL (spec 15.9; decision 0029); and the page's own server, whose redirect a
+// page's fetch hands back with no status (spec 15.6).
 
 // dependencies
 
@@ -125,4 +126,22 @@ const listenAcrossOrigins = async (
   return { heard };
 };
 
-Object.assign(globalThis, { callAcrossOrigins, listenAcrossOrigins });
+/**
+ * Connects to the server of the page's own origin, at the page's host and port, and disconnects:
+ * why its connect failed, or that it disconnected.
+ */
+const connectToOwnOrigin = async (): Promise<ICrossOriginReport> => {
+  const client = createHTTPClient();
+
+  try {
+    await client.connect({ host: location.hostname, port: Number(location.port) });
+  } catch (error) {
+    return { connectFailure: String(error) };
+  }
+
+  await client.transport.disconnect();
+
+  return { disconnected: true };
+};
+
+Object.assign(globalThis, { callAcrossOrigins, connectToOwnOrigin, listenAcrossOrigins });
