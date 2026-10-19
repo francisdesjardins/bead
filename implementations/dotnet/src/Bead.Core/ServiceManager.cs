@@ -474,15 +474,15 @@ public sealed record ServiceManagerOptions
 /// The requesters and resolvers of the services on one router: what a requester calls, and what
 /// answers it on the other side. Both sides of a router use the same manager.
 /// </summary>
-public sealed class ServiceManager
+public sealed partial class ServiceManager
 {
     // how long a request waits for its answer when its options and the manager's say nothing
     private static readonly TimeSpan TimeoutDefault = TimeSpan.FromSeconds(5);
 
     private readonly IRouterLike _router;
-    private readonly Action<string>? _closeConnection;
-    private readonly RequestDefaults _defaults;
-    private readonly TimeProvider _clock;
+    private readonly ServiceRequester _requester;
+    private readonly ServiceTrace _trace;
+    private readonly ServiceResolver _resolver;
 
     // the notifications this manager made, one per procedure, kept for its life: asked for again,
     // the same one is given
@@ -498,14 +498,41 @@ public sealed class ServiceManager
         ArgumentNullException.ThrowIfNull(router);
 
         _router = router;
-        _closeConnection = options?.CloseConnection;
 
         // held as the manager is built, rather than refused at each call it would time
-        _defaults = (options?.Defaults ?? new RequestDefaults()) with
+        var defaults = (options?.Defaults ?? new RequestDefaults()) with
         {
             Timeout = Clocks.AssertHeld(("a call's default timeout", nameof(RequestDefaults.Timeout)), options?.Defaults?.Timeout ?? TimeoutDefault),
         };
-        _clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
+        var clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
+        _trace = new ServiceTrace(
+            new ServiceTrace.Observer
+            {
+                Emit = Emit,
+                IsDebugging = () =>
+                {
+                    return IsDebugging;
+                },
+            },
+            new ServiceTrace.Options
+            {
+                Clock = clock,
+                Side = () =>
+                {
+                    return router.Side;
+                },
+            });
+        _resolver = new ServiceResolver(router, _trace);
+        _requester = new ServiceRequester(router, new ServiceRequester.Options
+        {
+            Defaults = defaults,
+            CloseConnection = options?.CloseConnection,
+            Trace = _trace,
+            Deprecated = (procedure) =>
+            {
+                Deprecated?.Invoke(procedure);
+            },
+        });
     }
 
     /// <summary>A notification dropped: its procedure, and the failure the other end ended it with, if any.</summary>
@@ -581,7 +608,7 @@ public sealed class ServiceManager
                 (_router, dependencies),
                 ((payload, call) =>
                 {
-                    return CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes, series)));
+                    return _requester.CallOf(payload, (procedure, dependencies.Serializer, call.Options, (DebugType.Request, call.Subscribes, series)));
                 },
                 (failure) =>
                 {
@@ -592,7 +619,7 @@ public sealed class ServiceManager
                     // * one check a notification heard while nobody listens
                     if (IsDebugging)
                     {
-                        Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = NotifiedNow() });
+                        _trace.Trace(procedure, new DebugStep(DebugDirection.Rx, DebugType.Notification) { Error = error, Rx = notification, Started = _trace.NotifiedNow() });
                     }
                 }
             ));
@@ -613,7 +640,7 @@ public sealed class ServiceManager
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
-        return RequesterOf(procedure, (dependencies, DebugType.Request));
+        return _requester.RequesterOf(procedure, (dependencies, DebugType.Request));
     }
 
     /// <summary>
@@ -625,7 +652,7 @@ public sealed class ServiceManager
         Procedure procedure,
         RequestDependencies<TRequest, TResponse> dependencies)
     {
-        return RequesterOf(procedure, (dependencies, DebugType.Command));
+        return _requester.RequesterOf(procedure, (dependencies, DebugType.Command));
     }
 
     /// <summary>
@@ -672,17 +699,17 @@ public sealed class ServiceManager
 
             var resolver = new NotificationResolver<TRequest, TResponse, TNotification>(
                 this,
-                (new Resolver<TRequest, TResponse>(
-                    this,
-                    new ResolverMade<TRequest, TResponse>(
-                        procedure,
-                        dependencies.Serializer,
-                        dependencies.BeforeRequest,
-                        (request, response) =>
-                        {
-                            return callback(request, response);
-                        },
-                        DebugType.Request)),
+                (_resolver.Create(new ResolverMade<TRequest, TResponse>
+                {
+                    Procedure = procedure,
+                    Serializer = dependencies.Serializer,
+                    BeforeRequest = dependencies.BeforeRequest,
+                    Callback = (request, response) =>
+                    {
+                        return callback(request, response);
+                    },
+                    Type = DebugType.Request,
+                }),
                 dependencies.Serializer));
 
             _router.RegisterResolver(resolver);
@@ -691,60 +718,14 @@ public sealed class ServiceManager
         };
     }
 
-    // a window, in a refusal's sentence
-    private static string WindowOf(int? window)
-    {
-        return window is { } given ? $"window {given}" : "no window";
-    }
-
-    // the failure a failed call carries, for a trace: its code, its scope and its detail; none when
-    // it carries none
-    private static Failure? TracedFailureOf(Exception reason)
-    {
-        return reason is FailureException { Failure: var failure }
-            ? new Failure { Code = failure.Code, Detail = failure.Detail, Scope = failure.Scope }
-            : null;
-    }
-
-    // now, for a call starting: the instant it is told at, on the wall clock, and the reading its
-    // duration counts from, on the monotonic one
-    private Started StartedNow()
-    {
-        return new Started(_clock.GetUtcNow(), _clock.GetTimestamp());
-    }
-
-    // now, for a notification sent or heard: one step, which takes no duration, read on the wall
-    // clock alone
-    private Started NotifiedNow()
-    {
-        return new Started(_clock.GetUtcNow(), 0);
-    }
-
-    // tells Debug of one step of a call, each listener within a guard: what one throws is reported
-    // through the router, and changes nothing of the call; nothing is built when nobody hears it
-    private void Trace(Procedure procedure, DebugStep step)
+    // tells Debug's listeners one step of a call, each within a guard: what one throws is reported
+    // through the router, with the call's connection, and changes nothing of the call
+    private void Emit(DebugEvent debugEvent, (Exception? Error, string? ConnectionHandle) step)
     {
         if (Debug is not { } debug)
         {
             return;
         }
-
-        var debugEvent = new DebugEvent
-        {
-            CallId = step.CallId,
-            ConnectionHandle = ConnectionOf(step),
-            Direction = step.Direction,
-            Duration = step.IsAnswered ? WholeMillisecondsOf(_clock.GetElapsedTime(step.Started.Timestamp)) : null,
-            Options = step.Options,
-            ProcedureId = procedure.ProcedureId,
-            ProcedureName = procedure.ProcedureName,
-            Rx = step.Rx,
-            ServiceId = procedure.ServiceId,
-            ServiceRevision = procedure.ServiceRevision,
-            StartedAt = step.Started.Instant,
-            Tx = step.Tx,
-            Type = step.Type,
-        };
 
         foreach (var listener in debug.GetInvocationList())
         {
@@ -757,49 +738,6 @@ public sealed class ServiceManager
                 _router.Report(reason, step.ConnectionHandle);
             }
         }
-    }
-
-    // the connection a step's call is on, as its envelopes name it: a client's one peer, the server,
-    // whatever its options said; none for a step that names no call
-    private string? ConnectionOf(DebugStep step)
-    {
-        if (step.CallId is null)
-        {
-            return null;
-        }
-
-        return _router.Side == RouterSide.Client ? RouterClient.ServerConnectionHandle : step.ConnectionHandle;
-    }
-
-    // a time in whole milliseconds, a fraction dropped
-    private static TimeSpan WholeMillisecondsOf(TimeSpan time)
-    {
-        return TimeSpan.FromTicks(time.Ticks - (time.Ticks % TimeSpan.TicksPerMillisecond));
-    }
-
-    // a requester: given a payload, then options, one call
-    private Func<TRequest, BoundCall<TResponse>> RequesterOf<TRequest, TResponse>(
-        Procedure procedure,
-        (RequestDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
-    {
-        ArgumentNullException.ThrowIfNull(procedure);
-        ArgumentNullException.ThrowIfNull(made.Dependencies);
-
-        // declared as it is made (spec/debugging.md 7.2): each of its calls carries its series
-        var series = _router.DeclareRequester(procedure);
-
-        async Task<TResponse> Called(TRequest payload, RequestOptions? options)
-        {
-            return (await CallOf(payload, (procedure, made.Dependencies.Serializer, options, (made.Type, null, series)))).Response;
-        }
-
-        return (payload) =>
-        {
-            return (options) =>
-            {
-                return Called(payload, options);
-            };
-        };
     }
 
     // a resolver of a request or a command: given its callback, it is registered on the router
@@ -816,17 +754,17 @@ public sealed class ServiceManager
         {
             ArgumentNullException.ThrowIfNull(callback);
 
-            var resolver = new Resolver<TRequest, TResponse>(
-                this,
-                new ResolverMade<TRequest, TResponse>(
-                    procedure,
-                    made.Dependencies.Serializer,
-                    made.Dependencies.BeforeRequest,
-                    (request, response) =>
-                    {
-                        return callback(request, response);
-                    },
-                    made.Type));
+            var resolver = _resolver.Create(new ResolverMade<TRequest, TResponse>
+            {
+                Procedure = procedure,
+                Serializer = made.Dependencies.Serializer,
+                BeforeRequest = made.Dependencies.BeforeRequest,
+                Callback = (request, response) =>
+                {
+                    return callback(request, response);
+                },
+                Type = made.Type,
+            });
 
             _router.RegisterResolver(resolver);
 
@@ -834,209 +772,16 @@ public sealed class ServiceManager
         };
     }
 
-    // a call's options, with the defaults applied: the call's, then the manager's, which is 5 s when
-    // none, and no close; the timeout held as a call's, so the trace, the router and the error tell
-    // one number
-    private ResolvedRequestOptions OptionsOf(RequestOptions? given)
+    // a window, in a refusal's sentence
+    private static string WindowOf(int? window)
     {
-        return new ResolvedRequestOptions
-        {
-            CancellationToken = given?.CancellationToken ?? CancellationToken.None,
-            CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
-            ConnectionHandle = given?.ConnectionHandle,
-            Credential = given?.Credential,
-            DestinationId = given?.DestinationId,
-            Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
-        };
+        return window is { } given ? $"window {given}" : "no window";
     }
-
-    // a result decoded; one that does not decode fails here, with the result's header
-    private TResponse DecodeOf<TRequest, TResponse>(
-        RouterResult result,
-        (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, ResolvedRequestOptions Options) call)
-    {
-        try
-        {
-            return call.Serializer.Decode(result.Payload);
-        }
-        catch (Exception reason)
-        {
-            throw new FailureException(
-                Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message),
-                (new FailureException.Raised(FailureOrigin.Local, _router.Side), reason))
-            {
-                DestinationId = call.Options.DestinationId,
-                Header = result.Header,
-                ProcedureAddress = call.Procedure.Address,
-            };
-        }
-    }
-
-    // one call — a request, a command, or the request that subscribes a notification: its options
-    // with the defaults applied, its trace, the request, the close on timeout, and its result
-    // decoded; a timeout refused fails as the options are resolved, and a value that does not write
-    // as it is written, both before the trace and the deprecation: no call is made (spec 17.2,
-    // item 4; spec/debugging.md 4.3)
-    private async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
-        TRequest payload,
-        (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
-    {
-        var (procedure, serializer, given, (type, subscribes, series)) = call;
-        var options = OptionsOf(given);
-        var encoded = serializer.Encode(payload);
-
-        // * one check a call while nobody listens: no clock read, no step, no copy of its options,
-        // nothing to hear its call id; a credential stays out of what a side tells, and the trace
-        // carries none
-        var traced = IsDebugging
-            ? new TracedCall(this, (procedure, new DebugStep(DebugDirection.Tx, type)
-            {
-                ConnectionHandle = options.ConnectionHandle,
-                Options = options with { Credential = null },
-                Started = StartedNow(),
-                Tx = payload,
-            }))
-            : null;
-
-        if (procedure.Deprecation is not null)
-        {
-            Deprecated?.Invoke(procedure);
-        }
-
-        var requested = _router.Request(
-            encoded,
-            new RouterRequest(procedure, options)
-            {
-                OnCallId = traced is null ? null : traced.OnCallId,
-                Series = series,
-                Subscribes = subscribes,
-            });
-        RouterResult result;
-
-        try
-        {
-            // one awaiter either way: the request itself, or the request once its tx step was told
-            result = await (traced is null ? requested : traced.Told(requested));
-        }
-        catch (Exception reason)
-        {
-            // a connection that let it go unanswered is closed, when the call or the manager says so
-            if (reason is TimeoutException && options.CloseOnTimeout == true && options.ConnectionHandle is { } connectionHandle)
-            {
-                _closeConnection?.Invoke(connectionHandle);
-            }
-
-            traced?.Failed(reason);
-
-            throw;
-        }
-
-        TResponse response;
-
-        try
-        {
-            response = DecodeOf(result, (procedure, serializer, options));
-        }
-        catch (FailureException reason)
-        {
-            traced?.Failed(reason);
-
-            throw;
-        }
-
-        traced?.Answered(response);
-
-        return (result.Header.CallId, response);
-    }
-
-    // one step of a call, as Trace tells it, and the connection a listener's error is reported with
-    private sealed record DebugStep(DebugDirection Direction, DebugType Type)
-    {
-        // the call id its envelopes carry, once drawn; none for a step that names no call
-        public uint? CallId { get; init; }
-
-        public string? ConnectionHandle { get; init; }
-
-        public Exception? Error { get; init; }
-
-        public bool IsAnswered { get; init; }
-
-        public ResolvedRequestOptions? Options { get; init; }
-
-        public object? Rx { get; init; }
-
-        // when its call started: every step of one call carries the same
-        public required Started Started { get; init; }
-
-        public object? Tx { get; init; }
-    }
-
-    // a call made while someone listens, and made only then: it hears its call id as its router
-    // draws it, and tells its tx step from the manager's own flow once it holds the id, or once the
-    // request failed before one was drawn; its rx step names the same id
-    private sealed class TracedCall(ServiceManager manager, (Procedure Procedure, DebugStep Step) call)
-    {
-        // ! continuations run asynchronously: what awaits the id, and the tx step's listeners with
-        // it, never runs inside OnCallId, on its router's scheduler, where one that blocks holds
-        // every connection of that router. Bead's routers draw it in a task of their scheduler,
-        // where the runtime inlines no await; over a router that draws it under no scheduler of its
-        // own, this alone keeps them off
-        private readonly TaskCompletionSource<uint> _drawn = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        // the call id its steps name, once its tx step was told; none for a call refused before
-        // its router drew one
-        private uint? _callId;
-
-        // hears the call id on the router's scheduler: it records it, and tells nothing there
-        public void OnCallId(uint callId)
-        {
-            _drawn.TrySetResult(callId);
-        }
-
-        // * the tx step, told once the first of the id and the request's end came, with the id or
-        // with none; then the request's outcome, which its rx step follows
-        public async Task<RouterResult> Told(Task<RouterResult> requested)
-        {
-            await Task.WhenAny(_drawn.Task, requested);
-
-            // drawn before the request goes, so before it ends: whichever came first, it is held
-            _callId = _drawn.Task.IsCompletedSuccessfully ? await _drawn.Task : null;
-            manager.Trace(call.Procedure, call.Step with { CallId = _callId });
-
-            return await requested;
-        }
-
-        // its answer, decoded
-        public void Answered(object? response)
-        {
-            manager.Trace(call.Procedure, call.Step with { CallId = _callId, Direction = DebugDirection.Rx, IsAnswered = true, Rx = response });
-        }
-
-        // what the call failed with once it started, told as its answer
-        public void Failed(Exception reason)
-        {
-            manager.Trace(
-                call.Procedure,
-                call.Step with { CallId = _callId, Direction = DebugDirection.Rx, Error = reason, IsAnswered = true, Rx = TracedFailureOf(reason) });
-        }
-    }
-
-    // when a call started: its instant on the wall clock, and the monotonic reading its duration counts from
-    private readonly record struct Started(DateTimeOffset Instant, long Timestamp);
-
-    // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
-    // what its calls are
-    private sealed record ResolverMade<TRequest, TResponse>(
-        Procedure Procedure,
-        IRequestSerializerServer<TRequest, TResponse> Serializer,
-        BeforeRequest? BeforeRequest,
-        Func<RequestProps<TRequest>, INotificationResponse<TResponse>, Task> Callback,
-        DebugType Type);
 
     // the resolver of a notification: the resolver of its procedure, and what it notifies
     private sealed class NotificationResolver<TRequest, TResponse, TNotification>(
         ServiceManager manager,
-        (Resolver<TRequest, TResponse> Resolver, INotificationSerializerServer<TRequest, TResponse, TNotification> Serializer) made)
+        (IRequestResolver Resolver, INotificationSerializerServer<TRequest, TResponse, TNotification> Serializer) made)
         : INotificationResolver<TNotification>
     {
         public Procedure Procedure
@@ -1078,12 +823,12 @@ public sealed class ServiceManager
 
             // * one check a notification sent while nobody listens: no clock read, no step
             var step = manager.IsDebugging
-                ? new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager.NotifiedNow(), Tx = notification }
+                ? new DebugStep(DebugDirection.Tx, DebugType.Notification) { Started = manager._trace.NotifiedNow(), Tx = notification }
                 : null;
 
             if (step is not null)
             {
-                manager.Trace(Procedure, step);
+                manager._trace.Trace(Procedure, step);
             }
 
             var request = new NotifyRequest { Filter = filtered, Key = options?.Key, Procedure = Procedure.Address };
@@ -1115,329 +860,7 @@ public sealed class ServiceManager
 
             if (failure is not null && step is not null)
             {
-                manager.Trace(Procedure, step with { Error = failure });
-            }
-        }
-    }
-
-    // the resolver of one procedure, registered in the router
-    private sealed class Resolver<TRequest, TResponse>(ServiceManager manager, ResolverMade<TRequest, TResponse> made) : IRequestResolver
-    {
-        private readonly IRouterLike _router = manager._router;
-
-        public Procedure Procedure
-        {
-            get
-            {
-                return made.Procedure;
-            }
-        }
-
-        public int? MaximumPayloadBytes
-        {
-            get
-            {
-                return Procedure.MaximumPayloadBytes;
-            }
-        }
-
-        public Failure? Admit(AdmissionRequest request)
-        {
-            return made.BeforeRequest?.RefusalOf(request);
-        }
-
-        public async Task Handle(RequestResolverProps props)
-        {
-            ArgumentNullException.ThrowIfNull(props);
-
-            // * the call starts as it arrives, its admission and its decoding counted in its duration,
-            // for a listener: one check while nobody listens, and no clock read
-            Started? started = manager.IsDebugging ? manager.StartedNow() : null;
-            var target = new AnswerTarget(props.ConnectionHandle, props.Header);
-            TRequest payload;
-
-            // a router that did not ask its admission leaves it here, before the payload is read
-            if (!props.IsAdmitted)
-            {
-                Failure? refusal;
-
-                try
-                {
-                    refusal = Admit(new AdmissionRequest(props.ConnectionHandle, props.Header) { Session = props.Session });
-                }
-                catch
-                {
-                    await AnswerFailed(target);
-
-                    throw;
-                }
-
-                if (refusal is not null)
-                {
-                    await _router.Respond(RouterAnswer.OfFailure(refusal), target);
-
-                    return;
-                }
-            }
-
-            // a payload that does not decode never reaches the callback
-            try
-            {
-                payload = made.Serializer.Decode(props.Payload);
-            }
-            catch (Exception)
-            {
-                await _router.Respond(RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.PayloadUndecodable)), target);
-
-                return;
-            }
-
-            if (started is { } at)
-            {
-                manager.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Type)
-                {
-                    CallId = props.Header.CallId,
-                    ConnectionHandle = props.ConnectionHandle,
-                    Rx = payload,
-                    Started = at,
-                });
-            }
-
-            var response = new Response(this, (target, payload, started, props.Signal));
-            var request = new RequestProps<TRequest>
-            {
-                ConnectionHandle = props.ConnectionHandle,
-                Header = props.Header,
-                Payload = payload,
-                Session = props.Session,
-                Signal = props.Signal,
-            };
-
-            try
-            {
-                await made.Callback(request, response);
-            }
-            catch (Exception reason)
-            {
-                // a resolver that failed before it answered still answers, so its requester does
-                // not wait out its timeout, told with why beside it; why it failed goes on, for the
-                // router to report; a call no longer answered takes neither
-                if (!response.IsAnswered)
-                {
-                    response.IsAnswered = true;
-
-                    if (started.HasValue && !props.Signal.IsCancellationRequested)
-                    {
-                        manager.Trace(Procedure, new DebugStep(DebugDirection.Tx, made.Type)
-                        {
-                            CallId = props.Header.CallId,
-                            ConnectionHandle = props.ConnectionHandle,
-                            Error = reason,
-                            IsAnswered = true,
-                            Rx = payload,
-                            Started = started.Value,
-                        });
-                    }
-
-                    await AnswerFailed(target);
-                }
-
-                throw;
-            }
-        }
-
-        private IRequestSerializerServer<TRequest, TResponse> Serializer
-        {
-            get
-            {
-                return made.Serializer;
-            }
-        }
-
-        private DebugType Type
-        {
-            get
-            {
-                return made.Type;
-            }
-        }
-
-        private void Traced(DebugStep step)
-        {
-            manager.Trace(Procedure, step);
-        }
-
-        // answers as failed; what keeps that answer from going out — a connection gone — is not heard
-        private async Task AnswerFailed(AnswerTarget target)
-        {
-            try
-            {
-                await _router.Respond(RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.ProcedureFailed)), target);
-            }
-            catch (Exception)
-            {
-                // nothing more to say: the failure that brought it here goes on
-            }
-        }
-
-        // the failure a resolver's answer sends: the procedure's own, or a refusal of admission
-        private static Failure ResolverFailureOf(Failure failure)
-        {
-            ArgumentNullException.ThrowIfNull(failure);
-
-            if ((failure.Scope == FailureScope.Application && failure.Code >= 1) || BeforeRequest.IsAdmissionFailure(failure))
-            {
-                return failure;
-            }
-
-            throw new ArgumentException(
-                $"a resolver answers a failure of its own, from 1 to 65535, or a refusal of admission, not {failure.Code}",
-                nameof(failure));
-        }
-
-        private sealed class Response(Resolver<TRequest, TResponse> resolver, (AnswerTarget Target, object? Request, Started? Started, CancellationToken Signal) answering) : INotificationResponse<TResponse>
-        {
-            public bool IsAnswered { get; set; }
-
-            private AnswerTarget Target
-            {
-                get
-                {
-                    return answering.Target;
-                }
-            }
-
-            public Task Answer(TResponse payload)
-            {
-                return Send(
-                    () =>
-                    {
-                        return RouterAnswer.OfPayload(resolver.Serializer.Encode(payload));
-                    },
-                    payload);
-            }
-
-            public Task<uint> RegisterNotification()
-            {
-                // a subscription the answer carries, so made before it goes out
-                if (IsAnswered)
-                {
-                    throw new InvalidOperationException($"{resolver.Procedure.ProcedureName} subscribes before it answers");
-                }
-
-                return resolver._router.Subscribe(Target);
-            }
-
-            public Task Fail(Failure failure)
-            {
-                return Send(
-                    () =>
-                    {
-                        return RouterAnswer.OfFailure(ResolverFailureOf(failure));
-                    },
-                    failure);
-            }
-
-            private async Task Send(Func<RouterAnswer> answerOf, object? answered)
-            {
-                if (IsAnswered)
-                {
-                    throw new InvalidOperationException($"{resolver.Procedure.ProcedureName} has answered this request already");
-                }
-
-                // what fails before the answer goes out leaves the request unanswered, to be answered
-                // as failed: a failure a resolver may not answer, or a payload that does not encode
-                var answer = answerOf();
-
-                IsAnswered = true;
-
-                // * a request its router answered in its place takes this answer nowhere: its step is
-                // told once, with the failure its router answered, and nothing failed here
-                // (spec/debugging.md 4.2)
-                if (ToldInPlace(answered))
-                {
-                    return;
-                }
-
-                // traced once its request was, to whoever listens
-                Told(answered, null);
-
-                try
-                {
-                    await resolver._router.Respond(answer, Target);
-                }
-                catch (Exception reason)
-                {
-                    // an answer the router could not send — too large, say — is told again at its
-                    // start with why, and answered as failed, so its requester does not wait out its
-                    // timeout
-                    Told(answered, reason);
-
-                    await resolver.AnswerFailed(Target);
-
-                    throw;
-                }
-
-                ToldLate(answered, answer);
-            }
-
-            // whether its router answered its request in its place, its step told with that failure;
-            // ! no local of its own in Send, whose state machine a request allocates
-            private bool ToldInPlace(object? answered)
-            {
-                if (resolver._router.AnsweredOf(Target) is not { } inPlace)
-                {
-                    return false;
-                }
-
-                if (answering.Started.HasValue)
-                {
-                    Told(answered, FailureOf(inPlace));
-                }
-
-                return true;
-            }
-
-            // ! its router answered in its place on its own thread while this answer went to it, so
-            // it went nowhere: told again at its start, with the failure its router answered; never
-            // the failure this answer was
-            private void ToldLate(object? answered, RouterAnswer answer)
-            {
-                if (answering.Started.HasValue
-                    && resolver._router.AnsweredOf(Target) is { } late
-                    && !ReferenceEquals(late, answer.Failure))
-                {
-                    Told(answered, FailureOf(late));
-                }
-            }
-
-            // the failure its router answered in its place, raised here, on its call id
-            private FailureException FailureOf(Failure failure)
-            {
-                return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, resolver._router.Side))
-                {
-                    Header = new FailureHeader { CallId = Target.Header.CallId },
-                };
-            }
-
-            // ! tells its answer's step, or why it did not go, to whoever listens; built here, out of
-            // the async Send, so that a request holds no step of its own while nobody listens. A call
-            // no longer answered takes no failure
-            private void Told(object? answered, Exception? reason)
-            {
-                if (answering.Started is { } started && (reason is null || !answering.Signal.IsCancellationRequested))
-                {
-                    resolver.Traced(new DebugStep(DebugDirection.Tx, resolver.Type)
-                    {
-                        CallId = Target.Header.CallId,
-                        ConnectionHandle = Target.ConnectionHandle,
-                        Error = reason,
-                        IsAnswered = true,
-                        Rx = answering.Request,
-                        Started = started,
-                        Tx = answered,
-                    });
-                }
+                manager._trace.Trace(Procedure, step with { Error = failure });
             }
         }
     }

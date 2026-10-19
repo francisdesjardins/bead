@@ -41,18 +41,11 @@ public sealed record RouterCoreOptions
 /// Everything it holds is touched on its own serial scheduler, as Bead's TypeScript core is on its one thread;
 /// its public methods may be called from any thread.
 /// </summary>
-public sealed class RouterCore : IDisposable
+public sealed partial class RouterCore : IDisposable
 {
     // constants
 
     private const string Disposed = "the router was disposed";
-
-    // what a failure's envelope holds besides its detail: its prefix, the announcement it may
-    // carry, and its record
-    private const int FailureOverheadBytes = 8 + Credential.AnnouncementBytes + 4;
-
-    // a chunk's header: its prefix, then its offset
-    private static readonly int ChunkHeaderBytes = EnvelopeCodec.HeaderBytesOf(new ChunkHeader { CallId = 1, IsLast = true, Offset = 0 });
 
     // what a relay that does not verify takes at step 1 of section 14.3: none and OPAQUE it resolves,
     // a JWT and an ELSEWHERE it forwards
@@ -60,21 +53,16 @@ public sealed class RouterCore : IDisposable
 
     private readonly IRouterCorePort _port;
     private readonly RouterSide _side;
-    private readonly int _detailBytes;
-    private readonly int _wholeBytes;
-    private readonly int _payloadBytesPerChunk;
+    private readonly RouterWriter _writer;
+    private readonly PayloadPlacement _placement;
     private readonly TimeProvider _clock;
     private readonly TaskScheduler _resolverScheduler;
     private readonly ReceivingTransfers _receivings;
     private readonly SendingTransfers _sendings = new();
-    private readonly PendingCalls _pendingCalls;
+    private readonly RouterRequester _requester;
     private readonly AnsweringCalls _answeringCalls;
     private readonly ConcurrentDictionary<ProcedureAddress, Registered> _resolvers = new();
     private readonly ConcurrentDictionary<ushort, int> _services = new();
-
-    // what each connection was last told of its session: a token, none once told it ended; a
-    // connection never told has no entry
-    private readonly Dictionary<string, SessionToken?> _announced = [];
 
     // the handler each request was routed to, by the very header dispatched
     private readonly ConditionalWeakTable<RequestHeader, IRequestHandler> _handlers = [];
@@ -106,52 +94,42 @@ public sealed class RouterCore : IDisposable
         _resolverScheduler = options?.ResolverScheduler ?? TaskScheduler.Default;
         _metrics = options?.Metrics;
 
-        // a failure's detail fits in an envelope, whatever the limit of a detail says
-        _detailBytes = Math.Min(Limits.MaximumDetailBytes, Limits.MaximumEnvelopeBytes - FailureOverheadBytes);
+        _writer = new RouterWriter(_port, new RouterWriter.Options
+        {
+            Limits = Limits,
+            IsDisposed = () =>
+            {
+                return _isDisposed;
+            },
+        });
 
-        // the largest envelope a payload goes whole in, and the bytes a chunk carries
-        _wholeBytes = Math.Min(Limits.ChunkBytes, Limits.MaximumEnvelopeBytes);
-        _payloadBytesPerChunk = Transfer.ChunkPayloadBytes(Limits, ChunkHeaderBytes);
+        _placement = new PayloadPlacement(Limits);
         _receivings = new ReceivingTransfers(new ReceivingTransfersOptions
         {
             Limits = Limits,
-            PayloadBytesPerChunk = _payloadBytesPerChunk,
+            PayloadBytesPerChunk = _placement.PayloadBytesPerChunk,
             Post = Post,
             SendCredit = (call, creditEnd) =>
             {
-                SendReporting(
+                _writer.SendReporting(
                     new Envelope { Header = new CreditHeader { CallId = call.CallId, CreditEnd = creditEnd } },
                     call.ConnectionHandle);
             },
             Clock = _clock,
         });
 
-        // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
-        // transfers it sends and receives
-        _pendingCalls = new PendingCalls(
-            _side,
-            new PendingCallsOptions
-            {
-                IsCallIdInUse = (callId, connectionHandle) =>
-                {
-                    return _port.IsCallIdInUse(callId, connectionHandle);
-                },
-                LastCallId = options?.LastCallId,
-                OnRemove = (pendingRequest) =>
-                {
-                    if (pendingRequest.Receiving is { } receiving)
-                    {
-                        _receivings.Close(receiving.Transfer);
-                    }
-
-                    if (pendingRequest.Sending is { } sending)
-                    {
-                        _sendings.Close(sending);
-                    }
-                },
-                Post = Post,
-                Clock = _clock,
-            });
+        _requester = new RouterRequester(new RequesterPort(this), new RouterRequester.Options
+        {
+            Side = _side,
+            Clock = _clock,
+            Limits = Limits,
+            Metrics = _metrics,
+            LastCallId = options?.LastCallId,
+            Writer = _writer,
+            Placement = _placement,
+            Receivings = _receivings,
+            Sendings = _sendings,
+        });
         _answeringCalls = new AnsweringCalls(new AnsweringCallsOptions
         {
             Limits = Limits,
@@ -214,25 +192,10 @@ public sealed class RouterCore : IDisposable
         };
     }
 
-    private static bool IsTimeout(TimeSpan delay)
-    {
-        return delay > TimeSpan.Zero && delay != Timeout.InfiniteTimeSpan;
-    }
-
     // whether every byte of a transfer came
     private static bool IsWhole(Receiving receiving)
     {
         return receiving.Incoming.Contiguous == receiving.Incoming.Total;
-    }
-
-    // a chunk's envelope, on its call id
-    private static Envelope ChunkEnvelopeOf(uint callId, Chunk chunk)
-    {
-        return new Envelope
-        {
-            Header = new ChunkHeader { CallId = callId, IsLast = chunk.IsLast, Offset = chunk.Offset },
-            Payload = chunk.Bytes,
-        };
     }
 
     private static Failure ProtocolFailureOf(ProtocolCode code, string detail = "")
@@ -240,25 +203,20 @@ public sealed class RouterCore : IDisposable
         return new Failure { Code = (ushort)code, Detail = detail, Scope = FailureScope.Protocol };
     }
 
-    private static Failure TooLargeOf(long length, int limit)
+    private static FailureException LocalOf(Failure failure, (RouterSide Side, IEnvelopeHeader? Header) raised)
     {
-        return ProtocolFailureOf(ProtocolCode.PayloadTooLarge, $"a payload is {limit} bytes at most, not {length}");
-    }
-
-    private FailureException LocalOf(Failure failure, IEnvelopeHeader? header = null)
-    {
-        return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, _side))
+        return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, raised.Side))
         {
-            Header = header is null ? null : Redact(header),
+            Header = raised.Header is null ? null : Redact(raised.Header),
         };
     }
 
     // a call counted as it starts, under its series, at this instant
-    private StartedCall StartedOf(CallSeries series)
+    private static StartedCall StartedOf(CallSeries series, TimeProvider clock)
     {
         series.Start();
 
-        return new StartedCall { Clock = _clock, Series = series, Timestamp = _clock.GetTimestamp() };
+        return new StartedCall { Clock = clock, Series = series, Timestamp = clock.GetTimestamp() };
     }
 
     // a call this side answers ends, once, whichever way it ends first
@@ -274,13 +232,7 @@ public sealed class RouterCore : IDisposable
     // what the core raises itself about an envelope, for the side to hear
     private void Report(Failure failure, (string ConnectionHandle, IEnvelopeHeader Header) about)
     {
-        _port.Report(LocalOf(failure, about.Header), about.ConnectionHandle);
-    }
-
-    // the bytes a payload of `handler` holds at most: its own limit, within the router's
-    private int PayloadLimitOf(int? maximumPayloadBytes)
-    {
-        return Math.Min(maximumPayloadBytes ?? int.MaxValue, Limits.MaximumPayloadBytes);
+        _port.Report(LocalOf(failure, (_side, about.Header)), about.ConnectionHandle);
     }
 
     // whether a call id is the peer's to open on this connection, and free: a refusal on it is answered
@@ -295,630 +247,6 @@ public sealed class RouterCore : IDisposable
     internal void Post(Action action)
     {
         Loop.Post(action);
-    }
-
-    // sends an envelope; `onHandOff` runs once the transport has it, before it settles
-    private Task Deliver(Envelope envelope, string connectionHandle, Action? onHandOff = null)
-    {
-        return Carrying(envelope, (connectionHandle, null, onHandOff, null));
-    }
-
-    // sends an envelope with what its transport carries beside it — a request's presenting
-    // ELSEWHERE — and none for any other; `OnHandOff` runs once the transport has it, before it
-    // settles. A notification counts into its procedure's series as it is handed off, or as it
-    // cannot be (spec/debugging.md 10.1); one its transport refuses after keeps its count
-    private async Task Carrying(Envelope envelope, (string ConnectionHandle, string? Carried, Action? OnHandOff, NotifyingSeries? Notifying) going)
-    {
-        var (connectionHandle, carried, onHandOff, notifying) = going;
-        Task sending;
-        Action restore;
-
-        try
-        {
-            (sending, restore) = HandOver(envelope, (connectionHandle, carried));
-        }
-        catch
-        {
-            notifying?.Failed();
-
-            throw;
-        }
-
-        notifying?.Sent();
-        onHandOff?.Invoke();
-
-        try
-        {
-            await sending;
-        }
-        catch
-        {
-            restore();
-
-            throw;
-        }
-    }
-
-    // hands an envelope to the transport, traced for whoever listens: what the transport settles,
-    // and what undoes its announcement should it not go out
-    private (Task Sending, Action Restore) HandOver(Envelope envelope, (string ConnectionHandle, string? Carried) going)
-    {
-        var (connectionHandle, carried) = going;
-
-        // a disposed router is done with its transport: nothing more goes out on it
-        if (_isDisposed)
-        {
-            throw new DisconnectException(Disposed);
-        }
-
-        // a failure, a credit and a cancel carry no payload of their own
-        if (envelope.Kind is not (EnvelopeKind.Cancel or EnvelopeKind.Credit or EnvelopeKind.Failure)
-            && envelope.Payload.Length > Limits.MaximumPayloadBytes)
-        {
-            throw LocalOf(TooLargeOf(envelope.Payload.Length, Limits.MaximumPayloadBytes), envelope.Header);
-        }
-
-        var (announced, restore) = Announce(envelope, connectionHandle);
-
-        try
-        {
-            var bytes = EnvelopeCodec.WriteEnvelope(announced, _detailBytes);
-
-            // one past its limit, the peer would refuse
-            if (bytes.Length > Limits.MaximumEnvelopeBytes)
-            {
-                throw LocalOf(
-                    ProtocolFailureOf(
-                        ProtocolCode.PayloadTooLarge,
-                        $"an envelope is {Limits.MaximumEnvelopeBytes} bytes at most, not {bytes.Length}"),
-                    envelope.Header);
-            }
-
-            // * one check an envelope while nobody listens: redacted for a listener alone
-            if (_port.IsTracing)
-            {
-                _port.Trace(DebugDirection.Tx, new TracedEnvelope(connectionHandle, Redact(announced.Header)));
-            }
-
-            return (_port.Send(new TransportMessage(bytes, false) { Credential = carried }, connectionHandle), restore);
-        }
-        catch
-        {
-            restore();
-
-            throw;
-        }
-    }
-
-    // an answer as it goes out to a connection: it carries the connection's session when it changed
-    // since the last one announced, recorded as it is written, so answers that go out together
-    // announce in the order they were written; what it gives back undoes that, should it not go out
-    private (Envelope Envelope, Action Restore) Announce(Envelope envelope, string connectionHandle)
-    {
-        static void Unchanged()
-        {
-        }
-
-        if (envelope.Header is not (ResultHeader or FailureHeader))
-        {
-            return (envelope, Unchanged);
-        }
-
-        var current = _port.SessionTokenOf(connectionHandle);
-        var hadPrevious = _announced.TryGetValue(connectionHandle, out var previous);
-
-        if (current == previous)
-        {
-            return (envelope, Unchanged);
-        }
-
-        _announced[connectionHandle] = current;
-
-        // its token, once it opened or was drawn anew; NONE, once it ended
-        var announcement = current is { } token ? Credential.Opaque(token) : Credential.None;
-        IEnvelopeHeader header = envelope.Header is ResultHeader result
-            ? result with { Credential = announcement }
-            : (FailureHeader)envelope.Header with { Credential = announcement };
-
-        return (
-            new Envelope { Header = header, Payload = envelope.Payload, Failure = envelope.Failure },
-            () =>
-            {
-                // an answer that did not go out announced nothing: what it recorded is undone,
-                // unless something since recorded over it or forgot the connection
-                if (_announced.TryGetValue(connectionHandle, out var recorded) && recorded == current)
-                {
-                    if (hadPrevious)
-                    {
-                        _announced[connectionHandle] = previous;
-                    }
-                    else
-                    {
-                        _announced.Remove(connectionHandle);
-                    }
-                }
-            }
-        );
-    }
-
-    // sends an envelope no call waits on: what keeps it from going out is reported
-    private void SendReporting(Envelope envelope, string connectionHandle)
-    {
-        _ = Reporting(Deliver(envelope, connectionHandle), connectionHandle);
-    }
-
-    private async Task Reporting(Task sending, string connectionHandle)
-    {
-        try
-        {
-            await sending;
-        }
-        catch (Exception reason)
-        {
-            _port.Report(reason, connectionHandle);
-        }
-    }
-
-    // tells the peer a call this side opened is cancelled, once, and reserves its call id in the same
-    // step, so nothing drawn meanwhile takes it; a cancel that cannot go out is reported
-    private void SendCancel(CallAddress call, TimeSpan? timeout)
-    {
-        // a disposed router sends nothing; a call id reserved already had its cancel
-        if (_isDisposed || _pendingCalls.IsReserved(call.CallId, call.ConnectionHandle))
-        {
-            return;
-        }
-
-        _pendingCalls.Reserve(call, timeout);
-        SendReporting(new Envelope { Header = new CancelHeader { CallId = call.CallId } }, call.ConnectionHandle);
-    }
-
-    // how long a call id stays reserved once its call ends: as its timeout says — and, once its
-    // result came in part, as long as the peer keeps the call abandoned, should that be longer, since
-    // what the credit let the peer send may still come
-    private TimeSpan ReservedFor(PendingRequest pendingRequest, TimeSpan? timeout = null)
-    {
-        var given = timeout ?? pendingRequest.Timeout;
-
-        if (pendingRequest.Receiving is null)
-        {
-            return given;
-        }
-
-        var reservation = PendingCalls.ReservationOf(given);
-
-        return reservation > Limits.TransferInactivityTimeout ? reservation : Limits.TransferInactivityTimeout;
-    }
-
-    // ends a call this side waits on before its answer came whole: forgotten first, so what it holds
-    // goes with it, then the peer told to cancel it, then the caller told; a call ended already ends
-    // no more
-    private void EndPending(Exception reason, CallAddress call, PendingRequest pendingRequest)
-    {
-        if (!ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
-        {
-            return;
-        }
-
-        _pendingCalls.Forget(call);
-        SendCancel(call, ReservedFor(pendingRequest));
-        pendingRequest.Reject(reason);
-    }
-
-    // sets a waiting call's timer going again, which its caller waits on too: past `delay`, a
-    // TimeoutException; none for no positive delay, nor for a call ended already. A timer that fired
-    // as it was set going again — its end on its way to the scheduler — ends nothing
-    private void Wait(TimeSpan delay, CallAddress call, PendingRequest pendingRequest)
-    {
-        if (!ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
-        {
-            return;
-        }
-
-        pendingRequest.Timer?.Dispose();
-        pendingRequest.TimerGeneration += 1;
-
-        var generation = pendingRequest.TimerGeneration;
-
-        pendingRequest.Timer = IsTimeout(delay)
-            ? _clock.CreateTimer(
-                (_) =>
-                {
-                    Post(() =>
-                    {
-                        if (pendingRequest.TimerGeneration != generation)
-                        {
-                            return;
-                        }
-
-                        EndPending(
-                            new TimeoutException(string.Create(CultureInfo.InvariantCulture, $"no answer came in {delay.TotalMilliseconds} milliseconds")),
-                            call,
-                            pendingRequest);
-                    });
-                },
-                null,
-                delay,
-                Timeout.InfiniteTimeSpan)
-            : null;
-    }
-
-    // how a payload goes after its header: whole — none — or as a transfer, a result's header counted
-    // with the announcement it may carry; or not at all, and the failure says why
-    private (OutgoingTransfer? Transfer, Failure? Refusal) TransferOf(
-        ReadOnlyMemory<byte> payload,
-        (IEnvelopeHeader Header, int MaximumPayloadBytes) going)
-    {
-        var (header, maximumPayloadBytes) = going;
-        var announcementBytes = header is ResultHeader ? Credential.AnnouncementBytes : 0;
-
-        if (payload.Length > maximumPayloadBytes)
-        {
-            return (null, TooLargeOf(payload.Length, maximumPayloadBytes));
-        }
-
-        if (EnvelopeCodec.HeaderBytesOf(header) + announcementBytes + payload.Length <= _wholeBytes)
-        {
-            return (null, null);
-        }
-
-        if (Limits.MaximumTransfers == 0)
-        {
-            return (null, ProtocolFailureOf(
-                ProtocolCode.PayloadTooLarge,
-                $"a payload of {payload.Length} bytes goes as a transfer, which this side sends none of"));
-        }
-
-        // only a request and a result open a transfer
-        IEnvelopeHeader opening = header is RequestHeader request
-            ? request with { Total = payload.Length }
-            : (ResultHeader)header with { Total = payload.Length };
-        var openingHeaderBytes = EnvelopeCodec.UnboundedHeaderBytesOf(opening);
-        var openingBytes = _wholeBytes - openingHeaderBytes - announcementBytes;
-
-        // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
-        // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
-        if (openingHeaderBytes > EnvelopeCodec.MaximumHeaderBytes)
-        {
-            return (null, ProtocolFailureOf(
-                ProtocolCode.PayloadTooLarge,
-                $"a payload of {payload.Length} bytes goes as a transfer, whose opening's header of {openingHeaderBytes} bytes passes {EnvelopeCodec.MaximumHeaderBytes}"));
-        }
-
-        if (openingBytes < 1)
-        {
-            return (null, ProtocolFailureOf(
-                ProtocolCode.PayloadTooLarge,
-                $"a payload of {payload.Length} bytes goes as a transfer, whose opening's header of {openingHeaderBytes} bytes leaves it no byte within {_wholeBytes}"));
-        }
-
-        return (new OutgoingTransfer(payload, (openingBytes, _payloadBytesPerChunk)), null);
-    }
-
-    // the credential a call of this side's own presents, as its options ask, and what its transport
-    // carries beside it: OPAQUE stands for the connection's session as this side knows it, and a
-    // side that knows none fails the call before it goes, as its peer would refuse it; a bearer
-    // credential its transport cannot carry, or would carry off the machine in the clear, fails it
-    // before it goes too, DESTINATION_UNREACHABLE, nothing tried
-    private (Credential? Presented, string? Carried) PresentedOf(CoreRequest request)
-    {
-        var asked = request.Options.Credential;
-        var connectionHandle = request.ConnectionHandle;
-        var known = asked is { Scheme: CredentialScheme.Opaque, SessionToken: null } ? _port.KnownSessionTokenOf(connectionHandle) : null;
-        var (presented, carried, refusal) = CallSession.PresentedCredentialOf(asked, known);
-
-        // * what the call presents, against what the connection carries: over a WebSocket, the bytes
-        // its upgrade carried alone (spec 13.4)
-        var carries = carried is { } bytes && _port.Carries(bytes, connectionHandle);
-
-        refusal ??= CallSession.UncarriedOf(presented, (carries, _port.IsSecure(connectionHandle)));
-
-        if (refusal is not null)
-        {
-            throw new FailureException(refusal, new FailureException.Raised(FailureOrigin.Local, _side))
-            {
-                DestinationId = request.Options.DestinationId,
-                ProcedureAddress = request.Procedure.Address,
-            };
-        }
-
-        return (presented, carried);
-    }
-
-    // what a request of the side's own goes out as, or why it does not, before it goes: a
-    // connection not open, its credential, no call id free, its payload past its limit, or a
-    // transfer its opening's header leaves no room
-    private (RequestHeader Header, OutgoingTransfer? Outgoing, string? Carried) HeaderOf(
-        ReadOnlyMemory<byte> payload,
-        (CoreRequest Request, int MaximumPayloadBytes) going)
-    {
-        var (request, maximumPayloadBytes) = going;
-        var options = request.Options;
-        var procedure = request.Procedure;
-
-        // * a refusal its router judged before the call came, then its credential's, come before the
-        // connection's state, as on the TypeScript side, whose router judges both before its core
-        if (request.Refusal is { } judged)
-        {
-            throw new FailureException(judged, new FailureException.Raised(FailureOrigin.Local, _side))
-            {
-                DestinationId = options.DestinationId,
-                ProcedureAddress = procedure.Address,
-            };
-        }
-
-        var (credential, carried) = PresentedOf(request);
-
-        // a call to a connection not open fails as one whose connection closes: one race with a close
-        if (!_port.IsOpen(request.ConnectionHandle))
-        {
-            throw new DisconnectException($"{request.ConnectionHandle} is not an open connection");
-        }
-
-        var callId = _pendingCalls.Draw(request.ConnectionHandle)
-            ?? throw new FailureException(
-                ProtocolFailureOf(ProtocolCode.CapacityExceeded, $"every call id of {request.ConnectionHandle} is in use"),
-                new FailureException.Raised(FailureOrigin.Local, _side))
-            {
-                DestinationId = options.DestinationId,
-                ProcedureAddress = procedure.Address,
-            };
-        var header = new RequestHeader
-        {
-            CallId = callId,
-            ServiceId = procedure.ServiceId,
-            ProcedureId = procedure.ProcedureId,
-            DestinationId = options.DestinationId,
-            OpensSubscription = request.OpensSubscription,
-            Paced = request.Paced,
-            Credential = credential,
-        };
-
-        // how it goes is decided before anything is kept of it: past its limit, nothing goes
-        var (outgoing, refusal) = TransferOf(payload, (header, maximumPayloadBytes));
-
-        if (refusal is not null)
-        {
-            throw new FailureException(refusal, new FailureException.Raised(FailureOrigin.Local, _side))
-            {
-                DestinationId = options.DestinationId,
-                Header = Redact(header),
-                ProcedureAddress = procedure.Address,
-            };
-        }
-
-        return (header, outgoing, carried);
-    }
-
-    // lays out the header `request` goes out with, its call id aside: a JWT, whose token its caller
-    // gives, may be longer than any header holds; OPAQUE, 16 bytes, and ELSEWHERE, none, always fit,
-    // OPAQUE's token known only once the call starts.
-    // Throws an ArgumentException past 1,020 bytes
-    private static void AssertHeaderHolds(CoreRequest request)
-    {
-        var options = request.Options;
-        var asked = options.Credential is { Scheme: not (CredentialScheme.None or CredentialScheme.Opaque or CredentialScheme.Elsewhere) } given
-            ? given
-            : (Credential?)null;
-
-        EnvelopeCodec.HeaderBytesOf(new RequestHeader
-        {
-            CallId = 1,
-            ServiceId = request.Procedure.ServiceId,
-            ProcedureId = request.Procedure.ProcedureId,
-            DestinationId = options.DestinationId,
-            OpensSubscription = request.OpensSubscription,
-            Paced = request.Paced,
-            Credential = asked,
-        });
-    }
-
-    private async Task<RouterResult> RequestOnLoop(ReadOnlyMemory<byte> payload, CoreRequest request)
-    {
-        var options = request.Options;
-        var procedure = request.Procedure;
-        var token = options.CancellationToken;
-
-        // what no call can take draws nothing
-        if (procedure.MaximumPayloadBytes is < 1)
-        {
-            throw new ArgumentException(
-                $"a payload's limit is a whole number above 0, not {procedure.MaximumPayloadBytes}",
-                nameof(request));
-        }
-
-        // held, which its timer, its reservation and its TimeoutException all take
-        var timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), options.Timeout);
-
-        // ! a credential no call presents is a programmer's error, before a token cancelled already,
-        // as the TypeScript side reads a call's credential before its signal (spec/debugging.md 9.3)
-        CallSession.AssertPresentable(options.Credential);
-
-        // drawn once the call starts: a cancelled token draws nothing
-        token.ThrowIfCancellationRequested();
-
-        // ! a credential no header of its request holds, whatever its payload, is a programmer's
-        // error, thrown before the call starts and not counted (spec 4.4)
-        AssertHeaderHolds(request);
-
-        // * nothing made it a programmer's error: the call starts (spec/debugging.md 9.3), and each
-        // refusal after ends it in this turn
-        var counted = _metrics is { } metrics ? StartedOf(request.Series?.Calls ?? metrics.Made) : (StartedCall?)null;
-        var maximumPayloadBytes = PayloadLimitOf(procedure.MaximumPayloadBytes);
-        RequestHeader header;
-        OutgoingTransfer? outgoing;
-        string? carried;
-
-        try
-        {
-            (header, outgoing, carried) = HeaderOf(payload, (request, maximumPayloadBytes));
-        }
-        catch (Exception reason)
-        {
-            counted?.End(StartedCall.EndingOf(reason));
-
-            throw;
-        }
-
-        var callId = header.CallId;
-        var pendingRequest = new PendingRequest
-        {
-            Carried = carried,
-            Counted = counted,
-            DestinationId = options.DestinationId,
-            MaximumPayloadBytes = maximumPayloadBytes,
-            OnSent = request.OnSent,
-            ProcedureAddress = procedure.Address,
-            Timeout = timeout,
-        };
-        var call = new CallAddress(callId, request.ConnectionHandle);
-
-        _pendingCalls.Add(call, pendingRequest);
-        request.OnCallId?.Invoke(callId);
-        Wait(timeout, call, pendingRequest);
-
-        // its token ends it: rejected here, on the core's scheduler
-        using var registration = token.Register(() =>
-        {
-            Post(() =>
-            {
-                if (ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
-                {
-                    pendingRequest.Reject(new OperationCanceledException($"call {callId} was cancelled", token));
-                }
-            });
-        });
-
-        if (outgoing is null)
-        {
-            _ = SendRequest(new Envelope { Header = header, Payload = payload }, (call, pendingRequest));
-        }
-        else
-        {
-            SendRequestTransfer(outgoing, (header, call, pendingRequest));
-        }
-
-        try
-        {
-            return await pendingRequest.Task;
-        }
-        catch (OperationCanceledException) when (pendingRequest.IsSent && ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
-        {
-            // gone out and unanswered, ended by its token: the peer is told before the caller hears
-            // of it, so a call made again in its place goes out behind the cancel
-            _pendingCalls.Forget(call);
-            SendCancel(call, ReservedFor(pendingRequest));
-
-            throw;
-        }
-        finally
-        {
-            // its own entry only: a response or a close took it out already, and another may hold it
-            _pendingCalls.Forget(call, pendingRequest);
-        }
-    }
-
-    // a request whole, or a transfer's opening: its activity is said once its last bytes went
-    private async Task SendRequest(Envelope envelope, (CallAddress Call, PendingRequest PendingRequest) waiting)
-    {
-        var (call, pendingRequest) = waiting;
-
-        void HandedOff()
-        {
-            pendingRequest.IsSent = true;
-            pendingRequest.OnSent?.Invoke(true);
-        }
-
-        try
-        {
-            await Carrying(envelope, (call.ConnectionHandle, pendingRequest.Carried, HandedOff, null));
-
-            if (((RequestHeader)envelope.Header).Total is null)
-            {
-                _port.Activity(RouterActivity.Request, call.ConnectionHandle);
-            }
-        }
-        catch (Exception reason)
-        {
-            // handed over, then refused by the transport: nothing of it went out
-            if (pendingRequest.IsSent)
-            {
-                pendingRequest.OnSent?.Invoke(false);
-            }
-
-            // ! a dispose that closed the transport under it rejects it as disposed, as its rejection
-            // posted after would: which comes first is a race, and the TypeScript side has none
-            pendingRequest.Reject(_isDisposed ? new DisconnectException($"{Disposed} before the answer") : reason);
-        }
-    }
-
-    // a request as a transfer: its opening, then each chunk credited; the call waits on the
-    // transfer's inactivity, then on its own timeout once the last chunk is handed off
-    private void SendRequestTransfer(OutgoingTransfer outgoing, (RequestHeader Header, CallAddress Call, PendingRequest PendingRequest) waiting)
-    {
-        var (header, call, pendingRequest) = waiting;
-
-        void Progress()
-        {
-            Wait(Limits.TransferInactivityTimeout, call, pendingRequest);
-        }
-
-        // the last one handed off, the call waits on its timeout — unless a result opened as it went,
-        // which waits on its own inactivity
-        void Sent()
-        {
-            if (pendingRequest.Receiving is null)
-            {
-                Wait(pendingRequest.Timeout, call, pendingRequest);
-            }
-        }
-
-        async Task SendChunk(Chunk chunk)
-        {
-            try
-            {
-                await Deliver(ChunkEnvelopeOf(call.CallId, chunk), call.ConnectionHandle, chunk.IsLast ? Sent : Progress);
-            }
-            catch (Exception reason)
-            {
-                // one that cannot go out ends the call: the peer, which holds a part of it, cancels it
-                EndPending(reason, call, pendingRequest);
-
-                return;
-            }
-
-            if (chunk.IsLast)
-            {
-                _port.Activity(RouterActivity.Request, call.ConnectionHandle);
-            }
-        }
-
-        void Send(Chunk chunk)
-        {
-            _ = SendChunk(chunk);
-        }
-
-        Progress();
-
-        // kept before its opening goes, so a credit that comes back as it goes finds it
-        pendingRequest.Sending = _sendings.Open(outgoing, (call, Progress, Send));
-        _ = SendRequest(new Envelope { Header = header with { Total = outgoing.Total }, Payload = outgoing.Opening }, (call, pendingRequest));
-    }
-
-    private void CancelOnLoop(CallAddress call, TimeSpan? timeout)
-    {
-        var pendingRequest = _pendingCalls.Get(call);
-
-        _pendingCalls.Forget(call);
-
-        // a request the transport never had leaves nothing at the other end to cancel
-        if (pendingRequest is null || pendingRequest.IsSent)
-        {
-            SendCancel(call, pendingRequest is null ? timeout : ReservedFor(pendingRequest, timeout));
-        }
-
-        // heard after the cancel went out, so a call made again in its place goes out behind it
-        pendingRequest?.Reject(new OperationCanceledException($"call {call.CallId} was cancelled"));
     }
 
     private async Task RespondOnLoop(RouterAnswer response, AnswerTarget target)
@@ -955,7 +283,7 @@ public sealed class RouterCore : IDisposable
                 : null;
 
         var transfer = response.Failure is null
-            ? ResultTransferOf(response.Payload, (answering, result, PayloadLimitOf(resolver?.MaximumPayloadBytes), header))
+            ? ResultTransferOf(response.Payload, (answering, result, _placement.PayloadLimitOf(resolver?.MaximumPayloadBytes), header))
             : null;
         var undo = _port.BeforeAnswer(new AnswerInfo(target, response.Failure is not null, resolver) { Session = answering?.Session });
 
@@ -971,11 +299,11 @@ public sealed class RouterCore : IDisposable
         {
             if (transfer is null)
             {
-                await Deliver(
+                await _writer.Deliver(
                     response.Failure is { } failure
                         ? new Envelope { Header = new FailureHeader { CallId = callId }, Failure = failure }
                         : new Envelope { Header = result, Payload = response.Payload },
-                    connectionHandle,
+                    (connectionHandle,
                     () =>
                     {
                         // * answered: its call ends as its answer is handed to its transport
@@ -985,7 +313,8 @@ public sealed class RouterCore : IDisposable
                             EndAnswered(answering, response.Failure is { } failed ? (CallOutcome.Failure, failed) : (CallOutcome.Result, null));
                             _answeringCalls.Close(call, answering);
                         }
-                    });
+                    }
+                ));
             }
             else
             {
@@ -1014,11 +343,11 @@ public sealed class RouterCore : IDisposable
         ReadOnlyMemory<byte> payload,
         (AnsweringCall? Answering, ResultHeader Header, int MaximumPayloadBytes, RequestHeader Request) going)
     {
-        var (outgoing, refusal) = TransferOf(payload, (going.Header, going.MaximumPayloadBytes));
+        var (outgoing, refusal) = _placement.TransferOf(payload, (going.Header, going.MaximumPayloadBytes));
 
         if (refusal is not null)
         {
-            throw LocalOf(refusal, going.Header);
+            throw LocalOf(refusal, (_side, going.Header));
         }
 
         if (outgoing is null)
@@ -1031,8 +360,8 @@ public sealed class RouterCore : IDisposable
             throw LocalOf(
                 ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
-                    $"a subscription's result goes in one envelope, of {_wholeBytes} bytes at most"),
-                going.Header);
+                    $"a subscription's result goes in one envelope, of {_placement.WholeBytes} bytes at most"),
+                (_side, going.Header));
         }
 
         if (going.Answering is null)
@@ -1108,8 +437,8 @@ public sealed class RouterCore : IDisposable
                             string.Create(CultureInfo.InvariantCulture, $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"));
 
                         EndAnswered(answering, (CallOutcome.Failure, stalled));
-                        Fail(LocalOf(stalled, header));
-                        SendReporting(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = stalled }, connectionHandle);
+                        Fail(LocalOf(stalled, (_side, header)));
+                        _writer.SendReporting(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = stalled }, connectionHandle);
                     });
                 },
                 null,
@@ -1129,7 +458,7 @@ public sealed class RouterCore : IDisposable
         {
             try
             {
-                await Deliver(ChunkEnvelopeOf(header.CallId, chunk), connectionHandle, chunk.IsLast ? Sent : Progress);
+                await _writer.Deliver(PayloadPlacement.ChunkEnvelopeOf(header.CallId, chunk), (connectionHandle, chunk.IsLast ? Sent : Progress));
             }
             catch (Exception reason)
             {
@@ -1148,7 +477,7 @@ public sealed class RouterCore : IDisposable
         {
             try
             {
-                await Deliver(new Envelope { Header = header with { Total = outgoing.Total }, Payload = outgoing.Opening }, connectionHandle);
+                await _writer.Deliver(new Envelope { Header = header with { Total = outgoing.Total }, Payload = outgoing.Opening }, connectionHandle);
             }
             catch (Exception reason)
             {
@@ -1333,34 +662,18 @@ public sealed class RouterCore : IDisposable
 
         // an answer of this layout, to a call waiting?
         var isAnswer = kind is (byte)EnvelopeKind.Result or (byte)EnvelopeKind.Failure && isThisLayout;
-        var call = new CallAddress(callId, connectionHandle);
-        var pendingRequest = isAnswer ? _pendingCalls.Get(call) : null;
 
-        if (pendingRequest is null)
+        if (isAnswer)
         {
-            // an answer of this layout on a call id reserved is late, and dropped in silence
-            if (isAnswer && _pendingCalls.IsReserved(callId, connectionHandle))
-            {
-                return;
-            }
-
-            if (!isReported)
-            {
-                _port.Report(failure, connectionHandle);
-            }
+            _requester.GateMalformedAnswer(failure, (new CallAddress(callId, connectionHandle), isReported));
 
             return;
         }
 
-        // the call it answers would otherwise wait out its timeout; the peer is told
-        EndPending(
-            new FailureException(failure.Failure, new FailureException.Raised(failure.Origin, failure.Side))
-            {
-                DestinationId = pendingRequest.DestinationId,
-                ProcedureAddress = pendingRequest.ProcedureAddress,
-            },
-            call,
-            pendingRequest);
+        if (!isReported)
+        {
+            _port.Report(failure, connectionHandle);
+        }
     }
 
     // a request answered at the gate, its header unread: it starts and ends in one turn, under
@@ -1368,19 +681,20 @@ public sealed class RouterCore : IDisposable
     // out is reported
     private async Task AnsweringAtGate(Failure failure, (string ConnectionHandle, uint CallId) gated)
     {
-        var counted = _metrics is { } metrics ? StartedOf(metrics.Answered) : (StartedCall?)null;
+        var counted = _metrics is { } metrics ? StartedOf(metrics.Answered, _clock) : (StartedCall?)null;
         var isHandedOff = false;
 
         try
         {
-            await Deliver(
+            await _writer.Deliver(
                 new Envelope { Header = new FailureHeader { CallId = gated.CallId }, Failure = failure },
-                gated.ConnectionHandle,
+                (gated.ConnectionHandle,
                 () =>
                 {
                     isHandedOff = true;
                     counted?.End((CallOutcome.Failure, failure));
-                });
+                }
+            ));
         }
         catch (Exception reason)
         {
@@ -1399,46 +713,27 @@ public sealed class RouterCore : IDisposable
     private void GateChunk(FailureException failure, (CallAddress Call, bool IsReported) gated)
     {
         var (call, isReported) = gated;
-        var invalid = ProtocolFailureOf(ProtocolCode.ChunkInvalid, failure.Failure.Detail);
 
         if (CallIds.SideOf(call.CallId) == _side)
         {
-            var pendingRequest = _pendingCalls.Get(call);
+            _requester.GateMalformedResultChunk(failure, gated);
 
-            if (pendingRequest?.Receiving is not null)
-            {
-                EndPending(
-                    new FailureException(invalid, new FailureException.Raised(FailureOrigin.Local, _side))
-                    {
-                        DestinationId = pendingRequest.DestinationId,
-                        ProcedureAddress = pendingRequest.ProcedureAddress,
-                    },
-                    call,
-                    pendingRequest);
-
-                return;
-            }
-
-            if (_pendingCalls.IsReserved(call.CallId, call.ConnectionHandle))
-            {
-                return;
-            }
+            return;
         }
-        else
+
+        var invalid = ProtocolFailureOf(ProtocolCode.ChunkInvalid, failure.Failure.Detail);
+        var receiving = _answeringCalls.ReceivingOf(call);
+
+        if (receiving is not null && !IsWhole(receiving.Transfer))
         {
-            var receiving = _answeringCalls.ReceivingOf(call);
+            Refuse(invalid, (receiving.Target, receiving.Answering));
 
-            if (receiving is not null && !IsWhole(receiving.Transfer))
-            {
-                Refuse(invalid, (receiving.Target, receiving.Answering));
+            return;
+        }
 
-                return;
-            }
-
-            if (_answeringCalls.AbandonedEndOf(call) is not null)
-            {
-                return;
-            }
+        if (_answeringCalls.AbandonedEndOf(call) is not null)
+        {
+            return;
         }
 
         if (!isReported)
@@ -1519,7 +814,7 @@ public sealed class RouterCore : IDisposable
         // refused or a call relayed
         if (_metrics is { } metrics)
         {
-            answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered);
+            answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered, _clock);
         }
 
         // one this side has no handler for: this peer relays nothing, to that destination or elsewhere
@@ -1742,12 +1037,12 @@ public sealed class RouterCore : IDisposable
 
         // admitted, past its procedure's limit — or the router's — it is refused, a transfer on the
         // total it declares, before any credit
-        var maximumPayloadBytes = PayloadLimitOf(resolver.MaximumPayloadBytes);
+        var maximumPayloadBytes = _placement.PayloadLimitOf(resolver.MaximumPayloadBytes);
         var length = header.Total ?? payload.Length;
 
         if (length > maximumPayloadBytes)
         {
-            Refuse(TooLargeOf(length, maximumPayloadBytes), dispatched);
+            Refuse(PayloadPlacement.TooLargeOf(length, maximumPayloadBytes), dispatched);
 
             return;
         }
@@ -1786,110 +1081,6 @@ public sealed class RouterCore : IDisposable
         _receivings.Grant(receiving);
     }
 
-    private void ReceiveAnswer(Envelope envelope, (string ConnectionHandle, bool MayOvertake) received)
-    {
-        var (connectionHandle, mayOvertake) = received;
-        var header = envelope.Header;
-        var call = new CallAddress(header.CallId, connectionHandle);
-
-        _port.OnAnswerReceived(header, connectionHandle);
-
-        var pendingRequest = _pendingCalls.Get(call);
-
-        if (pendingRequest is null)
-        {
-            // a failure may end a call the side keeps open once answered — a subscription
-            if (envelope.Failure is not null && _port.OnUnpairedFailure(envelope, connectionHandle))
-            {
-                return;
-            }
-
-            // one on a call id reserved is late, and dropped in silence
-            if (_pendingCalls.IsReserved(header.CallId, connectionHandle))
-            {
-                return;
-            }
-
-            Report(ProtocolFailureOf(ProtocolCode.CallUnknown), (connectionHandle, header));
-
-            return;
-        }
-
-        if (envelope.Failure is { } failure)
-        {
-            // out before it settles, so the same response again, even in the same read, pairs with
-            // nothing; a result it received in part goes with it, what that credit let the peer send
-            // dropped in silence behind its call id reserved
-            _pendingCalls.Forget(call, pendingRequest);
-
-            if (pendingRequest.Receiving is not null)
-            {
-                _pendingCalls.Reserve(call, ReservedFor(pendingRequest));
-            }
-
-            pendingRequest.Reject(new FailureException(failure, FailureException.RaisedOf(failure, _side))
-            {
-                DestinationId = pendingRequest.DestinationId,
-                Header = Redact(header),
-                MayOvertake = mayOvertake,
-                ProcedureAddress = pendingRequest.ProcedureAddress,
-            });
-            _port.Activity(RouterActivity.Response, connectionHandle);
-
-            return;
-        }
-
-        // a result that comes in a transfer answered the call: another answers nothing
-        if (pendingRequest.Receiving is not null)
-        {
-            Report(
-                ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, $"call {header.CallId} is answered already, by a transfer"),
-                (connectionHandle, header));
-
-            return;
-        }
-
-        var result = (ResultHeader)header;
-
-        if (result.Total is not { } total)
-        {
-            // out before it settles, so the same response again, even in the same read, pairs with nothing
-            _pendingCalls.Forget(call, pendingRequest);
-            pendingRequest.Resolve(new RouterResult(result, envelope.Payload));
-            _port.Activity(RouterActivity.Response, connectionHandle);
-
-            return;
-        }
-
-        // a transfer's opening is not its result: one refused — past its procedure's limit, say — ends
-        // the call, and the peer, which holds the result still, is told to cancel it; opened, the call
-        // waits on the rest, which one silent too long ends — its own timer, rather than the transfer's
-        var (receiving, refusal) = total > pendingRequest.MaximumPayloadBytes
-            ? (null, TooLargeOf(total, pendingRequest.MaximumPayloadBytes))
-            : _receivings.Open(envelope.Payload, (call, null, total));
-
-        if (receiving is null)
-        {
-            EndPending(
-                new FailureException(refusal!, new FailureException.Raised(FailureOrigin.Local, _side))
-                {
-                    DestinationId = pendingRequest.DestinationId,
-                    Header = Redact(header),
-                    ProcedureAddress = pendingRequest.ProcedureAddress,
-                },
-                call,
-                pendingRequest);
-
-            return;
-        }
-
-        Wait(Limits.TransferInactivityTimeout, call, pendingRequest);
-
-        // kept before its first credit goes, so a chunk that credit brings at once finds it
-        pendingRequest.Receiving = new ResultReceiving(result, receiving);
-        _receivings.Grant(receiving);
-    }
-
     private void ReceiveNotification(Envelope envelope, string connectionHandle)
     {
         var header = (NotificationHeader)envelope.Header;
@@ -1902,7 +1093,7 @@ public sealed class RouterCore : IDisposable
         }
 
         // one on a call id reserved was on its way, and is dropped in silence
-        if (_pendingCalls.IsReserved(header.CallId, connectionHandle))
+        if (_requester.IsReserved(header.CallId, connectionHandle))
         {
             return;
         }
@@ -1975,62 +1166,6 @@ public sealed class RouterCore : IDisposable
         }
     }
 
-    // a chunk of a call's result: the call is this side's
-    private void ReceiveResultChunk(Envelope envelope, (CallAddress Call, Chunk Chunk) received)
-    {
-        var (call, chunk) = received;
-        var pendingRequest = _pendingCalls.Get(call);
-
-        if (pendingRequest?.Receiving is not { } receiving)
-        {
-            // one on a call id reserved was on its way, and is dropped in silence
-            if (_pendingCalls.IsReserved(call.CallId, call.ConnectionHandle))
-            {
-                return;
-            }
-
-            ReceiveUnplaced(envelope, (call.ConnectionHandle, null, pendingRequest is not null));
-
-            return;
-        }
-
-        var (outcome, refusal) = _receivings.Place(receiving.Transfer, chunk);
-
-        switch (outcome)
-        {
-            case ChunkOutcome.Refused:
-                EndPending(
-                    new FailureException(refusal!, new FailureException.Raised(FailureOrigin.Local, _side))
-                    {
-                        DestinationId = pendingRequest.DestinationId,
-                        ProcedureAddress = pendingRequest.ProcedureAddress,
-                    },
-                    call,
-                    pendingRequest);
-                break;
-
-            // bytes placed are progress
-            case ChunkOutcome.Placed:
-                Wait(Limits.TransferInactivityTimeout, call, pendingRequest);
-                _receivings.Grant(receiving.Transfer);
-                break;
-            case ChunkOutcome.Complete:
-                var payload = _receivings.Complete(receiving.Transfer);
-
-                // out before it settles; what its credit let the peer send may still come, a copy or
-                // out of order, and its call id stays reserved, for it to be dropped in silence
-                _pendingCalls.Forget(call, pendingRequest);
-                _pendingCalls.Reserve(call, ReservedFor(pendingRequest));
-                pendingRequest.Resolve(new RouterResult(receiving.Header, payload));
-                _port.Activity(RouterActivity.Response, call.ConnectionHandle);
-                break;
-
-            // a chunk that brings nothing new is dropped in silence
-            case ChunkOutcome.Duplicate:
-                break;
-        }
-    }
-
     // a chunk of a transfer this side receives: on the peer's call id, of a request's payload; on
     // this side's, of a result's
     private void ReceiveChunk(Envelope envelope, string connectionHandle)
@@ -2040,7 +1175,7 @@ public sealed class RouterCore : IDisposable
 
         if (CallIds.SideOf(header.CallId) == _side)
         {
-            ReceiveResultChunk(envelope, received);
+            _requester.ReceiveResultChunk(envelope, received);
 
             return;
         }
@@ -2148,7 +1283,7 @@ public sealed class RouterCore : IDisposable
                 ReceiveRequest(request, (connectionHandle, envelope.Payload, message.Credential));
                 break;
             case ResultHeader or FailureHeader:
-                ReceiveAnswer(envelope, (connectionHandle, message.MayOvertake));
+                _requester.ReceiveAnswer(envelope, (connectionHandle, message.MayOvertake));
                 break;
             case NotificationHeader:
                 ReceiveNotification(envelope, connectionHandle);
@@ -2172,17 +1307,10 @@ public sealed class RouterCore : IDisposable
         // give back grants no credit to one about to go
         _receivings.CloseAll(connectionHandle);
 
-        var rejected = _pendingCalls.TakeAll(connectionHandle);
+        var rejected = _requester.TakeAll(connectionHandle);
         var aborted = _answeringCalls.TakeAll(connectionHandle);
 
-        if (connectionHandle is null)
-        {
-            _announced.Clear();
-        }
-        else
-        {
-            _announced.Remove(connectionHandle);
-        }
+        _writer.Forget(connectionHandle);
 
         // the signals first, which are cancelled in their turn where resolvers run: a resolver that
         // waits on one of its own calls, a relay's leg B, hears it ended before that call's rejection
@@ -2192,10 +1320,7 @@ public sealed class RouterCore : IDisposable
             Abort(answering, new DisconnectException(reason));
         }
 
-        foreach (var pendingRequest in rejected)
-        {
-            pendingRequest.Reject(new DisconnectException(reason));
-        }
+        rejected.Reject(reason);
     }
 
     // definition
@@ -2215,14 +1340,14 @@ public sealed class RouterCore : IDisposable
 
         if (Loop.IsCurrent)
         {
-            CancelOnLoop(call, held);
+            _requester.CancelOnLoop(call, held);
 
             return;
         }
 
         Post(() =>
         {
-            CancelOnLoop(call, held);
+            _requester.CancelOnLoop(call, held);
         });
     }
 
@@ -2239,14 +1364,14 @@ public sealed class RouterCore : IDisposable
 
         if (Loop.IsCurrent)
         {
-            _pendingCalls.Reserve(call, held);
+            _requester.Reserve(call, held);
 
             return;
         }
 
         Post(() =>
         {
-            _pendingCalls.Reserve(call, held);
+            _requester.Reserve(call, held);
         });
     }
 
@@ -2346,7 +1471,7 @@ public sealed class RouterCore : IDisposable
 
         return Loop.Run(() =>
         {
-            return RequestOnLoop(payload, request);
+            return _requester.RequestOnLoop(payload, request);
         });
     }
 
@@ -2379,7 +1504,7 @@ public sealed class RouterCore : IDisposable
 
         return Loop.Run(() =>
         {
-            return Deliver(envelope, connectionHandle);
+            return _writer.Deliver(envelope, connectionHandle);
         });
     }
 
@@ -2425,7 +1550,7 @@ public sealed class RouterCore : IDisposable
     {
         return Loop.Run(() =>
         {
-            return Carrying(envelope, (going.ConnectionHandle, null, null, going.Series));
+            return _writer.Carrying(envelope, (going.ConnectionHandle, null, null, going.Series));
         });
     }
 
@@ -2438,11 +1563,11 @@ public sealed class RouterCore : IDisposable
     {
         return Bead.Gauges.Merge(
         [
-            _pendingCalls.Gauges(),
+            _requester.Gauges(),
             _answeringCalls.Gauges(),
             _sendings.Gauges(),
             _receivings.Gauges(),
-            Bead.Gauges.Of(new Dictionary<string, long> { ["announced"] = _announced.Count }, _announced.Keys),
+            _writer.Gauges(),
         ]);
     }
 
@@ -2454,6 +1579,79 @@ public sealed class RouterCore : IDisposable
     {
         _isDisposed = true;
         RejectPending($"{Disposed} before the answer");
+    }
+
+    // what the requester asks of the core it serves: the core's port, its scheduler, whether it was
+    // disposed, its reader of a chunk no transfer takes, and its report of what it raises itself
+    private sealed class RequesterPort(RouterCore core) : IRouterRequesterPort
+    {
+        public bool IsDisposed
+        {
+            get
+            {
+                return core._isDisposed;
+            }
+        }
+
+        public void Post(Action action)
+        {
+            core.Post(action);
+        }
+
+        public bool IsCallIdInUse(uint callId, string connectionHandle)
+        {
+            return core._port.IsCallIdInUse(callId, connectionHandle);
+        }
+
+        public bool IsOpen(string connectionHandle)
+        {
+            return core._port.IsOpen(connectionHandle);
+        }
+
+        public SessionToken? KnownSessionTokenOf(string connectionHandle)
+        {
+            return core._port.KnownSessionTokenOf(connectionHandle);
+        }
+
+        public bool Carries(string credential, string connectionHandle)
+        {
+            return core._port.Carries(credential, connectionHandle);
+        }
+
+        public bool IsSecure(string connectionHandle)
+        {
+            return core._port.IsSecure(connectionHandle);
+        }
+
+        public void Report(Exception reason, string? connectionHandle)
+        {
+            core._port.Report(reason, connectionHandle);
+        }
+
+        public void ReportFailure(Failure failure, (string ConnectionHandle, IEnvelopeHeader Header) about)
+        {
+            core.Report(failure, about);
+        }
+
+        public void Activity(RouterActivity kind, string connectionHandle)
+        {
+            core._port.Activity(kind, connectionHandle);
+        }
+
+        public void OnAnswerReceived(IEnvelopeHeader header, string connectionHandle)
+        {
+            core._port.OnAnswerReceived(header, connectionHandle);
+        }
+
+        public bool OnUnpairedFailure(Envelope envelope, string connectionHandle)
+        {
+            return core._port.OnUnpairedFailure(envelope, connectionHandle);
+        }
+
+        public void ReceiveUnplaced(Envelope envelope, (string ConnectionHandle, long? CreditEnd, bool IsOpen) unplaced)
+        {
+            core.ReceiveUnplaced(envelope, unplaced);
+        }
     }
 
     // a resolver registered, and its series, made as it was declared; none while its router counts

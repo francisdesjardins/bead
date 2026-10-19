@@ -27,6 +27,10 @@ const LISTED_RESTS = Object.freeze({
     'the bound of any callable, which a function named after its procedure keeps whole',
   'nameAfter(...never[])':
     'the bound of any callable, which a function named after its procedure keeps whole',
+  'IServiceRequesterOptions.nameAfter(...never[])':
+    'the bound of any callable, which a function named after its procedure keeps whole',
+  'IServiceResolverOptions.nameAfter(...never[])':
+    'the bound of any callable, which a function named after its procedure keeps whole',
   // the tests'
   'batch(...Uint8Array[])': 'a batch of envelopes, as many as a case puts in it',
   'batchOf(...Uint8Array[])': 'a batch of envelopes, as many as a case puts in it',

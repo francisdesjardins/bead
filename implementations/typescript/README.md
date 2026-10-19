@@ -1298,6 +1298,35 @@ while the extension watches, and its registry's exposition — never the client,
 credential. Announced, a client builds no `debug` event until a panel opens; `devtools: false` among
 its options refuses, and a router built alone announces nothing.
 
+### The parts of the core, the manager and the HTTP server
+
+The router's core, the service manager and the HTTP transport server are each built of parts: here
+a module of its own under `src/`, on the C# side a private nested type of its owner, in a partial
+file named after both under `src/`, the type named after the module. Each part has its twin; one
+row names no part: `router-limits.ts`, whose twin is the public `RouterLimits`, outside the owner.
+The C# side's README holds the same table. A part's tests sit in the file named after it: those that go through the owner, under the
+owner's describe, and those of the part's own factory or functions, under theirs.
+
+| TypeScript module                           | C# file                                                      | What it holds                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `router/shared/router-requester.ts`         | `Bead.Core/RouterCore.Requester.cs`                          | The calls this side starts: their request, its credential, its header and its payload, whole or as a transfer; their call ids, held among the pending calls; their timers, their cancel and its reservation; an answer paired with its call, a result received in a transfer; the pending calls' gauges                               |
+| `router/shared/router-writer.ts`            | `Bead.Core/RouterCore.Writer.cs`                             | What goes to the transport: an envelope under the payload's and the envelope's limits, a failure's detail cut to its envelope, traced, handed over with its transport's credential; the session announced to each connection, again when its answer does not go out, and forgotten with it; the announcements' gauges                 |
+| `router/shared/payload-placement.ts`        | `Bead.Core/RouterCore.PayloadPlacement.cs`                   | How a payload goes: whole, as a transfer, or refused `PAYLOAD_TOO_LARGE`; the largest envelope a payload goes whole in, the bytes a chunk carries, a procedure's limit within the router's, a chunk's envelope                                                                                                                        |
+| `router/shared/router-limits.ts`            | `Bead.Core/RouterLimits.cs`                                  | The router's limits over their defaults, checked whole and held together: `limitsOf`, whose twin is no part but the public `RouterLimits` and its `Validate`, outside the owner                                                                                                                                                       |
+| `router/shared/service-trace.ts`            | `Bead.Core/ServiceManager.Trace.cs`                          | The steps a call tells `debug`: whether anyone listens, a call's start and a notification's, each step with its connection, its duration, its failure and its payloads, handed to the manager, which guards each listener                                                                                                             |
+| `router/shared/service-requester.ts`        | `Bead.Core/ServiceManager.Requester.cs`                      | The calls the manager makes: their options over its defaults, their requester declared to the router, their value written, traced, `deprecated` raised, the close on timeout, their answer decoded                                                                                                                                    |
+| `router/shared/service-resolver.ts`         | `Bead.Core/ServiceManager.Resolver.cs`                       | The resolver of a procedure, which the manager registers: a request admitted on its header, its payload decoded, its callback run with its signal, its one answer, or a refusal or a failure in its place, each step traced                                                                                                           |
+| `transport/server/http-request-exchange.ts` | `Bead.Transport.Http/HttpTransportServer.RequestExchange.cs` | One envelope's exchange: its body read into one buffer under its limits, its prefix checked, the request handed on, a cancel's 204, the body's bytes charged and given back; its answer awaited and written here on the C# side, by the server's `send` on the TypeScript side, where Node pushes it to the response the server holds |
+| `transport/server/http-server-fields.ts`    | `Bead.Transport.Http/HttpTransportServer.ServerFields.cs`    | The fields a request carries, read: its target, its authority, its counts, its listen, its body's type; the fields of a preflight and of every answer; an end written once; a malformed request refused as HTTP refuses it                                                                                                            |
+
+What stays in each owner: in `router-core.ts` and `RouterCore.cs`, what comes in, read, traced
+and dispatched, the peer's requests, their credential's session, their answers and the results
+sent as transfers, the transfers a request comes in, the registrations, the teardown and the gauges
+merged; in `service-manager.ts` and `ServiceManager.cs`, the manager, its events and its
+notifications, a resolver's registration and the guard on each `debug` listener; in
+`http-transport-server.ts` and `HttpTransportServer.cs`, the connections and their tokens checked,
+the listens, the outboxes and the server's life, under one lock on the C# side.
+
 ### Following a call
 
 Three paths cross the stack. Each step names its file under `src/` and the function that takes the
@@ -1305,19 +1334,20 @@ call there.
 
 **A request, from a client to a server, and back.**
 
-1. `services.getRequest(procedure, dependencies)(payload)(options)` — `router/shared/service-manager.ts`,
+1. `services.getRequest(procedure, dependencies)(payload)(options)` — `router/shared/service-requester.ts`,
    `callOf`, the body every requester shares: its declaration to the router, its value written — one
    that does not write fails the call before anything goes, nothing traced —, the trace, the
    `deprecated` event, `router.request` with the series the declaration gave, the close on timeout,
    the decoding of the answer.
 2. `request` — `router/client/router-client.ts`: refuses a programmer's error first, binds the
    notification a call subscribes, when it subscribes one, and hands the rest to the core.
-3. `request` — `router/shared/router-core.ts`: refuses a programmer's error or an aborted signal,
-   uncounted, then starts the call, counted when the router has a registry, draws an odd call id
-   and waits under it (`pending-calls.ts`), then `deliver`s the envelope — written by `envelope.ts`
-   and `header.ts`, traced, handed to the transport. A payload too large for one envelope goes as a
-   transfer (`transfer.ts`, `sending-transfers.ts`): its opening first, then each chunk the server's
-   credit lets go, the call waiting on the transfer's inactivity until the last is handed off.
+3. `request` — `router/shared/router-requester.ts`: refuses a programmer's error or an aborted
+   signal, uncounted, then starts the call, counted when the router has a registry, draws an odd
+   call id and waits under it (`pending-calls.ts`), then `deliver`s the envelope through
+   `router-writer.ts` — written by `envelope.ts` and `header.ts`, traced, handed to the
+   transport. A payload too large for one envelope goes as a transfer (`transfer.ts`,
+   `sending-transfers.ts`): its opening first, then each chunk the server's credit lets go, the
+   call waiting on the transfer's inactivity until the last is handed off.
 4. On the server, `server/server.ts` counts the message as its session's activity, and
    `router/server/router-server.ts` notes the connection open. `receive`, in the core, reads the
    prefix and the envelope — what does not read goes through `gate` — and `receiveRequest` checks
@@ -1327,17 +1357,19 @@ call there.
    resolver with it and the controller's `signal`. An opening is held first
    (`receiving-transfers.ts`), credited, and its chunks put together — `receiveChunk` — until the
    payload is whole.
-5. The resolver — `createResolver`, in the service manager — decodes the payload, its admission
-   asked already, runs the callback, and its `response` calls `router.respond`, then the core's
-   `respond`: an answer to a call no longer answered goes nowhere; `beforeAnswer` lets the server
-   settle what the call subscribed; the answer carries the session when it changed
+5. The resolver — `createResolver`, in `router/shared/service-resolver.ts` — decodes the payload,
+   its admission asked already, runs the callback, and its `response` calls `router.respond`, then
+   the core's `respond`: an answer to a call no longer answered goes nowhere; `beforeAnswer` lets
+   the server settle what the call subscribed; the answer carries the session when it changed
    (`announcements.ts`); the call closes as the transport takes the answer. A result too large for
    one envelope goes as a transfer — `sendResult` — its chunks under the client's credit, and the
    call closes once the last is handed off.
-6. Back on the client, `receiveAnswer` pairs the answer with its call by call id, and settles it. A
-   result that opens a transfer is credited as a request's is, and `receiveChunk` settles the call
-   once the result is whole, its call id reserved a while. A call its timeout or its signal ends
-   sends a CANCEL first, and its call id stays reserved a while.
+6. Back on the client, `receiveAnswer`, in `router/shared/router-requester.ts`, pairs the answer
+   with its call by call id, and settles it. A result that opens a transfer is credited as a
+   request's is, and the core's `receiveChunk` hands each chunk to the requester's
+   `receiveResultChunk`, which settles the call once the result is whole, its call id reserved a
+   while. A call its timeout or its signal ends sends a CANCEL first, and its call id stays reserved
+   a while.
 
 ```mermaid
 sequenceDiagram
@@ -1382,8 +1414,8 @@ sequenceDiagram
 1. `services.getNotification(procedure, dependencies)(payload, callback)()` — the service manager
    makes one notification per procedure (`router/shared/notification.ts`), which registers itself
    with the router before its request goes out, since a notification can come in the same read as
-   the answer, then sends the request through the manager's `callOf`, with the notification it
-   `subscribes`.
+   the answer, then sends the request through the service requester's `callOf`, with the
+   notification it `subscribes`.
 2. The client's router binds the call id to the notification as the core draws it, and the request
    carries the SUBSCRIPTION flag — and PACED, when the notification has a `window`.
 3. On the server, the resolver's `response.registerNotification()` calls `subscribe`, which puts
@@ -1453,9 +1485,9 @@ stateDiagram-v2
 
 **A command**, the server's request of one client: `server.services.getCommand(procedure,
 dependencies)(payload)({ connectionHandle })` goes through `callOf` to `request` in
-`router-server.ts`, which needs the connection named and open, then to the core, which draws an even
-call id. The client runs it with the resolver `getCommandResolver` made, and answers through its
-router's `respond`.
+`router-server.ts`, which needs the connection named and open, then to the core's requester, which
+draws an even call id. The client runs it with the resolver `getCommandResolver` made, and answers
+through its router's `respond`.
 
 **The names, and the words they are chosen over.** Every name says one thing, and none is
 abbreviated ([0003](../../docs/decisions/0003-one-word-one-meaning.md)).
