@@ -16,12 +16,12 @@ export default defineConfig({
   projects: [
     {
       name: 'unit',
-      testIgnore: ['**/__tests__/{hook,panel}.test.ts'],
+      testIgnore: ['**/__tests__/{hook,panel}.test.ts', '**/views/__tests__/*.test.ts'],
       testMatch: ['**/__tests__/*.test.ts'],
     },
     {
       name: 'extension',
-      testMatch: ['**/__tests__/{hook,panel}.test.ts'],
+      testMatch: ['**/__tests__/{hook,panel}.test.ts', '**/views/__tests__/*.test.ts'],
       timeout: COMPONENT_TIMEOUT,
     },
   ],
