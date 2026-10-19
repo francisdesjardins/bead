@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { Server } from 'node:http';
 import type { TransportServerConnectionHandle, TransportServerEventMap } from '../transport-server';
 import type {
   IIncomingMessageLike,
@@ -10,8 +11,8 @@ import type {
 /**
  * A `WebSocketServer` a test scripts by hand, for the branches a real one does not take on demand:
  * an error after listening, one before it, a peer that never answers a close, a close that throws.
- * The transport's HTTP server, which it is given, listens for real; its `listening` and its `error`
- * are what the test scripts, as `ws` forwards them.
+ * The transport's HTTP server, which it is given, records its listen arguments without opening a
+ * socket; its `listening` and its `error` are what the test scripts, as `ws` forwards them.
  */
 
 export interface IFakeSocket extends IServerSocketLike {
@@ -76,7 +77,11 @@ export const createFakeWebSocketServer = (options?: {
   address?: { address: string; port: number } | string | null;
 }) => {
   // each instance keeps the options it was built with
-  const instances: (EventEmitter & { closeCount: number; options: unknown })[] = [];
+  const instances: (EventEmitter & {
+    closeCount: number;
+    listened: unknown[] | undefined;
+    options: unknown;
+  })[] = [];
   const reported =
     options === undefined || !('address' in options)
       ? { address: '127.0.0.1', port: 50_000 }
@@ -85,9 +90,20 @@ export const createFakeWebSocketServer = (options?: {
   // a function rather than an arrow, since the transport calls it with `new`; it forwards the
   // `error` of the server it is given, as `ws` does, its `listening` the test's to tell
   const FakeWebSocketServer = function (serverOptions: unknown) {
-    const emitter = Object.assign(new EventEmitter(), { closeCount: 0, options: serverOptions });
+    const emitter = Object.assign(new EventEmitter(), {
+      closeCount: 0,
+      listened: undefined as unknown[] | undefined,
+      options: serverOptions,
+    });
+    const { server: http } = serverOptions as { server: Server };
+
+    // ! a scripted port is no TCP reservation: real binds race the errors the test tells by hand
+    http.listen = (port?: unknown, host?: unknown) => {
+      emitter.listened = [port, host];
+      return http;
+    };
     instances.push(emitter);
-    (serverOptions as { server?: EventEmitter } | undefined)?.server?.on('error', (error) => {
+    http.on('error', (error) => {
       emitter.emit('error', error);
     });
     return Object.assign(emitter, {
