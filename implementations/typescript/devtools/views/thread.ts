@@ -2,8 +2,9 @@
 
 // The Exchange tab's drawing, in SVG, with nothing to load: two lanes, the page and the server, a
 // third for a destination behind the server's relay; each envelope an arrow between two lanes and a
-// bead on the call's thread, its kind and its words beside it, its time on the left; and, for a
-// transfer, a bar of the bytes that passed against the credit given.
+// bead on the call's thread, its kind over the arrow and its words under it, from the page's lane,
+// its time on the left; and, for a transfer, a bar of the bytes that passed against the credit
+// given.
 
 // dependencies
 
@@ -18,34 +19,41 @@ import { make, noteOf, svgOf } from './dom';
 /** The width the thread is drawn at; the page scales it down to its own. */
 const WIDTH = 440;
 
-/** The characters a bead's words take before they are cut. */
-const WORDS = 34;
+/** What a label leaves clear before the next lane to its right, and an offset before the page's. */
+const MARGIN = 6;
 
-// helpers
+/** Where an exchange's labels start past the page's lane, clear of the arrowhead that ends there. */
+const INSET = 8;
 
-const cut = (text: string): string => {
-  return text.length > WORDS ? `${text.slice(0, WORDS - 1)}…` : text;
-};
+/** How far an envelope's words sit under its arrow: their top clear of the largest bead. */
+const UNDER = 19;
 
 // definition
 
-/** Fits an attached thread's labels to its drawing, their full words kept in a tooltip. */
+/** Cuts an attached thread's labels to the room their `data-room` gives, before the next lane. */
 export const fitThreadLabels = (root: HTMLElement): void => {
-  for (const label of root.querySelectorAll<SVGTextElement>('.thread text.words')) {
-    const content = label.firstChild;
-    const svg = label.ownerSVGElement;
+  // * every width is read before a label is cut, so the drawing is laid out once; a character's
+  // width is taken as the label's over its length, exact in the words' monospace font
+  const cuts = [...root.querySelectorAll<SVGTextElement>('.thread text[data-room]')].map(
+    (label) => {
+      const content = label.firstChild;
+      const room = Number(label.dataset['room']);
 
-    if (!(content instanceof Text) || svg === null) {
-      continue;
+      if (!(content instanceof Text) || content.data.length === 0) {
+        return undefined;
+      }
+
+      const width = label.getComputedTextLength();
+
+      return width <= room
+        ? undefined
+        : { content, length: Math.floor((room / width) * content.data.length) - 1 };
     }
+  );
 
-    const available = svg.viewBox.baseVal.width - (label.x.baseVal[0]?.value ?? 0) - 12;
-    const original = content.data;
-    let length = original.length;
-
-    while (length > 1 && label.getComputedTextLength() > available) {
-      length -= 1;
-      content.data = `${original.slice(0, length).trimEnd()}…`;
+  for (const cut of cuts) {
+    if (cut !== undefined) {
+      cut.content.data = `${cut.content.data.slice(0, Math.max(1, cut.length)).trimEnd()}…`;
     }
   }
 };
@@ -66,7 +74,17 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
       : []),
   ];
   const middle = (page + server) / 2;
+  const left = page + INSET;
   const parts: SVGElement[] = [];
+  const roomOf = (x: number): number => {
+    return (
+      (lanes.find((lane) => {
+        return lane > x;
+      }) ?? WIDTH) -
+      x -
+      MARGIN
+    );
+  };
 
   lanes.forEach((x, index) => {
     parts.push(
@@ -153,7 +171,12 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
     } else {
       parts.push(
         svgOf('text', {
-          attributes: { class: 'note', x: middle + 14, y: note.y + 8 },
+          attributes: {
+            class: 'note',
+            'data-room': roomOf(left),
+            x: left,
+            y: note.y + 8,
+          },
           text:
             note.kind === 'pause'
               ? `… ${spanOf(note.value)} later`
@@ -175,6 +198,7 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
           : kind === 'CREDIT'
             ? 'credit'
             : '';
+    const radius = bead.isSmall ? 5 : 7;
 
     parts.push(
       svgOf('path', {
@@ -190,7 +214,7 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
         },
       }),
       svgOf('circle', {
-        attributes: { class: `bead ${className}`, cx: middle, cy: bead.y, r: bead.isSmall ? 5 : 7 },
+        attributes: { class: `bead ${className}`, cx: middle, cy: bead.y, r: radius },
         children: [
           svgOf('title', {
             text: `${bead.envelope.direction === 'tx' ? 'sent' : 'received'} ${kind}${bead.words === '' ? '' : `: ${bead.words}`}`,
@@ -198,11 +222,17 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
         ],
       }),
       svgOf('text', {
-        attributes: { class: 'kind', x: middle + 12, y: bead.y - 6 },
+        attributes: {
+          class: 'kind',
+          // * over the arrow, the kind keeps to the left of its bead
+          'data-room': middle - radius - 4 - left,
+          x: left,
+          y: bead.y - 4,
+        },
         text: kind === 'FAILURE' ? 'FAILURE ✕' : kind,
       }),
       svgOf('text', {
-        attributes: { class: 'offset', x: 2, y: bead.y + 4 },
+        attributes: { class: 'offset', 'text-anchor': 'end', x: page - MARGIN, y: bead.y + 4 },
         text: `+${numberOf(Math.round(bead.offset))}`,
       })
     );
@@ -210,9 +240,14 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
     if (bead.words !== '') {
       parts.push(
         svgOf('text', {
-          attributes: { class: 'words', x: middle + 12, y: bead.y + 12 },
+          attributes: {
+            class: 'words',
+            'data-room': roomOf(left),
+            x: left,
+            y: bead.y + UNDER,
+          },
           children: [svgOf('title', { text: bead.words })],
-          text: cut(bead.words),
+          text: bead.words,
         })
       );
     }

@@ -1578,7 +1578,8 @@ across a reload with Preserve log, and exports its records as JSON, `bead-devtoo
 The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
 `←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
 snippet that makes it again by the page's own service manager, and hides or shows its procedure
-alone.
+alone. `←`, `→`, `Home` and `End` move across the view tabs and a call's tabs, and the `?` beside
+the filter opens its syntax, which `Escape` closes.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
 nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —

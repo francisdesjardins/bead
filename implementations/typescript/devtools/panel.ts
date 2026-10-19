@@ -1204,8 +1204,17 @@ export const startPanel = (host: IPanelHost): void => {
     const isModified = event.ctrlKey || event.metaKey;
 
     if (event.key === 'Escape' && !shown.filterHelp.hidden) {
+      // * this Escape closes the help alone: the filter keeps its words, and its focus
+      event.preventDefault();
+
+      if (
+        document.activeElement === shown.filterHelpButton ||
+        shown.filterHelp.contains(document.activeElement)
+      ) {
+        shown.filterHelpButton.focus();
+      }
+
       closeFilterHelp();
-      shown.filterHelpButton.focus();
     } else if (isModified && event.key.toLowerCase() === 'e') {
       event.preventDefault();
       toggleRecording();

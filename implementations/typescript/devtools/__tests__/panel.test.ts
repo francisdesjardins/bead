@@ -6,7 +6,7 @@ import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
 import type { BackgroundMessage } from '../messages';
 import { assertBuilt, EXTENSION } from './fixtures';
-import { IDS, T0, TRAFFIC } from './traffic';
+import { IDS, SLOW_RELAY, T0, TRAFFIC } from './traffic';
 
 // interfaces
 
@@ -125,6 +125,28 @@ const rowOf = (page: Page, name: string) => {
   return page.locator('#calls tr.call', { hasText: name });
 };
 
+/** What tells a tab's state apart: its text's colour, its tint and its underline. */
+const lookOf = (page: Page, selector: string) => {
+  return page.locator(selector).evaluate((element) => {
+    const style = getComputedStyle(element);
+
+    return { color: style.color, tint: style.backgroundColor, underline: style.borderBottomColor };
+  });
+};
+
+/** Where a focused element's outline falls: inside its box when its offset takes its width back. */
+const outlineOf = (page: Page, selector: string) => {
+  return page.locator(selector).evaluate((element) => {
+    const style = getComputedStyle(element);
+
+    return {
+      isFocusVisible: element.matches(':focus-visible'),
+      isInside: Number.parseFloat(style.outlineOffset) + Number.parseFloat(style.outlineWidth) <= 0,
+      style: style.outlineStyle,
+    };
+  });
+};
+
 /** Bytes as text whose every character is one of them, as DevTools may give a request's body. */
 const latin1Of = (bytes: Uint8Array): string => {
   return String.fromCharCode(...bytes);
@@ -197,6 +219,64 @@ test.describe('the panel', () => {
     await button.click();
     await page.locator('#filter').click();
     await expect(help).toBeHidden();
+    await button.click();
+    await page.locator('#filter').focus();
+    await page.keyboard.press('Escape');
+    await expect(help).toBeHidden();
+    await expect(page.locator('#filter')).toBeFocused();
+    await expect(page.locator('#filter')).toHaveValue('whoami');
+  });
+
+  test('keeps a hovered tab apart from the selected one, and the selected one as it is under the mouse', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+
+    for (const [selected, other] of [
+      ['[data-tab="calls"]', '[data-tab="state"]'],
+      ['[data-detail="overview"]', '[data-detail="payload"]'],
+    ] as const) {
+      await page.mouse.move(0, 0);
+
+      const atRest = await lookOf(page, selected);
+
+      await page.hover(other);
+
+      const hovered = await lookOf(page, other);
+
+      expect({ tint: hovered.tint, underline: hovered.underline }).not.toEqual({
+        tint: atRest.tint,
+        underline: atRest.underline,
+      });
+      await page.hover(selected);
+      expect(await lookOf(page, selected)).toEqual(atRest);
+    }
+  });
+
+  test('draws the focus ring of the list and of the detail inside them, where their scrolling keeps it', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+
+    await page.locator('[data-tab="calls"]').focus();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#list')).toBeFocused();
+    expect(await outlineOf(page, '#list')).toEqual({
+      isFocusVisible: true,
+      isInside: true,
+      style: 'solid',
+    });
+
+    await page.locator('[data-detail="overview"]').focus();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#detail')).toBeFocused();
+    expect(await outlineOf(page, '#detail')).toEqual({
+      isFocusVisible: true,
+      isInside: true,
+      style: 'solid',
+    });
   });
 
   test('moves between views and detail tabs with arrows and Home and End, keeping one tab stop in each', async ({
@@ -280,6 +360,82 @@ test.describe('the panel', () => {
 
     await expect(page.locator('#detail .thread text.words title').last()).toContainText(
       'announces a session'
+    );
+  });
+
+  test('keeps an exchange’s labels clear of its lanes, its beads and its offsets on a relayed thread, leg A’s words 18 characters at least', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await deliver(page, { dropped: 0, records: [...SLOW_RELAY], type: 'records' });
+    await rowOf(page, 'increment').click();
+    await page.click('[data-detail="exchange"]');
+
+    for (const name of ['increment', 'tally']) {
+      await rowOf(page, name).click();
+      await expect(page.locator('#detail .thread circle').first()).toBeVisible();
+
+      const drawing = await page.locator('#detail .thread svg').evaluate((svg) => {
+        const boxesOf = (selector: string) => {
+          return [...svg.querySelectorAll<SVGGraphicsElement>(selector)].map((element) => {
+            return { box: element.getBBox(), name: element.firstChild?.textContent ?? selector };
+          });
+        };
+        const meets = (a: DOMRect, b: DOMRect): boolean => {
+          return (
+            a.x < b.x + b.width &&
+            b.x < a.x + a.width &&
+            a.y < b.y + b.height &&
+            b.y < a.y + a.height
+          );
+        };
+        const lanes = boxesOf('line.life');
+        const beads = boxesOf('circle');
+        const offsets = boxesOf('text.offset');
+        // a lane's name sits above its line, centred on it
+        const labels = boxesOf('text.kind, text.words, text.note');
+
+        return {
+          collisions: [
+            ...[...labels, ...offsets].flatMap((label) => {
+              return lanes
+                .filter((lane) => {
+                  return meets(label.box, lane.box);
+                })
+                .map((lane) => {
+                  return `${label.name} crosses the lane at ${String(lane.box.x)}`;
+                });
+            }),
+            ...labels.flatMap((label) => {
+              return [...beads, ...offsets]
+                .filter((other) => {
+                  return meets(label.box, other.box);
+                })
+                .map((other) => {
+                  return `${label.name} meets ${other.name}`;
+                });
+            }),
+          ],
+          words: [...svg.querySelectorAll<SVGTextElement>('text.words')].map((text) => {
+            return {
+              shown: text.firstChild?.textContent ?? '',
+              whole: text.querySelector('title')?.textContent ?? '',
+            };
+          }),
+        };
+      });
+
+      expect(drawing.collisions).toEqual([]);
+
+      for (const { shown, whole } of drawing.words) {
+        expect(shown.endsWith('…') ? shown.length - 1 : shown.length).toBeGreaterThanOrEqual(
+          Math.min(18, whole.length)
+        );
+      }
+    }
+
+    await expect(page.locator('#detail .thread text.words title').last()).toHaveText(
+      '"an answer longer than the room its lanes leave"'
     );
   });
 
