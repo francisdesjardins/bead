@@ -1778,9 +1778,18 @@ const isExchange = (request: IncomingMessage, method: string): boolean => {
   return request.method === method && request.headers[CONNECTION_TOKEN_HEADER] !== undefined;
 };
 
-/** The platform's fetch, told to follow every redirect whatever it is handed. */
+/**
+ * The platform's fetch, told to follow every redirect whatever it is handed. Its bytes go as a
+ * `Blob`, which Node 24.9's fetch sends again on a 307 or a 308, where bytes fail it, detached.
+ */
 const followingFetch: FetchLike = (url, init) => {
-  return fetch(url, { ...init, redirect: 'follow' } as RequestInit);
+  const { body } = init;
+
+  return fetch(url, {
+    ...init,
+    ...(body instanceof Uint8Array ? { body: new Blob([body as BlobPart]) } : {}),
+    redirect: 'follow',
+  } as RequestInit);
 };
 
 /** Fetch's redirect statuses. */
