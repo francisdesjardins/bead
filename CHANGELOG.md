@@ -76,6 +76,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The DevTools panel's control borders reach at least 3:1 contrast against their surfaces in both
+  themes.
+
 - On the C# side, a resolver hears its signal before its call's rejection when its connection
   closes, whatever scheduler it runs on: the teardown cancels each incoming call's token in its own
   turn, by `CancelAsync`, its callbacks run after it. On the thread pool under load, a resolver
