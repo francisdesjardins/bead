@@ -162,6 +162,127 @@ test.describe('the panel', () => {
     expect((await fakeOf(page)).reloads).toBe(1);
   });
 
+  test('opens filter syntax without changing the filter, dismisses it, and keeps it inside a narrow panel', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 600, width: 400 });
+    await openWithTraffic(page);
+    await page.fill('#filter', 'whoami');
+
+    const button = page.getByRole('button', { name: 'Filter syntax' });
+    const help = page.locator('#filter-help');
+
+    await button.click();
+    await expect(button).toHaveAttribute('aria-expanded', 'true');
+    await expect(help).toBeVisible();
+    await expect(help).toContainText('d(rx)');
+    await expect(page.locator('#filter')).toHaveValue('whoami');
+    await expect(rowOf(page, 'whoami')).toBeVisible();
+
+    const box = await help.boundingBox();
+
+    expect(box).not.toBeNull();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(400);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(600);
+
+    await page.keyboard.press('Escape');
+    await expect(help).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(button).toBeFocused();
+    await button.click();
+    await page.keyboard.press('/');
+    await expect(help).toBeHidden();
+    await expect(page.locator('#filter')).toBeFocused();
+    await button.click();
+    await page.locator('#filter').click();
+    await expect(help).toBeHidden();
+  });
+
+  test('moves between views and detail tabs with arrows and Home and End, keeping one tab stop in each', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+    await page.locator('[data-tab="calls"]').focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('[data-tab="wire"]')).toBeFocused();
+    await expect(page.locator('[data-view="wire"]')).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-tab="calls"]')).toBeFocused();
+    await expect(page.locator('[data-view="calls"]')).toBeVisible();
+    await page.keyboard.press('End');
+    await expect(page.locator('[data-tab="wire"]')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(page.locator('[data-tab="calls"]')).toBeFocused();
+    await expect(page.locator('.tabs [tabindex="0"]')).toHaveCount(1);
+
+    await page.locator('[data-detail="overview"]').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-detail="payload"]')).toBeFocused();
+    await expect(page.locator('#detail .tree')).toBeVisible();
+    await expect(page.locator('#detail')).toHaveAttribute('aria-labelledby', 'payload-tab');
+    await page.keyboard.press('End');
+    await expect(page.locator('[data-detail="trace"]')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-detail="overview"]')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Home');
+    await expect(page.locator('[data-detail="overview"]')).toBeFocused();
+    await expect(page.locator('.detail-tabs [tabindex="0"]')).toHaveCount(1);
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#detail')).toBeFocused();
+  });
+
+  test('filters by client through the styled select, including a client with no calls', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await deliver(page, {
+      sources: [
+        { id: 1, protocol: 1, side: 'client' },
+        { id: 2, protocol: 1, side: 'client' },
+      ],
+      type: 'sources',
+    });
+    await page.locator('#source').selectOption('2');
+    await expect(page.locator('#calls tr.call')).toHaveCount(0);
+    await page.locator('#source').selectOption('1');
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+    await page.locator('#source').selectOption('all');
+    await expect(page.locator('#calls tr.call')).toHaveCount(10);
+  });
+
+  test('fits exchange labels inside their drawing and keeps the full words in a tooltip', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+    await page.click('[data-detail="exchange"]');
+    await expect(page.locator('#detail .thread text.words').first()).toBeVisible();
+
+    const labels = await page.locator('#detail .thread text.words').evaluateAll((elements) => {
+      return elements.map((element) => {
+        const label = element as SVGTextElement;
+
+        return {
+          edge: (label.x.baseVal[0]?.value ?? 0) + label.getComputedTextLength(),
+          title: label.querySelector('title')?.textContent,
+          width: label.ownerSVGElement?.viewBox.baseVal.width ?? 0,
+        };
+      });
+    });
+
+    for (const label of labels) {
+      expect(label.edge).toBeLessThanOrEqual(label.width);
+      expect(label.title).toBeTruthy();
+    }
+
+    await expect(page.locator('#detail .thread text.words title').last()).toContainText(
+      'announces a session'
+    );
+  });
+
   test('shows a call a row, newest first, its outcome in words, a command read the right way round', async ({
     page,
   }) => {

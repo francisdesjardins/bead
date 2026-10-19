@@ -9,9 +9,10 @@
         --paper: #ffffff;
         --raised: #f3f5f4;
         --ink: #1f2623;
-        --muted: #5f6b66;
-        --faint: #8a9590;
+        --muted: #53635b;
+        --faint: #68776f;
         --line: #dfe4e2;
+        --control-line: #c5cfc9;
         --accent: #0b6e5a;
         --accent-soft: rgb(11 110 90 / 0.1);
         --answered: #1a73e8;
@@ -22,21 +23,30 @@
         --added: rgb(30 142 62 / 0.14);
         --removed: rgb(197 34 31 / 0.12);
         --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+        --list-bar-height: 44px;
         color-scheme: light;
         font:
-          12px/1.45 system-ui,
+          13px/1.5 system-ui,
           -apple-system,
           'Segoe UI',
           sans-serif;
+        --space-1: 4px;
+        --space-2: 8px;
+        --space-3: 12px;
+        --space-4: 16px;
+        --syntax-string: #925b12;
+        --control-height: 30px;
+        --menu-row-height: 34px;
       }
 
       :root[data-theme='dark'] {
         --paper: #202124;
         --raised: #292a2d;
         --ink: #e3e6e4;
-        --muted: #9aa5a0;
-        --faint: #747d79;
+        --muted: #b2bdb7;
+        --faint: #9aa59f;
         --line: #3c4043;
+        --control-line: #535e57;
         --accent: #3cc7a6;
         --accent-soft: rgb(60 199 166 / 0.14);
         --answered: #8ab4f8;
@@ -47,6 +57,7 @@
         --added: rgb(129 201 149 / 0.16);
         --removed: rgb(242 139 130 / 0.16);
         color-scheme: dark;
+        --syntax-string: #e9bc79;
       }
 
       * {
@@ -66,8 +77,8 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px 8px;
-        padding: 5px 8px;
+        gap: var(--space-2);
+        padding: var(--space-2) var(--space-3);
         border-bottom: 1px solid var(--line);
         background: var(--raised);
       }
@@ -75,17 +86,119 @@
       select,
       input,
       button {
-        min-height: 22px;
-        padding: 1px 6px;
-        border: 1px solid var(--line);
-        border-radius: 4px;
+        min-height: var(--control-height);
+        padding: 4px 10px;
+        border: 1px solid var(--control-line);
+        border-radius: 6px;
         background: var(--paper);
         color: var(--ink);
         font: inherit;
       }
 
-      button {
+      select {
+        min-width: 124px;
+        padding: 4px 34px 4px 12px;
+        appearance: none;
+        background-image:
+          linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+          linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+        background-repeat: no-repeat;
+        background-position:
+          right 14px center,
+          right 10px center;
+        background-size: 4px 4px;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+        font-weight: 500;
         cursor: pointer;
+      }
+
+      select:hover {
+        border-color: var(--muted);
+        background-color: var(--raised);
+      }
+
+      select:open {
+        border-color: var(--accent);
+      }
+
+      @supports (appearance: base-select) {
+        select,
+        select::picker(select) {
+          appearance: base-select;
+        }
+
+        select {
+          gap: 16px;
+          padding-right: 12px;
+          background-image: none;
+        }
+
+        select::picker-icon {
+          width: 7px;
+          height: 7px;
+          align-self: center;
+          border-right: 1.5px solid var(--muted);
+          border-bottom: 1.5px solid var(--muted);
+          color: var(--muted);
+          content: '';
+          transform: translateY(-2px) rotate(45deg);
+        }
+
+        select:open::picker-icon {
+          border-color: var(--accent);
+          transform: translateY(2px) rotate(225deg);
+        }
+
+        select::picker(select) {
+          min-width: anchor-size(width);
+          max-height: 280px;
+          margin-top: 6px;
+          padding: 4px;
+          overflow: auto;
+          border: 1px solid var(--control-line);
+          border-radius: 8px;
+          background: var(--paper);
+          color: var(--ink);
+          box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+        }
+
+        option {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          min-height: 34px;
+          padding: 6px 10px;
+          border-radius: 4px;
+          font: inherit;
+        }
+
+        option:hover,
+        option:focus-visible {
+          background: var(--raised);
+          outline-offset: -2px;
+        }
+
+        option:checked {
+          background: var(--accent-soft);
+          color: var(--accent);
+          font-weight: 600;
+        }
+
+        option::checkmark {
+          order: 1;
+          margin-left: auto;
+          content: '✓';
+        }
+      }
+
+      button {
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      button:hover:not(:disabled) {
+        border-color: var(--muted);
+        background: var(--accent-soft);
       }
 
       button:disabled {
@@ -96,11 +209,20 @@
       button[aria-pressed='true'] {
         border-color: var(--accent);
         background: var(--accent-soft);
+        color: var(--accent);
       }
 
       :focus-visible {
         outline: 2px solid var(--accent);
-        outline-offset: -1px;
+        outline-offset: 2px;
+      }
+
+      #record,
+      #clear {
+        min-width: 32px;
+        padding-right: 6px;
+        padding-left: 6px;
+        font-size: 16px;
       }
 
       #record[aria-pressed='true'] {
@@ -108,9 +230,15 @@
       }
 
       #filter {
-        flex: 1 1 220px;
+        flex: 1 1 auto;
         min-width: 0;
-        font-family: var(--mono);
+        width: 100%;
+        padding-right: 36px;
+      }
+
+      #filter::placeholder {
+        color: var(--faint);
+        opacity: 1;
       }
 
       #filter[aria-invalid='true'] {
@@ -129,19 +257,54 @@
       .group {
         display: inline-flex;
         flex-wrap: wrap;
-        gap: 2px;
+        gap: 4px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--paper);
+      }
+
+      .group button {
+        border-color: transparent;
+        background: transparent;
+      }
+
+      .group button[aria-pressed='true'] {
+        border-color: var(--accent);
+        background: var(--accent-soft);
       }
 
       label {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
+        gap: 6px;
         white-space: nowrap;
       }
 
+      input[type='checkbox'] {
+        width: 15px;
+        height: 15px;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        accent-color: var(--accent);
+      }
+
       #status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         margin-left: auto;
         color: var(--muted);
+        font-size: 12px;
+      }
+
+      #status::before {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+        content: '';
       }
 
       #status[data-state='open'] {
@@ -150,24 +313,47 @@
 
       .tabs {
         display: flex;
-        gap: 2px;
-        padding: 0 8px;
+        gap: 6px;
+        padding: 0 12px;
         overflow-x: auto;
         border-bottom: 1px solid var(--line);
       }
 
       .tabs button {
-        min-height: 26px;
+        flex-shrink: 0;
+        min-height: 40px;
+        padding: 8px 14px;
         border: 0;
         border-bottom: 2px solid transparent;
         border-radius: 0;
         background: none;
         color: var(--muted);
+        font-weight: 600;
+        white-space: nowrap;
       }
 
       .tabs button[aria-selected='true'] {
         border-bottom-color: var(--accent);
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .tabs button:hover:not(:disabled) {
+        border-bottom-color: var(--accent);
         color: var(--ink);
+      }
+
+      .detail-tabs button:hover:not(:disabled) {
+        border-bottom-color: var(--accent);
+        color: var(--ink);
+      }
+
+      .tabs button:focus-visible {
+        outline-offset: -3px;
+      }
+
+      .detail-tabs button:focus-visible {
+        outline-offset: -3px;
       }
 
       main {
@@ -236,13 +422,24 @@
         top: 0;
         z-index: 1;
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
-        padding: 3px 8px;
+        gap: 10px;
+        min-height: var(--list-bar-height);
+        padding: 3px 12px;
         border-bottom: 1px solid var(--line);
         background: var(--paper);
         color: var(--muted);
+      }
+
+      .list-bar .group {
+        flex-shrink: 0;
+        padding: 2px;
+      }
+
+      #range {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .list-bar .chip {
@@ -258,13 +455,13 @@
 
       th {
         position: sticky;
-        top: 29px;
-        padding: 2px 6px;
+        top: var(--list-bar-height);
+        padding: 5px 6px;
         border-bottom: 1px solid var(--line);
         background: var(--raised);
         color: var(--muted);
         font:
-          600 11px system-ui,
+          600 12px/1.5 system-ui,
           sans-serif;
         text-align: left;
         white-space: nowrap;
@@ -284,7 +481,10 @@
         text-overflow: ellipsis;
       }
 
-      td.num,
+      td.num {
+        text-align: right;
+      }
+
       th.num {
         text-align: right;
       }
@@ -293,7 +493,10 @@
         cursor: pointer;
       }
 
-      tr.call.failed td.outcome,
+      tr.call.failed td.outcome {
+        color: var(--bad);
+      }
+
       tr.call.failed td.name {
         color: var(--bad);
       }
@@ -386,7 +589,12 @@
         box-shadow: inset 0 0 0 1px var(--answered);
       }
 
-      .wf i.open,
+      .wf i.open {
+        top: 4px;
+        height: 2px;
+        background: var(--muted);
+      }
+
       .wf i.closed {
         top: 4px;
         height: 2px;
@@ -405,43 +613,50 @@
         position: sticky;
         top: 0;
         display: flex;
-        gap: 2px;
-        padding: 0 6px;
+        z-index: 1;
+        gap: 4px;
+        padding: 0 8px;
         overflow-x: auto;
         border-bottom: 1px solid var(--line);
         background: var(--paper);
       }
 
       .detail-tabs button {
-        min-height: 26px;
+        flex-shrink: 0;
+        min-height: 40px;
+        padding: 8px 10px;
         border: 0;
         border-bottom: 2px solid transparent;
         border-radius: 0;
         background: none;
         color: var(--muted);
+        font-weight: 600;
+        white-space: nowrap;
       }
 
       .detail-tabs button[aria-selected='true'] {
         border-bottom-color: var(--accent);
-        color: var(--ink);
+        background: var(--accent-soft);
+        color: var(--accent);
       }
 
       #detail {
-        padding: 8px 10px;
+        padding: var(--space-4);
       }
 
       .title {
         display: flex;
         align-items: center;
         gap: 6px;
-        margin-bottom: 8px;
+        margin-bottom: 12px;
+        font-size: 14px;
         font-weight: 650;
       }
 
       .facts {
         display: grid;
         grid-template-columns: max-content minmax(0, 1fr);
-        gap: 3px 10px;
+        gap: var(--space-2) var(--space-4);
         margin: 0;
       }
 
@@ -455,10 +670,11 @@
       }
 
       .outcome-box {
-        margin-top: 10px;
-        padding: 6px 8px;
+        margin-top: var(--space-4);
+        padding: var(--space-2) var(--space-3);
         border-left: 3px solid var(--answered);
         background: var(--raised);
+        border-radius: 0 4px 4px 0;
       }
 
       .outcome-box.failed {
@@ -473,10 +689,11 @@
         display: flex;
         align-items: center;
         gap: 6px;
-        margin: 10px 0 4px;
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 650;
+        margin: var(--space-4) 0 var(--space-2);
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 600;
+        min-height: 30px;
       }
 
       h3 .spacer {
@@ -484,30 +701,36 @@
       }
 
       .link {
-        min-height: 0;
-        padding: 0 4px;
-        border: 0;
-        background: none;
+        min-height: 30px;
+        padding: var(--space-1) var(--space-2);
+        border: 1px solid var(--line);
+        background: var(--paper);
         color: var(--accent);
-        font-size: 11px;
+        font-size: 12px;
+        border-radius: 6px;
+        font:
+          500 13px/1.5 system-ui,
+          sans-serif;
       }
 
       pre {
         margin: 0;
-        padding: 6px 8px;
+        padding: var(--space-2) var(--space-3);
         overflow: auto;
-        border-radius: 4px;
+        border-radius: 6px;
         background: var(--raised);
         font: 11px/1.5 var(--mono);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+        border: 1px solid var(--line);
       }
 
       .tree {
-        padding: 4px 8px;
-        border-radius: 4px;
+        padding: var(--space-2) var(--space-3);
+        border-radius: 6px;
         background: var(--raised);
         font: 11px/1.6 var(--mono);
+        border: 1px solid var(--line);
       }
 
       .tree details {
@@ -530,11 +753,11 @@
       }
 
       .tree .string {
-        color: var(--bad);
+        color: var(--syntax-string);
       }
 
       :root[data-theme='dark'] .tree .string {
-        color: #f9ab73;
+        color: var(--syntax-string);
       }
 
       .tree .tagged {
@@ -581,8 +804,10 @@
       .frames li {
         display: flex;
         flex-wrap: wrap;
-        gap: 2px 8px;
+        gap: var(--space-2);
         border-bottom: 1px solid var(--line);
+        align-items: center;
+        padding: var(--space-1) 0;
       }
 
       .frames .fn {
@@ -590,14 +815,15 @@
       }
 
       .frames button {
-        min-height: 0;
-        padding: 0;
+        min-height: 24px;
+        padding: 2px var(--space-1);
         border: 0;
         background: none;
         color: var(--accent);
-        font: inherit;
+        font: 12px/1.5 var(--mono);
         text-align: left;
         overflow-wrap: anywhere;
+        border-radius: 4px;
       }
 
       .thread svg {
@@ -614,15 +840,23 @@
       .thread .lane {
         fill: var(--ink);
         font:
-          600 11px system-ui,
+          600 13px system-ui,
           sans-serif;
       }
 
-      .thread .lane-sub,
-      .thread .offset,
+      .thread .lane-sub {
+        fill: var(--muted);
+        font: 12px var(--mono);
+      }
+
+      .thread .offset {
+        fill: var(--muted);
+        font: 12px var(--mono);
+      }
+
       .thread .note {
         fill: var(--muted);
-        font: 10px var(--mono);
+        font: 12px var(--mono);
       }
 
       .thread .arrow {
@@ -669,13 +903,13 @@
       .thread .kind {
         fill: var(--ink);
         font:
-          600 10.5px system-ui,
+          600 12px system-ui,
           sans-serif;
       }
 
       .thread .words {
         fill: var(--muted);
-        font: 10.5px var(--mono);
+        font: 12px var(--mono);
       }
 
       .progress {
@@ -706,8 +940,9 @@
       .legend {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px 14px;
+        gap: var(--space-2) var(--space-4);
         color: var(--muted);
+        font-size: 12px;
       }
 
       .note {
@@ -715,14 +950,17 @@
         color: var(--muted);
       }
 
-      [data-view] > .note,
+      [data-view] > .note {
+        margin: 12px;
+      }
+
       .empty {
         margin: 12px;
       }
 
       .empty h2 {
         margin: 0 0 6px;
-        font-size: 13px;
+        font-size: 15px;
       }
 
       .empty ul {
@@ -732,16 +970,18 @@
       }
 
       .sect {
-        padding: 8px 12px;
+        padding: var(--space-4);
         border-bottom: 1px solid var(--line);
       }
 
       .sect h2 {
         display: flex;
         align-items: baseline;
-        gap: 8px;
+        gap: var(--space-2);
         margin: 0 0 6px;
-        font-size: 12px;
+        font-size: 14px;
+        margin-bottom: var(--space-3);
+        font-weight: 600;
       }
 
       .count {
@@ -749,10 +989,16 @@
         font-weight: 400;
       }
 
-      table.plain td,
+      table.plain td {
+        position: static;
+        border-bottom: 1px solid var(--line);
+        padding: var(--space-2);
+      }
+
       table.plain th {
         position: static;
         border-bottom: 1px solid var(--line);
+        padding: var(--space-2);
       }
 
       .scrub {
@@ -761,8 +1007,8 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px 10px;
-        padding: 6px 12px;
+        gap: var(--space-2) var(--space-3);
+        padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--line);
         background: var(--raised);
       }
@@ -772,6 +1018,10 @@
         padding: 0;
         border: 0;
         background: none;
+        appearance: none;
+        height: 30px;
+        min-height: 30px;
+        accent-color: var(--accent);
       }
 
       .scrub .when {
@@ -781,6 +1031,7 @@
       .scrub .said {
         flex-basis: 100%;
         color: var(--muted);
+        font-size: 12px;
       }
 
       .meter {
@@ -828,16 +1079,20 @@
         stroke: var(--line);
       }
 
-      #timeline .axis,
+      #timeline .axis {
+        fill: var(--muted);
+        font: 11px var(--mono);
+      }
+
       #timeline .row-id {
         fill: var(--muted);
-        font: 10px var(--mono);
+        font: 11px var(--mono);
       }
 
       #timeline .row-name {
         fill: var(--ink);
         font:
-          11px system-ui,
+          12px system-ui,
           sans-serif;
       }
 
@@ -858,8 +1113,8 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px 12px;
-        padding: 6px 12px;
+        gap: var(--space-2) var(--space-3);
+        padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--line);
       }
 
@@ -870,12 +1125,16 @@
       }
 
       .chip {
-        padding: 0 6px;
+        padding: 2px var(--space-2);
         border-radius: 4px;
         background: var(--raised);
         box-shadow: 0 0 0 1px var(--line);
-        font: 11px var(--mono);
+        font: 12px/1.5 var(--mono);
         font-variant-numeric: tabular-nums;
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        margin: 2px;
       }
 
       .chip.failure {
@@ -885,7 +1144,7 @@
       }
 
       details.raw {
-        margin: 6px 0;
+        margin: var(--space-3) 0;
       }
 
       summary {
@@ -900,15 +1159,15 @@
       }
 
       .exchange {
-        padding: 4px 12px 8px;
+        padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--line);
       }
 
       .exchange .line {
         display: flex;
         flex-wrap: wrap;
-        align-items: baseline;
-        gap: 4px 12px;
+        align-items: center;
+        gap: var(--space-2) var(--space-3);
       }
 
       .exchange .envelopes {
@@ -921,10 +1180,11 @@
         display: flex;
         flex-wrap: wrap;
         gap: 2px 16px;
-        padding: 3px 8px;
+        padding: 6px 12px;
         border-top: 1px solid var(--line);
         background: var(--raised);
         color: var(--muted);
+        font-size: 12px;
       }
 
       .statusbar b {
@@ -935,38 +1195,49 @@
       #menu {
         position: fixed;
         z-index: 10;
-        min-width: 180px;
-        padding: 4px 0;
+        min-width: 208px;
+        padding: var(--space-1);
         border: 1px solid var(--line);
-        border-radius: 6px;
+        border-radius: 8px;
         background: var(--paper);
-        box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+        border-color: var(--control-line);
       }
 
       #menu button {
         display: block;
         width: 100%;
-        min-height: 24px;
-        padding: 2px 12px;
+        min-height: var(--menu-row-height);
+        padding: 6px 10px;
         border: 0;
-        border-radius: 0;
+        border-radius: 4px;
         background: none;
         text-align: left;
+        font-size: 13px;
+        font-weight: 400;
       }
 
-      #menu button:hover:not(:disabled),
+      #menu button:hover:not(:disabled) {
+        background: var(--accent-soft);
+        color: var(--accent);
+        outline-offset: -2px;
+      }
+
       #menu button:focus-visible {
         background: var(--accent-soft);
+        color: var(--accent);
+        outline-offset: -2px;
       }
 
       #toast {
         position: fixed;
         right: 12px;
-        bottom: 32px;
-        padding: 4px 10px;
-        border-radius: 4px;
+        bottom: 44px;
+        padding: var(--space-2) var(--space-3);
+        border-radius: 6px;
         background: var(--ink);
         color: var(--paper);
+        font-size: 13px;
       }
 
       @media (prefers-reduced-motion: no-preference) {
@@ -981,25 +1252,215 @@
           }
         }
       }
+
+      .filter-field {
+        position: relative;
+        display: flex;
+        flex: 1 1 220px;
+        align-items: center;
+        min-width: 180px;
+      }
+
+      .filter-help {
+        position: absolute;
+        right: 4px;
+        display: grid;
+        width: 22px;
+        height: 22px;
+        min-height: 22px;
+        padding: 0;
+        place-items: center;
+        border: 0;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      #filter-help {
+        position: fixed;
+        inset: auto;
+        z-index: 20;
+        width: min(340px, calc(100vw - 24px));
+        max-height: calc(100vh - 24px);
+        margin: 0;
+        padding: var(--space-4);
+        border: 1px solid var(--control-line);
+        border-radius: 8px;
+        background: var(--paper);
+        color: var(--ink);
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+        font: inherit;
+        overflow: auto;
+      }
+
+      #filter-help strong {
+        display: block;
+        margin-bottom: var(--space-3);
+        font-size: 14px;
+      }
+
+      #filter-help dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: var(--space-2) var(--space-4);
+        margin: 0;
+      }
+
+      #filter-help dt {
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      #filter-help dd {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      #filter-help p {
+        margin: var(--space-3) 0 0;
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      h3:first-child {
+        margin-top: 0;
+      }
+
+      .link:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .sect h2 .count {
+        font-size: 12px;
+      }
+
+      .sect .note {
+        margin: var(--space-3) 0;
+        font-size: 12px;
+      }
+
+      table.plain {
+        font:
+          13px/1.5 system-ui,
+          sans-serif;
+      }
+
+      table.plain .num {
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .scrub input[type='range']::-webkit-slider-runnable-track {
+        height: 4px;
+        border-radius: 4px;
+        background: var(--line);
+      }
+
+      .scrub input[type='range']::-webkit-slider-thumb {
+        width: 14px;
+        height: 14px;
+        margin-top: -5px;
+        appearance: none;
+        border: 2px solid var(--paper);
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+
+      .scrub input[type='range']::-moz-range-track {
+        height: 4px;
+        border-radius: 4px;
+        background: var(--line);
+      }
+
+      .scrub input[type='range']::-moz-range-thumb {
+        width: 10px;
+        height: 10px;
+        border: 2px solid var(--paper);
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 0 0 1px var(--accent);
+      }
+
+      .tl-bar .note {
+        flex-basis: 100%;
+        margin: 0;
+        font-size: 12px;
+      }
+
+      .registry .link {
+        min-height: 24px;
+        padding: 0 var(--space-1);
+        border-color: transparent;
+        background: transparent;
+        font-weight: 500;
+      }
+
+      details.raw > summary {
+        padding: var(--space-2) 0;
+        font-size: 13px;
+      }
+
+      .exchange .line .note {
+        margin: 0;
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
     <header class="bar">
-      <button type="button" id="record" aria-pressed="true" title="Record, or pause (Ctrl+E)">
+      <button
+        type="button"
+        id="record"
+        aria-label="Record or pause"
+        aria-pressed="true"
+        title="Record, or pause (Ctrl+E)"
+      >
         ●
       </button>
       <button type="button" id="clear" title="Clear (Ctrl+L)" aria-label="Clear">⊘</button>
       <select id="source" aria-label="Client">
         <option value="all">All clients</option>
       </select>
-      <input
-        id="filter"
-        type="search"
-        spellcheck="false"
-        aria-label="Filter"
-        aria-describedby="filter-state"
-        placeholder="Filter, as bead:debug reads one: d(rx), t(request), -token, e(request)"
-      />
+      <span class="filter-field">
+        <input
+          id="filter"
+          type="search"
+          spellcheck="false"
+          aria-label="Filter"
+          aria-describedby="filter-state"
+          placeholder="Filter calls…"
+        />
+        <button
+          id="filter-help-button"
+          class="filter-help"
+          type="button"
+          aria-label="Filter syntax"
+          aria-controls="filter-help"
+          aria-expanded="false"
+        >
+          ?
+        </button>
+      </span>
+      <aside id="filter-help" aria-labelledby="filter-help-title" hidden>
+        <strong id="filter-help-title">Filter syntax</strong>
+        <dl>
+          <dt>d(rx)</dt>
+          <dd>Incoming traffic</dd>
+          <dt>t(request)</dt>
+          <dd>Requests only</dd>
+          <dt>-token</dt>
+          <dd>Exclude a procedure</dd>
+          <dt>e(request)</dt>
+          <dd>Request envelopes</dd>
+        </dl>
+        <p>Combine expressions with spaces. Press / to focus the filter.</p>
+      </aside>
       <span id="filter-state" role="status"></span>
       <span class="group" role="group" aria-label="Quick filters">
         <button type="button" data-quick="t(request)" aria-pressed="false">Requests</button>
@@ -1018,14 +1479,71 @@
       <span id="status" role="status">waiting for the page…</span>
     </header>
     <nav class="tabs" role="tablist" aria-label="Views">
-      <button type="button" role="tab" data-tab="calls" aria-selected="true">Calls</button>
-      <button type="button" role="tab" data-tab="state" aria-selected="false">State</button>
-      <button type="button" role="tab" data-tab="timeline" aria-selected="false">Timeline</button>
-      <button type="button" role="tab" data-tab="metrics" aria-selected="false">Metrics</button>
-      <button type="button" role="tab" data-tab="wire" aria-selected="false">Wire</button>
+      <button
+        type="button"
+        role="tab"
+        id="calls-tab"
+        aria-controls="calls-view"
+        tabindex="0"
+        data-tab="calls"
+        aria-selected="true"
+      >
+        Calls
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="state-tab"
+        aria-controls="state"
+        tabindex="-1"
+        data-tab="state"
+        aria-selected="false"
+      >
+        State
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="timeline-tab"
+        aria-controls="timeline"
+        tabindex="-1"
+        data-tab="timeline"
+        aria-selected="false"
+      >
+        Timeline
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="metrics-tab"
+        aria-controls="metrics"
+        tabindex="-1"
+        data-tab="metrics"
+        aria-selected="false"
+      >
+        Metrics
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="wire-tab"
+        aria-controls="wire"
+        tabindex="-1"
+        data-tab="wire"
+        aria-selected="false"
+      >
+        Wire
+      </button>
     </nav>
     <main>
-      <section data-view="calls" class="split" aria-label="Calls">
+      <section
+        role="tabpanel"
+        aria-labelledby="calls-tab"
+        id="calls-view"
+        data-view="calls"
+        class="split"
+        aria-label="Calls"
+      >
         <div id="list" class="rows" tabindex="0" aria-label="Calls, newest first">
           <div class="list-bar">
             <span class="group" role="group" aria-label="Show">
@@ -1065,27 +1583,97 @@
         </div>
         <div class="detail">
           <nav class="detail-tabs" role="tablist" aria-label="Detail">
-            <button type="button" role="tab" data-detail="overview" aria-selected="true">
+            <button
+              type="button"
+              role="tab"
+              id="overview-tab"
+              aria-controls="detail"
+              tabindex="0"
+              data-detail="overview"
+              aria-selected="true"
+            >
               Overview
             </button>
-            <button type="button" role="tab" data-detail="payload" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              id="payload-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="payload"
+              aria-selected="false"
+            >
               Payload
             </button>
-            <button type="button" role="tab" data-detail="exchange" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              id="exchange-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="exchange"
+              aria-selected="false"
+            >
               Exchange
             </button>
-            <button type="button" role="tab" data-detail="diff" aria-selected="false">Diff</button>
-            <button type="button" role="tab" data-detail="trace" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              id="diff-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="diff"
+              aria-selected="false"
+            >
+              Diff
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="trace-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="trace"
+              aria-selected="false"
+            >
               Trace
             </button>
           </nav>
-          <div id="detail" tabindex="-1"></div>
+          <div id="detail" role="tabpanel" aria-labelledby="overview-tab" tabindex="0"></div>
         </div>
       </section>
-      <section data-view="state" id="state" aria-label="State" hidden></section>
-      <section data-view="timeline" id="timeline" aria-label="Timeline" hidden></section>
-      <section data-view="metrics" id="metrics" aria-label="Metrics" hidden></section>
-      <section data-view="wire" id="wire" aria-label="Wire" hidden></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="state-tab"
+        data-view="state"
+        id="state"
+        aria-label="State"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="timeline-tab"
+        data-view="timeline"
+        id="timeline"
+        aria-label="Timeline"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="metrics-tab"
+        data-view="metrics"
+        id="metrics"
+        aria-label="Metrics"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="wire-tab"
+        data-view="wire"
+        id="wire"
+        aria-label="Wire"
+        hidden
+      ></section>
     </main>
     <footer id="footer" class="statusbar" aria-live="polite"></footer>
     <div id="menu" role="menu" hidden></div>

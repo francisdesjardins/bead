@@ -39,6 +39,7 @@ import { type DetailTab, detailOf } from './views/detail';
 import { make, noteOf } from './views/dom';
 import { metricsViewOf } from './views/metrics';
 import { stateViewOf } from './views/state';
+import { fitThreadLabels } from './views/thread';
 import { timelineViewOf } from './views/timeline';
 import { type IExchange, wireViewOf } from './views/wire';
 import { bytesOfContent, isBeadType, readBody } from './wire';
@@ -95,6 +96,8 @@ export const startPanel = (host: IPanelHost): void => {
     envelopesTable: elementOf('envelopes-table'),
     export: elementOf('export') as HTMLButtonElement,
     filter: elementOf('filter') as HTMLInputElement,
+    filterHelp: elementOf('filter-help'),
+    filterHelpButton: elementOf('filter-help-button') as HTMLButtonElement,
     filterState: elementOf('filter-state'),
     footer: elementOf('footer'),
     import: elementOf('import') as HTMLButtonElement,
@@ -421,8 +424,13 @@ export const startPanel = (host: IPanelHost): void => {
 
   const drawDetail = (): void => {
     for (const tab of document.querySelectorAll<HTMLElement>('[data-detail]')) {
-      tab.setAttribute('aria-selected', String(tab.dataset['detail'] === state.detailTab));
+      const isSelected = tab.dataset['detail'] === state.detailTab;
+
+      tab.setAttribute('aria-selected', String(isSelected));
+      tab.tabIndex = isSelected ? 0 : -1;
     }
+
+    shown.detail.setAttribute('aria-labelledby', `${state.detailTab}-tab`);
 
     const call = selectedCall();
 
@@ -450,6 +458,7 @@ export const startPanel = (host: IPanelHost): void => {
         tab: state.detailTab,
       })
     );
+    fitThreadLabels(shown.detail);
   };
 
   const drawFooter = (): void => {
@@ -501,7 +510,10 @@ export const startPanel = (host: IPanelHost): void => {
       }
 
       for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
-        tab.setAttribute('aria-selected', String(tab.dataset['tab'] === state.view));
+        const isSelected = tab.dataset['tab'] === state.view;
+
+        tab.setAttribute('aria-selected', String(isSelected));
+        tab.tabIndex = isSelected ? 0 : -1;
       }
 
       shown.record.setAttribute('aria-pressed', String(state.isRecording));
@@ -966,6 +978,59 @@ export const startPanel = (host: IPanelHost): void => {
   // the panel follows DevTools' theme, not the system's
   document.documentElement.dataset['theme'] = host.theme;
 
+  const closeFilterHelp = (): void => {
+    shown.filterHelp.hidden = true;
+    shown.filterHelpButton.setAttribute('aria-expanded', 'false');
+  };
+
+  shown.filterHelpButton.addEventListener('click', () => {
+    if (!shown.filterHelp.hidden) {
+      closeFilterHelp();
+
+      return;
+    }
+
+    shown.filterHelp.hidden = false;
+    shown.filterHelpButton.setAttribute('aria-expanded', 'true');
+
+    const button = shown.filterHelpButton.getBoundingClientRect();
+    const help = shown.filterHelp.getBoundingClientRect();
+
+    shown.filterHelp.style.left = `${String(Math.max(12, Math.min(button.right - help.width, innerWidth - help.width - 12)))}px`;
+    shown.filterHelp.style.top = `${String(Math.max(12, Math.min(button.bottom + 12, innerHeight - help.height - 12)))}px`;
+  });
+  window.addEventListener('resize', closeFilterHelp);
+
+  for (const nav of document.querySelectorAll<HTMLElement>('[role="tablist"]')) {
+    nav.addEventListener('keydown', (event) => {
+      const tabs = [...nav.querySelectorAll<HTMLElement>('[role="tab"]')];
+      const index = tabs.findIndex((tab) => {
+        return tab === document.activeElement;
+      });
+
+      if (index < 0) {
+        return;
+      }
+
+      const next =
+        event.key === 'ArrowRight'
+          ? (index + 1) % tabs.length
+          : event.key === 'ArrowLeft'
+            ? (index + tabs.length - 1) % tabs.length
+            : event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? tabs.length - 1
+                : undefined;
+
+      if (next !== undefined) {
+        event.preventDefault();
+        tabs[next]?.click();
+        tabs[next]?.focus();
+      }
+    });
+  }
+
   for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
     tab.addEventListener('click', () => {
       state.view = tab.dataset['tab'] as View;
@@ -1120,6 +1185,14 @@ export const startPanel = (host: IPanelHost): void => {
 
   document.addEventListener('pointerdown', (event) => {
     if (
+      event.target instanceof Node &&
+      !shown.filterHelp.contains(event.target) &&
+      !shown.filterHelpButton.contains(event.target)
+    ) {
+      closeFilterHelp();
+    }
+
+    if (
       !shown.menu.hidden &&
       !(event.target instanceof Node && shown.menu.contains(event.target))
     ) {
@@ -1130,7 +1203,10 @@ export const startPanel = (host: IPanelHost): void => {
   document.addEventListener('keydown', (event) => {
     const isModified = event.ctrlKey || event.metaKey;
 
-    if (isModified && event.key.toLowerCase() === 'e') {
+    if (event.key === 'Escape' && !shown.filterHelp.hidden) {
+      closeFilterHelp();
+      shown.filterHelpButton.focus();
+    } else if (isModified && event.key.toLowerCase() === 'e') {
       event.preventDefault();
       toggleRecording();
     } else if (isModified && event.key.toLowerCase() === 'l') {
@@ -1138,6 +1214,7 @@ export const startPanel = (host: IPanelHost): void => {
       clear();
     } else if (event.key === '/' && !isTyping(event.target)) {
       event.preventDefault();
+      closeFilterHelp();
       shown.filter.focus();
     }
   });

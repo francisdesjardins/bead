@@ -29,6 +29,27 @@ const cut = (text: string): string => {
 
 // definition
 
+/** Fits an attached thread's labels to its drawing, their full words kept in a tooltip. */
+export const fitThreadLabels = (root: HTMLElement): void => {
+  for (const label of root.querySelectorAll<SVGTextElement>('.thread text.words')) {
+    const content = label.firstChild;
+    const svg = label.ownerSVGElement;
+
+    if (!(content instanceof Text) || svg === null) {
+      continue;
+    }
+
+    const available = svg.viewBox.baseVal.width - (label.x.baseVal[0]?.value ?? 0) - 12;
+    const original = content.data;
+    let length = original.length;
+
+    while (length > 1 && label.getComputedTextLength() > available) {
+      length -= 1;
+      content.data = `${original.slice(0, length).trimEnd()}…`;
+    }
+  }
+};
+
 /** A call's thread, drawn, and what its transfer did. */
 export const threadViewOf = (call: ICall, { client }: { client: string }): Node[] => {
   const thread = threadOf(call);
@@ -190,6 +211,7 @@ export const threadViewOf = (call: ICall, { client }: { client: string }): Node[
       parts.push(
         svgOf('text', {
           attributes: { class: 'words', x: middle + 12, y: bead.y + 12 },
+          children: [svgOf('title', { text: bead.words })],
           text: cut(bead.words),
         })
       );
