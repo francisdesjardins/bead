@@ -713,16 +713,17 @@ public sealed partial class RouterCoreTests
         }
     }
 
-    // a resolver of one procedure, the interop service's echo, that keeps each request it is given for
-    // the test to answer; what it admits, and what handling a request does, are the test's to say
-    private sealed class Held(RouterCore core) : IRequestResolver
+    // a resolver of one procedure, the interop service's echo, or the handler of a destination, that
+    // keeps each request it is given for the test to answer; what it admits, and what handling a
+    // request does, are the test's to say
+    private sealed class Held(RouterCore core) : IRequestResolver, IDestinationHandler
     {
         public Procedure Procedure { get; init; } = Echo;
 
         public int? MaximumPayloadBytes { get; init; }
 
-        // whether it forwards a JWT and an ELSEWHERE without resolving them, as a relay that does not
-        // verify
+        // whether, as a destination's handler, it forwards a JWT and an ELSEWHERE without resolving
+        // them, as a relay that does not verify
         public bool ForwardsCredentials { get; init; }
 
         public List<RequestResolverProps> Requests { get; } = [];
@@ -809,6 +810,9 @@ public sealed partial class RouterCoreTests
         // the call ids the side holds otherwise: a subscription's
         public HashSet<uint> InUse { get; } = [];
 
+        // the handler of a request that names a destination, when the test gives one, as a relay's
+        public Func<RequestHeader, IDestinationHandler?>? Destination { get; set; }
+
         public bool IsTwoWayConnection { get; set; } = true;
 
         public int TwoWayAsked { get; private set; }
@@ -866,6 +870,11 @@ public sealed partial class RouterCoreTests
         public bool IsCallIdInUse(uint callId, string connectionHandle)
         {
             return InUse.Contains(callId);
+        }
+
+        public IDestinationHandler? HandlerOfDestination(RequestHeader header)
+        {
+            return Destination?.Invoke(header);
         }
 
         public bool IsTwoWay(string connectionHandle)

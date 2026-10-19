@@ -1,6 +1,6 @@
 namespace Bead;
 
-public sealed partial class RouterCore
+internal sealed partial class RouterCore
 {
     // how a payload fits in one envelope, or opens a transfer under the held limits
     private sealed class PayloadPlacement

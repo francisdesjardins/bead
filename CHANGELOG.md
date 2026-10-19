@@ -52,6 +52,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection, its answer never read. The C# side refuses at construction, with an
   `ArgumentException` naming `AllowAutoRedirect`, a `Handler` whose innermost `HttpClientHandler`
   or `SocketsHttpHandler` would follow.
+- On the TypeScript side, the header a resolver, its `admit`, its callback and a `beforeRequest` are
+  handed is an `IHandedRequestHeader`, exported beside `IRequestHeader`: its credential, a
+  `HandedCredential`, says a `JWT`'s scheme alone, so a procedure that reads a `JWT`'s token there
+  no longer compiles. The C# side's `RequestHeader` says so with a `Credential` whose `Token` is
+  none.
+
+### Removed
+
+- `transportCredential` from `IAdmissionRequest`, `IRequestResolverProps` and `ISessionRequest`,
+  and `forwardsCredentials` from `IRequestHandler`, on the TypeScript side;
+  `SessionRequest.TransportCredential` and `IRequestHandler.ForwardsCredentials` from the C# side's
+  public surface, and `RouterCore`, `RouterCoreOptions`, `IRouterCorePort`, `CoreRequest` and
+  `AnswerInfo`, internal as the TypeScript side's core is. A procedure no longer takes a credential
+  unverified to pass on; a relay's destination does.
 
 ### Fixed
 
@@ -73,6 +87,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection not open, as there.
 - On the C# side, a request whose sending fails as its router is disposed is rejected as disposed,
   as the TypeScript side rejects it, not with the transport's refusal, which raced the disposal.
+
+### Security
+
+- A procedure is handed no bearer credential its call came with, on both sides: its resolver, its
+  admission, a `beforeRequest` and a relay's `beforeRoute` read the call's session, and of a `JWT`
+  its scheme alone; what a transport carried beside an `ELSEWHERE`, and a `JWT`'s token, reach the
+  side's verifier and a relay alone. A registered resolver and its `admit` were handed both, and on
+  the C# side so were a `BeforeRequest` and a relay's `BeforeRoute`.
 
 ## [0.5.0] - 2026-10-14
 

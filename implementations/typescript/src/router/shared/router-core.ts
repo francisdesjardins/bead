@@ -8,7 +8,7 @@ import { mergeGauges } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { Data, ITransportMessage } from '../../transport/shared/types';
 import { createAnsweringCalls } from './answering-calls';
-import { credentialSchemesDetailOf } from './call-session';
+import { credentialSchemesDetailOf, handedHeaderOf } from './call-session';
 import { CredentialScheme, EnvelopeKind, EnvelopeLayout } from './constants';
 import { bytesOf, readEnvelope, writeFailure } from './envelope';
 import { CapacityError, DisconnectError, FailureError, redactHeader } from './errors';
@@ -32,15 +32,19 @@ import type {
   ICallAddress,
   ICallSession,
   IEnvelopePrefix,
+  IDestinationHandler,
   IFailure,
+  IHandedRequestHeader,
   IRequestHandler,
-  IRequestHeader,
   IRequestResolver,
+  IRequestResolverProps,
   IResultHeader,
   IRouterCore,
   IRouterCoreOptions,
   IRouterCorePort,
   IRouterFailures,
+  ISessionRequest,
+  ITransportCarried,
   OutgoingEnvelope,
   RouterSide,
   SessionOf,
@@ -49,15 +53,15 @@ import type {
 // interfaces
 
 /**
- * A request of the peer's as this side dispatches it: its connection, its header, its controller,
- * what its transport carried beside it, and the call's session once its credential resolved.
+ * A request of the peer's as this side dispatches it: its connection, its call's header — a
+ * procedure's made, its `JWT`'s scheme alone; a destination's as it came — its controller, and the
+ * call's session once its credential resolved.
  */
 interface IDispatched<Handle extends string> {
   connectionHandle: Handle;
   controller: AbortController;
-  header: IRequestHeader;
+  header: IHandedRequestHeader;
   session?: ICallSession | undefined;
-  transportCredential?: string | undefined;
 }
 
 /** A request routed to its handler, with its payload as it came: a transfer's opening, for one. */
@@ -91,7 +95,8 @@ interface IRegistered<Handle extends string> {
 const CREDENTIAL_NOT_HELD = 'the credential does not hold';
 const NO_CREDENTIAL = 'no credential came';
 
-// the schemes a handler that forwards credentials unresolved takes: every one the protocol names
+// the schemes a destination's handler that forwards credentials unresolved takes: every one the
+// protocol names
 const FORWARDED_SCHEMES: ReadonlySet<number> = new Set([
   CredentialScheme.OPAQUE,
   CredentialScheme.JWT,
@@ -127,6 +132,31 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> => {
 const resolvesLater = (credential: Credential | undefined): boolean => {
   return (
     credential?.scheme === CredentialScheme.JWT || credential?.scheme === CredentialScheme.ELSEWHERE
+  );
+};
+
+/**
+ * A destination's handler as the core hands it a request: with what the request came with — its
+ * header as it came, what its transport carried — which its call keeps for it alone (spec 14.2).
+ */
+const carryingOf = <Handle extends string>(
+  handler: IDestinationHandler<Handle>,
+  carried: ITransportCarried
+): IRequestHandler<Handle> => {
+  return Object.assign(
+    (props: IRequestResolverProps<Handle>) => {
+      return handler({ ...props, ...carried });
+    },
+    {
+      ...(handler.admit === undefined
+        ? {}
+        : {
+            admit: (request: IAdmissionRequest<Handle>) => {
+              return handler.admit?.({ ...request, ...carried });
+            },
+          }),
+      maximumPayloadBytes: handler.maximumPayloadBytes,
+    }
   );
 };
 
@@ -216,13 +246,16 @@ export const createRouterCore = <Handle extends string>(
   const resolvers = createProcedureMap<IRegistered<Handle>>();
   // the handler each request was routed to, by the very header dispatched: its answer is written by
   // that one's limit, whatever else holds the same address
-  const handlers = new WeakMap<IRequestHeader, IRequestHandler<Handle>>();
+  const handlers = new WeakMap<
+    IHandedRequestHeader,
+    IDestinationHandler<Handle> | IRequestHandler<Handle>
+  >();
   // the call's session each request was admitted in, by the very header dispatched, for what its
   // answer does first
-  const callSessions = new WeakMap<IRequestHeader, ICallSession>();
+  const callSessions = new WeakMap<IHandedRequestHeader, ICallSession>();
   // the failure each request dispatched was answered with, by the very header dispatched: one its
   // router answered in its resolver's place, which its resolver's answer tells (debugging 4.2)
-  const failuresAnswered = new WeakMap<IRequestHeader, IFailure>();
+  const failuresAnswered = new WeakMap<IHandedRequestHeader, IFailure>();
 
   let isDisposed = false;
 
@@ -346,7 +379,7 @@ export const createRouterCore = <Handle extends string>(
       connectionHandle: Handle;
       controller: AbortController;
       header: IResultHeader;
-      request: IRequestHeader;
+      request: IHandedRequestHeader;
     }
   ): Promise<void> => {
     const { callId } = header;
@@ -459,7 +492,7 @@ export const createRouterCore = <Handle extends string>(
       controller: AbortController | undefined;
       header: IResultHeader;
       maximumPayloadBytes: number;
-      request: IRequestHeader;
+      request: IHandedRequestHeader;
     }
   ): { controller: AbortController; outgoing: IOutgoingTransfer } | undefined => {
     const outgoing = transferOf(payload, { header, maximumPayloadBytes });
@@ -614,8 +647,7 @@ export const createRouterCore = <Handle extends string>(
     resolver: IRequestHandler<Handle>,
     dispatched: IDispatched<Handle> & { payload: Uint8Array }
   ): void => {
-    const { connectionHandle, controller, header, payload, session, transportCredential } =
-      dispatched;
+    const { connectionHandle, controller, header, payload, session } = dispatched;
     const fail = (reason: unknown): void => {
       const isAnswering = answeringCalls.isAnswering({ connectionHandle, header });
 
@@ -644,7 +676,6 @@ export const createRouterCore = <Handle extends string>(
         payload,
         session,
         signal: controller.signal,
-        ...(transportCredential === undefined ? {} : { transportCredential }),
       }).catch(fail);
     } catch (reason) {
       fail(reason);
@@ -789,14 +820,9 @@ export const createRouterCore = <Handle extends string>(
   // nothing goes back, a payload past its limit, a transfer's opening refused — dispatched, or its
   // transfer opened, whose first credit goes only now
   const admitRouted = ({ dispatched, payload, resolver }: IRouted<Handle>): void => {
-    const { connectionHandle, header, session, transportCredential } = dispatched;
+    const { connectionHandle, header, session } = dispatched;
     const { callId, total } = header;
-    const refusal = refusalOf(resolver, {
-      connectionHandle,
-      header,
-      session,
-      ...(transportCredential === undefined ? {} : { transportCredential }),
-    });
+    const refusal = refusalOf(resolver, { connectionHandle, header, session });
 
     if (refusal !== undefined) {
       return (refuse(refusal, dispatched), undefined);
@@ -858,12 +884,19 @@ export const createRouterCore = <Handle extends string>(
     receivings.grant(transfer);
   };
 
-  // the call's session, as `SessionOf` says, then its admission on it; while it resolves, its call
-  // id stays held, and what settles once its call ended is dropped
-  const resolveSession = (routed: IRouted<Handle>): void => {
-    const { dispatched, resolver } = routed;
-    const { connectionHandle, controller, header, transportCredential } = dispatched;
-    const { credential } = header;
+  // the call's session, as `SessionOf` says, from what its request came with, then its admission
+  // on it; while it resolves, its call id stays held, and what settles once its call ended is
+  // dropped
+  const resolveSession = (
+    routed: IRouted<Handle>,
+    {
+      isForwarded,
+      request,
+    }: { isForwarded: boolean; request: ISessionRequest<Handle> & ITransportCarried }
+  ): void => {
+    const { dispatched } = routed;
+    const { connectionHandle, controller } = dispatched;
+    const { credential } = request.header;
     const { signal } = controller;
 
     const settle = (session: ICallSession | undefined): void => {
@@ -892,7 +925,10 @@ export const createRouterCore = <Handle extends string>(
 
     // an ELSEWHERE its transport carried nothing beside has nothing to resolve: no credential came,
     // in a later turn all the same
-    if (credential?.scheme === CredentialScheme.ELSEWHERE && transportCredential === undefined) {
+    if (
+      credential?.scheme === CredentialScheme.ELSEWHERE &&
+      request.transportCredential === undefined
+    ) {
       return (
         queueMicrotask(() => {
           if (!signal.aborted) {
@@ -903,9 +939,9 @@ export const createRouterCore = <Handle extends string>(
       );
     }
 
-    // a JWT, or an ELSEWHERE carried, that its handler forwards resolves to none here, its
-    // destination's to verify, in a later turn all the same
-    if (isLater && resolver.forwardsCredentials === true) {
+    // a JWT, or an ELSEWHERE carried, that its destination's handler forwards resolves to none
+    // here, its destination's to verify, in a later turn all the same
+    if (isLater && isForwarded) {
       return (
         queueMicrotask(() => {
           if (!signal.aborted) {
@@ -919,14 +955,7 @@ export const createRouterCore = <Handle extends string>(
     let resolution: ReturnType<SessionOf<Handle>>;
 
     try {
-      resolution = port.sessionOf?.(
-        {
-          connectionHandle,
-          header,
-          ...(transportCredential === undefined ? {} : { transportCredential }),
-        },
-        signal
-      );
+      resolution = port.sessionOf?.(request, signal);
     } catch (reason) {
       if (!isLater) {
         return (fail(reason), undefined);
@@ -982,7 +1011,6 @@ export const createRouterCore = <Handle extends string>(
   ): void => {
     const { header, payload } = envelope;
     const { callId, destinationId, procedureId, serviceId } = header;
-    const request = { connectionHandle, header };
 
     // a request of this side's own parity, or on a call id in use, would answer another call
     if (sideOfCallId(callId) === failures.side) {
@@ -1006,25 +1034,33 @@ export const createRouterCore = <Handle extends string>(
 
     // the resolver it is routed to, whose series it counts into: _OTHER's for any other
     const registered = destinationId === undefined ? resolvers.get(header) : undefined;
+    // ! a procedure's call runs on a header made now, its JWT's scheme alone, which keys its call
+    // everywhere; one that names a destination keeps the header as it came (spec 13.1)
+    const request = {
+      connectionHandle,
+      header: destinationId === undefined ? handedHeaderOf(header) : header,
+    };
     // * its call starts as its request opens it, timed from its arrival
     const controller = answeringCalls.open(
       request,
       metrics === undefined ? undefined : (registered?.series?.calls ?? metrics.otherServer)
     );
-    // ! what its transport carried stands for ELSEWHERE alone, and stays here for any other: its
-    // sessionOf, its admission and its resolver are handed nothing beside it (spec 15.1)
+    // ! what its transport carried stands for ELSEWHERE alone, and stays here for any other: it
+    // reaches sessionOf, and a destination's handler, with the header as it came, and nothing else
+    // (spec 13.1, 15.1)
     const carried =
       header.credential?.scheme === CredentialScheme.ELSEWHERE ? transportCredential : undefined;
-    const dispatched: IDispatched<Handle> = {
-      ...request,
-      controller,
+    const came = {
+      connectionHandle,
+      header,
       ...(carried === undefined ? {} : { transportCredential: carried }),
     };
+    const dispatched: IDispatched<Handle> = { ...request, controller };
     // one that names a destination goes to the handler this side has for it — a relay's
+    const destination =
+      destinationId === undefined ? undefined : port.handlerOfDestination?.(destinationId);
     const resolver =
-      destinationId === undefined
-        ? registered?.resolver
-        : port.handlerOfDestination?.(destinationId);
+      destination === undefined ? registered?.resolver : carryingOf(destination, came);
 
     // one this side has no handler for: this peer relays nothing, to that destination or elsewhere
     if (destinationId !== undefined && resolver === undefined) {
@@ -1044,11 +1080,12 @@ export const createRouterCore = <Handle extends string>(
       return (refuse(unknown, dispatched), undefined);
     }
 
-    handlers.set(header, resolver);
+    handlers.set(request.header, destination ?? resolver);
 
-    // routed, a credential of a scheme this side takes none of — or its handler forwards none of —
-    // is refused before it resolves, and before any credit, the schemes it takes named
-    const isForwarded = resolver.forwardsCredentials === true;
+    // routed, a credential of a scheme this side takes none of — or its destination's handler
+    // forwards none of — is refused before it resolves, and before any credit, the schemes it takes
+    // named
+    const isForwarded = destination?.forwardsCredentials === true;
 
     if (
       header.credential !== undefined &&
@@ -1057,7 +1094,7 @@ export const createRouterCore = <Handle extends string>(
       return (refuse(isForwarded ? unforwarded : unsupported, dispatched), undefined);
     }
 
-    resolveSession({ dispatched, payload, resolver });
+    resolveSession({ dispatched, payload, resolver }, { isForwarded, request: came });
   };
 
   // a chunk no transfer takes: on a call abandoned, one under the credit it granted is late, and

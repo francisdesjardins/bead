@@ -10,6 +10,7 @@ import type {
   Credential,
   ICallSession,
   IFailure,
+  IHandedRequestHeader,
   IRouterFailures,
   RequestCredential,
   SessionIdentifier,
@@ -89,6 +90,19 @@ export const connectionSessionOf = (
   }
 
   return Object.freeze({ data: dataOf?.() });
+};
+
+/**
+ * A request's header as its side hands it to a procedure and its admission (spec 13.1): a copy whose
+ * `JWT` credential says its scheme alone, its token the verifier's and a relay's; any other header
+ * itself, one made already among them.
+ */
+export const handedHeaderOf = (header: Readonly<IHandedRequestHeader>): IHandedRequestHeader => {
+  const { credential } = header;
+
+  return credential?.scheme === CredentialScheme.JWT && 'token' in credential
+    ? { ...header, credential: { scheme: CredentialScheme.JWT } }
+    : header;
 };
 
 /**

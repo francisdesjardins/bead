@@ -20,7 +20,10 @@ internal sealed class AnsweringCall
     /// <summary>The call's session, once its credential resolved; none for a call in none.</summary>
     public CallSession? Session { get; set; }
 
-    /// <summary>What its transport carried beside its request, kept for one presenting ELSEWHERE alone.</summary>
+    /// <summary>
+    /// What its transport carried beside its request, kept for one presenting ELSEWHERE that names a
+    /// destination alone, which its relay checks and moves to leg B; none for a procedure's call.
+    /// </summary>
     public string? TransportCredential { get; set; }
 
     /// <summary>What hears, on the router's scheduler, that the call ended before its answer went: a result going as a transfer.</summary>

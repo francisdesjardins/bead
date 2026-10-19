@@ -95,7 +95,11 @@ public sealed record Procedure
     }
 }
 
-/// <summary>A request as its admission sees it: where it came from, and its header — never its payload.</summary>
+/// <summary>
+/// A request as its admission sees it: where it came from, and its header — never its payload. An
+/// application's admission and a resolver are handed no bearer credential its call came with: a
+/// <see cref="CredentialScheme.Jwt"/> in its header says its scheme alone (spec 13.1).
+/// </summary>
 /// <param name="ConnectionHandle">The connection it came from.</param>
 /// <param name="Header">Its header.</param>
 public readonly record struct AdmissionRequest(string ConnectionHandle, RequestHeader Header)
@@ -105,8 +109,9 @@ public readonly record struct AdmissionRequest(string ConnectionHandle, RequestH
 
     /// <summary>
     /// What its transport carried beside it, for a request presenting
-    /// <see cref="CredentialScheme.Elsewhere"/>, which a relay judges its leg B able to carry or not
-    /// (spec 14.3, step 5); none for any other.
+    /// <see cref="CredentialScheme.Elsewhere"/> that names a destination, which its relay judges its
+    /// leg B able to carry or not (spec 14.3, step 5); none for any other, a procedure's among them,
+    /// and never for an application's admission (spec 13.1).
     /// </summary>
     internal string? TransportCredential { get; init; }
 }
@@ -117,7 +122,10 @@ public sealed record RequestResolverProps
     /// <summary>The connection it came from.</summary>
     public required string ConnectionHandle { get; init; }
 
-    /// <summary>Its header, the very one the router dispatched: an answer finds its call by it.</summary>
+    /// <summary>
+    /// Its header, the very one the router dispatched: an answer finds its call by it. A
+    /// procedure's says a <see cref="CredentialScheme.Jwt"/>'s scheme alone (spec 13.1).
+    /// </summary>
     public required RequestHeader Header { get; init; }
 
     /// <summary>Set by a router that asked the resolver's admission already.</summary>
@@ -137,8 +145,9 @@ public sealed record RequestResolverProps
 
     /// <summary>
     /// What its transport carried beside it, for a request presenting
-    /// <see cref="CredentialScheme.Elsewhere"/>, which a relay moves to leg B's transport as it came;
-    /// none for any other, whose transport's credential stays where it came (spec 14.2).
+    /// <see cref="CredentialScheme.Elsewhere"/> that names a destination, which its relay moves to
+    /// leg B's transport as it came (spec 14.2); none for any other, a procedure's among them (spec
+    /// 13.1).
     /// </summary>
     internal string? TransportCredential { get; init; }
 }
@@ -165,21 +174,23 @@ public interface IRequestHandler
     /// kept (spec 9.2, step 5); one that throws refuses it as failed, and is reported.
     /// </summary>
     Failure? Admit(AdmissionRequest request);
+}
 
+/// <summary>
+/// The handler of a request that names a destination: a relay's, the one handler a request's bearer
+/// credentials reach, which it checks and moves to leg B (spec 14.2, 14.3).
+/// </summary>
+internal interface IDestinationHandler : IRequestHandler
+{
     /// <summary>
     /// Whether it forwards a credential unresolved — a relay's that does not verify (spec 14.3, step
     /// 1): a request presenting a <see cref="CredentialScheme.Jwt"/>, or an
     /// <see cref="CredentialScheme.Elsewhere"/> its transport carried, reaches its admission in
     /// none, every scheme the protocol names taken, and its session is not asked; one presenting none
-    /// or <see cref="CredentialScheme.Opaque"/> resolves as any other. None does by default.
+    /// or <see cref="CredentialScheme.Opaque"/> resolves as any other. Only a relay's handler
+    /// forwards: a procedure resolves its call's credential at its side (spec 9.2, step 5).
     /// </summary>
-    bool ForwardsCredentials
-    {
-        get
-        {
-            return false;
-        }
-    }
+    bool ForwardsCredentials { get; }
 }
 
 /// <summary>
@@ -332,9 +343,8 @@ public sealed record RouterRequest(Procedure Procedure, ResolvedRequestOptions O
     public INotificationLike? Subscribes { get; init; }
 
     /// <summary>
-    /// What hears the call id before the request goes out, as <see cref="CoreRequest.OnCallId"/>
-    /// does: once the router drew it, on its scheduler; a call refused before it draws one is never
-    /// heard.
+    /// What hears the call id before the request goes out: once the router drew it, on its
+    /// scheduler; a call refused before it draws one is never heard.
     /// </summary>
     public Action<uint>? OnCallId { get; init; }
 
@@ -352,7 +362,7 @@ public sealed record RouterRequest(Procedure Procedure, ResolvedRequestOptions O
 }
 
 /// <summary>A request a router's core sends: where, for which procedure, and how.</summary>
-public sealed record CoreRequest
+internal sealed record CoreRequest
 {
     /// <summary>The connection the request goes to.</summary>
     public required string ConnectionHandle { get; init; }
@@ -426,7 +436,7 @@ public readonly record struct TracedEnvelope(string ConnectionHandle, IEnvelopeH
 /// <param name="Target">The request it answers.</param>
 /// <param name="IsFailure">Whether it is a failure.</param>
 /// <param name="Resolver">The handler its request was routed to, if any.</param>
-public readonly record struct AnswerInfo(AnswerTarget Target, bool IsFailure, IRequestHandler? Resolver)
+internal readonly record struct AnswerInfo(AnswerTarget Target, bool IsFailure, IRequestHandler? Resolver)
 {
     /// <summary>The session the request it answers ran in, its call's; none for a call in none.</summary>
     public CallSession? Session { get; init; }
@@ -436,7 +446,7 @@ public readonly record struct AnswerInfo(AnswerTarget Target, bool IsFailure, IR
 /// What sets one side of a router apart, for its core: its side, how it sends, and what it hears of
 /// what the core does. A member a side has nothing to say with keeps its default.
 /// </summary>
-public interface IRouterCorePort
+internal interface IRouterCorePort
 {
     /// <summary>Which side the router is: its failures say so, and it draws call ids of its parity.</summary>
     RouterSide Side { get; }
@@ -477,7 +487,7 @@ public interface IRouterCorePort
     /// The handler of a request that names a destination, its header given, its destination among
     /// it; none refuses it.
     /// </summary>
-    IRequestHandler? HandlerOfDestination(RequestHeader header)
+    IDestinationHandler? HandlerOfDestination(RequestHeader header)
     {
         return null;
     }

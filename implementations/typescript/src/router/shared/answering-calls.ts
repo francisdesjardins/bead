@@ -7,14 +7,14 @@ import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { LIMIT_DEFAULTS } from './constants';
 import { CallEnding, type IProcedureSeries, microsecondsOf } from './metrics-registry';
-import type { CallId, ICallAddress, IRequestHeader, IRouterLimits } from './types';
+import type { CallId, ICallAddress, IHandedRequestHeader, IRouterLimits } from './types';
 
 // interfaces
 
 /** A request as it was dispatched: the connection it came from, and its header. */
 interface IDispatchedRequest<Handle extends string> {
   connectionHandle: Handle;
-  header: IRequestHeader;
+  header: IHandedRequestHeader;
 }
 
 /**
@@ -62,7 +62,7 @@ export interface IAnsweringCalls<
   /** Takes out the call `controller` is for — none that took its call id since. */
   close(call: ICallAddress<Handle>, controller: AbortController): void;
   /** The controller of the request dispatched with `header`; `undefined` for one never dispatched. */
-  controllerOf(header: IRequestHeader): AbortController | undefined;
+  controllerOf(header: IHandedRequestHeader): AbortController | undefined;
   /**
    * Counts the call of a request ended, as `ending` says — its answer handed to its transport, say
    * — once, into the series it was opened with; nothing for a call that counts none.
@@ -126,7 +126,7 @@ export const createAnsweringCalls = <
   const { maximumTransfers, transferInactivityTimeout } = options.limits ?? LIMIT_DEFAULTS;
   const answering = new Map<Handle, Map<CallId, IAnswering<Receiving>>>();
   // the controller of each request dispatched, by its header
-  const dispatched = new WeakMap<IRequestHeader, AbortController>();
+  const dispatched = new WeakMap<IHandedRequestHeader, AbortController>();
   const abandoned = new Map<Handle, Map<CallId, IAbandoned>>();
 
   // forgets a call abandoned, and its timer

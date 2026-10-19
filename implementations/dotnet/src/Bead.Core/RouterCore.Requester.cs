@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Bead;
 
-public sealed partial class RouterCore
+internal sealed partial class RouterCore
 {
     // what the requester asks of the core it serves
     private interface IRouterRequesterPort
