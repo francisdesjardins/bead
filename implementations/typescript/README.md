@@ -1578,7 +1578,14 @@ across a reload with Preserve log, and exports its records as JSON, `bead-devtoo
 The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
 `←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
 snippet that makes it again by the page's own service manager, and hides or shows its procedure
-alone.
+alone. `←`, `→`, `Home` and `End` move across the view tabs and a call's tabs, and the `?` beside
+the filter opens its syntax, which `Escape` closes. Its status bar's Detail choice puts a call's
+detail right of the list, under it, or, at Auto, as DevTools' Elements panel places its sidebar:
+beside a split wider than 680 px, under it otherwise. The splitter between them follows the
+pointer, or, focused, `←` and `→` (`↑` and `↓` when stacked), `Home` and `End` to its limits, and
+`Enter`, which collapses the list to its least and, pressed again, restores it. The list keeps its least
+first, eight rows when stacked, and the detail its whole tab bar where the panel holds both; the
+panel's page keeps both choices.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
 nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —
@@ -1595,7 +1602,10 @@ leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each o
 `messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
 extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
 page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
-panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed.
+panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed. Its type scale
+and spacing are penumbra's, its two sheets copied whole into `devtools/penumbra/` with the commit
+they came from; the panel's skin over them, in `panel.html`, sets every colour the panel draws with,
+DevTools' own.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
 unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's

@@ -46,6 +46,8 @@ export interface IEnvelopeList {
   envelopes: readonly { call: ICall; envelope: IEnvelopeRecord }[];
   isAllClients: boolean;
   nameOf: (call: ICall) => string;
+  /** The call selected, whose envelopes read as selected too. */
+  selected: number | undefined;
 }
 
 // helpers
@@ -289,7 +291,11 @@ export const callRowsOf = (list: ICallList): HTMLElement[] => {
 export const envelopeListRowsOf = (list: IEnvelopeList): HTMLElement[] => {
   return [...list.envelopes].reverse().map(({ call, envelope }) => {
     return make('tr', {
-      attributes: { 'data-direction': envelope.direction, 'data-key': String(call.key) },
+      attributes: {
+        'aria-selected': String(call.key === list.selected),
+        'data-direction': envelope.direction,
+        'data-key': String(call.key),
+      },
       children: [
         make('td', { text: clockOf(envelope.at) }),
         make('td', { text: arrowOf(envelope.direction) }),

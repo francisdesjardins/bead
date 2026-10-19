@@ -107,7 +107,7 @@ export const statusIconOf = (status: CallStatus): SVGElement => {
         attributes: {
           d,
           fill: 'none',
-          stroke: dash === undefined ? 'var(--answered)' : 'var(--ended)',
+          stroke: dash === undefined ? 'var(--app-info)' : 'var(--ended)',
           'stroke-dasharray': dash,
           'stroke-width': 1.4,
         },
@@ -119,21 +119,21 @@ export const statusIconOf = (status: CallStatus): SVGElement => {
     case 'answered':
     case 'heard':
       return icon([
-        svgOf('circle', { attributes: { cx: 6, cy: 6, fill: 'var(--answered)', r: 5 } }),
+        svgOf('circle', { attributes: { cx: 6, cy: 6, fill: 'var(--app-info)', r: 5 } }),
         svgOf('path', {
           attributes: {
             d: 'M3.4 6.2l1.8 1.8 3.4-3.6',
             fill: 'none',
-            stroke: 'var(--paper)',
+            stroke: 'var(--app-paper)',
             'stroke-width': 1.4,
           },
         }),
       ]);
     case 'failed':
       return icon([
-        svgOf('circle', { attributes: { cx: 6, cy: 6, fill: 'var(--bad)', r: 5 } }),
+        svgOf('circle', { attributes: { cx: 6, cy: 6, fill: 'var(--app-error)', r: 5 } }),
         svgOf('path', {
-          attributes: { d: 'M4 4l4 4M8 4l-4 4', stroke: 'var(--paper)', 'stroke-width': 1.4 },
+          attributes: { d: 'M4 4l4 4M8 4l-4 4', stroke: 'var(--app-paper)', 'stroke-width': 1.4 },
         }),
       ]);
     case 'ended':
@@ -165,7 +165,7 @@ export const statusIconOf = (status: CallStatus): SVGElement => {
             cy: 6,
             fill: 'none',
             r: 4.6,
-            stroke: 'var(--line)',
+            stroke: 'var(--app-divider)',
             'stroke-width': 1.6,
           },
         }),
@@ -174,7 +174,7 @@ export const statusIconOf = (status: CallStatus): SVGElement => {
             class: 'spin',
             d: 'M6 1.4a4.6 4.6 0 0 1 4.6 4.6',
             fill: 'none',
-            stroke: 'var(--answered)',
+            stroke: 'var(--app-info)',
             'stroke-width': 1.6,
           },
         }),

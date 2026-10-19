@@ -48,13 +48,13 @@ const TICKED = Object.freeze<number[]>([
 ]);
 
 const FILLS = Object.freeze({
-  answered: 'var(--answered)',
-  closed: 'var(--muted)',
+  answered: 'var(--app-info)',
+  closed: 'var(--app-text-secondary)',
   ended: 'none',
-  failed: 'var(--bad)',
-  flight: 'var(--answered-soft)',
-  heard: 'var(--answered)',
-  open: 'var(--muted)',
+  failed: 'var(--app-error)',
+  flight: 'var(--app-info-wash)',
+  heard: 'var(--app-info)',
+  open: 'var(--app-text-secondary)',
 });
 
 // definition
@@ -121,7 +121,7 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
                 status === 'ended'
                   ? 'var(--ended)'
                   : status === 'flight'
-                    ? 'var(--answered)'
+                    ? 'var(--app-info)'
                     : undefined,
               'stroke-dasharray': status === 'ended' ? '3 2' : undefined,
               width: Math.max(scale.xOf(end) - scale.xOf(start), 2),
@@ -134,9 +134,9 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
           attributes: {
             cx: scale.xOf(at),
             cy: y + 10,
-            fill: 'var(--paper)',
+            fill: 'var(--app-paper)',
             r: 3,
-            stroke: 'var(--ink)',
+            stroke: 'var(--app-text)',
             'stroke-width': 1.2,
           },
         });
@@ -148,7 +148,7 @@ export const timelineViewOf = (view: ITimelineView): Node[] => {
         .map(({ at }) => {
           return svgOf('line', {
             attributes: {
-              stroke: 'var(--ink)',
+              stroke: 'var(--app-text)',
               'stroke-width': 1.1,
               x1: scale.xOf(at),
               x2: scale.xOf(at),
