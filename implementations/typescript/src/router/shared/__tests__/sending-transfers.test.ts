@@ -137,6 +137,43 @@ test.describe('createSendingTransfers', () => {
     expect([before.offsets, after.offsets]).toEqual([[], [40]]);
   });
 
+  test('closes every transfer of a connection, or of every one: nothing more of them goes', () => {
+    const sendings = createSendingTransfers<Handle>();
+    const first = { callId: 1, connectionHandle: 'a' } as const;
+    const second = { callId: 3, connectionHandle: 'a' } as const;
+    const other = { callId: 1, connectionHandle: 'b' } as const;
+    const opened = [openOn(sendings, { call: first }), openOn(sendings, { call: second })];
+    const kept = openOn(sendings, { call: other });
+
+    sendings.closeAll('a');
+    // a credit on their calls is for none
+    sendings.credit(first, 88);
+    sendings.credit(second, 88);
+    sendings.credit(other, 88);
+
+    expect(
+      opened.map(({ offsets }) => {
+        return offsets;
+      })
+    ).toEqual([[], []]);
+    expect(kept.offsets).toEqual([40]);
+    expect(sendings.gauges()).toMatchObject({
+      connectionHandles: new Set(['b']),
+      counts: { sendingTransfers: 1 },
+    });
+
+    // ended already, they end nothing more, and every connection's go
+    sendings.closeAll('a');
+    sendings.closeAll();
+    sendings.credit(other, 200);
+
+    expect(kept.offsets).toEqual([40]);
+    expect(sendings.gauges()).toMatchObject({
+      connectionHandles: new Set(),
+      counts: { sendingTransfers: 0 },
+    });
+  });
+
   test('counts the transfers sent, and the connections they go to', () => {
     const sendings = createSendingTransfers<Handle>();
     const { sending } = openOn(sendings, { call: { callId: 1, connectionHandle: 'a' } });

@@ -91,7 +91,8 @@ export interface IAnsweringCalls<
   take(call: ICallAddress<Handle>): AbortController | undefined;
   /**
    * Takes out every call — `connectionHandle`'s alone, when given — and gives their controllers,
-   * for the caller to abort; the calls abandoned go with them, and none is abandoned.
+   * for the caller to abort; the calls abandoned go with them, and none is abandoned. Each call is
+   * counted closed once all are out.
    */
   takeAll(connectionHandle?: Handle): AbortController[];
 }
@@ -296,13 +297,12 @@ export const createAnsweringCalls = <
         connectionHandle === undefined
           ? new Set([...answering.keys(), ...abandoned.keys()])
           : [connectionHandle];
-      const controllers: AbortController[] = [];
+      const taken: IAnswering<Receiving>[] = [];
 
       for (const handle of connections) {
         for (const [callId, entry] of answering.get(handle)?.entries() ?? []) {
           forget({ callId, connectionHandle: handle });
-          ended(entry, CallEnding.CLOSED);
-          controllers.push(entry.controller);
+          taken.push(entry);
         }
 
         // a map's entry deleted as it is visited leaves the others to visit
@@ -311,7 +311,14 @@ export const createAnsweringCalls = <
         }
       }
 
-      return controllers;
+      // each counted once every one is out, so none is counted while another is still held
+      for (const entry of taken) {
+        ended(entry, CallEnding.CLOSED);
+      }
+
+      return taken.map(({ controller }) => {
+        return controller;
+      });
     },
   };
 };

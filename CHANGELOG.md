@@ -24,9 +24,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The DevTools panel places its detail right of the list, under it, or by the panel's width as
   DevTools' Elements panel does, and a splitter between them sizes both; the panel keeps both
   choices.
+- Debugging 9.7 states that a call made on a connection that closes fails as closed,
+  `DisconnectError`, `DisconnectException`, even when the signal it was given is that of a call the
+  close ends; an exit of `spec/metrics.json` closes a connection while a call on it awaits its
+  command, and counts both `closed`, once each.
 
 ### Changed
 
+- Both sides close a closing connection's sending transfers with its receiving ones, before they
+  settle its calls: every transfer of the connection ends, and every call of it is taken out, before
+  any of its calls is counted.
 - The README says why nothing is published before 1.0.0: the wire, the names and the API change
   freely until then, with no deprecation cycle.
 - The DevTools panel reads larger, on penumbra's type scale and spacing under a skin of DevTools'
@@ -69,6 +76,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- On the C# side, a resolver hears its signal before its call's rejection when its connection
+  closes, whatever scheduler it runs on: the teardown cancels each incoming call's token in its own
+  turn, by `CancelAsync`, its callbacks run after it. On the thread pool under load, a resolver
+  could catch its outgoing call's `DisconnectException` with its token not yet cancelled.
 - In the DevTools panel's Envelopes mode, the call whose envelope is clicked stays selected, each of
   its envelopes marked, as its row is in the Calls mode.
 - Spec 15.6 states that a send answered with a redirect is lost, as both sides play it, and that a

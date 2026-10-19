@@ -18,6 +18,9 @@ internal sealed class SerialScheduler : TaskScheduler
     private readonly List<TaskCompletionSource> _idleWaiters = [];
     private bool _isDraining;
 
+    // the tasks covered that have not completed yet
+    private int _covering;
+
     /// <summary>What hears a task posted that threw: none of the router's should.</summary>
     public Action<Exception>? OnUnhandled { get; set; }
 
@@ -88,12 +91,40 @@ internal sealed class SerialScheduler : TaskScheduler
             .Unwrap();
     }
 
-    /// <summary>Settles once nothing is queued and nothing runs.</summary>
+    /// <summary>
+    /// Counts <paramref name="task"/> as work of the scheduler's own until it completes, for what runs
+    /// elsewhere on its router's behalf and posts here: a signal's callbacks, off its scheduler.
+    /// </summary>
+    public void Cover(Task task)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+
+        lock (_gate)
+        {
+            _covering += 1;
+        }
+
+        // ! uncovered as a task of its own, queued once the task completed: what it posted runs first,
+        // and the drain that runs it says the scheduler idle
+        task.ContinueWith(
+            (_) =>
+            {
+                lock (_gate)
+                {
+                    _covering -= 1;
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.DenyChildAttach,
+            this);
+    }
+
+    /// <summary>Settles once nothing is queued, nothing runs, and every task covered completed.</summary>
     public Task WhenIdle()
     {
         lock (_gate)
         {
-            if (!_isDraining && _queue.Count == 0)
+            if (!_isDraining && _queue.Count == 0 && _covering == 0)
             {
                 return Task.CompletedTask;
             }
@@ -165,8 +196,12 @@ internal sealed class SerialScheduler : TaskScheduler
                     if (!_queue.TryDequeue(out task))
                     {
                         _isDraining = false;
-                        idle = [.. _idleWaiters];
-                        _idleWaiters.Clear();
+
+                        if (_covering == 0)
+                        {
+                            idle = [.. _idleWaiters];
+                            _idleWaiters.Clear();
+                        }
                     }
                 }
 

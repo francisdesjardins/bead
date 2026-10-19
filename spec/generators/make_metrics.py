@@ -721,6 +721,9 @@ EXITS = [
      {4: [*answered_whole('slow', 'cancelled'), *answered_whole('cancellations', 'result')]}),
     ('a call whose connection closes counts closed', [CLOSED],
      'a connection that closes ends its calls, and their answers go nowhere', {2: answered_whole('slow', 'closed')}),
+    ('a call awaiting its command as their connection closes counts closed, and the command closed, each once', [CLOSED, MADE_CLOSED],
+     'the server asks its client a command, and answers with what the client answered',
+     {2: [opened('ask'), commanded('clock')], 3: [ended('ask', 'closed'), settled('clock', 'closed')]}, [close()], 2),
     # the commands the server makes
     ('a command answered counts among the client families, type command, beside the call that made it', [CLIENT_STARTS, CLIENT_ENDS, MADE_RESULT, ROLES],
      'the server asks its client a command, and answers with what the client answered',

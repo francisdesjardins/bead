@@ -142,6 +142,38 @@ public sealed class SendingTransfersTests
     }
 
     [Fact]
+    public void Closes_every_transfer_of_a_connection_or_of_every_one_nothing_more_of_them_goes()
+    {
+        var sendings = new SendingTransfers();
+        var second = new CallAddress(3, "a");
+        var other = new CallAddress(1, "b");
+        var opened = new[] { OpenOn(sendings, (First, null)), OpenOn(sendings, (second, null)) };
+        var kept = OpenOn(sendings, (other, null));
+
+        sendings.CloseAll("a");
+
+        // a credit on their calls is for none
+        sendings.Credit(First, 88);
+        sendings.Credit(second, 88);
+        sendings.Credit(other, 88);
+        Assert.All(opened, (transfer) =>
+        {
+            Assert.Empty(transfer.Offsets);
+        });
+        Assert.Equal([40], kept.Offsets);
+        Assert.Equal(["b"], sendings.Gauges().ConnectionHandles);
+        Assert.Equal(new Dictionary<string, long> { ["sendingTransfers"] = 1 }, sendings.Gauges().Counts);
+
+        // ended already, they end nothing more, and every connection's go
+        sendings.CloseAll("a");
+        sendings.CloseAll();
+        sendings.Credit(other, 200);
+        Assert.Equal([40], kept.Offsets);
+        Assert.Empty(sendings.Gauges().ConnectionHandles);
+        Assert.Equal(new Dictionary<string, long> { ["sendingTransfers"] = 0 }, sendings.Gauges().Counts);
+    }
+
+    [Fact]
     public void Counts_the_transfers_sent_and_the_connections_they_go_to()
     {
         var sendings = new SendingTransfers();

@@ -37,6 +37,23 @@ internal sealed class SendingTransfers
     }
 
     /// <summary>
+    /// Ends every transfer — <paramref name="connectionHandle"/>'s alone, when given — as a closing
+    /// connection does: nothing more of them goes, even as their chunks go out, and their senders
+    /// closing them later do nothing.
+    /// </summary>
+    public void CloseAll(string? connectionHandle = null)
+    {
+        foreach (var (call, held) in _sent.ToList())
+        {
+            if (connectionHandle is null || call.ConnectionHandle == connectionHandle)
+            {
+                held.IsOpen = false;
+                _sent.Remove(call);
+            }
+        }
+    }
+
+    /// <summary>
     /// A credit received on <paramref name="call"/>: it raises the end of the transfer sent there,
     /// its <c>OnCredit</c> hears it when it did, then the chunks it lets go are sent. A credit that
     /// comes while chunks go out only raises the end, which the chunks going out take on; one for no
