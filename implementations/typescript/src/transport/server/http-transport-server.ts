@@ -9,13 +9,11 @@ import {
   CLOSE_EVENT,
   CONNECTION_EVENT,
   CONNECTION_TOKEN_HEADER,
-  CONNECTION_UNKNOWN,
   ERROR_EVENT,
   LISTEN_EVENT,
   LISTEN_HEADER,
   MESSAGE_EVENT,
   REFUSAL_EVENT,
-  REFUSAL_HEADER,
   SEQUENCE_HEADER,
   TRANSPORT_HTTP,
   WAIT_HEADER,
@@ -24,25 +22,17 @@ import { assertHeld, assertHeldFinite, PLATFORM_CLOCK, type TimeoutId } from '..
 import { createPromise } from '../shared/create-promise';
 import { GenericError, ProgrammerError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
-import { BARE_ITEM_TYPES, type BareItem, parseItem } from '../shared/structured-fields';
 import type { Data } from '../shared/types';
 import {
   assertHosts,
   assertListeningAddress,
   assertOrigins,
-  authorityOf,
-  credentialOf,
   hasVisibleFields,
-  HOST_REFUSAL,
-  isAuthority,
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
-  type IAuthority,
-  ORIGIN_REFUSAL,
   originOf,
   ownAuthorityOf,
-  requestTargetOf,
 } from './hosts-and-origins';
 import {
   createTransportServer,
@@ -52,6 +42,31 @@ import {
   listenOn,
 } from './transport-server';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
+import { createHTTPRequestExchange } from './http-request-exchange';
+import type { IExchange } from './http-request-exchange';
+import {
+  ENVELOPE_KINDS,
+  ENVELOPE_PREFIX,
+  REFUSALS,
+  UNKNOWN_CONNECTION,
+} from './http-server-fields';
+export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
+import {
+  authorityNamedBy,
+  countOf,
+  endWith,
+  hasBody,
+  headerOf,
+  isBeadBody,
+  linesOf,
+  listeningOf,
+  preflightOf,
+  refuseMalformed,
+  RESPONSE_HEADERS,
+  sendHead,
+  targetOf,
+} from './http-server-fields';
+import type { IEnd, IExchangeIn } from './http-server-fields';
 import type {
   HTTPRequestListener,
   HTTPTransportServer,
@@ -91,33 +106,6 @@ export type {
 
 // interfaces
 
-/** An exchange as the listener meets it: its request, and the response it writes. */
-interface IExchangeIn {
-  request: IHTTPRequestLike;
-  response: IHTTPResponseLike;
-}
-
-/** How an exchange ends, when the transport ends it: its status, its reason, its headers. */
-interface IEnd {
-  headers?: Record<string, string> | undefined;
-  /** The reason a refusal of the transport's own is marked with; none for a 201 or a 204. */
-  reason?: string | undefined;
-  status: number;
-}
-
-/** An exchange of a request, from its first 8 bytes to its answer. */
-interface IExchange {
-  /** A cancel came for it while its body was still coming: it is read to its end, then 204. */
-  isCancelled: boolean;
-  /** Its request went on to the router, which owes it an answer. */
-  isDelivered: boolean;
-  /** The transport ended it — an answer, a 204, a refusal, its connection closed — so its close is no loss. */
-  isEnded: boolean;
-  readonly response: IHTTPResponseLike;
-  /** Ends its connection, as lost, once its request waited past `exchangeTimeout` for its answer. */
-  timer: TimeoutId | undefined;
-}
-
 /** An envelope of the server's own, waiting in its connection's outbox until a listen acknowledges it. */
 interface IOutgoing {
   readonly bytes: Uint8Array;
@@ -156,12 +144,6 @@ interface IDrawn extends IDrawnConnection {
   sequence: number;
   /** The exchanges of requests, by call id, from their first 8 bytes to their answer. */
   readonly waiting: Map<number, IExchange>;
-}
-
-/** A body as it comes: one buffer it grows into, so no chunk it came in is kept. */
-interface IBody {
-  bytes: Uint8Array;
-  length: number;
 }
 
 // constants
@@ -207,52 +189,15 @@ export const START_DEFAULTS = Object.freeze({
 } satisfies ITransportServerStartOptions);
 
 /**
- * What the transport reads of an envelope, and nothing else (0020), in the prefix 0001 lays out and
- * every layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the
- * call id in its fifth to eighth.
- */
-export const ENVELOPE_PREFIX = Object.freeze({
-  bytes: 8,
-  firstLayout: 0xa1,
-  lastLayout: 0xaf,
-});
-
-/** The kinds the transport tells apart: a request waits for its answer; a cancel ends one. */
-export const ENVELOPE_KINDS = Object.freeze({
-  REQUEST: 0x10,
-  RESULT: 0x11,
-  FAILURE: 0x12,
-  CANCEL: 0x16,
-});
-
-/**
  * How long a cancel that came before its request buries that call id: 5 seconds, the least a
  * requester reserves one for. A request that comes later still runs, and its answer is dropped as
  * late by the requester.
  */
 export const BURIAL_MILLISECONDS = 5_000;
 
-/** The reasons each refusal of the transport's own is marked with, in `bead-refusal`. */
-export const REFUSALS = Object.freeze({
-  BUSY: 'busy',
-  CALL_WAITING: 'call-waiting',
-  CONNECTION_UNKNOWN,
-  HOST: HOST_REFUSAL,
-  LISTEN_UNDECLARED: 'listen-undeclared',
-  MALFORMED: 'malformed',
-  METHOD: 'method-refused',
-  ORIGIN: ORIGIN_REFUSAL,
-  PATH: 'path-unknown',
-  TOO_LARGE: 'too-large',
-  TYPE: 'type-refused',
-});
-
 // a token: 16 bytes from `crypto`, in base64url without padding, as a session's
 const TOKEN_BYTES = 16;
 const TOKEN_PATTERN = /^[\w-]{22}$/u;
-
-// what a body is first given room for, before it grows
-const FIRST_BODY_BYTES = 65_536;
 
 // the length before each envelope of a batch
 const LENGTH_BYTES = 4;
@@ -260,45 +205,7 @@ const LENGTH_BYTES = 4;
 // what a listen that brings nothing back ends with
 const NOTHING: IEnd = Object.freeze({ status: 204 });
 
-// what every response on the path carries: never stored, never sniffed, and which one a request
-// gets turns on its Origin; HTTP's own 400 carries none of these
-const RESPONSE_HEADERS = Object.freeze({
-  'cache-control': 'no-store',
-  vary: 'Origin',
-  'x-content-type-options': 'nosniff',
-});
-
-// what a preflight's answer from an origin `origins` names (spec 15.12) carries whatever method it
-// asks for: the browser judges its request against it
-const PREFLIGHT = Object.freeze({
-  'access-control-allow-methods': 'GET, POST, DELETE',
-  'access-control-max-age': '7200',
-});
-
-// HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
-const PROTOCOL_ERROR = 0x1;
-
-// the 404 that tells a client its connection is gone
-const UNKNOWN_CONNECTION: IEnd = Object.freeze({
-  reason: REFUSALS.CONNECTION_UNKNOWN,
-  status: 404,
-});
-
 // helpers
-
-const headerOf = (request: IHTTPRequestLike, name: string): string | undefined => {
-  const value = request.headers[name];
-
-  return Array.isArray(value) ? value[0] : value;
-};
-
-// the path a request names, an absolute-form target's among them, its query read by no exchange;
-// none for a target HTTP refuses
-const targetOf = (request: IHTTPRequestLike): { path: string } | undefined => {
-  const target = requestTargetOf(request.url);
-
-  return target === undefined ? undefined : { path: target.path };
-};
 
 // the length an envelope goes after in a batch
 const lengthOf = (bytes: Uint8Array): Uint8Array => {
@@ -307,104 +214,6 @@ const lengthOf = (bytes: Uint8Array): Uint8Array => {
   new DataView(length.buffer).setUint32(0, bytes.length);
 
   return length;
-};
-
-// whether a request says it has a body: a length above 0, as RFC 9110 §8.6 reads its digits, or a
-// transfer coding
-const hasBody = (request: IHTTPRequestLike): boolean => {
-  return (
-    Number(headerOf(request, 'content-length') ?? '0') > 0 ||
-    headerOf(request, 'transfer-encoding') !== undefined
-  );
-};
-
-// the values of every line of the field `name` a request carries, as they came: `headers` keeps
-// the first of two, so they are counted where each stands
-const linesOf = (request: IHTTPRequestLike, name: string): string[] => {
-  const values: string[] = [];
-  const { rawHeaders } = request;
-
-  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
-    if (rawHeaders[index]?.toLowerCase() === name) {
-      values.push(rawHeaders[index + 1] ?? '');
-    }
-  }
-
-  return values;
-};
-
-// a field a request carries read as an Item of RFC 9651, its lines joined by `, ` first (§4.2, RFC
-// 9110 §5.3): its bare item, its parameters ignored (§2.3); `null` when the request carries none,
-// `undefined` when it does not parse, two lines of it among them
-const bareItemOf = (request: IHTTPRequestLike, name: string): BareItem | null | undefined => {
-  const lines = linesOf(request, name);
-
-  return lines.length === 0 ? null : parseItem(lines.join(', '))?.bareItem;
-};
-
-// a count a listen gives (spec 15.9): an Integer of 0 or more, anything else none; left out, 0, or
-// none where it `isRequired`
-const countOf = (
-  request: IHTTPRequestLike,
-  name: string,
-  { isRequired = false }: { isRequired?: boolean } = {}
-): number | undefined => {
-  const bareItem = bareItemOf(request, name);
-
-  if (bareItem === null) {
-    return isRequired ? undefined : 0;
-  }
-
-  return bareItem?.type === BARE_ITEM_TYPES.INTEGER && bareItem.value >= 0
-    ? bareItem.value
-    : undefined;
-};
-
-// whether a connect says its client listens: a Boolean, absent being false; anything else is none
-const listeningOf = (request: IHTTPRequestLike): boolean | undefined => {
-  const bareItem = bareItemOf(request, LISTEN_HEADER);
-
-  if (bareItem === null) {
-    return false;
-  }
-
-  return bareItem?.type === BARE_ITEM_TYPES.BOOLEAN ? bareItem.value : undefined;
-};
-
-// a preflight's answer (spec 15.12): `authorization`, which no wildcard covers (Fetch §4.8); the
-// names asked, for a browser that caches names and no wildcard; then `*`. No `Vary` names what was
-// asked: no cache stores an answer to `OPTIONS` (RFC 9110 §9.3.7)
-const preflightOf = (request: IHTTPRequestLike): IEnd => {
-  const asked = linesOf(request, 'access-control-request-headers').join(', ');
-  const allowed = ['authorization', ...(asked === '' ? [] : [asked]), '*'];
-
-  return {
-    headers: { ...PREFLIGHT, 'access-control-allow-headers': allowed.join(', ') },
-    status: 204,
-  };
-};
-
-// a request's authority (spec 15.12): over HTTP/2, its `:authority`, else its `host`, judged by
-// its form; over HTTP/1, as `authorityOf` reads it. None for what HTTP refuses of its own
-const authorityNamedBy = (request: IHTTPRequestLike): IAuthority | undefined => {
-  if (request.httpVersionMajor !== 1) {
-    const authority = headerOf(request, ':authority') ?? headerOf(request, 'host');
-
-    return authority === undefined || isAuthority(authority) ? { authority } : undefined;
-  }
-
-  return authorityOf(linesOf(request, 'host'), {
-    isRequired: request.httpVersion === '1.1',
-    target: requestTargetOf(request.url),
-  });
-};
-
-// a body of Bead's media type, parameters aside, sent as it is
-const isBeadBody = (request: IHTTPRequestLike): boolean => {
-  const type = headerOf(request, 'content-type')?.split(';')[0]?.trim().toLowerCase();
-  const encoding = headerOf(request, 'content-encoding')?.trim().toLowerCase();
-
-  return type === BEAD_MEDIA_TYPE && (encoding === undefined || encoding === 'identity');
 };
 
 // the envelope a router hands over, as bytes; a string or a Blob it never sends
@@ -416,21 +225,6 @@ const bytesOf = (data: Data): Uint8Array | undefined => {
   return ArrayBuffer.isView(data)
     ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
     : undefined;
-};
-
-// a chunk copied into the body, which doubles its room as it needs, up to `limit`
-const append = (body: IBody, { chunk, limit }: { chunk: Uint8Array; limit: number }): void => {
-  const length = body.length + chunk.length;
-
-  if (length > body.bytes.length) {
-    const grown = new Uint8Array(Math.min(Math.max(length, 2 * body.bytes.length), limit));
-
-    grown.set(body.bytes.subarray(0, body.length));
-    body.bytes = grown;
-  }
-
-  body.bytes.set(chunk, body.length);
-  body.length = length;
 };
 
 const drawToken = (): string => {
@@ -447,52 +241,6 @@ const assertOption = (name: string, { value }: { value: number }) => {
 // a timer that keeps no process alive: a browser's has no `unref`
 const unref = (timer: TimeoutId): void => {
   (timer as { unref?: () => unknown }).unref?.();
-};
-
-// writes an exchange's end, once: its status and headers, marked when it is a refusal
-// ! never tells: the 404 of a connection that closes is section 15.7's close, told by `close`, and
-// no refusal; a refusal the transport judges goes through `finish`, which tells it
-const endWith = (response: IHTTPResponseLike, { headers, reason, status }: IEnd): void => {
-  if (!response.headersSent) {
-    response.writeHead(status, {
-      ...RESPONSE_HEADERS,
-      ...headers,
-      ...(reason === undefined ? {} : { [REFUSAL_HEADER]: reason }),
-    });
-  }
-
-  response.end();
-};
-
-// a malformed HTTP/2 request's end: its stream reset, nothing written (RFC 9113 §8.1.1)
-const reset = (response: IHTTPResponseLike): void => {
-  if (response.stream === undefined) {
-    response.destroy();
-  } else {
-    response.stream.close(PROTOCOL_ERROR);
-  }
-};
-
-// what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
-// unmarked, with none of the path's fields, as Node's parser writes its own; over HTTP/2, a
-// malformed request, its stream reset
-const refuseMalformed = ({ request, response }: IExchangeIn): void => {
-  if (request.httpVersionMajor !== 1) {
-    return (reset(response), undefined);
-  }
-
-  response.writeHead(400, { 'content-length': '0', connection: 'close' });
-  response.end();
-
-  return undefined;
-};
-
-// a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
-const sendHead = (response: IHTTPResponseLike): void => {
-  if (!response.headersSent) {
-    response.writeHead(200, { ...RESPONSE_HEADERS, 'content-type': BEAD_MEDIA_TYPE });
-    response.flushHeaders?.();
-  }
 };
 
 // definition
@@ -930,232 +678,141 @@ export const createHTTPTransportServer = (
         return (finish(exchange, drew), undefined);
       };
 
-      // one envelope: read into one buffer, its prefix checked from its first 8 bytes, then handed on
-      const receive = (exchange: IExchangeIn, connection: IDrawn): void => {
-        const { request, response } = exchange;
-        const { connectionHandle } = connection;
-        const declared = Number(headerOf(request, 'content-length') ?? Number.NaN);
-        const authorizations = linesOf(request, 'authorization');
+      const { receive } = createHTTPRequestExchange<IDrawn>(
+        {
+          admitExchange: (connection) => {
+            return connection.open < 2 * maximumWaitingExchanges;
+          },
+          createExchange: (response) => {
+            return {
+              isCancelled: false,
+              isDelivered: false,
+              isEnded: false,
+              prefix: undefined,
+              response,
+              timer: undefined,
+            };
+          },
+          beginExchange: (connection) => {
+            connection.open += 1;
+            clock.clearTimeout(connection.idle);
 
-        // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
-        // could be taken for the other
-        if (authorizations.length > 1) {
-          return (finish(exchange, { reason: REFUSALS.MALFORMED, status: 400 }), undefined);
-        }
+            const client = connections.get(connection.connectionHandle);
 
-        if (Number.isFinite(declared) && declared > maximumBodyBytes) {
-          return (finish(exchange, { reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
-        }
+            if (client !== undefined) {
+              client.lastActivity = clock.Date.now();
+            }
+          },
+          chargeBody: (count) => {
+            bodyBytes += count;
 
-        // a bound on what one connection has under way, cancels included, well past what its
-        // waiting requests may be: those are refused at their prefix
-        if (connection.open >= 2 * maximumWaitingExchanges) {
-          return (finish(exchange, { reason: REFUSALS.BUSY, status: 429 }), undefined);
-        }
-
-        const state: IExchange = {
-          isCancelled: false,
-          isDelivered: false,
-          isEnded: false,
-          response,
-          timer: undefined,
-        };
-        const body: IBody = {
-          bytes: new Uint8Array(
-            Number.isFinite(declared) ? Math.min(declared, FIRST_BODY_BYTES) : FIRST_BODY_BYTES
-          ),
-          length: 0,
-        };
-        let charged = 0;
-        let received = 0;
-        let prefix: { callId: number; kind: number } | undefined;
-        // under way until both its request and its response are done
-        let sides = 2;
-
-        connection.open += 1;
-        clock.clearTimeout(connection.idle);
-
-        const client = connections.get(connectionHandle);
-
-        if (client !== undefined) {
-          client.lastActivity = clock.Date.now();
-        }
-
-        const release = (): void => {
-          bodyBytes -= charged;
-          charged = 0;
-        };
-
-        const done = (): void => {
-          sides -= 1;
-
-          if (sides === 0) {
+            return bodyBytes > bodyBytesBudget;
+          },
+          releaseBody: (count) => {
+            bodyBytes -= count;
+          },
+          endExchange: (connection) => {
             connection.open -= 1;
 
-            if (drawn.get(connectionHandle) === connection) {
+            if (drawn.get(connection.connectionHandle) === connection) {
               rest(connection);
             }
-          }
-        };
-
-        // ends it now, before its body or its answer; what still comes is counted, and dropped
-        const endEarly = (end: IEnd): void => {
-          state.isEnded = true;
-          clock.clearTimeout(state.timer);
-
-          if (prefix !== undefined && connection.waiting.get(prefix.callId) === state) {
-            connection.waiting.delete(prefix.callId);
-          }
-
-          finish(exchange, end);
-        };
-
-        // what the first 8 bytes say: a request waits under its call id from now on
-        const classify = (head: Uint8Array): void => {
-          const view = new DataView(head.buffer, head.byteOffset, head.byteLength);
-          const layout = view.getUint8(0);
-          const kind = view.getUint8(1);
-          const callId = view.getUint32(4);
-
-          if (layout < ENVELOPE_PREFIX.firstLayout || layout > ENVELOPE_PREFIX.lastLayout) {
-            return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
-          }
-
-          if (kind !== ENVELOPE_KINDS.REQUEST) {
-            return ((prefix = { callId, kind }), undefined);
-          }
-
-          // a client's call ids are odd, and none is 0
-          if (callId % 2 === 0) {
-            return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
-          }
-
-          if (connection.waiting.has(callId)) {
-            return (endEarly({ reason: REFUSALS.CALL_WAITING, status: 409 }), undefined);
-          }
-
-          if (connection.waiting.size >= maximumWaitingExchanges) {
-            return (endEarly({ reason: REFUSALS.BUSY, status: 429 }), undefined);
-          }
-
-          prefix = { callId, kind };
-
-          if (connection.buried.has(callId)) {
-            clock.clearTimeout(connection.buried.get(callId));
-            connection.buried.delete(callId);
-            state.isCancelled = true;
-          }
-
-          return (connection.waiting.set(callId, state), undefined);
-        };
-
-        response.on('close', () => {
-          release();
-          clock.clearTimeout(state.timer);
-
-          // closed before the transport ended it: lost, as a dropped socket's frames are
-          if (!state.isEnded) {
-            closeDrawn(connection, false);
-          }
-
-          done();
-        });
-
-        request.on('close', () => {
-          release();
-          done();
-        });
-
-        request.on('data', (chunk) => {
-          received += chunk.length;
-          charged += chunk.length;
-          bodyBytes += chunk.length;
-
-          // past the limit, it is refused, and then no more of it is read
-          if (received > maximumBodyBytes) {
-            if (!state.isEnded) {
-              endEarly({ reason: REFUSALS.TOO_LARGE, status: 413 });
-            }
-
-            return (request.destroy(), undefined);
-          }
-
-          if (bodyBytes > bodyBytesBudget && !state.isEnded) {
-            const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
-
-            return (endEarly(busy), undefined);
-          }
-
-          if (state.isEnded || state.isCancelled) {
-            return undefined;
-          }
-
-          append(body, { chunk, limit: maximumBodyBytes });
-
-          if (prefix === undefined && body.length >= ENVELOPE_PREFIX.bytes) {
-            classify(body.bytes.subarray(0, ENVELOPE_PREFIX.bytes));
-          }
-
-          return undefined;
-        });
-
-        request.on('error', () => {
-          release();
-        });
-
-        request.on('end', () => {
-          release();
-
-          if (state.isEnded) {
-            return undefined;
-          }
-
-          // its connection closed while its body came: its client learns it is gone
-          if (drawn.get(connectionHandle) !== connection) {
+          },
+          endEarly: (connection, state) => {
             state.isEnded = true;
+            clock.clearTimeout(state.timer);
 
-            return (endWith(response, UNKNOWN_CONNECTION), undefined);
-          }
+            const { prefix } = state;
 
-          if (prefix === undefined) {
-            return (endEarly({ reason: REFUSALS.MALFORMED, status: 400 }), undefined);
-          }
+            if (prefix !== undefined && connection.waiting.get(prefix.callId) === state) {
+              connection.waiting.delete(prefix.callId);
+            }
+          },
+          classify: (connection, state, { layout, prefix }) => {
+            const { callId, kind } = prefix;
 
-          const { callId, kind } = prefix;
-
-          // its cancel came first, or while it came: dropped, and ended empty
-          if (state.isCancelled) {
-            return (endEarly({ status: 204 }), undefined);
-          }
-
-          const envelope = body.bytes.slice(0, body.length);
-
-          // a request is handed on with the credential its exchange carried; no other envelope is
-          if (kind === ENVELOPE_KINDS.REQUEST) {
-            const credential = credentialOf(authorizations);
-
-            state.isDelivered = true;
-            tell(MESSAGE_EVENT, [{ credential, data: envelope }, connectionHandle]);
-
-            // still waiting — not answered as it came — its head goes now, so its client knows the
-            // router has it; and it waits for its answer no longer than it may
-            if (connection.waiting.get(callId) === state) {
-              sendHead(response);
-
-              if (exchangeTimeout !== Infinity) {
-                state.timer = clock.setTimeout(() => {
-                  closeDrawn(connection, false);
-                }, exchangeTimeout);
-                unref(state.timer);
-              }
+            if (layout < ENVELOPE_PREFIX.firstLayout || layout > ENVELOPE_PREFIX.lastLayout) {
+              return { reason: REFUSALS.MALFORMED, status: 400 };
             }
 
+            if (kind !== ENVELOPE_KINDS.REQUEST) {
+              state.prefix = prefix;
+
+              return undefined;
+            }
+
+            // a client's call ids are odd, and none is 0
+            if (callId % 2 === 0) {
+              return { reason: REFUSALS.MALFORMED, status: 400 };
+            }
+
+            if (connection.waiting.has(callId)) {
+              return { reason: REFUSALS.CALL_WAITING, status: 409 };
+            }
+
+            if (connection.waiting.size >= maximumWaitingExchanges) {
+              return { reason: REFUSALS.BUSY, status: 429 };
+            }
+
+            state.prefix = prefix;
+
+            if (connection.buried.has(callId)) {
+              clock.clearTimeout(connection.buried.get(callId));
+              connection.buried.delete(callId);
+              state.isCancelled = true;
+            }
+
+            connection.waiting.set(callId, state);
+
             return undefined;
-          }
+          },
+          prefixOf: (state) => {
+            return state.prefix;
+          },
+          isEnded: (state) => {
+            return state.isEnded;
+          },
+          isCancelled: (state) => {
+            return state.isCancelled;
+          },
+          lose: (connection, state) => {
+            clock.clearTimeout(state.timer);
 
-          tell(MESSAGE_EVENT, [{ credential: undefined, data: envelope }, connectionHandle]);
+            if (!state.isEnded) {
+              closeDrawn(connection, false);
+            }
+          },
+          finishBody: (connection, state) => {
+            if (state.isEnded) {
+              return 'ended';
+            }
 
-          if (kind === ENVELOPE_KINDS.CANCEL) {
+            if (drawn.get(connection.connectionHandle) !== connection) {
+              state.isEnded = true;
+
+              return 'gone';
+            }
+
+            return 'continue';
+          },
+          beginHandOff: (state) => {
+            state.isDelivered = true;
+          },
+          waitAfterHandOff: (connection, state, { callId }) => {
+            return connection.waiting.get(callId) === state;
+          },
+          armExchangeTimer: (connection, state) => {
+            if (exchangeTimeout !== Infinity) {
+              state.timer = clock.setTimeout(() => {
+                closeDrawn(connection, false);
+              }, exchangeTimeout);
+              unref(state.timer);
+            }
+          },
+          message: (connection, message) => {
+            tell(MESSAGE_EVENT, [message, connection.connectionHandle]);
+          },
+          cancel: (connection, callId) => {
             const cancelled = connection.waiting.get(callId);
 
             // a cancel is never answered: the exchange of its call ends empty — a 200 with no body
@@ -1167,15 +824,18 @@ export const createHTTPTransportServer = (
               connection.waiting.delete(callId);
               cancelled.isEnded = true;
               clock.clearTimeout(cancelled.timer);
-              endWith(cancelled.response, { status: 204 });
+
+              return cancelled.response;
             } else {
               cancelled.isCancelled = true;
             }
-          }
 
-          return (endEarly({ status: 204 }), undefined);
-        });
-      };
+            return undefined;
+          },
+          finish,
+        },
+        { maximumBodyBytes }
+      );
 
       const onExchange: HTTPRequestListener = (request, response) => {
         const exchange = { request, response };
