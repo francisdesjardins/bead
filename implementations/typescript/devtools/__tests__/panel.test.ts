@@ -226,6 +226,20 @@ const isWholeOf = (page: Page, selector: string): Promise<boolean> => {
     });
 };
 
+/** Whether each tab, focused, is wholly within its bar. */
+const isEveryTabInSightAsFocused = (page: Page): Promise<boolean> => {
+  return page.evaluate(() => {
+    return [...document.querySelectorAll<HTMLElement>('[role="tab"]')].every((tab) => {
+      tab.focus();
+
+      const bar = (tab.parentElement as HTMLElement).getBoundingClientRect();
+      const box = tab.getBoundingClientRect();
+
+      return box.left >= bar.left - 0.5 && box.right <= bar.right + 0.5;
+    });
+  });
+};
+
 /** The call rows the list shows whole. */
 const rowsShownOf = (page: Page): Promise<number> => {
   return page.evaluate(() => {
@@ -578,7 +592,7 @@ test.describe('the panel', () => {
     }
   });
 
-  test('scrolls no page sideways in a narrow panel, and keeps every tab in sight', async ({
+  test('scrolls no page sideways in a narrow panel, and brings each tab into sight as it is focused', async ({
     page,
   }) => {
     await openWithTraffic(page);
@@ -586,8 +600,8 @@ test.describe('the panel', () => {
     for (const width of [360, 320]) {
       await resize(page, { height: 640, width });
       expect(await isWholeOf(page, 'html')).toBe(true);
-      expect(await isWholeOf(page, '.tabs')).toBe(true);
-      expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+      // a bar narrower than its tabs, as a platform's wider type may make it, scrolls within itself
+      expect(await isEveryTabInSightAsFocused(page)).toBe(true);
     }
   });
 

@@ -237,11 +237,12 @@ export const startPanel = (host: IPanelHost): void => {
     const sides = SIDES[placement];
 
     if (placement === 'right') {
+      // ! read to the fraction: offsets round, and a bar a pixel short of its tabs scrolls
       const last = shown.detailTabs.lastElementChild;
       const bar =
         last instanceof HTMLElement
-          ? last.offsetLeft +
-            last.offsetWidth +
+          ? last.getBoundingClientRect().right -
+            shown.detailTabs.getBoundingClientRect().left +
             Number.parseFloat(getComputedStyle(shown.detailTabs).paddingRight)
           : 0;
 
@@ -1263,6 +1264,13 @@ export const startPanel = (host: IPanelHost): void => {
   // * each tab bar is WAI-ARIA APG's Tabs, a tab shown as it is focused: ←, →, Home and End move
   // along the bar, which keeps one tab stop
   for (const nav of document.querySelectorAll<HTMLElement>('[role="tablist"]')) {
+    // a bar narrower than its tabs scrolls within itself: a tab focused comes whole into sight,
+    // which focus alone leaves to a tab out of sight entirely
+    nav.addEventListener('focusin', (event) => {
+      if (event.target instanceof HTMLElement && event.target.getAttribute('role') === 'tab') {
+        event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+    });
     nav.addEventListener('keydown', (event) => {
       const tabs = [...nav.querySelectorAll<HTMLElement>('[role="tab"]')];
       const index = tabs.findIndex((tab) => {
