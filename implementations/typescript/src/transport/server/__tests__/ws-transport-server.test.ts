@@ -1178,14 +1178,23 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       fake.instances[0]?.emit('listening');
       await starting;
 
-      const { server: given, ...options } = (fake.instances[0]?.options ?? {}) as Record<
-        string,
-        unknown
-      >;
+      const { server: given, ...options } = (fake.instances[0]?.options ?? {}) as {
+        maxPayload: number;
+        server: Server;
+      };
 
       // the transport's own HTTP server, which judges each request before ws reads it
       expect(options).toEqual({ maxPayload: expected });
       expect(given).toBeInstanceOf(Server);
+      // the scripted bind opens no TCP socket, even once Node can finish a real listen
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      expect([given.listening, given.address(), fake.instances[0]?.listened]).toEqual([
+        false,
+        null,
+        [0, host],
+      ]);
       await server.stop();
     }
 
@@ -2086,6 +2095,16 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
     expect(await starting).toEqual({ address: 'localhost', port: 50_000 });
     expect(
+      fake.instances.map(({ listened }) => {
+        return listened;
+      })
+    ).toEqual([
+      [0, host],
+      [50_000, '::1'],
+      [0, host],
+      [50_000, '::1'],
+    ]);
+    expect(
       fake.instances.map(({ closeCount }) => {
         return closeCount;
       })
@@ -2130,6 +2149,14 @@ test.describe('WSTransportServer, the address it listens on', () => {
         code,
         { address: '127.0.0.1', port: 50_000 },
         '127.0.0.1',
+      ]);
+      expect(
+        fake.instances.map(({ listened }) => {
+          return listened;
+        })
+      ).toEqual([
+        [0, host],
+        [50_000, '::1'],
       ]);
       // the IPv6 one let go, the IPv4 one serving, secure there
       expect([
