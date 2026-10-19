@@ -1862,23 +1862,27 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
-    test('detach calls before settling an incoming resolver awaiting an outgoing call, and count its incoming close once', async () => {
+    // a connection that closes as each of its resolvers awaits an outgoing call, an answer of its
+    // own held for credit: the gauges at each counted end, as the core reads its clock, and what
+    // each resolver hears
+    const closeAwaiting = async ({ forward, incoming }: { forward: boolean; incoming: number }) => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');
       const clock = createTestClock();
-      const { port, reported } = createPort();
+      const { port, reported, sent } = createPort();
       using core = createRouterCore(port, { clock, limits, metrics });
       const entered = Promise.withResolvers<void>();
-      const finished = Promise.withResolvers<void>();
       const steps: string[] = [];
       const snapshots: ReturnType<typeof core.gauges>[] = [];
+      const answers: Promise<void>[] = [];
+      const finished: Promise<void>[] = [];
+      // what each resolver's outgoing call rejected with, and whether its signal was aborted then
+      const caught: { aborted: boolean; reason: unknown }[] = [];
       // the clock as the core reads it
       const read: Pick<IClock, 'performance'> = clock;
       const monotonicNow = read.performance.now.bind(read.performance);
       // records the state at a counted call's end, as the core reads its clock
       let reading: (() => void) | undefined;
-      let signal: AbortSignal | undefined;
-      let answer: Promise<void> | undefined;
 
       read.performance.now = () => {
         reading?.();
@@ -1886,85 +1890,178 @@ test.describe('createRouterCore', () => {
         return monotonicNow();
       };
       core.registerResolver(
-        Object.assign(async (props: IRequestResolverProps<Handle>) => {
-          signal = props.signal;
-          props.signal.addEventListener('abort', () => {
-            steps.push('incoming-aborted');
-          });
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          const resolved = (async () => {
+            props.signal.addEventListener('abort', () => {
+              steps.push('incoming-aborted');
+            });
 
-          const made = core.request(new Uint8Array(0), {
-            connectionHandle: props.connectionHandle,
-            options: { timeout: Infinity },
-            procedure: echo,
-            series: metrics.declareRequester(echo),
-          });
+            const made = core.request(new Uint8Array(0), {
+              connectionHandle: props.connectionHandle,
+              options: forward
+                ? { signal: props.signal, timeout: Infinity }
+                : { timeout: Infinity },
+              procedure: echo,
+              series: metrics.declareRequester(echo),
+            });
 
-          // an incoming result held for credit, while the resolver still awaits its outgoing call
-          answer = core.respond({ payload: patternOf(200) }, props);
-          entered.resolve();
+            // an incoming result held for credit, while the resolver still awaits its outgoing call
+            answers.push(core.respond({ payload: patternOf(200) }, props));
 
-          try {
-            await made;
-          } catch (reason) {
-            if (reason instanceof DisconnectError) {
+            if (answers.length === incoming) {
+              entered.resolve();
+            }
+
+            try {
+              await made;
+            } catch (reason) {
+              caught.push({ aborted: props.signal.aborted, reason });
               steps.push('incoming-await-rejected');
             }
-          } finally {
-            finished.resolve();
-          }
+          })();
+
+          finished.push(resolved);
+
+          return resolved;
         }, echo)
       );
-      core.receive(requestOf(1), 'a');
+
+      // the peer's call ids, odd
+      for (let index = 0; index < incoming; index += 1) {
+        core.receive(requestOf(2 * index + 1), 'a');
+      }
+
       await entered.promise;
 
-      expect(core.gauges().counts).toMatchObject({
-        answeringCalls: 1,
-        pendingCalls: 1,
-        sendingTransfers: 1,
-      });
+      const before = core.gauges();
+      const sentBefore = sent.length;
 
       reading = () => {
         snapshots.push(core.gauges());
-        steps.push(snapshots.length === 1 ? 'incoming-ended' : 'outgoing-ended');
+        steps.push(snapshots.length <= incoming ? 'incoming-ended' : 'outgoing-ended');
       };
       core.rejectPending('the connection closed', 'a');
       reading = undefined;
 
-      expect(snapshots).toHaveLength(2);
+      const atReturn = [...steps];
 
-      for (const { counts } of snapshots) {
-        expect(counts).toMatchObject({ answeringCalls: 0, pendingCalls: 0, receivingTransfers: 0 });
-      }
+      await Promise.all(finished);
 
-      // ? the answer's transfer closes with its call's abort, once the outgoing call ended: an open
-      // difference of docs/support.md
-      expect(snapshots[0]?.counts).toMatchObject({ sendingTransfers: 1 });
-      expect(snapshots[1]?.counts).toMatchObject({ sendingTransfers: 1 });
-      expect(core.gauges().counts).toMatchObject({ sendingTransfers: 0 });
-      expect(steps).toEqual(['incoming-ended', 'outgoing-ended', 'incoming-aborted']);
-
-      await finished.promise;
-      await expect(answer).rejects.toThrow(DisconnectError);
-      expect(signal?.aborted).toBe(true);
-      expect(steps).toEqual([
-        'incoming-ended',
-        'outgoing-ended',
-        'incoming-aborted',
-        'incoming-await-rejected',
-      ]);
+      const settled = await Promise.allSettled(answers);
 
       // neither the resolver unwinding nor another close ends its incoming metrics again
       core.rejectPending('closed again', 'a');
       await sleep(0);
 
-      const { text } = registry.exposition();
+      return {
+        atReturn,
+        before,
+        caught,
+        reported,
+        sentAfter: sent.slice(sentBefore),
+        settled,
+        snapshots,
+        steps,
+        text: registry.exposition().text,
+      };
+    };
 
+    // what a connection's close leaves of one call it answered and the call its resolver made
+    const expectClosedOnce = (text: string) => {
       expect(text).toContain(
         'bead_server_call_handled_total{service="2",procedure="echo",type="request",outcome="closed"} 1\n'
       );
       expect(text).toContain(
         'bead_server_call_duration_seconds_count{service="2",procedure="echo",type="request"} 1\n'
       );
+      expect(text).toContain(
+        'bead_client_call_handled_total{service="2",procedure="echo",type="command",outcome="closed"} 1\n'
+      );
+      expect(text).not.toMatch(/outcome="cancelled"\} [1-9]/);
+    };
+
+    // every transfer went with the calls, before any end was counted
+    const expectDetached = (snapshots: { counts: Record<string, number> }[]) => {
+      for (const { counts } of snapshots) {
+        expect(counts).toMatchObject({
+          answeringCalls: 0,
+          pendingCalls: 0,
+          receivingTransfers: 0,
+          sendingTransfers: 0,
+        });
+      }
+    };
+
+    test('detach calls before settling an incoming resolver awaiting an outgoing call, and count its incoming close once', async () => {
+      const { atReturn, before, caught, reported, sentAfter, settled, snapshots, steps, text } =
+        await closeAwaiting({ forward: false, incoming: 1 });
+
+      expect(before.counts).toMatchObject({
+        answeringCalls: 1,
+        pendingCalls: 1,
+        sendingTransfers: 1,
+      });
+      expect(snapshots).toHaveLength(2);
+      expectDetached(snapshots);
+      expect(atReturn).toEqual(['incoming-ended', 'outgoing-ended', 'incoming-aborted']);
+      expect(steps).toEqual([
+        'incoming-ended',
+        'outgoing-ended',
+        'incoming-aborted',
+        'incoming-await-rejected',
+      ]);
+      // the resolver hears its signal before its call's rejection
+      expect(caught).toEqual([{ aborted: true, reason: expect.any(DisconnectError) }]);
+      expect(settled).toEqual([{ reason: expect.any(DisconnectError), status: 'rejected' }]);
+      expectClosedOnce(text);
+      expect(sentAfter).toEqual([]);
+      expect(reported).toEqual([]);
+    });
+
+    // debugging 9.7
+    test('detach calls before settling an incoming resolver awaiting an outgoing call given its signal, and fail that call as closed, never as a cancel', async () => {
+      const { atReturn, before, caught, reported, sentAfter, settled, snapshots, steps, text } =
+        await closeAwaiting({ forward: true, incoming: 1 });
+
+      expect(before.counts).toMatchObject({
+        answeringCalls: 1,
+        pendingCalls: 1,
+        sendingTransfers: 1,
+      });
+      expect(snapshots).toHaveLength(2);
+      expectDetached(snapshots);
+      expect(atReturn).toEqual(['incoming-ended', 'outgoing-ended', 'incoming-aborted']);
+      expect(steps).toEqual([
+        'incoming-ended',
+        'outgoing-ended',
+        'incoming-aborted',
+        'incoming-await-rejected',
+      ]);
+      // ! the signal is aborted once the call it was given is rejected: aborted first, it would
+      // fail that call as a cancel
+      expect(caught).toEqual([{ aborted: true, reason: expect.any(DisconnectError) }]);
+      expect(caught[0]?.reason).not.toBeInstanceOf(CancelError);
+      expect(settled).toEqual([{ reason: expect.any(DisconnectError), status: 'rejected' }]);
+      expectClosedOnce(text);
+      expect(sentAfter).toEqual([]);
+      expect(reported).toEqual([]);
+    });
+
+    test('detach every transfer of a closing connection before counting any of its calls, two incoming calls each answering as a transfer', async () => {
+      const { before, reported, sentAfter, snapshots } = await closeAwaiting({
+        forward: false,
+        incoming: 2,
+      });
+
+      expect(before.counts).toMatchObject({
+        answeringCalls: 2,
+        pendingCalls: 2,
+        sendingTransfers: 2,
+      });
+      // each call answered and each call made
+      expect(snapshots).toHaveLength(4);
+      expectDetached(snapshots);
+      expect(sentAfter).toEqual([]);
       expect(reported).toEqual([]);
     });
 

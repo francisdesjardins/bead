@@ -56,4 +56,45 @@ public sealed class SerialSchedulerTests
         Assert.Same(broken, Assert.Single(heard));
         Assert.True(ran);
     }
+
+    [Fact]
+    public async Task Says_itself_idle_only_once_each_task_covered_completed_and_what_it_posted_ran()
+    {
+        var scheduler = new SerialScheduler();
+        var covered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ran = new List<string>();
+
+        scheduler.Cover(covered.Task);
+
+        // nothing queued, nothing running: a task covered still holds it
+        var idle = scheduler.WhenIdle();
+
+        var posted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        scheduler.Post(() =>
+        {
+            ran.Add("posted");
+            posted.SetResult();
+        });
+        await posted.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+        // time for its drain to say it idle, were the task covered not to hold it
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.False(idle.IsCompleted);
+
+        // what runs elsewhere on its behalf posts here, then completes
+        _ = Task.Run(
+            () =>
+            {
+                scheduler.Post(() =>
+                {
+                    ran.Add("on its behalf");
+                });
+                covered.SetResult();
+            },
+            TestContext.Current.CancellationToken);
+        await idle.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        Assert.Equal(["posted", "on its behalf"], ran);
+        Assert.True(scheduler.WhenIdle().IsCompleted);
+    }
 }

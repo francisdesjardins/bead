@@ -11,7 +11,7 @@ internal sealed class AnsweringCall
 
     public bool IsAnswered { get; set; }
 
-    /// <summary>Whether its call ended, said at once on the router's scheduler; its signal follows.</summary>
+    /// <summary>Whether its call ended, said at once on the router's scheduler, as its signal is; its signal's callbacks follow.</summary>
     public bool IsAborted { get; set; }
 
     /// <summary>What it receives of its payload as a transfer; none once the call leaves.</summary>

@@ -1296,16 +1296,23 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const rejectPending = (reason: string, connectionHandle?: Handle): void => {
-    // what the connection receives, what it opened, the call ids it reserved, and what it was told
-    // of its session, go with it, before anything waiting or answering hears of it; its transfers
-    // first, so the budget they give back grants no credit to one about to go
+    // what the connection receives and sends, what it opened, its call ids reserved and what it was
+    // told of its session go with it, before anything hears of it; its transfers first, so the
+    // budget the received give back grants no credit to one about to go
     receivings.closeAll(connectionHandle);
+    sendings.closeAll(connectionHandle);
 
     const rejected = requester.takeAll(connectionHandle);
-    const aborted = answeringCalls.takeAll(connectionHandle);
 
     writer.forget(connectionHandle);
 
+    // ! the calls it answers taken last, each counted closed once all are out: nothing of the
+    // connection is held as any is counted
+    const aborted = answeringCalls.takeAll(connectionHandle);
+
+    // then each call waiting settled, and each signal aborted, application code last: a signal's
+    // listeners run as it is aborted, and a call given it settled already fails as closed, not as a
+    // cancel; a resolver hears its call's rejection a microtask later, its signal aborted
     rejected.reject(reason);
 
     for (const controller of aborted) {

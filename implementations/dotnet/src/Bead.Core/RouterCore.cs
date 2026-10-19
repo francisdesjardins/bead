@@ -24,8 +24,8 @@ internal sealed record RouterCoreOptions
     internal RouterSeries? Metrics { get; init; }
 
     /// <summary>
-    /// Where resolvers run, and where a call's signal is cancelled: the thread pool when none. A
-    /// test runs them on the router's own scheduler, so it knows when everything settled.
+    /// Where resolvers run: the thread pool when none. A test runs them on the router's own
+    /// scheduler, so it knows when everything settled.
     /// </summary>
     internal TaskScheduler? ResolverScheduler { get; init; }
 
@@ -529,20 +529,14 @@ internal sealed partial class RouterCore : IDisposable
     }
 
     // ends a call this side answers before its answer: a result going as a transfer hears it at once,
-    // and its signal is cancelled where resolvers run, so what hears it never runs on the core's
-    // scheduler
+    // and its signal is cancelled in this turn, its callbacks run off the core's scheduler, which
+    // waits for them before it says itself idle: a resolver finds its signal cancelled whatever it
+    // hears next, on any scheduler, and what hears it never runs here
     private void Abort(AnsweringCall answering, Exception reason)
     {
         answering.IsAborted = true;
         answering.OnAbort?.Invoke(reason);
-        Task.Factory.StartNew(
-            () =>
-            {
-                answering.Source.Cancel();
-            },
-            CancellationToken.None,
-            TaskCreationOptions.DenyChildAttach,
-            _resolverScheduler);
+        Loop.Cover(answering.Source.CancelAsync());
     }
 
     // hands a request to its resolver, where resolvers run: one that throws before it returns fails
@@ -1312,25 +1306,35 @@ internal sealed partial class RouterCore : IDisposable
 
     private void RejectPendingOnLoop(string reason, string? connectionHandle)
     {
-        // what the connection receives, what it opened, what it answers, and what it was told of its
-        // session, go with it, before anything hears of it; its transfers first, so the budget they
-        // give back grants no credit to one about to go
+        // what the connection receives and sends, what it opened, its call ids reserved and what it
+        // was told of its session go with it, before anything hears of it; its transfers first, so
+        // the budget the received give back grants no credit to one about to go
         _receivings.CloseAll(connectionHandle);
+        _sendings.CloseAll(connectionHandle);
 
         var rejected = _requester.TakeAll(connectionHandle);
-        var aborted = _answeringCalls.TakeAll(connectionHandle);
 
         _writer.Forget(connectionHandle);
 
-        // the signals first, which are cancelled in their turn where resolvers run: a resolver that
-        // waits on one of its own calls, a relay's leg B, hears it ended before that call's rejection
+        // ! the calls it answers taken last, each counted closed once all are out: nothing of the
+        // connection is held as any is counted
+        var aborted = _answeringCalls.TakeAll(connectionHandle);
+
         foreach (var answering in aborted)
         {
             EndAnswered(answering, (CallOutcome.Closed, null));
-            Abort(answering, new DisconnectException(reason));
         }
 
+        // then each call waiting settled, and each signal cancelled, application code last: a token
+        // is cancelled in this turn, its callbacks after it, and a call given it settled already fails
+        // as closed, not as a cancel; a resolver hears its call's rejection in a later turn, its
+        // signal cancelled, a relay's leg B among them
         rejected.Reject(reason);
+
+        foreach (var answering in aborted)
+        {
+            Abort(answering, new DisconnectException(reason));
+        }
     }
 
     // definition
@@ -1457,7 +1461,7 @@ internal sealed partial class RouterCore : IDisposable
     /// Rejects what waits for an answer — from a connection only, when given — with a
     /// <see cref="DisconnectException"/> saying <paramref name="reason"/>, and forgets the calls the
     /// connection opened and the call ids it reserved; the signal of each call it opened is
-    /// cancelled first.
+    /// cancelled after, before anything waiting hears its rejection.
     /// </summary>
     public void RejectPending(string reason, string? connectionHandle = null)
     {
