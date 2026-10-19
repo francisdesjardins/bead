@@ -321,7 +321,9 @@ same file, and prints each file's lines and branches run, then the lines no repo
 `--floor`, it fails under the side's floor, or when it measured nothing, and with `--summary`, it
 writes the report into the run's summary. A floor sits half a point under what was measured, and
 rises with `--raise`, never down but by a decision
-([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Locally, the same commands as CI's:
+([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Each run keeps its reports 14 days, among its
+artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, and `coverage-csharp`, the
+cobertura files. Locally, the same commands as CI's:
 
 ```sh
 cd implementations/typescript
