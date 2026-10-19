@@ -2,55 +2,29 @@
 
 // dependencies
 
-import {
-  assertHeld,
-  assertHeldFinite,
-  PLATFORM_CLOCK,
-  type TimeoutId,
-} from '../../transport/shared/clock';
-import { createPromise } from '../../transport/shared/create-promise';
-import { CancelError, ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
+import { PLATFORM_CLOCK, type TimeoutId } from '../../transport/shared/clock';
+import { CancelError, ProgrammerError, toError } from '../../transport/shared/errors';
 import { mergeGauges } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { Data, ITransportMessage } from '../../transport/shared/types';
-import { createAnnouncements } from './announcements';
 import { createAnsweringCalls } from './answering-calls';
 import { credentialSchemesDetailOf } from './call-session';
-import {
-  CredentialScheme,
-  EnvelopeKind,
-  EnvelopeLayout,
-  LIMIT_DEFAULTS,
-  SESSION_TOKEN_BYTES,
-} from './constants';
-import { bytesOf, readEnvelope, writeEnvelope, writeFailure } from './envelope';
-import {
-  CapacityError,
-  DisconnectError,
-  FailureError,
-  failureErrorOf,
-  redactHeader,
-} from './errors';
-import { headerBytesOf, MAXIMUM_HEADER_BYTES, readPrefix, unboundedHeaderBytesOf } from './header';
+import { CredentialScheme, EnvelopeKind, EnvelopeLayout } from './constants';
+import { bytesOf, readEnvelope, writeFailure } from './envelope';
+import { CapacityError, DisconnectError, FailureError, redactHeader } from './errors';
+import { readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
 import { checkDeclaration } from './identity';
 import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
-import {
-  assertReservation,
-  createPendingCalls,
-  type IPendingRequest,
-  reservationOf,
-} from './pending-calls';
+import { createPayloadPlacement, isPayloadLimit } from './payload-placement';
+import type { ChunkEnvelope } from './payload-placement';
 import { createProcedureMap } from './procedure-map';
 import { createReceivingTransfers, type IReceiving } from './receiving-transfers';
+import { limitsOf } from './router-limits';
+import { createRouterRequester } from './router-requester';
+import { createRouterWriter, DISPOSED } from './router-writer';
 import { createSendingTransfers } from './sending-transfers';
-import {
-  ChunkOutcome,
-  chunkPayloadBytes,
-  createOutgoingTransfer,
-  type IChunk,
-  type IOutgoingTransfer,
-} from './transfer';
+import { ChunkOutcome, type IChunk, type IOutgoingTransfer } from './transfer';
 import type {
   CallId,
   Credential,
@@ -60,20 +34,15 @@ import type {
   ICallSession,
   IEnvelopePrefix,
   IFailure,
-  IProcedure,
-  IProtocolFailure,
   IRequestHandler,
   IRequestHeader,
   IRequestResolver,
   IResultHeader,
-  IRouterResult,
   IRouterCore,
   IRouterCoreOptions,
   IRouterCorePort,
   IRouterFailures,
-  IRouterLimits,
   OutgoingEnvelope,
-  RouterLimitsOptions,
   RouterSide,
   SessionOf,
 } from './types';
@@ -110,85 +79,24 @@ interface IRequestReceiving<Handle extends string> {
   readonly transfer: IReceiving<Handle>;
 }
 
-/** A call this side waits on: where it is, and its entry there. */
-interface IWaitingCall<Handle extends string> {
-  call: ICallAddress<Handle>;
-  pendingRequest: IPendingRequest<Handle>;
-}
-
 /** A resolver registered, and the series its calls count into when the router counts. */
 interface IRegistered<Handle extends string> {
   readonly resolver: IRequestResolver<Handle>;
   readonly series: IResolverSeries | undefined;
 }
 
-// types
-
-type ChunkEnvelope = Extract<Envelope, { kind: typeof EnvelopeKind.CHUNK }>;
-
 // constants
-
-// a chunk's header: its prefix, then its offset
-const CHUNK_HEADER_BYTES = headerBytesOf({
-  callId: 1,
-  isLast: true,
-  kind: EnvelopeKind.CHUNK,
-  offset: 0,
-});
-
-const DISPOSED = 'the router was disposed';
 
 // SESSION_REQUIRED's details at a credential's resolution, which the spec states: one came and did
 // not hold, or none came
 const CREDENTIAL_NOT_HELD = 'the credential does not hold';
 const NO_CREDENTIAL = 'no credential came';
 
-// what an answer's announcement adds to its header: a credential's head, then a session's token
-const ANNOUNCEMENT_BYTES = 4 + SESSION_TOKEN_BYTES;
-
-// what a failure's envelope holds besides its detail: its prefix, an announcement, and its record
-const FAILURE_OVERHEAD_BYTES = 32;
-
 // the schemes a handler that forwards credentials unresolved takes: every one the protocol names
 const FORWARDED_SCHEMES: ReadonlySet<number> = new Set([
   CredentialScheme.OPAQUE,
   CredentialScheme.JWT,
   CredentialScheme.ELSEWHERE,
-]);
-
-// what the limits hold to together, each as the failure that says it does not
-const LIMIT_RULES: readonly { holds: (limits: IRouterLimits) => boolean; rule: string }[] =
-  Object.freeze([
-    {
-      holds: ({ maximumEnvelopeBytes }) => {
-        return maximumEnvelopeBytes >= 64;
-      },
-      rule: 'an envelope is 64 bytes at least',
-    },
-    {
-      holds: ({ chunkBytes, maximumEnvelopeBytes }) => {
-        return chunkBytes >= 64 && chunkBytes <= maximumEnvelopeBytes;
-      },
-      rule: "a chunk's envelope is 64 bytes at least, and an envelope at most",
-    },
-    {
-      holds: ({ chunkBytes, windowBytes }) => {
-        return windowBytes >= 2 * chunkBytes;
-      },
-      rule: 'a window holds two chunks at least, so a sender waits for no credit it is owed',
-    },
-    {
-      holds: ({ bufferedBytesBudget, maximumPayloadBytes }) => {
-        return maximumPayloadBytes <= bufferedBytesBudget;
-      },
-      rule: 'a payload fits in the budget of the transfers received',
-    },
-  ]);
-
-// the limits that may be 0: no transfer taken, and no detail told
-const MAY_BE_NONE: ReadonlySet<keyof IRouterLimits> = new Set([
-  'maximumDetailBytes',
-  'maximumTransfers',
 ]);
 
 // helpers
@@ -204,114 +112,6 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
         { ...failures.envelopeMalformed, detail: toError(reason).message },
         { cause: reason }
       );
-};
-
-/**
- * `given` over {@link LIMIT_DEFAULTS}, where it says nothing. A {@link ProgrammerError} for a limit
- * that is not a whole number — positive, but for the transfers and the detail — for limits that do
- * not hold together, or for a transfer's inactivity that is not from 1 to 2³¹ − 1 milliseconds, 0
- * and `Infinity` among them; the inactivity is held rounded to the nearest whole millisecond.
- */
-const limitsOf = (given: RouterLimitsOptions | undefined): IRouterLimits => {
-  const keys = Object.keys(LIMIT_DEFAULTS) as (keyof IRouterLimits)[];
-  const limits = Object.fromEntries(
-    keys.map((key) => {
-      return [key, given?.[key] ?? LIMIT_DEFAULTS[key]];
-    })
-  ) as unknown as IRouterLimits;
-
-  for (const key of keys) {
-    const value = limits[key];
-
-    // a transfer's inactivity is a duration, held below as every other is
-    if (
-      key !== 'transferInactivityTimeout' &&
-      (!Number.isSafeInteger(value) || value < (MAY_BE_NONE.has(key) ? 0 : 1))
-    ) {
-      throw new ProgrammerError(
-        `${key} is a whole number${MAY_BE_NONE.has(key) ? '' : ' above 0'}, not ${String(value)}`
-      );
-    }
-  }
-
-  for (const { holds, rule } of LIMIT_RULES) {
-    if (!holds(limits)) {
-      throw new ProgrammerError(`the router's limits do not hold together: ${rule}`);
-    }
-  }
-
-  // never, refused: a silent transfer stalls in time, and the call id it keeps reserved goes free;
-  // held, as its failures' details say it on the wire
-  return Object.freeze({
-    ...limits,
-    transferInactivityTimeout: assertHeldFinite(
-      "a transfer's inactivity",
-      limits.transferInactivityTimeout
-    ),
-  });
-};
-
-/** Whether `value` limits a procedure's payloads: none, or a whole number above 0. */
-const isPayloadLimit = (value: unknown): boolean => {
-  return value === undefined || (Number.isSafeInteger(value) && (value as number) >= 1);
-};
-
-/**
- * Throws a {@link ProgrammerError} for a credential no header of its request holds, whatever its
- * payload (spec 4.4): its header laid out on call id 1, whole, with its credential when its caller
- * gives its bytes, a `JWT` or a scheme to come; an `OPAQUE`, 16 bytes, and an `ELSEWHERE`, none,
- * always fit.
- */
-const assertHeaderHolds = ({
-  credential,
-  destinationId,
-  opensSubscription,
-  paced,
-  procedure: { procedureId, serviceId },
-}: {
-  credential?: Credential | undefined;
-  destinationId?: number | undefined;
-  opensSubscription?: boolean | undefined;
-  paced?: boolean | undefined;
-  procedure: Pick<IProcedure, 'procedureId' | 'serviceId'>;
-}): void => {
-  const isAsked =
-    credential !== undefined &&
-    credential.scheme !== CredentialScheme.OPAQUE &&
-    credential.scheme !== CredentialScheme.ELSEWHERE;
-
-  headerBytesOf({
-    callId: 1,
-    destinationId,
-    kind: EnvelopeKind.REQUEST,
-    procedureId,
-    serviceId,
-    ...(opensSubscription === true ? { opensSubscription } : {}),
-    ...(paced === true ? { paced } : {}),
-    ...(isAsked ? { credential } : {}),
-  });
-};
-
-/** How a call this side made ended, by what its router settled it with (spec/debugging.md 9.6). */
-const madeEndingOf = (reason: unknown): CallEnding => {
-  if (reason instanceof FailureError) {
-    return endingOf(reason);
-  }
-
-  if (reason instanceof TimeoutError) {
-    return CallEnding.TIMEOUT;
-  }
-
-  if (reason instanceof CancelError) {
-    return CallEnding.CANCELLED;
-  }
-
-  return reason instanceof DisconnectError ? CallEnding.CLOSED : CallEnding.ERROR;
-};
-
-/** Whether a call waits `timeout` at most: a duration held; none and `Infinity` wait on. */
-const isTimeout = (timeout: number | undefined): timeout is number => {
-  return timeout !== undefined && Number.isFinite(timeout) && timeout > 0;
 };
 
 /** Whether every byte of a transfer came. */
@@ -364,14 +164,15 @@ export const createRouterCore = <Handle extends string>(
   const clock = options?.clock ?? PLATFORM_CLOCK;
   const metrics = options?.metrics;
   const limits = limitsOf(options?.limits);
-  // a failure's detail fits in an envelope, whatever the limit of a detail says
-  const detailBytes = Math.min(
-    limits.maximumDetailBytes,
-    limits.maximumEnvelopeBytes - FAILURE_OVERHEAD_BYTES
-  );
-  // the largest envelope a payload goes whole in, and the bytes a chunk carries
-  const wholeBytes = Math.min(limits.chunkBytes, limits.maximumEnvelopeBytes);
-  const payloadBytesPerChunk = chunkPayloadBytes(limits, CHUNK_HEADER_BYTES);
+  const placement = createPayloadPlacement(failures, limits);
+  const {
+    chunkEnvelopeOf,
+    payloadBytesPerChunk,
+    payloadLimitOf,
+    tooLargeOf,
+    transferOf,
+    wholeBytes,
+  } = placement;
   const receivings = createReceivingTransfers<Handle>({
     clock,
     failures,
@@ -385,23 +186,6 @@ export const createRouterCore = <Handle extends string>(
     },
   });
   const sendings = createSendingTransfers<Handle>();
-  // what a call holds leaves with the call, whichever way the call leaves: its timer, and the
-  // transfers it sends and receives
-  const pendingCalls = createPendingCalls(port, {
-    clock,
-    lastCallId: options?.lastCallId,
-    onRemove: ({ receiving, sending, timer }) => {
-      clock.clearTimeout(timer);
-
-      if (receiving !== undefined) {
-        receivings.close(receiving.transfer);
-      }
-
-      if (sending !== undefined) {
-        sendings.close(sending);
-      }
-    },
-  });
   const answeringCalls = createAnsweringCalls<Handle, IRequestReceiving<Handle>>({
     clock,
     limits,
@@ -409,7 +193,14 @@ export const createRouterCore = <Handle extends string>(
       receivings.close(transfer);
     },
   });
-  const announcements = createAnnouncements(port);
+  const writer = createRouterWriter(port, {
+    isDisposed: () => {
+      return isDisposed;
+    },
+    limits,
+    tooLargeOf,
+  });
+  const { deliver, sendReporting } = writer;
   // the credential schemes this side takes, OPAQUE always, and the detail that names them
   const schemesTaken: ReadonlySet<number> = new Set([
     CredentialScheme.OPAQUE,
@@ -460,20 +251,45 @@ export const createRouterCore = <Handle extends string>(
     );
   };
 
-  // the bytes a payload of `procedure` holds at most: its own limit, within the router's
-  const payloadLimitOf = (
-    procedure: Pick<IProcedure, 'maximumPayloadBytes'> | undefined
-  ): number => {
-    return Math.min(procedure?.maximumPayloadBytes ?? Infinity, limits.maximumPayloadBytes);
-  };
-
-  // the failure of a payload of `length` bytes, past `limit`
-  const tooLargeOf = (length: number, limit: number): IProtocolFailure => {
-    return {
-      ...failures.payloadTooLarge,
-      detail: `a payload is ${String(limit)} bytes at most, not ${String(length)}`,
-    };
-  };
+  const requester = createRouterRequester(
+    {
+      failures,
+      isDisposed: () => {
+        return isDisposed;
+      },
+      isCallIdInUse: (callId, connectionHandle) => {
+        return port.isCallIdInUse?.(callId, connectionHandle) === true;
+      },
+      report: (error, connectionHandle) => {
+        port.report(error, connectionHandle);
+      },
+      reportFailure: (failure, details) => {
+        report(failure, details);
+      },
+      activity: (kind, connectionHandle) => {
+        port.activity(kind, connectionHandle);
+      },
+      onAnswerReceived: (header, connectionHandle) => {
+        port.onAnswerReceived?.(header, connectionHandle);
+      },
+      onUnpairedFailure: (envelope, connectionHandle) => {
+        return port.onUnpairedFailure?.(envelope, connectionHandle) === true;
+      },
+      receiveUnplaced: (envelope, unplaced) => {
+        receiveUnplaced(envelope, unplaced);
+      },
+    },
+    {
+      clock,
+      lastCallId: options?.lastCallId,
+      limits,
+      metrics,
+      placement,
+      receivings,
+      sendings,
+      writer,
+    }
+  );
 
   // whether a call id is the peer's to open on this connection, and free: a refusal on it is answered
   const isAnswerable = (callId: CallId, connectionHandle: Handle): boolean => {
@@ -482,87 +298,6 @@ export const createRouterCore = <Handle extends string>(
       !answeringCalls.has({ callId, connectionHandle }) &&
       port.isCallIdInUse?.(callId, connectionHandle) !== true
     );
-  };
-
-  // sends an envelope, with the credential its transport carries beside it, when it carries one;
-  // `onHandOff` runs once the transport has it, before it settles
-  const deliver = async (
-    outgoing: OutgoingEnvelope,
-    {
-      connectionHandle,
-      credential,
-      onHandOff,
-    }: {
-      connectionHandle: Handle;
-      credential?: string | undefined;
-      onHandOff?: (() => void) | undefined;
-    }
-  ): Promise<void> => {
-    // a disposed router is done with its transport: nothing more goes out on it
-    if (isDisposed) {
-      throw new DisconnectError(DISPOSED);
-    }
-
-    // a failure, a credit and a cancel carry no payload of their own
-    if (
-      outgoing.kind !== EnvelopeKind.CANCEL &&
-      outgoing.kind !== EnvelopeKind.CREDIT &&
-      outgoing.kind !== EnvelopeKind.FAILURE &&
-      outgoing.payload.length > limits.maximumPayloadBytes
-    ) {
-      throw new FailureError(tooLargeOf(outgoing.payload.length, limits.maximumPayloadBytes), {
-        header: outgoing.header,
-      });
-    }
-
-    const { envelope, restore } = announcements.announce(outgoing, connectionHandle);
-    let sending: Promise<unknown>;
-
-    try {
-      const bytes = writeEnvelope(envelope, detailBytes);
-
-      // one past its limit, the peer would refuse: a notification too large for one envelope, say
-      if (bytes.length > limits.maximumEnvelopeBytes) {
-        throw new FailureError(
-          {
-            ...failures.payloadTooLarge,
-            detail: `an envelope is ${String(limits.maximumEnvelopeBytes)} bytes at most, not ${String(bytes.length)}`,
-          },
-          { header: outgoing.header }
-        );
-      }
-
-      // * one check an envelope while nobody listens: no redacted header is built
-      if (port.isTracing()) {
-        port.trace('tx', { connectionHandle, header: redactHeader(envelope.header) });
-      }
-
-      sending = port.send(
-        credential === undefined ? { data: bytes } : { credential, data: bytes },
-        connectionHandle
-      );
-    } catch (reason) {
-      restore();
-
-      throw reason;
-    }
-
-    onHandOff?.();
-
-    try {
-      await sending;
-    } catch (reason) {
-      restore();
-
-      throw reason;
-    }
-  };
-
-  // sends an envelope no call waits on: what keeps it from going out is reported
-  const sendReporting = (envelope: OutgoingEnvelope, connectionHandle: Handle): void => {
-    deliver(envelope, { connectionHandle }).catch((reason: unknown) => {
-      port.report(toError(reason), connectionHandle);
-    });
   };
 
   // answers a request whose header does not read, at the gate: a call of _OTHER's, counted, that
@@ -596,194 +331,6 @@ export const createRouterCore = <Handle extends string>(
     }).catch((reason: unknown) => {
       end(CallEnding.ERROR);
       port.report(toError(reason), connectionHandle);
-    });
-  };
-
-  // how long a call id stays reserved once its call ends: as its timeout says — and, once its result
-  // came in part, as long as the peer keeps the call abandoned, should that be longer, since what
-  // the credit let the peer send may still come
-  const reservedFor = ({
-    receiving,
-    timeout,
-  }: Pick<IPendingRequest<Handle>, 'receiving' | 'timeout'>): number | undefined => {
-    return receiving === undefined
-      ? timeout
-      : Math.max(reservationOf(timeout), limits.transferInactivityTimeout);
-  };
-
-  // tells the peer a call this side opened is cancelled, once, and reserves its call id in the same
-  // turn, so nothing drawn meanwhile takes it; a cancel that cannot go out is reported
-  const sendCancel = ({
-    callId,
-    connectionHandle,
-    timeout,
-  }: ICallAddress<Handle> & { timeout: number | undefined }): void => {
-    // a disposed router sends nothing; a call id reserved already had its cancel
-    if (isDisposed || pendingCalls.isReserved(callId, connectionHandle)) {
-      return;
-    }
-
-    pendingCalls.reserve({ callId, connectionHandle, timeout });
-    sendReporting(
-      { header: { callId, kind: EnvelopeKind.CANCEL }, kind: EnvelopeKind.CANCEL },
-      connectionHandle
-    );
-  };
-
-  // ends a call this side waits on before its answer came whole: forgotten first, so what it holds
-  // goes with it, then the peer told to cancel it, then the caller told; a call ended already — by
-  // its answer, say, before a send behind it failed — ends no more
-  const endPending = (reason: Error, { call, pendingRequest }: IWaitingCall<Handle>): void => {
-    if (pendingCalls.get(call) !== pendingRequest) {
-      return;
-    }
-
-    pendingCalls.forget(call);
-    sendCancel({ ...call, timeout: reservedFor(pendingRequest) });
-    pendingRequest.reject(reason);
-  };
-
-  // sets a waiting call's timer going again, which its caller waits on too: past `delay`, a
-  // TimeoutError; none for no positive delay, nor for a call ended already, as a send went
-  const wait = (delay: number | undefined, waiting: IWaitingCall<Handle>): void => {
-    const { call, pendingRequest } = waiting;
-
-    if (pendingCalls.get(call) !== pendingRequest) {
-      return;
-    }
-
-    clock.clearTimeout(pendingRequest.timer);
-    pendingRequest.timer = isTimeout(delay)
-      ? clock.setTimeout(() => {
-          endPending(new TimeoutError(delay), waiting);
-        }, delay)
-      : undefined;
-  };
-
-  // how a payload goes after `header`: whole — `undefined` — or as a transfer, a result's header
-  // counted with the announcement it may carry; or not at all, and the failure says why
-  const transferOf = (
-    payload: Uint8Array,
-    {
-      header,
-      maximumPayloadBytes,
-    }: { header: IRequestHeader | IResultHeader; maximumPayloadBytes: number }
-  ): IOutgoingTransfer | IProtocolFailure | undefined => {
-    const announcementBytes = header.kind === EnvelopeKind.RESULT ? ANNOUNCEMENT_BYTES : 0;
-
-    if (payload.length > maximumPayloadBytes) {
-      return tooLargeOf(payload.length, maximumPayloadBytes);
-    }
-
-    if (headerBytesOf(header) + announcementBytes + payload.length <= wholeBytes) {
-      return undefined;
-    }
-
-    if (limits.maximumTransfers === 0) {
-      return {
-        ...failures.payloadTooLarge,
-        detail: `a payload of ${String(payload.length)} bytes goes as a transfer, which this side sends none of`,
-      };
-    }
-
-    const openingHeaderBytes = unboundedHeaderBytesOf({ ...header, total: payload.length });
-    const openingBytes = wholeBytes - openingHeaderBytes - announcementBytes;
-
-    // ! a header past 1,020 bytes no reader takes, and an opening without a byte of its payload
-    // none places: a payload that needs such a transfer goes whole or not at all (spec 12.3)
-    if (openingHeaderBytes > MAXIMUM_HEADER_BYTES || openingBytes < 1) {
-      return {
-        ...failures.payloadTooLarge,
-        detail:
-          openingHeaderBytes > MAXIMUM_HEADER_BYTES
-            ? `a payload of ${String(payload.length)} bytes goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes passes ${String(MAXIMUM_HEADER_BYTES)}`
-            : `a payload of ${String(payload.length)} bytes goes as a transfer, whose opening's header of ${String(openingHeaderBytes)} bytes leaves it no byte within ${String(wholeBytes)}`,
-      };
-    }
-
-    return createOutgoingTransfer(payload, { openingBytes, payloadBytesPerChunk });
-  };
-
-  // a chunk's envelope, on `callId`
-  const chunkEnvelopeOf = (callId: CallId, { bytes, isLast, offset }: IChunk): OutgoingEnvelope => {
-    return {
-      header: { callId, isLast, kind: EnvelopeKind.CHUNK, offset },
-      kind: EnvelopeKind.CHUNK,
-      payload: bytes,
-    };
-  };
-
-  // a request as a transfer: its opening, then each chunk credited; the call waits on the transfer's
-  // inactivity, then on its own timeout once the last chunk is handed off
-  const sendRequest = (
-    outgoing: IOutgoingTransfer,
-    {
-      header,
-      transportCredential,
-      waiting,
-    }: {
-      header: IRequestHeader;
-      transportCredential: string | undefined;
-      waiting: IWaitingCall<Handle>;
-    }
-  ): void => {
-    const { call, pendingRequest } = waiting;
-    const { callId, connectionHandle } = call;
-    const progress = (): void => {
-      wait(limits.transferInactivityTimeout, waiting);
-    };
-
-    progress();
-    // kept before its opening goes, so a credit that comes back as it goes finds it
-    pendingRequest.sending = sendings.open(outgoing, {
-      call,
-      onCredit: progress,
-      send: (chunk) => {
-        deliver(chunkEnvelopeOf(callId, chunk), {
-          connectionHandle,
-          // the last one handed off, the call waits on its timeout — unless a result opened as it
-          // went, which waits on its own inactivity
-          onHandOff: chunk.isLast
-            ? () => {
-                if (pendingRequest.receiving === undefined) {
-                  wait(pendingRequest.timeout, waiting);
-                }
-              }
-            : progress,
-        }).then(
-          () => {
-            if (chunk.isLast) {
-              port.activity('request', connectionHandle);
-            }
-          },
-          // one that cannot go out ends the call: the peer, which holds a part of it, cancels it
-          (reason: unknown) => {
-            endPending(toError(reason), waiting);
-          }
-        );
-      },
-    });
-    deliver(
-      {
-        header: { ...header, total: outgoing.total },
-        kind: EnvelopeKind.REQUEST,
-        payload: outgoing.opening,
-      },
-      {
-        connectionHandle,
-        credential: transportCredential,
-        onHandOff: () => {
-          pendingRequest.isSent = true;
-          pendingRequest.onSent?.(true);
-        },
-      }
-    ).catch((reason: unknown) => {
-      // handed over, then refused by the transport: nothing of it went out
-      if (pendingRequest.isSent) {
-        pendingRequest.onSent?.(false);
-      }
-
-      pendingRequest.reject(toError(reason));
     });
   };
 
@@ -898,32 +445,6 @@ export const createRouterCore = <Handle extends string>(
     ).catch(fail);
 
     return promise;
-  };
-
-  const cancel: IRouterCore<Handle>['cancel'] = ({ callId, connectionHandle, timeout: given }) => {
-    const timeout = assertReservation(given);
-
-    const pendingRequest = pendingCalls.get({ callId, connectionHandle });
-
-    pendingCalls.forget({ callId, connectionHandle });
-
-    // a request the transport never had leaves nothing at the other end to cancel
-    if (pendingRequest === undefined || pendingRequest.isSent) {
-      sendCancel({
-        callId,
-        connectionHandle,
-        timeout:
-          pendingRequest === undefined
-            ? timeout
-            : reservedFor({
-                receiving: pendingRequest.receiving,
-                timeout: timeout ?? pendingRequest.timeout,
-              }),
-      });
-    }
-
-    // heard after the cancel went out, so a call made again in its place goes out behind it
-    pendingRequest?.reject(new CancelError(`call ${String(callId)} was cancelled`));
   };
 
   // how a result goes, decided before anything is done for it: whole — `undefined` — or as a
@@ -1176,22 +697,14 @@ export const createRouterCore = <Handle extends string>(
     }: ICallAddress<Handle> & { isReported?: boolean }
   ): void => {
     const call = { callId, connectionHandle };
-    const invalid = { ...failures.chunkInvalid, detail: failure.detail };
 
     if (sideOfCallId(callId) === failures.side) {
-      const pendingRequest = pendingCalls.get(call);
-
-      if (pendingRequest?.receiving !== undefined) {
-        const { destinationId, procedureAddress } = pendingRequest;
-        const reason = new FailureError(invalid, { destinationId, procedureAddress });
-
-        return (endPending(reason, { call, pendingRequest }), undefined);
-      }
-
-      if (pendingCalls.isReserved(callId, connectionHandle)) {
-        return;
-      }
+      return (
+        requester.gateMalformedResultChunk(failure, { callId, connectionHandle, isReported }),
+        undefined
+      );
     } else {
+      const invalid = { ...failures.chunkInvalid, detail: failure.detail };
       const receiving = answeringCalls.receivingOf(call);
 
       if (receiving !== undefined && !isWhole(receiving.transfer)) {
@@ -1237,38 +750,18 @@ export const createRouterCore = <Handle extends string>(
     }
 
     // an answer of this layout, to a call waiting?
-
-    const pendingRequest =
+    if (
       (kind === EnvelopeKind.RESULT || kind === EnvelopeKind.FAILURE) &&
       layout === EnvelopeLayout.FIRST
-        ? pendingCalls.get({ callId, connectionHandle })
-        : undefined;
-
-    if (pendingRequest === undefined) {
-      // an answer of this layout on a call id reserved is late, and dropped in silence
-      if (
-        (kind === EnvelopeKind.RESULT || kind === EnvelopeKind.FAILURE) &&
-        layout === EnvelopeLayout.FIRST &&
-        pendingCalls.isReserved(callId, connectionHandle)
-      ) {
-        return;
-      }
-
-      if (!isReported) {
-        port.report(failure, connectionHandle);
-      }
-
-      return;
+    ) {
+      return (
+        requester.gateMalformedAnswer(failure, { callId, connectionHandle, isReported }), undefined
+      );
     }
 
-    const { destinationId, procedureAddress } = pendingRequest;
-
-    // the call it answers would otherwise wait out its timeout; it says what the call went to, as
-    // every failure that settles a call does, and the peer, which may hold the call still, is told
-    endPending(new FailureError(failure, { destinationId, procedureAddress }), {
-      call: { callId, connectionHandle },
-      pendingRequest,
-    });
+    if (!isReported) {
+      port.report(failure, connectionHandle);
+    }
   };
 
   // a cancel from the peer ends a call it opened: forgotten first, so an answer from what hears the
@@ -1577,7 +1070,7 @@ export const createRouterCore = <Handle extends string>(
       connectionHandle,
       creditEnd,
       isOpen,
-    }: { connectionHandle: Handle; creditEnd: number | undefined; isOpen: boolean }
+    }: { connectionHandle: Handle; creditEnd?: number | undefined; isOpen: boolean }
   ): void => {
     const { callId, offset } = envelope.header;
 
@@ -1647,63 +1140,6 @@ export const createRouterCore = <Handle extends string>(
     }
   };
 
-  // a chunk of a call's result: the call is this side's
-  const receiveResultChunk = (
-    envelope: ChunkEnvelope,
-    { call, chunk }: { call: ICallAddress<Handle>; chunk: IChunk }
-  ): void => {
-    const { callId, connectionHandle } = call;
-    const pendingRequest = pendingCalls.get(call);
-
-    if (pendingRequest?.receiving === undefined) {
-      // one on a call id reserved was on its way, and is dropped in silence
-      if (pendingCalls.isReserved(callId, connectionHandle)) {
-        return;
-      }
-
-      return (
-        receiveUnplaced(envelope, {
-          connectionHandle,
-          creditEnd: undefined,
-          isOpen: pendingRequest !== undefined,
-        }),
-        undefined
-      );
-    }
-
-    const { destinationId, procedureAddress, receiving } = pendingRequest;
-    const { header, transfer } = receiving;
-    const outcome = receivings.place(transfer, chunk);
-
-    if (typeof outcome === 'object') {
-      const reason = new FailureError(outcome, { destinationId, procedureAddress });
-
-      return (endPending(reason, { call, pendingRequest }), undefined);
-    }
-
-    switch (outcome) {
-      // bytes placed are progress
-      case ChunkOutcome.PLACED:
-        wait(limits.transferInactivityTimeout, { call, pendingRequest });
-
-        return (receivings.grant(transfer), undefined);
-      case ChunkOutcome.COMPLETE: {
-        const payload = receivings.complete(transfer);
-
-        // out before it settles; what its credit let the peer send may still come, a copy or out
-        // of order, and its call id stays reserved, for it to be dropped in silence
-        pendingCalls.forget(call, pendingRequest);
-        pendingCalls.reserve({ callId, connectionHandle, timeout: reservedFor(pendingRequest) });
-        pendingRequest.resolve({ header, payload });
-
-        return (port.activity('response', connectionHandle), undefined);
-      }
-      // a chunk that brings nothing new is dropped in silence
-      case ChunkOutcome.DUPLICATE:
-        return;
-    }
-  };
-
   // a chunk of a transfer this side receives: on the peer's call id, of a request's payload; on
   // this side's, of a result's
   const receiveChunk = (envelope: ChunkEnvelope, connectionHandle: Handle): void => {
@@ -1714,105 +1150,10 @@ export const createRouterCore = <Handle extends string>(
     };
 
     if (sideOfCallId(callId) === failures.side) {
-      return (receiveResultChunk(envelope, received), undefined);
+      return (requester.receiveResultChunk(envelope, received), undefined);
     }
 
     return (receiveRequestChunk(envelope, received), undefined);
-  };
-
-  const receiveAnswer = (
-    envelope: Extract<Envelope, { kind: typeof EnvelopeKind.FAILURE | typeof EnvelopeKind.RESULT }>,
-    { connectionHandle, mayOvertake }: { connectionHandle: Handle; mayOvertake: boolean }
-  ): void => {
-    const { header } = envelope;
-    const { callId } = header;
-    const call = { callId, connectionHandle };
-
-    port.onAnswerReceived?.(header, connectionHandle);
-
-    const pendingRequest = pendingCalls.get(call);
-
-    if (pendingRequest === undefined) {
-      // a failure may end a call the side keeps open once answered — a subscription — which the
-      // side takes; anything else answers no call
-      if (
-        envelope.kind === EnvelopeKind.FAILURE &&
-        port.onUnpairedFailure?.(envelope, connectionHandle) === true
-      ) {
-        return;
-      }
-
-      // one on a call id reserved is late, and dropped in silence
-      if (pendingCalls.isReserved(callId, connectionHandle)) {
-        return;
-      }
-
-      return (report(failures.callUnknown, { connectionHandle, envelope }), undefined);
-    }
-
-    const { destinationId, procedureAddress, receiving } = pendingRequest;
-
-    if (envelope.kind === EnvelopeKind.FAILURE) {
-      // out before it settles, so the same response again, even in the same read, pairs with
-      // nothing; a result it received in part goes with it, what that credit let the peer send
-      // dropped in silence behind its call id reserved
-      pendingCalls.forget(call, pendingRequest);
-
-      if (receiving !== undefined) {
-        pendingCalls.reserve({ callId, connectionHandle, timeout: reservedFor(pendingRequest) });
-      }
-
-      pendingRequest.reject(
-        failureErrorOf(envelope.failure, {
-          destinationId,
-          failures,
-          header: envelope.header,
-          mayOvertake,
-          procedureAddress,
-        })
-      );
-
-      return (port.activity('response', connectionHandle), undefined);
-    }
-
-    // a result that comes in a transfer answered the call: another answers nothing
-    if (receiving !== undefined) {
-      const detail = `call ${String(callId)} is answered already, by a transfer`;
-
-      return (
-        report(failures.envelopeMalformed, { connectionHandle, detail, envelope }), undefined
-      );
-    }
-
-    const { total } = envelope.header;
-
-    if (total === undefined) {
-      // out before it settles, so the same response again, even in the same read, pairs with nothing
-      pendingCalls.forget(call, pendingRequest);
-      pendingRequest.resolve({ header: envelope.header, payload: envelope.payload });
-
-      return (port.activity('response', connectionHandle), undefined);
-    }
-
-    // a transfer's opening is not its result: one refused — past its procedure's limit, say — ends
-    // the call, and the peer, which holds the result still, is told to cancel it; opened, the call
-    // waits on the rest, which one silent too long ends — its own timer, rather than the transfer's
-    const { maximumPayloadBytes } = pendingRequest;
-    const transfer =
-      total > maximumPayloadBytes
-        ? tooLargeOf(total, maximumPayloadBytes)
-        : receivings.open(envelope.payload, { call, total });
-
-    if ('code' in transfer) {
-      const reason = new FailureError(transfer, { destinationId, header, procedureAddress });
-
-      return (endPending(reason, { call, pendingRequest }), undefined);
-    }
-
-    wait(limits.transferInactivityTimeout, { call, pendingRequest });
-    // kept before its first credit goes, so a chunk that credit brings at once finds it
-    pendingRequest.receiving = { header: envelope.header, transfer };
-    receivings.grant(transfer);
   };
 
   const receiveNotification = (
@@ -1828,7 +1169,7 @@ export const createRouterCore = <Handle extends string>(
     }
 
     // one on a call id reserved was on its way, and is dropped in silence
-    if (pendingCalls.isReserved(header.callId, connectionHandle)) {
+    if (requester.isReserved(header.callId, connectionHandle)) {
       return;
     }
 
@@ -1898,7 +1239,7 @@ export const createRouterCore = <Handle extends string>(
         return (receiveRequest(envelope, { connectionHandle, transportCredential }), undefined);
       case EnvelopeKind.FAILURE:
       case EnvelopeKind.RESULT:
-        return (receiveAnswer(envelope, { connectionHandle, mayOvertake }), undefined);
+        return (requester.receiveAnswer(envelope, { connectionHandle, mayOvertake }), undefined);
       case EnvelopeKind.NOTIFICATION:
         return (receiveNotification(envelope, connectionHandle), undefined);
       case EnvelopeKind.CHUNK:
@@ -1924,14 +1265,12 @@ export const createRouterCore = <Handle extends string>(
     // first, so the budget they give back grants no credit to one about to go
     receivings.closeAll(connectionHandle);
 
-    const rejected = pendingCalls.takeAll(connectionHandle);
+    const rejected = requester.takeAll(connectionHandle);
     const aborted = answeringCalls.takeAll(connectionHandle);
 
-    announcements.forget(connectionHandle);
+    writer.forget(connectionHandle);
 
-    for (const pendingRequest of rejected) {
-      pendingRequest.reject(new DisconnectError(reason));
-    }
+    rejected.reject(reason);
 
     for (const controller of aborted) {
       controller.abort(new DisconnectError(reason));
@@ -1950,21 +1289,21 @@ export const createRouterCore = <Handle extends string>(
       return failuresAnswered.get(header);
     },
 
-    cancel,
+    cancel: requester.cancel,
     gauges: () => {
       return mergeGauges([
-        pendingCalls.gauges(),
+        requester.gauges(),
         answeringCalls.gauges(),
         sendings.gauges(),
         receivings.gauges(),
-        announcements.gauges(),
+        writer.gauges(),
       ]);
     },
     isAnswering: (request) => {
       return answeringCalls.isAnswering(request);
     },
     isReserved: (callId, connectionHandle) => {
-      return pendingCalls.isReserved(callId, connectionHandle);
+      return requester.isReserved(callId, connectionHandle);
     },
     receive,
     registerResolver: (resolver) => {
@@ -1993,199 +1332,8 @@ export const createRouterCore = <Handle extends string>(
       return series;
     },
     rejectPending,
-    request: (
-      payload,
-      {
-        connectionHandle,
-        credential,
-        onCallId,
-        onSent,
-        opensSubscription,
-        options: requestOptions,
-        paced,
-        procedure,
-        refusal,
-        series: given,
-        transportCredential,
-      }
-    ) => {
-      const { destinationId, signal, timeout: givenTimeout } = requestOptions;
-      const procedureAddress = {
-        procedureId: procedure.procedureId,
-        serviceId: procedure.serviceId,
-      };
-      // the series it counts into, a requester's or _OTHER's; none while the router counts nothing
-      const series = metrics === undefined ? undefined : (given ?? metrics.otherClient);
-      // the call once drawn: where it waits, and its entry there
-      let waiting: IWaitingCall<Handle> | undefined;
-      // counted, the monotonic reading it started at, and whether it ended
-      let startedAt: number | undefined;
-      let isEnded = false;
-      // ! made only for a call counted: one counted nothing allocates nothing for it
-      const end =
-        series === undefined
-          ? undefined
-          : (ending: CallEnding): void => {
-              if (startedAt !== undefined && !isEnded) {
-                isEnded = true;
-                series.end(ending, microsecondsOf(clock.performance.now() - startedAt));
-              }
-            };
-
-      // the call's timer is the core's, which the signal alone is not
-      return createPromise<IRouterResult>(
-        (resolved, rejected) => {
-          // what no call can take draws nothing, and is no call: it is not counted
-          if (!isPayloadLimit(procedure.maximumPayloadBytes)) {
-            const refused = new ProgrammerError(
-              `a payload's limit is a whole number above 0, not ${String(procedure.maximumPayloadBytes)}`
-            );
-
-            return (rejected(refused), undefined);
-          }
-
-          // held, which its timer, its reservation and its TimeoutError all take
-          const timeout = assertHeld("a call's timeout", givenTimeout);
-
-          // ! a credential no header of its request holds, whatever its payload, is a programmer's
-          // error, thrown before the call starts and not counted (spec 4.4)
-          assertHeaderHolds({ credential, destinationId, opensSubscription, paced, procedure });
-
-          // * the call starts once nothing makes it a programmer's error and its signal is not
-          // aborted, and ends wherever its router settles it, each refusal after in this turn
-          if (series !== undefined) {
-            series.start();
-            startedAt = clock.performance.now();
-          }
-
-          const resolve =
-            end === undefined
-              ? resolved
-              : (result: IRouterResult): void => {
-                  end(CallEnding.RESULT);
-                  resolved(result);
-                };
-          const reject =
-            end === undefined
-              ? rejected
-              : (reason: Error): void => {
-                  end(madeEndingOf(reason));
-                  rejected(reason);
-                };
-
-          if (refusal !== undefined) {
-            return (reject(refusal), undefined);
-          }
-
-          // drawn once the call starts: an aborted signal draws nothing
-          const callId = pendingCalls.draw(connectionHandle);
-
-          if (callId === undefined) {
-            const detail = `every call id of ${connectionHandle} is in use`;
-            const exceeded = new FailureError(
-              { ...failures.capacityExceeded, detail },
-              { destinationId, procedureAddress }
-            );
-
-            return (reject(exceeded), undefined);
-          }
-
-          const header: IRequestHeader = {
-            ...procedureAddress,
-            callId,
-            destinationId,
-            kind: EnvelopeKind.REQUEST,
-            ...(opensSubscription === true ? { opensSubscription } : {}),
-            ...(paced === true ? { paced } : {}),
-            ...(credential === undefined ? {} : { credential }),
-          };
-          // how it goes is decided before anything is kept of it: past its limit, nothing goes
-          const maximumPayloadBytes = payloadLimitOf(procedure);
-          const outgoing = transferOf(payload, { header, maximumPayloadBytes });
-
-          if (outgoing !== undefined && 'code' in outgoing) {
-            const refused = new FailureError(outgoing, { destinationId, header, procedureAddress });
-
-            return (reject(refused), undefined);
-          }
-
-          const pendingRequest: IPendingRequest<Handle> = {
-            destinationId,
-            isSent: false,
-            // its result, as its request, holds its procedure's limit at most
-            maximumPayloadBytes,
-            onSent,
-            procedureAddress,
-            reject,
-            resolve,
-            timeout,
-          };
-          const call = { callId, connectionHandle };
-
-          waiting = { call, pendingRequest };
-          pendingCalls.add(call, pendingRequest);
-          onCallId?.(callId);
-
-          if (outgoing !== undefined) {
-            return (sendRequest(outgoing, { header, transportCredential, waiting }), undefined);
-          }
-
-          wait(timeout, waiting);
-          deliver(
-            { header, kind: EnvelopeKind.REQUEST, payload },
-            {
-              connectionHandle,
-              credential: transportCredential,
-              onHandOff: () => {
-                pendingRequest.isSent = true;
-                pendingRequest.onSent?.(true);
-              },
-            }
-          ).then(
-            () => {
-              port.activity('request', connectionHandle);
-            },
-            (reason: unknown) => {
-              // handed over, then refused by the transport: nothing of it went out
-              if (pendingRequest.isSent) {
-                pendingRequest.onSent?.(false);
-              }
-
-              reject(toError(reason));
-            }
-          );
-
-          return undefined;
-        },
-        { signal }
-      )
-        .catch((reason: unknown) => {
-          // ended by its signal, which settles it beside the executor
-          end?.(madeEndingOf(reason));
-
-          // gone out and unanswered, ended by its signal: the peer is told before the caller hears
-          // of it, so a call made again in its place goes out behind the cancel
-          if (
-            waiting?.pendingRequest.isSent === true &&
-            pendingCalls.get(waiting.call) === waiting.pendingRequest &&
-            reason instanceof CancelError
-          ) {
-            pendingCalls.forget(waiting.call);
-            sendCancel({ ...waiting.call, timeout: reservedFor(waiting.pendingRequest) });
-          }
-
-          throw reason;
-        })
-        .finally(() => {
-          // its own entry only: a response or a close took it out already, and another may hold it
-          if (waiting !== undefined) {
-            pendingCalls.forget(waiting.call, waiting.pendingRequest);
-          }
-        });
-    },
-    reserve: (call) => {
-      pendingCalls.reserve({ ...call, timeout: assertReservation(call.timeout) });
-    },
+    request: requester.request,
+    reserve: requester.reserve,
     respond,
     send: (envelope, connectionHandle) => {
       return deliver(envelope, { connectionHandle });
