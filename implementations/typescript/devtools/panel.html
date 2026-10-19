@@ -13,6 +13,12 @@
         --app-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
         --app-font-mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
 
+        /* panel radii: narrow meters and small furniture, then the system’s control/menu steps */
+        /* the radius scale gives narrow meters a two-pixel corner */
+        --app-radius-xs: 2px;
+        /* the small radius step matches four-pixel furniture corners */
+        --app-radius-sm: 4px;
+
         --app-flame: #0b6e5a;
         --app-flame-wash: rgb(11 110 90 / 0.1);
         --app-accent: #0b6e5a;
@@ -37,9 +43,10 @@
         --ended: #80868b;
         --removed: rgb(197 34 31 / 0.12);
         --syntax-string: #925b12;
-        --list-bar-height: 36px;
+        --list-bar-height: calc(var(--app-space-8) + var(--app-space-1));
+        /* the compact DevTools control floor is independent of text padding */
         --control-height: 26px;
-        --menu-row-height: 28px;
+        --menu-row-height: calc(var(--app-space-6) + var(--app-space-1));
         color-scheme: light;
       }
 
@@ -91,6 +98,7 @@
         align-items: center;
         gap: var(--app-space-1);
         padding: var(--app-space-1) var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         background: var(--app-bg);
       }
@@ -99,9 +107,10 @@
       input,
       button {
         min-height: var(--control-height);
-        padding: 3px 10px;
+        padding: var(--app-space-1) var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-control-border);
-        border-radius: 6px;
+        border-radius: var(--app-radius);
         background: var(--app-paper);
         color: var(--app-text);
         font: inherit;
@@ -110,17 +119,21 @@
       }
 
       select {
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 112px;
-        padding: 3px 30px 3px 10px;
+        padding: var(--app-space-1) var(--app-space-8) var(--app-space-1) var(--app-space-2);
         appearance: none;
         background-image:
           linear-gradient(45deg, transparent 50%, var(--app-text-secondary) 50%),
           linear-gradient(135deg, var(--app-text-secondary) 50%, transparent 50%);
         background-repeat: no-repeat;
         background-position:
+          /* the fallback chevron’s paired triangles share the same centre */
           right 14px center,
-          right 10px center;
+          /* the fallback chevron’s paired triangles share the same centre */ right 10px center;
+        /* the fallback chevron uses two four-pixel triangles */
         background-size: 4px 4px;
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
         font-weight: 500;
         cursor: pointer;
@@ -142,53 +155,63 @@
         }
 
         select {
-          gap: 12px;
-          padding-right: 10px;
+          gap: var(--app-space-3);
+          padding-right: var(--app-space-2);
           background-image: none;
         }
 
         select::picker-icon {
+          /* this fixed drawing width keeps the small glyph or data meter legible */
           width: 7px;
+          /* this fixed drawing height keeps the small glyph or data meter legible */
           height: 7px;
           align-self: center;
+          /* the chevron uses a thin rotated stroke */
           border-right: 1.5px solid var(--app-text-secondary);
+          /* the chevron uses a thin rotated stroke */
           border-bottom: 1.5px solid var(--app-text-secondary);
           color: var(--app-text-secondary);
           content: '';
+          /* the chevron’s two-pixel shift centres its rotated strokes */
           transform: translateY(-2px) rotate(45deg);
         }
 
         select:open::picker-icon {
           border-color: var(--app-accent);
+          /* the chevron’s two-pixel shift centres its rotated strokes */
           transform: translateY(2px) rotate(225deg);
         }
 
         select::picker(select) {
           min-width: anchor-size(width);
+          /* the popup height is capped for short DevTools viewports */
           max-height: 280px;
-          margin-top: 6px;
-          padding: 4px;
+          margin-top: var(--app-space-2);
+          padding: var(--app-space-1);
           overflow: auto;
+          /* a one-pixel hairline separates the surfaces */
           border: 1px solid var(--app-control-border);
-          border-radius: 8px;
+          border-radius: var(--app-radius-md);
           background: var(--app-paper);
           color: var(--app-text);
+          /* the shadow’s hairline and blur express elevation rather than spacing */
           box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
         }
 
         option {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: var(--app-space-3);
           min-height: var(--menu-row-height);
-          padding: 3px 10px;
-          border-radius: 4px;
+          padding: var(--app-space-1) var(--app-space-2);
+          border-radius: var(--app-radius-sm);
           font: inherit;
         }
 
         option:hover,
         option:focus-visible {
           background: var(--app-bg);
+          /* the offset tracks the two-pixel focus stroke */
           outline-offset: -2px;
         }
 
@@ -227,7 +250,9 @@
       }
 
       :focus-visible {
+        /* the two-pixel focus stroke stays distinct from the control’s hairline */
         outline: 2px solid var(--app-accent);
+        /* the offset tracks the two-pixel focus stroke */
         outline-offset: 2px;
       }
 
@@ -236,14 +261,15 @@
       [data-view]:focus-visible,
       pre:focus-visible,
       [role='tab']:focus-visible {
+        /* the offset tracks the two-pixel focus stroke */
         outline-offset: -2px;
       }
 
       #record,
       #clear {
         min-width: var(--control-height);
-        padding-right: 6px;
-        padding-left: 6px;
+        padding-right: var(--app-space-2);
+        padding-left: var(--app-space-2);
         font-size: var(--app-text-base);
         line-height: 1;
       }
@@ -256,7 +282,7 @@
         flex: 1 1 auto;
         min-width: 0;
         width: 100%;
-        padding-right: 32px;
+        padding-right: var(--app-space-8);
       }
 
       #filter::placeholder {
@@ -280,10 +306,11 @@
       .group {
         display: inline-flex;
         flex-wrap: wrap;
-        gap: 2px;
-        padding: 2px;
+        gap: var(--app-space-1);
+        padding: var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-divider);
-        border-radius: 8px;
+        border-radius: var(--app-radius-md);
         background: var(--app-paper);
       }
 
@@ -300,12 +327,14 @@
       label {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        gap: var(--app-space-2);
         white-space: nowrap;
       }
 
       input[type='checkbox'] {
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 15px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 15px;
         min-height: 0;
         margin: 0;
@@ -326,12 +355,15 @@
 
       #status::before {
         display: inline-block;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 6px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 6px;
-        margin-right: 6px;
-        border-radius: 50%;
+        margin-right: var(--app-space-2);
+        border-radius: var(--app-radius-pill);
         background: currentColor;
         content: '';
+        /* the glyph’s optical offset aligns it with the text baseline */
         vertical-align: 2px;
       }
 
@@ -344,13 +376,15 @@
         gap: var(--app-space-1);
         padding: 0 var(--app-space-2);
         overflow-x: auto;
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
       }
 
       [role='tab'] {
         flex-shrink: 0;
-        padding: 6px 12px;
+        padding: var(--app-space-1) var(--app-space-3);
         border: 0;
+        /* the two-pixel underline marks the selected or hovered tab */
         border-bottom: 2px solid transparent;
         border-radius: 0;
         background: none;
@@ -392,11 +426,13 @@
          side's share, and the side the detail takes, as its layout says */
       .split {
         display: grid;
+        /* the splitter occupies a one-pixel track; its hit area extends beyond it */
         grid-template: minmax(0, 1fr) / minmax(0, 3fr) 1px minmax(0, 2fr);
         overflow: hidden;
       }
 
       .split[data-layout='bottom'] {
+        /* the splitter occupies a one-pixel track; its hit area extends beyond it */
         grid-template: minmax(0, 3fr) 1px minmax(0, 2fr) / minmax(0, 1fr);
       }
 
@@ -440,12 +476,14 @@
       }
 
       /* ! measured on the rows' type: the table needs about 870 px with its waterfall, 740 without */
+      /* the table’s measured column widths set this visibility breakpoint */
       @container (max-width: 880px) {
         .wide {
           display: none;
         }
       }
 
+      /* the table’s measured column widths set this visibility breakpoint */
       @container (max-width: 750px) {
         .mid {
           display: none;
@@ -460,7 +498,8 @@
         align-items: center;
         gap: var(--app-space-2);
         min-height: var(--list-bar-height);
-        padding: 1px var(--app-space-2);
+        padding: 0 var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         background: var(--app-paper);
         color: var(--app-text-secondary);
@@ -486,7 +525,8 @@
       th {
         position: sticky;
         top: var(--list-bar-height);
-        padding: 3px 6px;
+        padding: var(--app-space-1) var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         background: var(--app-bg);
         color: var(--app-text-secondary);
@@ -496,13 +536,15 @@
       }
 
       td {
-        padding: 1px 6px;
+        padding: 0 var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         white-space: nowrap;
       }
 
       td.outcome {
         width: 100%;
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 120px;
         max-width: 0;
         overflow: hidden;
@@ -534,11 +576,11 @@
       }
 
       tr.envelope td.name {
-        padding-left: 28px;
+        padding-left: calc(var(--app-space-4) + var(--app-space-3));
       }
 
       tr.marker td {
-        padding: 2px 8px;
+        padding: var(--app-space-1) var(--app-space-2);
         color: var(--app-text-secondary);
         font-family: var(--app-font-body);
         text-align: center;
@@ -554,7 +596,7 @@
       }
 
       .twist {
-        width: 16px;
+        width: var(--app-space-4);
         min-height: 0;
         padding: 0;
         border: 0;
@@ -568,9 +610,9 @@
       }
 
       .tag {
-        margin-left: 6px;
-        padding: 0 4px;
-        border-radius: 3px;
+        margin-left: var(--app-space-2);
+        padding: 0 var(--app-space-1);
+        border-radius: var(--app-radius-sm);
         background: var(--app-bg);
         color: var(--app-text-secondary);
         font-size: var(--app-text-sm);
@@ -578,23 +620,29 @@
 
       .status {
         display: inline-block;
-        width: 12px;
-        height: 12px;
+        width: var(--app-space-3);
+        height: var(--app-space-3);
+        /* the glyph’s optical offset aligns it with the text baseline */
         vertical-align: -2px;
       }
 
       .wf {
         position: relative;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 120px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 10px;
       }
 
       .wf i {
         position: absolute;
+        /* the marker’s pixel offset aligns it inside its data track */
         top: 2px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 6px;
+        /* two pixels keep even a very short duration visible */
         min-width: 2px;
-        border-radius: 1px;
+        border-radius: var(--app-radius-xs);
         background: var(--app-info);
       }
 
@@ -603,27 +651,32 @@
       }
 
       .wf i.ended {
+        /* a one-pixel hairline separates the surfaces */
         border: 1px dashed var(--ended);
         background: none;
       }
 
       .wf i.flight {
         background: var(--app-info-wash);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: inset 0 0 0 1px var(--app-info);
       }
 
       .wf i.open,
       .wf i.closed {
-        top: 4px;
+        top: var(--app-space-1);
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 2px;
         background: var(--app-text-secondary);
       }
 
       .wf b {
         position: absolute;
+        /* the marker’s pixel offset aligns it inside its data track */
         top: 1px;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 1px;
-        height: 8px;
+        height: var(--app-space-2);
         background: var(--app-text);
       }
 
@@ -632,18 +685,20 @@
         top: 0;
         display: flex;
         z-index: 1;
-        gap: 2px;
+        gap: var(--app-space-1);
         padding: 0 var(--app-space-1);
         overflow-x: auto;
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         background: var(--app-paper);
       }
 
       .detail-tabs [role='tab'] {
-        padding-inline: 10px;
+        padding-inline: var(--app-space-2);
       }
 
       /* a narrow panel keeps every tab in sight */
+      /* the controls’ measured widths set this wrapping breakpoint */
       @media (max-width: 400px) {
         [role='tab'] {
           padding-inline: var(--app-space-2);
@@ -662,7 +717,7 @@
       .title {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: var(--app-space-2);
         margin-bottom: var(--app-space-2);
         font-size: var(--app-text-md);
         font-weight: 650;
@@ -687,9 +742,10 @@
       .outcome-box {
         margin-top: var(--app-space-3);
         padding: var(--app-space-2) var(--app-space-3);
+        /* the three-pixel semantic marker is a stroke rather than an inset */
         border-left: 3px solid var(--app-info);
         background: var(--app-bg);
-        border-radius: 0 4px 4px 0;
+        border-radius: 0 var(--app-radius-sm) var(--app-radius-sm) 0;
       }
 
       .outcome-box.failed {
@@ -703,7 +759,7 @@
       h3 {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: var(--app-space-2);
         margin: var(--app-space-3) 0 var(--app-space-1);
         color: var(--app-text);
         font-size: var(--app-text-md);
@@ -716,6 +772,7 @@
       }
 
       .link {
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-divider);
         background: var(--app-paper);
         color: var(--app-accent);
@@ -725,29 +782,31 @@
         margin: 0;
         padding: var(--app-space-1) var(--app-space-2);
         overflow: auto;
-        border-radius: 6px;
+        border-radius: var(--app-radius);
         background: var(--app-bg);
         font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-divider);
       }
 
       .tree {
         padding: var(--app-space-1) var(--app-space-2);
-        border-radius: 6px;
+        border-radius: var(--app-radius);
         background: var(--app-bg);
         font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-divider);
       }
 
       .tree details {
         margin: 0;
-        padding-left: 14px;
+        padding-left: var(--app-space-4);
       }
 
       .tree summary {
-        margin-left: -14px;
+        margin-left: calc(-1 * var(--app-space-4));
         color: var(--app-text);
         cursor: pointer;
       }
@@ -787,14 +846,14 @@
       }
 
       .diff-item {
-        margin-bottom: 8px;
+        margin-bottom: var(--app-space-2);
       }
 
       .diff-item header {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-bottom: 2px;
+        gap: var(--app-space-2);
+        margin-bottom: var(--app-space-1);
         color: var(--app-text-secondary);
       }
 
@@ -809,25 +868,27 @@
         display: flex;
         flex-wrap: wrap;
         gap: var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         align-items: center;
         padding: var(--app-space-1) 0;
       }
 
       .frames .fn {
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 120px;
       }
 
       .frames button {
-        min-height: 24px;
-        padding: 2px var(--app-space-1);
+        min-height: var(--app-space-6);
+        padding: var(--app-space-1) var(--app-space-1);
         border: 0;
         background: none;
         color: var(--app-accent);
         font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         text-align: left;
         overflow-wrap: anywhere;
-        border-radius: 4px;
+        border-radius: var(--app-radius-sm);
       }
 
       .thread svg {
@@ -862,6 +923,7 @@
       .thread .kind {
         paint-order: stroke;
         stroke: var(--app-paper);
+        /* the SVG label’s three-pixel paper stroke clears the thread behind it */
         stroke-width: 3px;
         stroke-linejoin: round;
       }
@@ -909,9 +971,9 @@
 
       .progress {
         position: relative;
-        height: 8px;
-        margin: 8px 0 4px;
-        border-radius: 4px;
+        height: var(--app-space-2);
+        margin: var(--app-space-2) 0 var(--app-space-1);
+        border-radius: var(--app-radius-sm);
         background: var(--app-divider);
       }
 
@@ -920,14 +982,17 @@
         top: 0;
         bottom: 0;
         left: 0;
-        border-radius: 4px;
+        border-radius: var(--app-radius-sm);
         background: var(--app-info);
       }
 
       .progress u {
         position: absolute;
+        /* the marker’s pixel offset aligns it inside its data track */
         top: -2px;
+        /* the marker extends past the data track by its stroke width */
         bottom: -2px;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 2px;
         background: var(--app-text);
       }
@@ -941,7 +1006,7 @@
       }
 
       .note {
-        margin: 8px 0;
+        margin: var(--app-space-2) 0;
         color: var(--app-text-secondary);
       }
 
@@ -951,18 +1016,19 @@
       }
 
       .empty h2 {
-        margin: 0 0 6px;
+        margin: 0 0 var(--app-space-2);
         font-size: var(--app-text-base);
       }
 
       .empty ul {
-        margin: 6px 0 10px;
-        padding-left: 18px;
+        margin: var(--app-space-2) 0 var(--app-space-2);
+        padding-left: var(--app-space-4);
         color: var(--app-text-secondary);
       }
 
       .sect {
         padding: var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
       }
 
@@ -983,6 +1049,7 @@
       table.plain td,
       table.plain th {
         position: static;
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         padding: var(--app-space-1) var(--app-space-2);
       }
@@ -995,11 +1062,13 @@
         align-items: center;
         gap: var(--app-space-1) var(--app-space-2);
         padding: var(--app-space-2) var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
         background: var(--app-bg);
       }
 
       .scrub input[type='range'] {
+        /* the filter’s preferred width yields to the controls beside it */
         flex: 1 1 200px;
         padding: 0;
         border: 0;
@@ -1022,15 +1091,16 @@
 
       .meter {
         display: inline-flex;
-        gap: 2px;
+        gap: var(--app-space-1);
         vertical-align: middle;
       }
 
       .meter i {
-        width: 8px;
-        height: 8px;
+        width: var(--app-space-2);
+        height: var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-info);
-        border-radius: 2px;
+        border-radius: var(--app-radius-xs);
       }
 
       .meter i.on {
@@ -1039,9 +1109,11 @@
 
       .bar-mini {
         position: relative;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 140px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 6px;
-        border-radius: 3px;
+        border-radius: var(--app-radius-sm);
         background: var(--app-divider);
       }
 
@@ -1050,13 +1122,14 @@
         top: 0;
         bottom: 0;
         left: 0;
-        border-radius: 3px;
+        border-radius: var(--app-radius-sm);
         background: var(--app-info);
       }
 
       #timeline svg {
         display: block;
         width: 100%;
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 560px;
         user-select: none;
       }
@@ -1095,6 +1168,7 @@
         align-items: center;
         gap: var(--app-space-1) var(--app-space-2);
         padding: var(--app-space-2) var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
       }
 
@@ -1105,16 +1179,18 @@
       }
 
       .chip {
-        padding: 2px var(--app-space-2);
-        border-radius: 4px;
+        padding: var(--app-space-1) var(--app-space-2);
+        border-radius: var(--app-radius-sm);
         background: var(--app-bg);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: 0 0 0 1px var(--app-divider);
         font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
         display: inline-flex;
         align-items: center;
+        /* the compact chip floor follows its text line box */
         min-height: 22px;
-        margin: 2px;
+        margin: var(--app-space-1);
       }
 
       .chip.failure {
@@ -1134,12 +1210,13 @@
 
       details.raw pre {
         max-height: 50vh;
-        margin-top: 4px;
+        margin-top: var(--app-space-1);
         white-space: pre;
       }
 
       .exchange {
         padding: var(--app-space-2) var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
         border-bottom: 1px solid var(--app-divider);
       }
 
@@ -1151,7 +1228,7 @@
       }
 
       .exchange .envelopes {
-        margin: 2px 0 0 12px;
+        margin: var(--app-space-1) 0 0 var(--app-space-3);
         color: var(--app-text-secondary);
         font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
       }
@@ -1159,8 +1236,9 @@
       .statusbar {
         display: flex;
         align-items: center;
-        gap: 2px var(--app-space-3);
-        padding: 2px var(--app-space-2);
+        gap: var(--app-space-1) var(--app-space-3);
+        padding: var(--app-space-1) var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border-top: 1px solid var(--app-divider);
         background: var(--app-bg);
         color: var(--app-text-secondary);
@@ -1199,11 +1277,14 @@
       #menu {
         position: fixed;
         z-index: 10;
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 208px;
         padding: var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-control-border);
-        border-radius: 8px;
+        border-radius: var(--app-radius-md);
         background: var(--app-paper);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
       }
 
@@ -1211,9 +1292,9 @@
         display: block;
         width: 100%;
         min-height: var(--menu-row-height);
-        padding: 3px 10px;
+        padding: var(--app-space-1) var(--app-space-2);
         border: 0;
-        border-radius: 4px;
+        border-radius: var(--app-radius-sm);
         background: none;
         text-align: left;
         font-weight: 400;
@@ -1223,15 +1304,17 @@
       #menu button:focus-visible {
         background: var(--app-flame-wash);
         color: var(--app-accent);
+        /* the offset tracks the two-pixel focus stroke */
         outline-offset: -2px;
       }
 
       #toast {
         position: fixed;
-        right: 12px;
+        right: var(--app-space-3);
+        /* the toast clears the status bar and its focused controls */
         bottom: 44px;
         padding: var(--app-space-2) var(--app-space-3);
-        border-radius: 6px;
+        border-radius: var(--app-radius);
         background: var(--app-text);
         color: var(--app-paper);
         font-size: var(--app-text-sm);
@@ -1239,6 +1322,7 @@
 
       @media (prefers-reduced-motion: no-preference) {
         .spin {
+          /* the spinner turns about the centre of its twelve-pixel status glyph */
           transform-origin: 6px 6px;
           animation: spin 1s linear infinite;
         }
@@ -1253,6 +1337,7 @@
       .filter-field {
         position: relative;
         display: flex;
+        /* the filter’s preferred width yields to the controls beside it */
         flex: 1 1 240px;
         align-items: center;
         min-width: 0;
@@ -1260,6 +1345,7 @@
 
       /* wide enough, the bar keeps to one line: the filter takes what the other controls leave, down
          to its floor, and the status ellipsizes after it */
+      /* the controls’ measured widths set this wrapping breakpoint */
       @media (min-width: 1060px) {
         .bar {
           flex-wrap: nowrap;
@@ -1271,21 +1357,23 @@
 
         .filter-field {
           flex-basis: 0;
+          /* a content-width floor keeps this label or plot readable before it scrolls */
           min-width: 100px;
         }
       }
 
       .filter-help-toggle {
         position: absolute;
+        /* the help button sits one pixel inside the field’s border */
         right: 1px;
         display: grid;
-        width: 24px;
-        height: 24px;
-        min-height: 24px;
+        width: var(--app-space-6);
+        height: var(--app-space-6);
+        min-height: var(--app-space-6);
         padding: 0;
         place-items: center;
         border: 0;
-        border-radius: 4px;
+        border-radius: var(--app-radius-sm);
         background: transparent;
         color: var(--app-text-secondary);
         font-size: var(--app-text-sm);
@@ -1295,14 +1383,18 @@
         position: fixed;
         inset: auto;
         z-index: 20;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: min(380px, calc(100vw - 24px));
+        /* the popup height is capped for short DevTools viewports */
         max-height: calc(100vh - 24px);
         margin: 0;
         padding: var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-control-border);
-        border-radius: 8px;
+        border-radius: var(--app-radius-md);
         background: var(--app-paper);
         color: var(--app-text);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
         font: inherit;
         overflow: auto;
@@ -1342,6 +1434,7 @@
       #filter-help p {
         margin: var(--app-space-2) 0 0;
         padding-top: var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
         border-top: 1px solid var(--app-divider);
         color: var(--app-text-secondary);
         font-size: var(--app-text-sm);
@@ -1375,34 +1468,43 @@
       }
 
       .scrub input[type='range']::-webkit-slider-runnable-track {
-        height: 4px;
-        border-radius: 4px;
+        height: var(--app-space-1);
+        border-radius: var(--app-radius-sm);
         background: var(--app-divider);
       }
 
       .scrub input[type='range']::-webkit-slider-thumb {
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 14px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 14px;
+        /* the WebKit thumb is centred: (4px track - 14px thumb) / 2 = -5px */
         margin-top: -5px;
         appearance: none;
+        /* the two-pixel paper rim separates the thumb from its track */
         border: 2px solid var(--app-paper);
-        border-radius: 50%;
+        border-radius: var(--app-radius-pill);
         background: var(--app-accent);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: 0 0 0 1px var(--app-accent);
       }
 
       .scrub input[type='range']::-moz-range-track {
-        height: 4px;
-        border-radius: 4px;
+        height: var(--app-space-1);
+        border-radius: var(--app-radius-sm);
         background: var(--app-divider);
       }
 
       .scrub input[type='range']::-moz-range-thumb {
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 10px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 10px;
+        /* the two-pixel paper rim separates the thumb from its track */
         border: 2px solid var(--app-paper);
-        border-radius: 50%;
+        border-radius: var(--app-radius-pill);
         background: var(--app-accent);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
         box-shadow: 0 0 0 1px var(--app-accent);
       }
 
@@ -1413,7 +1515,7 @@
       }
 
       .registry .link {
-        min-height: 24px;
+        min-height: var(--app-space-6);
         padding: 0 var(--app-space-1);
         border-color: transparent;
         background: transparent;
