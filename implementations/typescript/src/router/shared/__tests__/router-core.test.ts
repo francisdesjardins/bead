@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createTestClock, hasRef, timersBy } from '../../../transport/shared/__tests__/fixtures';
+import type { IClock } from '../../../transport/shared/clock';
 import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import { noop } from '../../../transport/shared/noop';
 import {
@@ -1730,6 +1731,112 @@ test.describe('createRouterCore', () => {
       expect(reasons).toEqual([expect.any(DisconnectError)]);
       expect((reasons[0] as Error).message).toBe('a closed');
       expect(sent).toEqual([]);
+      expect(reported).toEqual([]);
+    });
+
+    test('detach calls before settling an incoming resolver awaiting an outgoing call, and count its incoming close once', async () => {
+      const registry = createMetricsRegistry();
+      const metrics = registry.attach('server');
+      const clock = createTestClock();
+      const { port, reported } = createPort();
+      using core = createRouterCore(port, { clock, limits, metrics });
+      const entered = Promise.withResolvers<void>();
+      const finished = Promise.withResolvers<void>();
+      const steps: string[] = [];
+      const snapshots: ReturnType<typeof core.gauges>[] = [];
+      // the clock as the core reads it
+      const read: Pick<IClock, 'performance'> = clock;
+      const monotonicNow = read.performance.now.bind(read.performance);
+      // records the state at a counted call's end, as the core reads its clock
+      let reading: (() => void) | undefined;
+      let signal: AbortSignal | undefined;
+      let answer: Promise<void> | undefined;
+
+      read.performance.now = () => {
+        reading?.();
+
+        return monotonicNow();
+      };
+      core.registerResolver(
+        Object.assign(async (props: IRequestResolverProps<Handle>) => {
+          signal = props.signal;
+          props.signal.addEventListener('abort', () => {
+            steps.push('incoming-aborted');
+          });
+
+          const made = core.request(new Uint8Array(0), {
+            connectionHandle: props.connectionHandle,
+            options: { timeout: Infinity },
+            procedure: echo,
+            series: metrics.declareRequester(echo),
+          });
+
+          // an incoming result held for credit, while the resolver still awaits its outgoing call
+          answer = core.respond({ payload: patternOf(200) }, props);
+          entered.resolve();
+
+          try {
+            await made;
+          } catch (reason) {
+            if (reason instanceof DisconnectError) {
+              steps.push('incoming-await-rejected');
+            }
+          } finally {
+            finished.resolve();
+          }
+        }, echo)
+      );
+      core.receive(requestOf(1), 'a');
+      await entered.promise;
+
+      expect(core.gauges().counts).toMatchObject({
+        answeringCalls: 1,
+        pendingCalls: 1,
+        sendingTransfers: 1,
+      });
+
+      reading = () => {
+        snapshots.push(core.gauges());
+        steps.push(snapshots.length === 1 ? 'incoming-ended' : 'outgoing-ended');
+      };
+      core.rejectPending('the connection closed', 'a');
+      reading = undefined;
+
+      expect(snapshots).toHaveLength(2);
+
+      for (const { counts } of snapshots) {
+        expect(counts).toMatchObject({ answeringCalls: 0, pendingCalls: 0, receivingTransfers: 0 });
+      }
+
+      // ? the answer's transfer closes with its call's abort, once the outgoing call ended: an open
+      // difference of docs/support.md
+      expect(snapshots[0]?.counts).toMatchObject({ sendingTransfers: 1 });
+      expect(snapshots[1]?.counts).toMatchObject({ sendingTransfers: 1 });
+      expect(core.gauges().counts).toMatchObject({ sendingTransfers: 0 });
+      expect(steps).toEqual(['incoming-ended', 'outgoing-ended', 'incoming-aborted']);
+
+      await finished.promise;
+      await expect(answer).rejects.toThrow(DisconnectError);
+      expect(signal?.aborted).toBe(true);
+      expect(steps).toEqual([
+        'incoming-ended',
+        'outgoing-ended',
+        'incoming-aborted',
+        'incoming-await-rejected',
+      ]);
+
+      // neither the resolver unwinding nor another close ends its incoming metrics again
+      core.rejectPending('closed again', 'a');
+      await sleep(0);
+
+      const { text } = registry.exposition();
+
+      expect(text).toContain(
+        'bead_server_call_handled_total{service="2",procedure="echo",type="request",outcome="closed"} 1\n'
+      );
+      expect(text).toContain(
+        'bead_server_call_duration_seconds_count{service="2",procedure="echo",type="request"} 1\n'
+      );
       expect(reported).toEqual([]);
     });
 
