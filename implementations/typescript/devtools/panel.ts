@@ -71,15 +71,18 @@ const TOAST_MILLISECONDS = 1_600;
 /** The detail's layouts, as DevTools' Elements panel offers its own. */
 const LAYOUTS = Object.freeze(['auto', 'right', 'bottom'] as const);
 
-/** A panel `auto` stacks: narrower than 720 px, or taller than it is wide, as DevTools on a side. */
-const STACKED = '(max-width: 719.98px), (orientation: portrait)';
+/** The split's width past which `auto` puts the detail beside the list, as the Elements panel's. */
+const AUTO_RIGHT_WIDTH = 680;
 
 /** The list's share of the split, in percent: by default, and a key's step. */
 const SHARE = Object.freeze({ default: 60, step: 5 });
 
-/** The least each side of the split keeps, in pixels, by where the detail sits. */
+/** The calls a list over its detail keeps in sight, however tight the panel. */
+const LIST_ROWS = 8;
+
+/** The least each side of the split keeps, in pixels, where what is drawn asks no more. */
 const SIDES = Object.freeze({
-  bottom: Object.freeze({ detail: 160, list: 120 }),
+  bottom: Object.freeze({ detail: 160, list: 240 }),
   right: Object.freeze({ detail: 260, list: 240 }),
 });
 
@@ -154,6 +157,7 @@ export const startPanel = (host: IPanelHost): void => {
     callsView: elementOf('calls-view'),
     clear: elementOf('clear') as HTMLButtonElement,
     detail: elementOf('detail'),
+    detailTabs: elementOf('detail-tabs'),
     empty: elementOf('empty'),
     envelopes: elementOf('envelopes'),
     envelopesTable: elementOf('envelopes-table'),
@@ -204,6 +208,7 @@ export const startPanel = (host: IPanelHost): void => {
   };
   let port: IHostPort | undefined;
   let isDrawing = false;
+  let envelopeAt: number | undefined;
 
   // the detail's place and the split, kept by the panel's page
   const split = {
@@ -213,32 +218,59 @@ export const startPanel = (host: IPanelHost): void => {
       right: shareOf(readKept(KEPT.share.right)),
     } satisfies Record<Placement, number>,
   };
-  const stacked = matchMedia(STACKED);
+  // the share Enter restores, by placement, once it has sent the detail to its least
+  const restored: Record<Placement, number | undefined> = { bottom: undefined, right: undefined };
 
   const placementOf = (): Placement => {
     if (split.layout === 'auto') {
-      return stacked.matches ? 'bottom' : 'right';
+      // * DevTools' Elements panel's rule: its sidebar beside a split wider than 680 px, else under
+      const width = shown.callsView.getBoundingClientRect().width || innerWidth;
+
+      return width > AUTO_RIGHT_WIDTH ? 'right' : 'bottom';
     }
 
     return split.layout;
   };
 
-  /** The list's least and greatest share, in percent, that leave each side its least. */
+  /** What each side keeps: the detail its whole tab bar, the list its rows, as they are drawn. */
+  const floorsOf = (placement: Placement): { detail: number; list: number } => {
+    const sides = SIDES[placement];
+
+    if (placement === 'right') {
+      const last = shown.detailTabs.lastElementChild;
+      const bar =
+        last instanceof HTMLElement
+          ? last.offsetLeft +
+            last.offsetWidth +
+            Number.parseFloat(getComputedStyle(shown.detailTabs).paddingRight)
+          : 0;
+
+      return { detail: Math.max(sides.detail, Math.ceil(bar)), list: sides.list };
+    }
+
+    const table = shown.list.querySelector<HTMLElement>('table:not([hidden])');
+    const bar = shown.list.querySelector<HTMLElement>('.list-bar')?.offsetHeight ?? 0;
+    const head = table?.querySelector<HTMLElement>('thead')?.offsetHeight ?? 0;
+    const row = table?.querySelector<HTMLElement>('tbody tr')?.offsetHeight ?? 0;
+
+    return {
+      detail: sides.detail,
+      list: Math.max(sides.list, Math.ceil(bar + head + LIST_ROWS * row)),
+    };
+  };
+
+  /** The list's least and greatest share, in percent: the list keeps its least first. */
   const limitsOf = (placement: Placement): { max: number; min: number } => {
     const box = shown.callsView.getBoundingClientRect();
     const size = (placement === 'right' ? box.width : box.height) - 1;
-    const sides = SIDES[placement];
+    const floors = floorsOf(placement);
+    const min = Math.min(100, Math.ceil((floors.list / size) * 1_000) / 10);
 
-    if (size <= sides.list + sides.detail) {
-      const share = Math.round((sides.list / (sides.list + sides.detail)) * 100);
-
-      return { max: share, min: share };
+    if (size <= floors.list + floors.detail) {
+      return { max: min, min };
     }
 
-    return {
-      max: Math.floor((1 - sides.detail / size) * 100),
-      min: Math.ceil((sides.list / size) * 100),
-    };
+    return { max: Math.floor((1 - floors.detail / size) * 1_000) / 10, min };
   };
 
   const shareShown = (placement: Placement): number => {
@@ -248,6 +280,12 @@ export const startPanel = (host: IPanelHost): void => {
   };
 
   const layOut = (): void => {
+    shown.layout.value = split.layout;
+
+    if (shown.callsView.hidden) {
+      return;
+    }
+
     const placement = placementOf();
     const { max, min } = limitsOf(placement);
     const share = shareShown(placement);
@@ -263,7 +301,6 @@ export const startPanel = (host: IPanelHost): void => {
     shown.splitter.setAttribute('aria-valuemin', String(min));
     shown.splitter.setAttribute('aria-valuemax', String(max));
     shown.splitter.setAttribute('aria-valuenow', String(share));
-    shown.layout.value = split.layout;
   };
 
   const moveSplit = (value: number, { isKept }: { isKept: boolean }): void => {
@@ -1124,6 +1161,8 @@ export const startPanel = (host: IPanelHost): void => {
     shown.filterHelpButton.setAttribute('aria-expanded', 'false');
   };
 
+  // * the help is WAI-ARIA APG's Disclosure: the `?` shows and hides it, and says which in
+  // `aria-expanded`; it closes too as focus leaves the field and the help
   shown.filterHelpButton.addEventListener('click', () => {
     if (!shown.filterHelp.hidden) {
       closeFilterHelp();
@@ -1142,22 +1181,37 @@ export const startPanel = (host: IPanelHost): void => {
   });
   window.addEventListener('resize', closeFilterHelp);
 
+  for (const part of [shown.filterHelpButton.parentElement, shown.filterHelp]) {
+    part?.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget;
+      const isWithin =
+        next instanceof Node &&
+        (shown.filterHelp.contains(next) ||
+          shown.filterHelpButton.parentElement?.contains(next) === true);
+
+      if (!isWithin) {
+        closeFilterHelp();
+      }
+    });
+  }
+
   shown.layout.addEventListener('change', () => {
     split.layout = layoutOf(shown.layout.value);
     keep(KEPT.layout, split.layout);
     layOut();
   });
-  stacked.addEventListener('change', layOut);
   window.addEventListener('resize', layOut);
 
-  // * the splitter is WAI-ARIA APG's Window Splitter: a separator whose value is the list's
-  // share, moved by its arrows, sent to its limits by Home and End, and restored by Enter
+  // * the splitter is WAI-ARIA APG's Window Splitter, the list its primary pane: a separator
+  // whose value is the list's share, moved by its arrows, sent to its limits by Home and End.
+  // Its Enter collapses the list to its least, and restores the share it had
   shown.splitter.addEventListener('keydown', (event) => {
     const placement = placementOf();
     const { max, min } = limitsOf(placement);
     const now = shareShown(placement);
     const [less, more] =
       placement === 'right' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    const isCollapsed = now <= min;
     const next =
       event.key === less
         ? now - SHARE.step
@@ -1168,11 +1222,14 @@ export const startPanel = (host: IPanelHost): void => {
             : event.key === 'End'
               ? max
               : event.key === 'Enter'
-                ? SHARE.default
+                ? isCollapsed
+                  ? (restored[placement] ?? SHARE.default)
+                  : min
                 : undefined;
 
     if (next !== undefined) {
       event.preventDefault();
+      restored[placement] = event.key === 'Enter' && !isCollapsed ? now : undefined;
       moveSplit(next, { isKept: true });
     }
   });
@@ -1203,6 +1260,8 @@ export const startPanel = (host: IPanelHost): void => {
     keep(KEPT.share[placementOf()], String(split.shares[placementOf()]));
   });
 
+  // * each tab bar is WAI-ARIA APG's Tabs, a tab shown as it is focused: ←, →, Home and End move
+  // along the bar, which keeps one tab stop
   for (const nav of document.querySelectorAll<HTMLElement>('[role="tablist"]')) {
     nav.addEventListener('keydown', (event) => {
       const tabs = [...nav.querySelectorAll<HTMLElement>('[role="tab"]')];
@@ -1318,11 +1377,41 @@ export const startPanel = (host: IPanelHost): void => {
 
   shown.envelopes.addEventListener('click', (event) => {
     const call = callOfRow(event.target);
+    const row = event.target instanceof Element ? event.target.closest('tr') : null;
 
     if (call !== undefined) {
+      envelopeAt = row === null ? undefined : [...shown.envelopes.children].indexOf(row);
       select(call.key);
     }
   });
+
+  /** In the Envelopes mode, the arrows step from the row shown to the next of another call. */
+  const stepEnvelopes = (step: number): void => {
+    const rows = [...shown.envelopes.querySelectorAll<HTMLElement>('tr[data-key]')];
+    const isOfSelected = (row: HTMLElement | undefined): boolean => {
+      return row !== undefined && Number(row.dataset['key']) === state.selected;
+    };
+    const from =
+      envelopeAt !== undefined && isOfSelected(rows[envelopeAt])
+        ? envelopeAt
+        : rows.findIndex(isOfSelected);
+
+    for (let at = from + step; at >= 0 && at < rows.length; at += step) {
+      const row = rows[at];
+
+      if (row !== undefined && !isOfSelected(row)) {
+        envelopeAt = at;
+        select(Number(row.dataset['key']));
+        requestAnimationFrame(() => {
+          shown.envelopes
+            .querySelectorAll('tr[data-key]')
+            [at]?.scrollIntoView({ block: 'nearest' });
+        });
+
+        return;
+      }
+    }
+  };
 
   shown.calls.addEventListener('contextmenu', (event) => {
     const call = callOfRow(event.target);
@@ -1341,7 +1430,10 @@ export const startPanel = (host: IPanelHost): void => {
     });
     const call = selectedCall();
 
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && state.mode === 'envelopes') {
+      event.preventDefault();
+      stepEnvelopes(event.key === 'ArrowDown' ? 1 : -1);
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
 
       const next =

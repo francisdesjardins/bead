@@ -30,7 +30,10 @@ const UNDER = 19;
 
 // definition
 
-/** Cuts an attached thread's labels to the room their `data-room` gives, before the next lane. */
+/**
+ * Cuts an attached thread's labels to the room their `data-room` gives, before the next lane, a
+ * label cut keeping its whole text in a tooltip.
+ */
 export const fitThreadLabels = (root: HTMLElement): void => {
   // * every width is read before a label is cut, so the drawing is laid out once; a character's
   // width is taken as the label's over its length, exact in the words' monospace font
@@ -47,12 +50,16 @@ export const fitThreadLabels = (root: HTMLElement): void => {
 
       return width <= room
         ? undefined
-        : { content, length: Math.floor((room / width) * content.data.length) - 1 };
+        : { content, label, length: Math.floor((room / width) * content.data.length) - 1 };
     }
   );
 
   for (const cut of cuts) {
     if (cut !== undefined) {
+      if (cut.label.querySelector('title') === null) {
+        cut.label.append(svgOf('title', { text: cut.content.data }));
+      }
+
       cut.content.data = `${cut.content.data.slice(0, Math.max(1, cut.length)).trimEnd()}…`;
     }
   }

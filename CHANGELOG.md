@@ -21,16 +21,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's envelope readers are fuzzed in its suite: seeded mutations of `spec/vectors.json`'s
   bytes, each read returning or refusing with a failure within a second; `BEAD_FUZZ_INPUTS` draws
   more for a longer run.
-- The DevTools panel places its detail right of the list, under it, or as the panel's shape says,
-  and a splitter between them sizes both; the panel keeps both choices.
+- The DevTools panel places its detail right of the list, under it, or by the panel's width as
+  DevTools' Elements panel does, and a splitter between them sizes both; the panel keeps both
+  choices.
 
 ### Changed
 
-- The DevTools panel reads larger and sits tighter, on penumbra's type scale and spacing under a
-  skin of DevTools' own colours: its controls and tabs are compact and of one look in both themes,
-  and its bar holds on one line. Its tabs move on the arrow keys, Home and End,
-  its filter's syntax opens from a `?` beside it, and an exchange's labels stop short of the next
-  lane, whole in a tooltip.
+- The DevTools panel reads larger, on penumbra's type scale and spacing under a skin of DevTools'
+  own colours: its controls and tabs are of one look in both themes, and its bar holds on one line
+  on a wide panel. Its tabs move on the arrow keys, Home and End, its filter's syntax opens from a
+  `?` beside it, and an exchange's labels stop short of the next lane, whole in a tooltip.
 - The `json` codec reads and writes a large payload in a fraction of the time, its output the
   same: the C# side writes a string that holds no escape as its bytes, and the TypeScript side
   finds the end of a string by search rather than character by character. A 64 KiB echo over a

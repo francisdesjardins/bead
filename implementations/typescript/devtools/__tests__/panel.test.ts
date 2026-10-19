@@ -19,14 +19,32 @@ interface IFake {
   reloads: number;
 }
 
+// types
+
+/** DevTools' themes, as `chrome.devtools.panels.themeName` names them. */
+type ThemeName = (typeof THEMES)[number];
+
+// constants
+
+const THEMES = Object.freeze(['dark', 'default'] as const);
+
+/** A selected tab and another, in the views' bar and in a call's. */
+const TAB_PAIRS = Object.freeze([
+  ['[data-tab="calls"]', '[data-tab="state"]'],
+  ['[data-detail="overview"]', '[data-detail="payload"]'],
+] as const);
+
 // helpers
 
 const encoder = new TextEncoder();
 
 /** The panel, on a page of its own, over a fake of what DevTools and the runtime give it. */
-const openPanel = async (page: Page): Promise<void> => {
+const openPanel = async (
+  page: Page,
+  { themeName = 'dark' }: { themeName?: ThemeName } = {}
+): Promise<void> => {
   await assertBuilt();
-  await page.addInitScript(() => {
+  await page.addInitScript((theme) => {
     const listeners = {
       disconnect: [] as ((port: unknown) => void)[],
       finished: [] as ((entry: unknown) => void)[],
@@ -71,7 +89,7 @@ const openPanel = async (page: Page): Promise<void> => {
             openResource: (url: string, line: number) => {
               fake.opened.push([url, line]);
             },
-            themeName: 'dark',
+            themeName: theme,
           },
         },
         runtime: {
@@ -95,7 +113,7 @@ const openPanel = async (page: Page): Promise<void> => {
       },
       fake,
     });
-  });
+  }, themeName);
   await page.goto(pathToFileURL(join(EXTENSION, 'panel.html')).href);
 };
 
@@ -114,8 +132,11 @@ const fakeOf = (page: Page): Promise<IFake> => {
 };
 
 /** The panel, its page connected, a client announced, and the traffic heard. */
-const openWithTraffic = async (page: Page): Promise<void> => {
-  await openPanel(page);
+const openWithTraffic = async (
+  page: Page,
+  options: { themeName?: ThemeName } = {}
+): Promise<void> => {
+  await openPanel(page, options);
   await deliver(page, { type: 'page-connected' });
   await deliver(page, { sources: [{ id: 1, protocol: 1, side: 'client' }], type: 'sources' });
   await deliver(page, { dropped: 0, records: [...TRAFFIC], type: 'records' });
@@ -144,6 +165,77 @@ const outlineOf = (page: Page, selector: string) => {
       isInside: Number.parseFloat(style.outlineOffset) + Number.parseFloat(style.outlineWidth) <= 0,
       style: style.outlineStyle,
     };
+  });
+};
+
+/** The WCAG 2 contrast of an element's text over its tint, laid on the panel's paper. */
+const contrastOf = (page: Page, selector: string): Promise<number> => {
+  return page.locator(selector).evaluate((element) => {
+    const channelsOf = (color: string): number[] => {
+      return (color.match(/[\d.]+/gu) ?? []).map(Number);
+    };
+    const luminanceOf = (rgb: number[]): number => {
+      const [red = 0, green = 0, blue = 0] = rgb.map((value) => {
+        const share = value / 255;
+
+        return share <= 0.039_28 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+      });
+
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    const [red = 0, green = 0, blue = 0, alpha = 1] = channelsOf(
+      getComputedStyle(element).backgroundColor
+    );
+    const paper = channelsOf(getComputedStyle(document.body).backgroundColor);
+    const ground = [red, green, blue].map((value, at) => {
+      return value * alpha + (paper[at] ?? 0) * (1 - alpha);
+    });
+    const [lighter = 0, darker = 0] = [
+      luminanceOf(channelsOf(getComputedStyle(element).color).slice(0, 3)),
+      luminanceOf(ground),
+    ].sort((one, other) => {
+      return other - one;
+    });
+
+    return (lighter + 0.05) / (darker + 0.05);
+  });
+};
+
+/** The viewport made `width` by `height`, once the panel has laid itself out again. */
+const resize = async (page: Page, { height, width }: { height: number; width: number }) => {
+  await page.setViewportSize({ height, width });
+  await page.evaluate(() => {
+    // a resize is dispatched before the next frame's callbacks: two frames see it handled
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+  });
+};
+
+/** Whether an element shows all it holds across, with nothing to scroll sideways. */
+const isWholeOf = (page: Page, selector: string): Promise<boolean> => {
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((element) => {
+      return element.scrollWidth <= element.clientWidth;
+    });
+};
+
+/** The call rows the list shows whole. */
+const rowsShownOf = (page: Page): Promise<number> => {
+  return page.evaluate(() => {
+    const list = document.getElementById('list')?.getBoundingClientRect();
+
+    return [...document.querySelectorAll('#calls tr.call')].filter((row) => {
+      const box = row.getBoundingClientRect();
+
+      return list !== undefined && box.top >= list.top && box.bottom <= list.bottom + 0.5;
+    }).length;
   });
 };
 
@@ -302,87 +394,110 @@ test.describe('the panel', () => {
     await expect(page.locator('#filter')).toHaveValue('whoami');
   });
 
-  test('keeps a hovered tab apart from the selected one, and the selected one as it is under the mouse', async ({
+  test('keeps its filter syntax open while focus stays in the field or the help, and closes it as focus leaves', async ({
     page,
   }) => {
     await openWithTraffic(page);
-    await rowOf(page, 'whoami').click();
 
-    for (const [selected, other] of [
-      ['[data-tab="calls"]', '[data-tab="state"]'],
-      ['[data-detail="overview"]', '[data-detail="payload"]'],
-    ] as const) {
+    const button = page.getByRole('button', { name: 'Filter syntax' });
+    const help = page.locator('#filter-help');
+
+    await button.click();
+    await page.locator('#filter').focus();
+    await expect(help).toBeVisible();
+    await help.click();
+    await expect(help).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(help).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  for (const themeName of THEMES) {
+    test(`keeps a hovered tab apart from the selected one, and the selected one as it is under the mouse, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
+
+      for (const [selected, other] of TAB_PAIRS) {
+        await page.mouse.move(0, 0);
+
+        const atRest = await lookOf(page, selected);
+
+        await page.hover(other);
+
+        const hovered = await lookOf(page, other);
+
+        expect({ tint: hovered.tint, underline: hovered.underline }).not.toEqual({
+          tint: atRest.tint,
+          underline: atRest.underline,
+        });
+        await page.hover(selected);
+        expect(await lookOf(page, selected)).toEqual(atRest);
+      }
+    });
+
+    test(`reads its selected tab at least as clearly as the others, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
       await page.mouse.move(0, 0);
 
-      const atRest = await lookOf(page, selected);
+      for (const [selected, other] of TAB_PAIRS) {
+        const contrast = await contrastOf(page, selected);
 
-      await page.hover(other);
+        expect(contrast).toBeGreaterThanOrEqual(4.5);
+        expect(contrast).toBeGreaterThanOrEqual(await contrastOf(page, other));
+      }
+    });
 
-      const hovered = await lookOf(page, other);
+    test(`draws the focus ring of the list and of the detail inside them, where their scrolling keeps it, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
 
-      expect({ tint: hovered.tint, underline: hovered.underline }).not.toEqual({
-        tint: atRest.tint,
-        underline: atRest.underline,
+      await page.locator('[data-tab="calls"]').focus();
+      await page.keyboard.press('Tab');
+      await expect(page.locator('#list')).toBeFocused();
+      expect(await outlineOf(page, '#list')).toEqual({
+        isFocusVisible: true,
+        isInside: true,
+        style: 'solid',
       });
-      await page.hover(selected);
-      expect(await lookOf(page, selected)).toEqual(atRest);
-    }
-  });
 
-  test('draws the focus ring of the list and of the detail inside them, where their scrolling keeps it', async ({
-    page,
-  }) => {
-    await openWithTraffic(page);
-    await rowOf(page, 'whoami').click();
-
-    await page.locator('[data-tab="calls"]').focus();
-    await page.keyboard.press('Tab');
-    await expect(page.locator('#list')).toBeFocused();
-    expect(await outlineOf(page, '#list')).toEqual({
-      isFocusVisible: true,
-      isInside: true,
-      style: 'solid',
+      await page.locator('[data-detail="overview"]').focus();
+      await page.keyboard.press('Tab');
+      await expect(page.locator('#detail')).toBeFocused();
+      expect(await outlineOf(page, '#detail')).toEqual({
+        isFocusVisible: true,
+        isInside: true,
+        style: 'solid',
+      });
     });
+  }
 
-    await page.locator('[data-detail="overview"]').focus();
-    await page.keyboard.press('Tab');
-    await expect(page.locator('#detail')).toBeFocused();
-    expect(await outlineOf(page, '#detail')).toEqual({
-      isFocusVisible: true,
-      isInside: true,
-      style: 'solid',
-    });
-  });
-
-  test('places its detail right of the list or under it as the panel’s shape says, and where its Detail choice says', async ({
+  test('places its detail as DevTools’ Elements panel does, beside a split wider than 680 px and under it otherwise, and where its Detail choice says', async ({
     page,
   }) => {
     await page.setViewportSize({ height: 800, width: 1280 });
     await openWithTraffic(page);
-
     await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
-    await expect
-      .poll(() => {
-        return placementOf(page);
-      })
-      .toBe('right');
-    expect((await splitterOf(page)).orientation).toBe('vertical');
 
-    await page.setViewportSize({ height: 900, width: 600 });
-    await expect
-      .poll(() => {
-        return placementOf(page);
-      })
-      .toBe('bottom');
-    expect((await splitterOf(page)).orientation).toBe('horizontal');
+    for (const [width, height, placement, orientation] of [
+      [1280, 800, 'right', 'vertical'],
+      [900, 950, 'right', 'vertical'],
+      [681, 500, 'right', 'vertical'],
+      [680, 500, 'bottom', 'horizontal'],
+      [600, 900, 'bottom', 'horizontal'],
+    ] as const) {
+      await resize(page, { height, width });
+      expect(await placementOf(page)).toBe(placement);
+      expect((await splitterOf(page)).orientation).toBe(orientation);
+    }
 
-    await page.setViewportSize({ height: 500, width: 700 });
-    await expect
-      .poll(() => {
-        return placementOf(page);
-      })
-      .toBe('bottom');
-
+    await resize(page, { height: 500, width: 680 });
     await page.getByRole('combobox', { name: 'Detail' }).selectOption('right');
     await expect
       .poll(() => {
@@ -399,13 +514,90 @@ test.describe('the panel', () => {
       .toBe('bottom');
   });
 
+  test('keeps the detail’s tab bar whole beside the list, as Auto places it and with the detail at its least', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 600, width: 760 });
+    await openWithTraffic(page);
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+    expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+
+    await page.locator('#splitter').focus();
+    await page.keyboard.press('End');
+    expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+
+    await resize(page, { height: 800, width: 1280 });
+    await page.keyboard.press('End');
+    await expect(page.locator('#splitter')).not.toHaveAttribute('aria-valuenow', '60');
+    expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+  });
+
+  test('keeps the list its rows first in a tight panel, and its status bar on one line', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    // the rows the panel showed at these sizes before its type grew
+    for (const [width, height, rows] of [
+      [690, 400, 5],
+      [600, 500, 8],
+    ] as const) {
+      await resize(page, { height, width });
+      expect(await rowsShownOf(page)).toBeGreaterThanOrEqual(rows);
+    }
+
+    await resize(page, { height: 600, width: 400 });
+
+    const bar = await page.locator('.statusbar').evaluate((statusbar) => {
+      const counts = statusbar.querySelector('#footer') as HTMLElement;
+      const choice = statusbar.querySelector('label') as HTMLElement;
+
+      return {
+        isCut: counts.scrollWidth > counts.clientWidth,
+        isOneLine:
+          Math.abs(counts.getBoundingClientRect().top - choice.getBoundingClientRect().top) < 8,
+        right: choice.getBoundingClientRect().right,
+      };
+    });
+
+    expect(bar.isCut).toBe(true);
+    expect(bar.isOneLine).toBe(true);
+    expect(bar.right).toBeLessThanOrEqual(400);
+  });
+
+  test('keeps the calls table within its list on a wide panel', async ({ page }) => {
+    await openWithTraffic(page);
+
+    for (const width of [1280, 1366]) {
+      await resize(page, { height: 800, width });
+      expect(await isWholeOf(page, '#list')).toBe(true);
+    }
+  });
+
+  test('scrolls no page sideways in a narrow panel, and keeps every tab in sight', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    for (const width of [360, 320]) {
+      await resize(page, { height: 640, width });
+      expect(await isWholeOf(page, 'html')).toBe(true);
+      expect(await isWholeOf(page, '.tabs')).toBe(true);
+      expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+    }
+  });
+
   test('moves its splitter by keyboard and by pointer, within the least each side keeps', async ({
     page,
   }) => {
     await page.setViewportSize({ height: 800, width: 1280 });
     await openWithTraffic(page);
 
-    const splitter = page.getByRole('separator', { name: 'Size of the list and the detail' });
+    const splitter = page.getByRole('separator', { name: 'Calls list' });
 
     await expect(splitter).toHaveAttribute('aria-valuenow', '60');
     await splitter.focus();
@@ -415,13 +607,22 @@ test.describe('the panel', () => {
     await page.keyboard.press('ArrowLeft');
     await expect(splitter).toHaveAttribute('aria-valuenow', '55');
 
+    // Enter collapses the list to its least, and restores the share it had
+    await page.keyboard.press('Enter');
+
+    const collapsed = await splitterOf(page);
+
+    expect(collapsed.now).toBe(collapsed.min);
+    await page.keyboard.press('Enter');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '55');
+
     await page.keyboard.press('Home');
 
     const atLeast = await splitterOf(page);
 
     expect(atLeast.now).toBe(atLeast.min);
     expect((await splitOf(page)).list).toBeGreaterThanOrEqual(240);
-    expect((await splitOf(page)).list).toBeLessThan(240 + 13);
+    expect((await splitOf(page)).list).toBeLessThan(240 + 3);
 
     await page.keyboard.press('End');
 
@@ -429,8 +630,6 @@ test.describe('the panel', () => {
 
     expect(atMost.now).toBe(atMost.max);
     expect((await splitOf(page)).detail).toBeGreaterThanOrEqual(260);
-    await page.keyboard.press('Enter');
-    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
 
     const box = await splitter.boundingBox();
 
@@ -462,7 +661,7 @@ test.describe('the panel', () => {
     await expect(splitter).toHaveAttribute('aria-valuenow', '65');
   });
 
-  test('keeps its layout and each placement’s split across a reload of its page', async ({
+  test('keeps its layout and each placement’s split, a share dragged among them, across a reload of its page', async ({
     page,
   }) => {
     await page.setViewportSize({ height: 800, width: 1280 });
@@ -489,6 +688,23 @@ test.describe('the panel', () => {
     await expect(splitter).toHaveAttribute('aria-valuenow', '65');
     await page.getByRole('combobox', { name: 'Detail' }).selectOption('right');
     await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+
+    const box = await splitter.boundingBox();
+
+    if (box === null) {
+      throw new Error('the splitter has no box');
+    }
+
+    await page.mouse.move(box.x, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(500, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+
+    const dragged = (await splitterOf(page)).now;
+
+    expect(dragged).not.toBe(50);
+    await page.reload();
+    await expect(splitter).toHaveAttribute('aria-valuenow', String(dragged));
   });
 
   test('keeps its defaults, and its choices for the page’s life, when its storage refuses', async ({
@@ -623,9 +839,15 @@ test.describe('the panel', () => {
     await rowOf(page, 'increment').click();
     await page.click('[data-detail="exchange"]');
 
-    for (const name of ['increment', 'tally']) {
+    for (const [name, callId] of [
+      ['increment', IDS.relayed],
+      ['tally', IDS.slowRelay],
+    ] as const) {
       await rowOf(page, name).click();
-      await expect(page.locator('#detail .thread circle').first()).toBeVisible();
+      await expect(page.locator('#detail .thread svg')).toHaveAttribute(
+        'aria-label',
+        `The envelopes of call #${String(callId)}, in order`
+      );
 
       const drawing = await page.locator('#detail .thread svg').evaluate((svg) => {
         const boxesOf = (selector: string) => {
@@ -668,6 +890,12 @@ test.describe('the panel', () => {
                 });
             }),
           ],
+          kinds: [...svg.querySelectorAll<SVGTextElement>('text.kind')].map((text) => {
+            return {
+              shown: text.firstChild?.textContent ?? '',
+              whole: text.querySelector('title')?.textContent,
+            };
+          }),
           words: [...svg.querySelectorAll<SVGTextElement>('text.words')].map((text) => {
             return {
               shown: text.firstChild?.textContent ?? '',
@@ -678,6 +906,20 @@ test.describe('the panel', () => {
       });
 
       expect(drawing.collisions).toEqual([]);
+
+      for (const { shown, whole } of drawing.kinds) {
+        if (shown.endsWith('…')) {
+          expect(whole?.startsWith(shown.slice(0, -1))).toBe(true);
+        }
+      }
+
+      if (name === 'tally') {
+        expect(
+          drawing.kinds.map(({ shown, whole }) => {
+            return whole ?? shown;
+          })
+        ).toContain('NOTIFICATION');
+      }
 
       for (const { shown, whole } of drawing.words) {
         expect(shown.endsWith('…') ? shown.length - 1 : shown.length).toBeGreaterThanOrEqual(
@@ -757,6 +999,43 @@ test.describe('the panel', () => {
     expect(await backgroundOf(selected.first())).not.toBe(
       await backgroundOf(page.locator('#envelopes tr[aria-selected="false"]').first())
     );
+  });
+
+  test('steps through the envelopes shown with ↑ and ↓ in the Envelopes mode, the call’s mark following', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 500, width: 1280 });
+    await openWithTraffic(page);
+    await page.click('[data-mode="envelopes"]');
+
+    const rows = page.locator('#envelopes tr[data-key]');
+    const keys = await rows.evaluateAll((elements) => {
+      return elements.map((element) => {
+        return (element as HTMLElement).dataset['key'];
+      });
+    });
+    const stepped = [0];
+
+    // each step lands on the next row of another call
+    for (let step = 0; step < 12; step += 1) {
+      const from = stepped.at(-1) ?? 0;
+      const next = keys.findIndex((key, at) => {
+        return at > from && key !== keys[from];
+      });
+
+      stepped.push(next < 0 ? from : next);
+    }
+
+    await rows.first().click();
+
+    for (const at of stepped.slice(1)) {
+      await page.keyboard.press('ArrowDown');
+      await expect(rows.nth(at)).toHaveAttribute('aria-selected', 'true');
+    }
+
+    await expect(rows.nth(stepped.at(-1) ?? 0)).toBeInViewport();
+    await page.keyboard.press('ArrowUp');
+    await expect(rows.nth(stepped.at(-1) ?? 0)).toHaveAttribute('aria-selected', 'false');
   });
 
   test('filters as the package’s filter does, keeps the last filter that held when one is refused, and says why', async ({
@@ -891,7 +1170,10 @@ test.describe('the panel', () => {
     await expect(page.locator('#calls tr.call')).toHaveCount(10);
 
     await page.keyboard.press('Control+e');
-    await expect(page.locator('#record')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('button', { exact: true, name: 'Record' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
     await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 4), type: 'records' });
     await expect(page.locator('#footer')).toContainText('paused: 4 records not recorded');
     await expect(page.locator('#calls tr.call')).toHaveCount(10);

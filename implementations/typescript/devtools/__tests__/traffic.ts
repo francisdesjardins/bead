@@ -431,7 +431,10 @@ export const TRAFFIC: readonly ActivityRecord[] = Object.freeze([
   }),
 ]);
 
-/** A call to destination 7 answered past a second, apart from the traffic: a thread's widest labels. */
+/**
+ * A call to destination 7 answered past a second, a notification and a cancel on its way, apart from
+ * the traffic: a thread's widest labels.
+ */
 export const SLOW_RELAY: readonly ActivityRecord[] = Object.freeze([
   envelope(3_000, {
     direction: 'tx',
@@ -451,6 +454,14 @@ export const SLOW_RELAY: readonly ActivityRecord[] = Object.freeze([
     procedureName: 'tally',
     startedAt: T0 + 3_000,
     tx: '1',
+  }),
+  envelope(3_500, {
+    direction: 'rx',
+    header: { callId: IDS.slowRelay, kind: EnvelopeKind.NOTIFICATION },
+  }),
+  envelope(3_600, {
+    direction: 'tx',
+    header: { callId: IDS.slowRelay, kind: EnvelopeKind.CANCEL },
   }),
   envelope(4_234, {
     direction: 'rx',

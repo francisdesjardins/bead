@@ -75,6 +75,8 @@
       body {
         display: grid;
         grid-template-rows: auto auto minmax(0, 1fr) auto;
+        /* ! the panel's width bounds every row: a split's fractions never widen the page */
+        grid-template-columns: minmax(0, 1fr);
         height: 100vh;
         margin: 0;
         background: var(--app-paper);
@@ -278,7 +280,6 @@
       .group {
         display: inline-flex;
         flex-wrap: wrap;
-        flex-shrink: 0;
         gap: 2px;
         padding: 2px;
         border: 1px solid var(--app-divider);
@@ -438,13 +439,14 @@
         container-type: inline-size;
       }
 
-      @container (max-width: 760px) {
+      /* ! measured on the rows' type: the table needs about 870 px with its waterfall, 740 without */
+      @container (max-width: 880px) {
         .wide {
           display: none;
         }
       }
 
-      @container (max-width: 520px) {
+      @container (max-width: 750px) {
         .mid {
           display: none;
         }
@@ -641,6 +643,17 @@
         padding-inline: 10px;
       }
 
+      /* a narrow panel keeps every tab in sight */
+      @media (max-width: 400px) {
+        [role='tab'] {
+          padding-inline: var(--app-space-2);
+        }
+
+        .detail-tabs [role='tab'] {
+          padding-inline: var(--app-space-1);
+        }
+      }
+
       #detail {
         padding: var(--app-space-3);
         font-size: var(--app-text-sm);
@@ -829,17 +842,14 @@
         stroke-width: 1.5;
       }
 
-      .thread .lane {
+      .thread .lane,
+      .thread .kind {
         fill: var(--app-text);
         font: 600 var(--app-text-sm) var(--app-font-body);
       }
 
       .thread .lane-sub,
-      .thread .words {
-        fill: var(--app-text-secondary);
-        font: var(--app-text-xs) var(--app-font-mono);
-      }
-
+      .thread .words,
       .thread .offset,
       .thread .note {
         fill: var(--app-text-secondary);
@@ -895,11 +905,6 @@
 
       .thread .bead.credit {
         stroke-dasharray: 2 2;
-      }
-
-      .thread .kind {
-        fill: var(--app-text);
-        font: 600 var(--app-text-sm) var(--app-font-body);
       }
 
       .progress {
@@ -1153,7 +1158,6 @@
 
       .statusbar {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
         gap: 2px var(--app-space-3);
         padding: 2px var(--app-space-2);
@@ -1169,15 +1173,19 @@
       }
 
       #footer {
-        display: flex;
         flex: 1 1 auto;
-        flex-wrap: wrap;
-        gap: 2px var(--app-space-3);
-        align-items: center;
         min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #footer > span + span {
+        margin-left: var(--app-space-3);
       }
 
       .statusbar > label {
+        flex-shrink: 0;
         margin-left: auto;
       }
 
@@ -1255,6 +1263,10 @@
       @media (min-width: 1060px) {
         .bar {
           flex-wrap: nowrap;
+        }
+
+        .bar .group {
+          flex-shrink: 0;
         }
 
         .filter-field {
@@ -1424,7 +1436,7 @@
       <button
         type="button"
         id="record"
-        aria-label="Record or pause"
+        aria-label="Record"
         aria-pressed="true"
         title="Record, or pause (Ctrl+E)"
       >
@@ -1454,7 +1466,7 @@
           ?
         </button>
       </span>
-      <div id="filter-help" role="group" aria-labelledby="filter-help-title" hidden>
+      <div id="filter-help" role="group" aria-labelledby="filter-help-title" tabindex="-1" hidden>
         <strong id="filter-help-title">Filter syntax</strong>
         <dl>
           <dt>who*</dt>
@@ -1596,7 +1608,7 @@
           id="splitter"
           role="separator"
           tabindex="0"
-          aria-label="Size of the list and the detail"
+          aria-label="Calls list"
           aria-controls="list"
           aria-orientation="vertical"
           aria-valuemin="0"
@@ -1604,7 +1616,7 @@
           aria-valuenow="60"
         ></div>
         <div class="detail">
-          <nav class="detail-tabs" role="tablist" aria-label="Detail">
+          <nav id="detail-tabs" class="detail-tabs" role="tablist" aria-label="Detail">
             <button
               type="button"
               role="tab"
