@@ -203,20 +203,20 @@ public sealed partial class RouterCore : IDisposable
         return new Failure { Code = (ushort)code, Detail = detail, Scope = FailureScope.Protocol };
     }
 
-    private FailureException LocalOf(Failure failure, IEnvelopeHeader? header = null)
+    private static FailureException LocalOf(Failure failure, (RouterSide Side, IEnvelopeHeader? Header) raised)
     {
-        return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, _side))
+        return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, raised.Side))
         {
-            Header = header is null ? null : Redact(header),
+            Header = raised.Header is null ? null : Redact(raised.Header),
         };
     }
 
     // a call counted as it starts, under its series, at this instant
-    private StartedCall StartedOf(CallSeries series)
+    private static StartedCall StartedOf(CallSeries series, TimeProvider clock)
     {
         series.Start();
 
-        return new StartedCall { Clock = _clock, Series = series, Timestamp = _clock.GetTimestamp() };
+        return new StartedCall { Clock = clock, Series = series, Timestamp = clock.GetTimestamp() };
     }
 
     // a call this side answers ends, once, whichever way it ends first
@@ -232,7 +232,7 @@ public sealed partial class RouterCore : IDisposable
     // what the core raises itself about an envelope, for the side to hear
     private void Report(Failure failure, (string ConnectionHandle, IEnvelopeHeader Header) about)
     {
-        _port.Report(LocalOf(failure, about.Header), about.ConnectionHandle);
+        _port.Report(LocalOf(failure, (_side, about.Header)), about.ConnectionHandle);
     }
 
     // whether a call id is the peer's to open on this connection, and free: a refusal on it is answered
@@ -347,7 +347,7 @@ public sealed partial class RouterCore : IDisposable
 
         if (refusal is not null)
         {
-            throw LocalOf(refusal, going.Header);
+            throw LocalOf(refusal, (_side, going.Header));
         }
 
         if (outgoing is null)
@@ -361,7 +361,7 @@ public sealed partial class RouterCore : IDisposable
                 ProtocolFailureOf(
                     ProtocolCode.PayloadTooLarge,
                     $"a subscription's result goes in one envelope, of {_placement.WholeBytes} bytes at most"),
-                going.Header);
+                (_side, going.Header));
         }
 
         if (going.Answering is null)
@@ -437,7 +437,7 @@ public sealed partial class RouterCore : IDisposable
                             string.Create(CultureInfo.InvariantCulture, $"no credit came for {Limits.TransferInactivityTimeout.TotalMilliseconds} milliseconds"));
 
                         EndAnswered(answering, (CallOutcome.Failure, stalled));
-                        Fail(LocalOf(stalled, header));
+                        Fail(LocalOf(stalled, (_side, header)));
                         _writer.SendReporting(new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = stalled }, connectionHandle);
                     });
                 },
@@ -681,7 +681,7 @@ public sealed partial class RouterCore : IDisposable
     // out is reported
     private async Task AnsweringAtGate(Failure failure, (string ConnectionHandle, uint CallId) gated)
     {
-        var counted = _metrics is { } metrics ? StartedOf(metrics.Answered) : (StartedCall?)null;
+        var counted = _metrics is { } metrics ? StartedOf(metrics.Answered, _clock) : (StartedCall?)null;
         var isHandedOff = false;
 
         try
@@ -720,22 +720,20 @@ public sealed partial class RouterCore : IDisposable
 
             return;
         }
-        else
+
+        var invalid = ProtocolFailureOf(ProtocolCode.ChunkInvalid, failure.Failure.Detail);
+        var receiving = _answeringCalls.ReceivingOf(call);
+
+        if (receiving is not null && !IsWhole(receiving.Transfer))
         {
-            var invalid = ProtocolFailureOf(ProtocolCode.ChunkInvalid, failure.Failure.Detail);
-            var receiving = _answeringCalls.ReceivingOf(call);
+            Refuse(invalid, (receiving.Target, receiving.Answering));
 
-            if (receiving is not null && !IsWhole(receiving.Transfer))
-            {
-                Refuse(invalid, (receiving.Target, receiving.Answering));
+            return;
+        }
 
-                return;
-            }
-
-            if (_answeringCalls.AbandonedEndOf(call) is not null)
-            {
-                return;
-            }
+        if (_answeringCalls.AbandonedEndOf(call) is not null)
+        {
+            return;
         }
 
         if (!isReported)
@@ -816,7 +814,7 @@ public sealed partial class RouterCore : IDisposable
         // refused or a call relayed
         if (_metrics is { } metrics)
         {
-            answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered);
+            answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered, _clock);
         }
 
         // one this side has no handler for: this peer relays nothing, to that destination or elsewhere
@@ -1584,7 +1582,7 @@ public sealed partial class RouterCore : IDisposable
     }
 
     // what the requester asks of the core it serves: the core's port, its scheduler, whether it was
-    // disposed, and its reader of a chunk no transfer takes
+    // disposed, its reader of a chunk no transfer takes, and its report of what it raises itself
     private sealed class RequesterPort(RouterCore core) : IRouterRequesterPort
     {
         public bool IsDisposed
@@ -1628,6 +1626,11 @@ public sealed partial class RouterCore : IDisposable
         public void Report(Exception reason, string? connectionHandle)
         {
             core._port.Report(reason, connectionHandle);
+        }
+
+        public void ReportFailure(Failure failure, (string ConnectionHandle, IEnvelopeHeader Header) about)
+        {
+            core.Report(failure, about);
         }
 
         public void Activity(RouterActivity kind, string connectionHandle)

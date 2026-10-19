@@ -19,8 +19,10 @@ public sealed partial class RouterCore
             PayloadBytesPerChunk = Transfer.ChunkPayloadBytes(limits, ChunkHeaderBytes);
         }
 
+        // the largest envelope a payload goes whole in
         internal int WholeBytes { get; }
 
+        // the bytes of a payload a chunk carries
         internal int PayloadBytesPerChunk { get; }
 
         // a chunk's envelope, on its call id
@@ -33,6 +35,7 @@ public sealed partial class RouterCore
             };
         }
 
+        // the failure of a payload of `length` bytes, past `limit`
         internal static Failure TooLargeOf(long length, int limit)
         {
             return ProtocolFailureOf(ProtocolCode.PayloadTooLarge, $"a payload is {limit} bytes at most, not {length}");

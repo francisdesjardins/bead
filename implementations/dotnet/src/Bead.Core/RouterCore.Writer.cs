@@ -35,14 +35,7 @@ public sealed partial class RouterCore
             internal required Func<bool> IsDisposed { get; init; }
         }
 
-        private FailureException LocalOf(Failure failure, IEnvelopeHeader? header = null)
-        {
-            return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, _side))
-            {
-                Header = header is null ? null : Redact(header),
-            };
-        }
-
+        // sends an envelope
         internal Task Deliver(Envelope envelope, string connectionHandle)
         {
             return Deliver(envelope, (connectionHandle, null));
@@ -106,7 +99,7 @@ public sealed partial class RouterCore
             if (envelope.Kind is not (EnvelopeKind.Cancel or EnvelopeKind.Credit or EnvelopeKind.Failure)
                 && envelope.Payload.Length > _options.Limits.MaximumPayloadBytes)
             {
-                throw LocalOf(PayloadPlacement.TooLargeOf(envelope.Payload.Length, _options.Limits.MaximumPayloadBytes), envelope.Header);
+                throw LocalOf(PayloadPlacement.TooLargeOf(envelope.Payload.Length, _options.Limits.MaximumPayloadBytes), (_side, envelope.Header));
             }
 
             var (announced, restore) = Announce(envelope, connectionHandle);
@@ -122,7 +115,7 @@ public sealed partial class RouterCore
                         ProtocolFailureOf(
                             ProtocolCode.PayloadTooLarge,
                             $"an envelope is {_options.Limits.MaximumEnvelopeBytes} bytes at most, not {bytes.Length}"),
-                        envelope.Header);
+                        (_side, envelope.Header));
                 }
 
                 // * one check an envelope while nobody listens: redacted for a listener alone
@@ -210,6 +203,7 @@ public sealed partial class RouterCore
             }
         }
 
+        // forgets what one connection was told of its session, or what every one was
         internal void Forget(string? connectionHandle)
         {
             if (connectionHandle is null)
@@ -222,6 +216,7 @@ public sealed partial class RouterCore
             }
         }
 
+        // the announcements' gauges
         internal Gauges Gauges()
         {
             return Bead.Gauges.Of(new Dictionary<string, long> { ["announced"] = _announced.Count }, _announced.Keys);

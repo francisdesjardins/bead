@@ -44,7 +44,7 @@ const MAY_BE_NONE: ReadonlySet<keyof IRouterLimits> = new Set([
   'maximumTransfers',
 ]);
 
-// helpers
+// definition
 
 /**
  * `given` over {@link LIMIT_DEFAULTS}, where it says nothing. A {@link ProgrammerError} for a limit

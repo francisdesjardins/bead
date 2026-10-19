@@ -4,31 +4,46 @@ namespace Bead;
 
 public sealed partial class RouterCore
 {
-    // the live capabilities outgoing calls use, without incoming admission or resolver state
+    // what the requester asks of the core it serves
     private interface IRouterRequesterPort
     {
+        // whether the core is disposed, read at each call
         bool IsDisposed { get; }
 
+        // runs an action on the core's scheduler, after what came before it
         void Post(Action action);
 
+        // whether the side holds a call id beyond what the core waits on: none is drawn
         bool IsCallIdInUse(uint callId, string connectionHandle);
 
+        // whether a connection is open
         bool IsOpen(string connectionHandle);
 
+        // the session a connection was last told of, which a request may present
         SessionToken? KnownSessionTokenOf(string connectionHandle);
 
+        // whether a connection's transport carries a credential beside an envelope
         bool Carries(string credential, string connectionHandle);
 
+        // whether a connection's transport is secure
         bool IsSecure(string connectionHandle);
 
+        // what went wrong that no call waits on, with its connection
         void Report(Exception reason, string? connectionHandle);
 
+        // a failure the core raises itself, on what came in, for the side to hear
+        void ReportFailure(Failure failure, (string ConnectionHandle, IEnvelopeHeader Header) about);
+
+        // what the router did: sent a request, or took the response to one
         void Activity(RouterActivity kind, string connectionHandle);
 
+        // every result and every failure received, before it is paired with its request
         void OnAnswerReceived(IEnvelopeHeader header, string connectionHandle);
 
+        // a failure that answers no call waiting; true when the side took it
         bool OnUnpairedFailure(Envelope envelope, string connectionHandle);
 
+        // a chunk no transfer takes, on a call open or on none, as the core reads one
         void ReceiveUnplaced(Envelope envelope, (string ConnectionHandle, long? CreditEnd, bool IsOpen) unplaced);
     }
 
@@ -107,46 +122,32 @@ public sealed partial class RouterCore
             internal required SendingTransfers Sendings { get; init; }
         }
 
-        private FailureException LocalOf(Failure failure, IEnvelopeHeader? header = null)
-        {
-            return new FailureException(failure, new FailureException.Raised(FailureOrigin.Local, _side))
-            {
-                Header = header is null ? null : Redact(header),
-            };
-        }
-
-        private void Report(Failure failure, (string ConnectionHandle, IEnvelopeHeader Header) about)
-        {
-            _port.Report(LocalOf(failure, about.Header), about.ConnectionHandle);
-        }
-
-        private StartedCall StartedOf(CallSeries series)
-        {
-            series.Start();
-
-            return new StartedCall { Clock = _clock, Series = series, Timestamp = _clock.GetTimestamp() };
-        }
-
+        // whether a call id of this side's is reserved on a connection
         internal bool IsReserved(uint callId, string connectionHandle)
         {
             return _pendingCalls.IsReserved(callId, connectionHandle);
         }
 
+        // reserves a call id, as the core's Reserve does
         internal void Reserve(CallAddress call, TimeSpan? timeout)
         {
             _pendingCalls.Reserve(call, timeout);
         }
 
+        // the pending calls' gauges
         internal Gauges Gauges()
         {
             return _pendingCalls.Gauges();
         }
 
+        // takes every call waiting on one connection, or on all, out of the pending calls, for them to
+        // be rejected with a DisconnectException after
         internal Detached TakeAll(string? connectionHandle)
         {
             return new Detached(_pendingCalls.TakeAll(connectionHandle));
         }
 
+        // the calls taken, which rejects them
         internal sealed class Detached(IReadOnlyList<PendingRequest> entries)
         {
             internal void Reject(string reason)
@@ -200,6 +201,7 @@ public sealed partial class RouterCore
         private void EndPending(Exception reason, (CallAddress Call, PendingRequest PendingRequest) waiting)
         {
             var (call, pendingRequest) = waiting;
+
             if (!ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
             {
                 return;
@@ -216,6 +218,7 @@ public sealed partial class RouterCore
         private void Wait(TimeSpan delay, (CallAddress Call, PendingRequest PendingRequest) waiting)
         {
             var (call, pendingRequest) = waiting;
+
             if (!ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
             {
                 return;
@@ -396,7 +399,7 @@ public sealed partial class RouterCore
 
             // * nothing made it a programmer's error: the call starts (spec/debugging.md 9.3), and each
             // refusal after ends it in this turn
-            var counted = _metrics is { } metrics ? StartedOf(request.Series?.Calls ?? metrics.Made) : (StartedCall?)null;
+            var counted = _metrics is { } metrics ? StartedOf(request.Series?.Calls ?? metrics.Made, _clock) : (StartedCall?)null;
             var maximumPayloadBytes = _placement.PayloadLimitOf(procedure.MaximumPayloadBytes);
             RequestHeader header;
             OutgoingTransfer? outgoing;
@@ -574,6 +577,7 @@ public sealed partial class RouterCore
             pendingRequest?.Reject(new OperationCanceledException($"call {call.CallId} was cancelled"));
         }
 
+        // an answer of this layout that does not read: it ends the call it answers, if one waits
         internal void GateMalformedAnswer(FailureException failure, (CallAddress Call, bool IsReported) received)
         {
             var (call, isReported) = received;
@@ -607,6 +611,7 @@ public sealed partial class RouterCore
                 (call, pendingRequest));
         }
 
+        // a chunk of this layout that does not read: it ends the result's transfer it was for
         internal void GateMalformedResultChunk(FailureException failure, (CallAddress Call, bool IsReported) gated)
         {
             var (call, isReported) = gated;
@@ -661,7 +666,7 @@ public sealed partial class RouterCore
                     return;
                 }
 
-                Report(ProtocolFailureOf(ProtocolCode.CallUnknown), (connectionHandle, header));
+                _port.ReportFailure(ProtocolFailureOf(ProtocolCode.CallUnknown), (connectionHandle, header));
 
                 return;
             }
@@ -693,7 +698,7 @@ public sealed partial class RouterCore
             // a result that comes in a transfer answered the call: another answers nothing
             if (pendingRequest.Receiving is not null)
             {
-                Report(
+                _port.ReportFailure(
                     ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, $"call {header.CallId} is answered already, by a transfer"),
                     (connectionHandle, header));
 

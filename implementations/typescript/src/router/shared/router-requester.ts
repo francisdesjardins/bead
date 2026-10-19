@@ -2,8 +2,7 @@
 
 // dependencies
 
-import { assertHeld } from '../../transport/shared/clock';
-import type { IClock } from '../../transport/shared/clock';
+import { assertHeld, type IClock } from '../../transport/shared/clock';
 import { createPromise } from '../../transport/shared/create-promise';
 import { CancelError, ProgrammerError, TimeoutError, toError } from '../../transport/shared/errors';
 import type { IGauges } from '../../transport/shared/types';
@@ -11,15 +10,17 @@ import { CredentialScheme, EnvelopeKind } from './constants';
 import { DisconnectError, FailureError, failureErrorOf } from './errors';
 import { headerBytesOf } from './header';
 import { CallEnding, endingOf, microsecondsOf } from './metrics-registry';
-import { isPayloadLimit } from './payload-placement';
-import type { ChunkEnvelope, IPayloadPlacement } from './payload-placement';
-import { assertReservation, createPendingCalls, reservationOf } from './pending-calls';
-import type { IPendingRequest } from './pending-calls';
+import { type ChunkEnvelope, type IPayloadPlacement, isPayloadLimit } from './payload-placement';
+import {
+  assertReservation,
+  createPendingCalls,
+  type IPendingRequest,
+  reservationOf,
+} from './pending-calls';
 import type { IReceivingTransfers } from './receiving-transfers';
 import type { IRouterWriter } from './router-writer';
 import type { ISendingTransfers } from './sending-transfers';
-import { ChunkOutcome } from './transfer';
-import type { IChunk, IOutgoingTransfer } from './transfer';
+import { ChunkOutcome, type IChunk, type IOutgoingTransfer } from './transfer';
 import type {
   CallId,
   Credential,
@@ -43,8 +44,9 @@ import type {
  */
 export interface IRouterRequesterPort<Handle extends string> extends Pick<
   IRouterCorePort<Handle>,
-  'failures' | 'isCallIdInUse' | 'report' | 'activity' | 'onAnswerReceived' | 'onUnpairedFailure'
+  'activity' | 'failures' | 'isCallIdInUse' | 'onAnswerReceived' | 'onUnpairedFailure' | 'report'
 > {
+  /** Whether the core is disposed, read at each call. */
   isDisposed: () => boolean;
   /** A chunk no transfer takes, on a call open or on none, as the core reads one. */
   receiveUnplaced: (
@@ -80,7 +82,7 @@ export interface IRouterRequesterOptions<Handle extends string> extends Pick<
  * once it ends.
  */
 export interface IRouterRequester<Handle extends string> {
-  /** Cancels a call this side waits on, telling the peer when its request went out. */
+  /** Cancels a call this side opened, telling the peer when its request went out. */
   cancel: IRouterCore<Handle>['cancel'];
   /** An answer of this layout that does not read: it ends the call it answers, if one waits. */
   gateMalformedAnswer: (
@@ -533,6 +535,7 @@ export const createRouterRequester = <Handle extends string>(
     pendingRequest.receiving = { header: envelope.header, transfer };
     receivings.grant(transfer);
   };
+
   const request: IRouterCore<Handle>['request'] = (
     payload,
     {
@@ -723,6 +726,7 @@ export const createRouterRequester = <Handle extends string>(
         }
       });
   };
+
   const reserve: IRouterCore<Handle>['reserve'] = (call) => {
     pendingCalls.reserve({ ...call, timeout: assertReservation(call.timeout) });
   };

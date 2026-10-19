@@ -16,8 +16,7 @@ import { readPrefix } from './header';
 import { sideOfCallId } from './identifiers';
 import { checkDeclaration } from './identity';
 import { CallEnding, endingOf, type IResolverSeries, microsecondsOf } from './metrics-registry';
-import { createPayloadPlacement, isPayloadLimit } from './payload-placement';
-import type { ChunkEnvelope } from './payload-placement';
+import { type ChunkEnvelope, createPayloadPlacement, isPayloadLimit } from './payload-placement';
 import { createProcedureMap } from './procedure-map';
 import { createReceivingTransfers, type IReceiving } from './receiving-transfers';
 import { limitsOf } from './router-limits';
@@ -253,21 +252,15 @@ export const createRouterCore = <Handle extends string>(
 
   const requester = createRouterRequester(
     {
-      failures,
-      isDisposed: () => {
-        return isDisposed;
+      activity: (kind, connectionHandle) => {
+        port.activity(kind, connectionHandle);
       },
+      failures,
       isCallIdInUse: (callId, connectionHandle) => {
         return port.isCallIdInUse?.(callId, connectionHandle) === true;
       },
-      report: (error, connectionHandle) => {
-        port.report(error, connectionHandle);
-      },
-      reportFailure: (failure, details) => {
-        report(failure, details);
-      },
-      activity: (kind, connectionHandle) => {
-        port.activity(kind, connectionHandle);
+      isDisposed: () => {
+        return isDisposed;
       },
       onAnswerReceived: (header, connectionHandle) => {
         port.onAnswerReceived?.(header, connectionHandle);
@@ -277,6 +270,12 @@ export const createRouterCore = <Handle extends string>(
       },
       receiveUnplaced: (envelope, unplaced) => {
         receiveUnplaced(envelope, unplaced);
+      },
+      report: (error, connectionHandle) => {
+        port.report(error, connectionHandle);
+      },
+      reportFailure: (failure, details) => {
+        report(failure, details);
       },
     },
     {
@@ -703,17 +702,17 @@ export const createRouterCore = <Handle extends string>(
         requester.gateMalformedResultChunk(failure, { callId, connectionHandle, isReported }),
         undefined
       );
-    } else {
-      const invalid = { ...failures.chunkInvalid, detail: failure.detail };
-      const receiving = answeringCalls.receivingOf(call);
+    }
 
-      if (receiving !== undefined && !isWhole(receiving.transfer)) {
-        return (refuse(invalid, receiving.dispatched), undefined);
-      }
+    const invalid = { ...failures.chunkInvalid, detail: failure.detail };
+    const receiving = answeringCalls.receivingOf(call);
 
-      if (answeringCalls.abandonedEndOf(call) !== undefined) {
-        return;
-      }
+    if (receiving !== undefined && !isWhole(receiving.transfer)) {
+      return (refuse(invalid, receiving.dispatched), undefined);
+    }
+
+    if (answeringCalls.abandonedEndOf(call) !== undefined) {
+      return;
     }
 
     if (!isReported) {

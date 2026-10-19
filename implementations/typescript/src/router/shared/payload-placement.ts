@@ -4,8 +4,12 @@
 
 import { EnvelopeKind, SESSION_TOKEN_BYTES } from './constants';
 import { headerBytesOf, MAXIMUM_HEADER_BYTES, unboundedHeaderBytesOf } from './header';
-import { chunkPayloadBytes, createOutgoingTransfer } from './transfer';
-import type { IChunk, IOutgoingTransfer } from './transfer';
+import {
+  chunkPayloadBytes,
+  createOutgoingTransfer,
+  type IChunk,
+  type IOutgoingTransfer,
+} from './transfer';
 import type {
   CallId,
   Envelope,
