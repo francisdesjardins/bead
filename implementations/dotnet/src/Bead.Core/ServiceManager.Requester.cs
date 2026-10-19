@@ -3,9 +3,22 @@ namespace Bead;
 public sealed partial class ServiceManager
 {
     // calls this manager makes, their held defaults, and their decoded results
-    private sealed class ServiceRequester(IRouterLike router, ServiceRequester.Options options)
+    private sealed class ServiceRequester
     {
-        private readonly Options _options = options;
+        private readonly IRouterLike _router;
+        private readonly RequestDefaults _defaults;
+        private readonly Action<string>? _closeConnection;
+        private readonly ServiceTrace _trace;
+        private readonly Action<Procedure> _deprecated;
+
+        internal ServiceRequester(IRouterLike router, Options options)
+        {
+            _router = router;
+            _defaults = options.Defaults;
+            _closeConnection = options.CloseConnection;
+            _trace = options.Trace;
+            _deprecated = options.Deprecated;
+        }
 
         internal sealed record Options
         {
@@ -27,7 +40,7 @@ public sealed partial class ServiceManager
             ArgumentNullException.ThrowIfNull(made.Dependencies);
 
             // declared as it is made (spec/debugging.md 7.2): each of its calls carries its series
-            var series = router.DeclareRequester(procedure);
+            var series = _router.DeclareRequester(procedure);
 
             async Task<TResponse> Called(TRequest payload, RequestOptions? options)
             {
@@ -51,11 +64,11 @@ public sealed partial class ServiceManager
             return new ResolvedRequestOptions
             {
                 CancellationToken = given?.CancellationToken ?? CancellationToken.None,
-                CloseOnTimeout = given?.CloseOnTimeout ?? _options.Defaults.CloseOnTimeout,
+                CloseOnTimeout = given?.CloseOnTimeout ?? _defaults.CloseOnTimeout,
                 ConnectionHandle = given?.ConnectionHandle,
                 Credential = given?.Credential,
                 DestinationId = given?.DestinationId,
-                Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _options.Defaults.Timeout!.Value),
+                Timeout = Clocks.AssertHeld(("a call's timeout", nameof(RequestOptions.Timeout)), given?.Timeout ?? _defaults.Timeout!.Value),
             };
         }
 
@@ -72,7 +85,7 @@ public sealed partial class ServiceManager
             {
                 throw new FailureException(
                     Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message),
-                    (new FailureException.Raised(FailureOrigin.Local, router.Side), reason))
+                    (new FailureException.Raised(FailureOrigin.Local, _router.Side), reason))
                 {
                     DestinationId = call.Options.DestinationId,
                     Header = result.Header,
@@ -97,22 +110,22 @@ public sealed partial class ServiceManager
             // * one check a call while nobody listens: no clock read, no step, no copy of its options,
             // nothing to hear its call id; a credential stays out of what a side tells, and the trace
             // carries none
-            var traced = _options.Trace.IsDebugging
-                ? new TracedCall(_options.Trace, (procedure, new DebugStep(DebugDirection.Tx, type)
+            var traced = _trace.IsDebugging
+                ? new TracedCall(_trace, (procedure, new DebugStep(DebugDirection.Tx, type)
                 {
                     ConnectionHandle = options.ConnectionHandle,
                     Options = options with { Credential = null },
-                    Started = _options.Trace.StartedNow(),
+                    Started = _trace.StartedNow(),
                     Tx = payload,
                 }))
                 : null;
 
             if (procedure.Deprecation is not null)
             {
-                _options.Deprecated(procedure);
+                _deprecated(procedure);
             }
 
-            var requested = router.Request(
+            var requested = _router.Request(
                 encoded,
                 new RouterRequest(procedure, options)
                 {
@@ -132,7 +145,7 @@ public sealed partial class ServiceManager
                 // a connection that let it go unanswered is closed, when the call or the manager says so
                 if (reason is TimeoutException && options.CloseOnTimeout == true && options.ConnectionHandle is { } connectionHandle)
                 {
-                    _options.CloseConnection?.Invoke(connectionHandle);
+                    _closeConnection?.Invoke(connectionHandle);
                 }
 
                 traced?.Failed(reason);

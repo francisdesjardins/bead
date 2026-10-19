@@ -6,16 +6,17 @@ import type { TimeoutId } from '../shared/clock';
 import type { ITransportMessage } from '../shared/types';
 import { credentialOf } from './hosts-and-origins';
 import {
+  endWith,
   ENVELOPE_KINDS,
   ENVELOPE_PREFIX,
-  REFUSALS,
-  UNKNOWN_CONNECTION,
-  endWith,
   headerOf,
+  type IEnd,
+  type IExchangeIn,
   linesOf,
+  REFUSALS,
   sendHead,
+  UNKNOWN_CONNECTION,
 } from './http-server-fields';
-import type { IEnd, IExchangeIn } from './http-server-fields';
 import type { IHTTPResponseLike } from './types';
 
 // interfaces
@@ -28,12 +29,14 @@ export interface IExchange {
   isDelivered: boolean;
   /** The transport ended it — an answer, a 204, a refusal, its connection closed — so its close is no loss. */
   isEnded: boolean;
+  /** What its first 8 bytes said, once they came. */
   prefix: IExchangePrefix | undefined;
   readonly response: IHTTPResponseLike;
   /** Ends its connection, as lost, once its request waited past `exchangeTimeout` for its answer. */
   timer: TimeoutId | undefined;
 }
 
+/** What an envelope's prefix says the transport needs: its call id and its kind. */
 interface IExchangePrefix {
   callId: number;
   kind: number;
@@ -44,32 +47,51 @@ interface IExchangePrefix {
  * state, how a prefix is judged, and where the request and its answer go.
  */
 export interface IHTTPRequestExchangePort<Connection> {
+  /** Whether a connection may take another exchange, under the bound on what it has under way. */
   admitExchange: (connection: Connection) => boolean;
+  /** The state of an exchange, answered on `response`. */
   createExchange: (response: IHTTPResponseLike) => IExchange;
+  /** An exchange under way on its connection, its idle timer stopped. */
   beginExchange: (connection: Connection) => void;
+  /** Bytes of body charged against the server's budget: whether it is now past it. */
   chargeBody: (count: number) => boolean;
+  /** Bytes of body given back to the server's budget. */
   releaseBody: (count: number) => void;
+  /** An exchange done, both its request and its response: its connection rests once it has none. */
   endExchange: (connection: Connection) => void;
+  /** An exchange ended before its body or its answer: no longer waiting under its call id. */
   endEarly: (connection: Connection, state: IExchange) => void;
+  /** What the first 8 bytes say: a request waits under its call id from now on; or its refusal. */
   classify: (
     connection: Connection,
     state: IExchange,
     options: { layout: number; prefix: IExchangePrefix }
   ) => IEnd | undefined;
+  /** What an exchange's first 8 bytes said, once they came. */
   prefixOf: (state: IExchange) => IExchangePrefix | undefined;
+  /** Whether the transport ended an exchange. */
   isEnded: (state: IExchange) => boolean;
+  /** Whether a cancel came for an exchange while its body was still coming. */
   isCancelled: (state: IExchange) => boolean;
+  /** An exchange closed before the transport ended it: lost, as a dropped socket's frames are. */
   lose: (connection: Connection, state: IExchange) => void;
+  /** A body read whole: ended as it came, its connection gone, or to go on. */
   finishBody: (connection: Connection, state: IExchange) => 'ended' | 'gone' | 'continue';
+  /** A request about to go on to the router, which then owes it an answer. */
   beginHandOff: (state: IExchange) => void;
+  /** A request handed on: whether it still waits for its answer. */
   waitAfterHandOff: (
     connection: Connection,
     state: IExchange,
     options: { callId: number }
   ) => boolean;
+  /** Ends an exchange's connection, as lost, once its request waited past `exchangeTimeout`. */
   armExchangeTimer: (connection: Connection, state: IExchange) => void;
+  /** An envelope handed on to the router, with the credential its exchange carried. */
   message: (connection: Connection, message: ITransportMessage) => void;
+  /** A cancel's call ended: the response of its exchange to end empty, when its head went. */
   cancel: (connection: Connection, callId: number) => IHTTPResponseLike | undefined;
+  /** Ends an exchange the transport answers itself. */
   finish: (exchange: IExchangeIn, end: IEnd) => void;
 }
 
@@ -77,7 +99,8 @@ export interface IHTTPRequestExchangePort<Connection> {
 export interface IHTTPRequestExchange<Connection> {
   /**
    * One envelope: its body read into one buffer under its limits, its prefix checked from its first
-   * 8 bytes, then handed on, and its answer waited for.
+   * 8 bytes, then handed on; a request's head sent and its timer armed, its answer written by the
+   * server's `send`.
    */
   receive: (exchange: IExchangeIn, connection: Connection) => void;
 }

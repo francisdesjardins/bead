@@ -5,8 +5,7 @@
 import { assertHeld } from '../../transport/shared/clock';
 import { TimeoutError, toError } from '../../transport/shared/errors';
 import { FailureError } from './errors';
-import { tracedCallOf, tracedFailureOf } from './service-trace';
-import type { IServiceTrace } from './service-trace';
+import { type IServiceTrace, tracedCallOf, tracedFailureOf } from './service-trace';
 import type {
   CallId,
   DebugType,
@@ -90,8 +89,7 @@ export const REQUEST_DEFAULTS = Object.freeze({
 /**
  * `options` with `defaults` where they say nothing — a close on timeout only where `defaults` has one
  * — and the timeout held as a call's, so the trace, the router and the error tell one number:
- * rounded to the nearest whole millisecond, `Infinity` to wait on, and a
- * [ProgrammerError](../../transport/shared/errors.ts) for
+ * rounded to the nearest whole millisecond, `Infinity` to wait on, and a {@link ProgrammerError} for
  * any other not from 1 to 2³¹ − 1, 0 among them. `options` is left alone.
  */
 export const resolveRequestOptions = (

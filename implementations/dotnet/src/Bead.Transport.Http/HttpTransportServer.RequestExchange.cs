@@ -15,14 +15,19 @@ public sealed partial class HttpTransportServer
         private readonly Port _port;
         private readonly int _maximumBodyBytes;
 
+        // the exchanges of one server, through its port, each body read to `maximumBodyBytes` at most
         internal HttpRequestExchange(Port port, int maximumBodyBytes)
         {
             _port = port;
             _maximumBodyBytes = maximumBodyBytes;
         }
 
+        // what the first 8 bytes say: a request waits under its call id from now on; or how the
+        // exchange is refused
         internal delegate End? ClassifyCallback(ReadOnlySpan<byte> head, (TConnection Connection, Waiting Waiting) call);
 
+        // what an exchange needs of its server, for the connection it is on: its bounds, its
+        // exchange's state, how a prefix is judged, and where the request and its answer go
         internal sealed record Port
         {
             internal required Func<TConnection, PipeReader, Waiting?> BeginExchange { get; init; }
@@ -204,7 +209,6 @@ public sealed partial class HttpTransportServer
             finally
             {
                 _port.ReleaseBody(charged);
-                charged = 0;
             }
 
             var (isGone, isEnded) = _port.FinishBody((connection, waiting));
@@ -219,8 +223,6 @@ public sealed partial class HttpTransportServer
                 return (null, null);
             }
 
-            // ! these reads follow FinishBody's registry transaction: a cancel may arrive between
-            // that transaction and this check, so neither value is captured under its lock
             if (waiting.Prefix is null)
             {
                 return (null, Malformed);

@@ -9,38 +9,6 @@ public sealed partial class ServiceManager
         {
             return new Resolver<TRequest, TResponse>(trace, (router, made));
         }
-
-        // a resolver of a request or a command: given its callback, it is registered on the router
-        internal Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> ResolverOf<TRequest, TResponse>(
-            Procedure procedure,
-            (RequestResolverDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
-        {
-            ArgumentNullException.ThrowIfNull(procedure);
-            ArgumentNullException.ThrowIfNull(made.Dependencies);
-            // as the resolver is asked for, before its callback is given, as every side refuses it (spec 16.10)
-            Identity.Check(procedure, nameof(procedure));
-
-            return (callback) =>
-            {
-                ArgumentNullException.ThrowIfNull(callback);
-
-                var resolver = Create(new ResolverMade<TRequest, TResponse>
-                {
-                    Procedure = procedure,
-                    Serializer = made.Dependencies.Serializer,
-                    BeforeRequest = made.Dependencies.BeforeRequest,
-                    Callback = (request, response) =>
-                    {
-                        return callback(request, response);
-                    },
-                    Type = made.Type,
-                });
-
-                router.RegisterResolver(resolver);
-
-                return resolver;
-            };
-        }
     }
 
     // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
@@ -59,7 +27,7 @@ public sealed partial class ServiceManager
     }
 
     // the resolver of one procedure, registered in the router
-    private sealed class Resolver<TRequest, TResponse>(ServiceTrace trace, (IRouterLike Router, ResolverMade<TRequest, TResponse> Options) made) : IRequestResolver
+    private sealed class Resolver<TRequest, TResponse>(ServiceTrace trace, (IRouterLike Router, ResolverMade<TRequest, TResponse> Made) made) : IRequestResolver
     {
         private readonly IRouterLike _router = made.Router;
 
@@ -67,7 +35,7 @@ public sealed partial class ServiceManager
         {
             get
             {
-                return made.Options.Procedure;
+                return made.Made.Procedure;
             }
         }
 
@@ -81,7 +49,7 @@ public sealed partial class ServiceManager
 
         public Failure? Admit(AdmissionRequest request)
         {
-            return made.Options.BeforeRequest?.RefusalOf(request);
+            return made.Made.BeforeRequest?.RefusalOf(request);
         }
 
         public async Task Handle(RequestResolverProps props)
@@ -121,7 +89,7 @@ public sealed partial class ServiceManager
             // a payload that does not decode never reaches the callback
             try
             {
-                payload = made.Options.Serializer.Decode(props.Payload);
+                payload = made.Made.Serializer.Decode(props.Payload);
             }
             catch (Exception)
             {
@@ -132,7 +100,7 @@ public sealed partial class ServiceManager
 
             if (started is { } at)
             {
-                trace.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Options.Type)
+                trace.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Made.Type)
                 {
                     CallId = props.Header.CallId,
                     ConnectionHandle = props.ConnectionHandle,
@@ -153,7 +121,7 @@ public sealed partial class ServiceManager
 
             try
             {
-                await made.Options.Callback(request, response);
+                await made.Made.Callback(request, response);
             }
             catch (Exception reason)
             {
@@ -166,7 +134,7 @@ public sealed partial class ServiceManager
 
                     if (started.HasValue && !props.Signal.IsCancellationRequested)
                     {
-                        trace.Trace(Procedure, new DebugStep(DebugDirection.Tx, made.Options.Type)
+                        trace.Trace(Procedure, new DebugStep(DebugDirection.Tx, made.Made.Type)
                         {
                             CallId = props.Header.CallId,
                             ConnectionHandle = props.ConnectionHandle,
@@ -188,7 +156,7 @@ public sealed partial class ServiceManager
         {
             get
             {
-                return made.Options.Serializer;
+                return made.Made.Serializer;
             }
         }
 
@@ -196,7 +164,7 @@ public sealed partial class ServiceManager
         {
             get
             {
-                return made.Options.Type;
+                return made.Made.Type;
             }
         }
 

@@ -37,6 +37,40 @@ export interface IEnd {
 
 // constants
 
+/**
+ * What the transport reads of an envelope, and nothing else (0020), in the prefix 0001 lays out and
+ * every layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the
+ * call id in its fifth to eighth.
+ */
+export const ENVELOPE_PREFIX = Object.freeze({
+  bytes: 8,
+  firstLayout: 0xa1,
+  lastLayout: 0xaf,
+});
+
+/** The kinds the transport tells apart: a request waits for its answer; a cancel ends one. */
+export const ENVELOPE_KINDS = Object.freeze({
+  REQUEST: 0x10,
+  RESULT: 0x11,
+  FAILURE: 0x12,
+  CANCEL: 0x16,
+});
+
+/** The reasons each refusal of the transport's own is marked with, in `bead-refusal`. */
+export const REFUSALS = Object.freeze({
+  BUSY: 'busy',
+  CALL_WAITING: 'call-waiting',
+  CONNECTION_UNKNOWN,
+  HOST: HOST_REFUSAL,
+  LISTEN_UNDECLARED: 'listen-undeclared',
+  MALFORMED: 'malformed',
+  METHOD: 'method-refused',
+  ORIGIN: ORIGIN_REFUSAL,
+  PATH: 'path-unknown',
+  TOO_LARGE: 'too-large',
+  TYPE: 'type-refused',
+});
+
 // what every response on the path carries: never stored, never sniffed, and which one a request
 // gets turns on its Origin; HTTP's own 400 carries none of these
 export const RESPONSE_HEADERS = Object.freeze({
@@ -54,6 +88,12 @@ const PREFLIGHT = Object.freeze({
 
 // HTTP/2's error code of a malformed request, which resets its stream (RFC 9113 §7, §8.1.1)
 const PROTOCOL_ERROR = 0x1;
+
+// the 404 that tells a client its connection is gone
+export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
+  reason: REFUSALS.CONNECTION_UNKNOWN,
+  status: 404,
+});
 
 // helpers
 
@@ -214,43 +254,3 @@ export const sendHead = (response: IHTTPResponseLike): void => {
     response.flushHeaders?.();
   }
 };
-
-/**
- * What the transport reads of an envelope, and nothing else (0020), in the prefix 0001 lays out and
- * every layout from 0xA1 to 0xAF keeps: the layout in its first byte, the kind in its second, the
- * call id in its fifth to eighth.
- */
-export const ENVELOPE_PREFIX = Object.freeze({
-  bytes: 8,
-  firstLayout: 0xa1,
-  lastLayout: 0xaf,
-});
-
-/** The kinds the transport tells apart: a request waits for its answer; a cancel ends one. */
-export const ENVELOPE_KINDS = Object.freeze({
-  REQUEST: 0x10,
-  RESULT: 0x11,
-  FAILURE: 0x12,
-  CANCEL: 0x16,
-});
-
-/** The reasons each refusal of the transport's own is marked with, in `bead-refusal`. */
-export const REFUSALS = Object.freeze({
-  BUSY: 'busy',
-  CALL_WAITING: 'call-waiting',
-  CONNECTION_UNKNOWN,
-  HOST: HOST_REFUSAL,
-  LISTEN_UNDECLARED: 'listen-undeclared',
-  MALFORMED: 'malformed',
-  METHOD: 'method-refused',
-  ORIGIN: ORIGIN_REFUSAL,
-  PATH: 'path-unknown',
-  TOO_LARGE: 'too-large',
-  TYPE: 'type-refused',
-});
-
-// the 404 that tells a client its connection is gone
-export const UNKNOWN_CONNECTION: IEnd = Object.freeze({
-  reason: REFUSALS.CONNECTION_UNKNOWN,
-  status: 404,
-});

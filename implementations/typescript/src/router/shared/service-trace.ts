@@ -56,12 +56,14 @@ export interface ITracedCall<Handle extends string> {
 
 /** What the trace tells: whether anyone listens to `debug`, and how an event reaches them. */
 export interface ITraceObserver<Handle extends string> {
-  isDebugging: () => boolean;
+  /** Tells an event to each listener, with the connection a listener's error is reported with. */
   emit: (event: {
+    connectionHandle: Handle | undefined;
     error: unknown;
     info: IDebugEvent;
-    connectionHandle: Handle | undefined;
   }) => void;
+  /** Whether anyone listens to `debug`. */
+  isDebugging: () => boolean;
 }
 
 /**
@@ -138,8 +140,7 @@ export const createServiceTrace = <Handle extends string>(
     return { instant: clock.Date.now(), timestamp: 0 };
   };
 
-  // tells `debug` about one step of a call, each listener within a guard: what one throws is
-  // reported through the router, with the call's connection, and changes nothing of the call
+  // tells `debug` about one step of a call; nothing is built while nobody listens
   const trace = (procedure: IProcedure, step: ITraceStep<Handle>): void => {
     if (!observer.isDebugging()) {
       return;

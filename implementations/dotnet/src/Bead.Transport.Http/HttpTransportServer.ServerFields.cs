@@ -81,15 +81,6 @@ public sealed partial class HttpTransportServer
             return StructuredFields.ParseItem(value)?.BareItem is long count and >= 0 ? count : null;
         }
 
-        // a token as the server draws it: 22 characters of base64url
-        internal static bool IsToken(string token)
-        {
-            return token.Length == 22 && token.All((character) =>
-            {
-                return char.IsAsciiLetterOrDigit(character) || character is '-' or '_';
-            });
-        }
-
         // the authority a request names, as it came (spec 15.12): an HTTP/1 request's absolute-form
         // target's, else its Host's; none when it names none
         internal static string? AuthorityOf(HttpContext context)

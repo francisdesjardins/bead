@@ -707,6 +707,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
     }
 
+    // a token as the server draws it: 22 characters of base64url
+    private static bool IsToken(string token)
+    {
+        return token.Length == 22 && token.All((character) =>
+        {
+            return char.IsAsciiLetterOrDigit(character) || character is '-' or '_';
+        });
+    }
+
     // ends an exchange the transport answers itself; one whose body it will not read is closed
     // behind a refusal, and a refusal marked is told once written: the one writer of every refusal
     // the transport judges (spec 15.1)
@@ -931,7 +940,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        if (connectionToken is null || !HttpServerFields.IsToken(connectionToken))
+        if (connectionToken is null || !IsToken(connectionToken))
         {
             await Finish(context, Malformed);
 
@@ -1037,11 +1046,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         await Finish(context, new End(StatusCodes.Status201Created) { Headers = headers });
     }
 
+    // one envelope of a connection drawn, received by the exchange
     private Task Receive(HttpContext context, Drawn connection)
     {
         return _exchange.Receive(context, connection);
     }
 
+    // an exchange under way on its connection, its idle timer stopped; none past the bound on what
+    // one connection has under way
     private Waiting? BeginExchange(Drawn connection, PipeReader reading)
     {
         Waiting? waiting = new() { Reading = reading };
@@ -1065,6 +1077,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return waiting;
     }
 
+    // an exchange done, both its request and its response: its connection rests once it has none
     private void EndExchange(Drawn connection)
     {
         lock (_gate)
@@ -1078,10 +1091,11 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
     }
 
+    // a body read whole: whether its connection is gone, and whether its exchange ended as it came
     private (bool IsGone, bool IsEnded) FinishBody((Drawn Connection, Waiting Waiting) call)
     {
-        var connection = call.Connection;
-        var waiting = call.Waiting;
+        var (connection, waiting) = call;
+
         lock (_gate)
         {
             waiting.Reading = null;
@@ -1104,6 +1118,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return (false, false);
     }
 
+    // a request about to go on to the router: whether it was answered first, and handed on when not
     private bool BeginHandOff(Waiting waiting)
     {
         bool isAnswered;
@@ -1117,11 +1132,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return isAnswered;
     }
 
+    // a request handed on: whether it still waits for its answer, its timer armed when it does
     private bool WaitAfterHandOff((Drawn Connection, Waiting Waiting, uint CallId) call)
     {
-        var connection = call.Connection;
-        var waiting = call.Waiting;
-        var callId = call.CallId;
+        var (connection, waiting, callId) = call;
         bool isWaiting;
 
         lock (_gate)
@@ -1145,6 +1159,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return isWaiting;
     }
 
+    // bytes of body charged against the server's budget: whether it is now past it
     private bool ChargeBody(int count)
     {
         lock (_gate)
@@ -1155,6 +1170,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
     }
 
+    // bytes of body given back to the server's budget
     private void ReleaseBody(long charged)
     {
         lock (_gate)
@@ -1167,8 +1183,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // exchange is refused
     private End? Classify(ReadOnlySpan<byte> head, (Drawn Connection, Waiting Waiting) call)
     {
-        var connection = call.Connection;
-        var waiting = call.Waiting;
+        var (connection, waiting) = call;
         var layout = head[0];
         var kind = (EnvelopeKind)head[1];
         var callId = BinaryPrimitives.ReadUInt32BigEndian(head[4..]);

@@ -506,9 +506,13 @@ public sealed partial class ServiceManager
         };
         var clock = Clocks.Of((options?.Clock, router.Clock), ("a service manager", "its router"));
         _trace = new ServiceTrace(
-            () =>
+            new ServiceTrace.Observer
             {
-                return Debug;
+                Emit = Emit,
+                IsDebugging = () =>
+                {
+                    return IsDebugging;
+                },
             },
             new ServiceTrace.Options
             {
@@ -517,7 +521,6 @@ public sealed partial class ServiceManager
                 {
                     return router.Side;
                 },
-                Report = router.Report,
             });
         _resolver = new ServiceResolver(router, _trace);
         _requester = new ServiceRequester(router, new ServiceRequester.Options
@@ -660,7 +663,7 @@ public sealed partial class ServiceManager
         Procedure procedure,
         RequestResolverDependencies<TRequest, TResponse> dependencies)
     {
-        return _resolver.ResolverOf(procedure, (dependencies, DebugType.Command));
+        return ResolverOf(procedure, (dependencies, DebugType.Command));
     }
 
     /// <summary>
@@ -673,7 +676,7 @@ public sealed partial class ServiceManager
         Procedure procedure,
         RequestResolverDependencies<TRequest, TResponse> dependencies)
     {
-        return _resolver.ResolverOf(procedure, (dependencies, DebugType.Request));
+        return ResolverOf(procedure, (dependencies, DebugType.Request));
     }
 
     /// <summary>
@@ -708,6 +711,60 @@ public sealed partial class ServiceManager
                     Type = DebugType.Request,
                 }),
                 dependencies.Serializer));
+
+            _router.RegisterResolver(resolver);
+
+            return resolver;
+        };
+    }
+
+    // tells Debug's listeners one step of a call, each within a guard: what one throws is reported
+    // through the router, with the call's connection, and changes nothing of the call
+    private void Emit(DebugEvent debugEvent, (Exception? Error, string? ConnectionHandle) step)
+    {
+        if (Debug is not { } debug)
+        {
+            return;
+        }
+
+        foreach (var listener in debug.GetInvocationList())
+        {
+            try
+            {
+                ((Action<Exception?, DebugEvent>)listener)(step.Error, debugEvent);
+            }
+            catch (Exception reason)
+            {
+                _router.Report(reason, step.ConnectionHandle);
+            }
+        }
+    }
+
+    // a resolver of a request or a command: given its callback, it is registered on the router
+    private Func<RequestResolverCallback<TRequest, TResponse>, IRequestResolver> ResolverOf<TRequest, TResponse>(
+        Procedure procedure,
+        (RequestResolverDependencies<TRequest, TResponse> Dependencies, DebugType Type) made)
+    {
+        ArgumentNullException.ThrowIfNull(procedure);
+        ArgumentNullException.ThrowIfNull(made.Dependencies);
+        // as the resolver is asked for, before its callback is given, as every side refuses it (spec 16.10)
+        Identity.Check(procedure, nameof(procedure));
+
+        return (callback) =>
+        {
+            ArgumentNullException.ThrowIfNull(callback);
+
+            var resolver = _resolver.Create(new ResolverMade<TRequest, TResponse>
+            {
+                Procedure = procedure,
+                Serializer = made.Dependencies.Serializer,
+                BeforeRequest = made.Dependencies.BeforeRequest,
+                Callback = (request, response) =>
+                {
+                    return callback(request, response);
+                },
+                Type = made.Type,
+            });
 
             _router.RegisterResolver(resolver);
 

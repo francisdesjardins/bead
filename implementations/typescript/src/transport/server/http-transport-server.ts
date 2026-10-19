@@ -42,31 +42,28 @@ import {
   listenOn,
 } from './transport-server';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
-import { createHTTPRequestExchange } from './http-request-exchange';
-import type { IExchange } from './http-request-exchange';
-import {
-  ENVELOPE_KINDS,
-  ENVELOPE_PREFIX,
-  REFUSALS,
-  UNKNOWN_CONNECTION,
-} from './http-server-fields';
-export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
+import { createHTTPRequestExchange, type IExchange } from './http-request-exchange';
 import {
   authorityNamedBy,
   countOf,
   endWith,
+  ENVELOPE_KINDS,
+  ENVELOPE_PREFIX,
   hasBody,
   headerOf,
+  type IEnd,
+  type IExchangeIn,
   isBeadBody,
   linesOf,
   listeningOf,
   preflightOf,
+  REFUSALS,
   refuseMalformed,
   RESPONSE_HEADERS,
   sendHead,
   targetOf,
+  UNKNOWN_CONNECTION,
 } from './http-server-fields';
-import type { IEnd, IExchangeIn } from './http-server-fields';
 import type {
   HTTPRequestListener,
   HTTPTransportServer,
@@ -103,6 +100,7 @@ export type {
   IHTTPServerLike,
   IHTTPTransportServerOptions,
 } from './types';
+export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
 
 // interfaces
 

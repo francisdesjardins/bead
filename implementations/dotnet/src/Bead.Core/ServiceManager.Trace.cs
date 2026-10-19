@@ -2,23 +2,30 @@ namespace Bead;
 
 public sealed partial class ServiceManager
 {
-    // a live view of the manager's listeners, and the steps a call tells them
-    private sealed class ServiceTrace(Func<Action<Exception?, DebugEvent>?> listeners, ServiceTrace.Options options)
+    // the steps a call tells the manager's listeners, through what the manager observes of them
+    private sealed class ServiceTrace(ServiceTrace.Observer observer, ServiceTrace.Options options)
     {
+        // what the trace tells: whether anyone listens to Debug, and how an event reaches them, with
+        // its error and the connection a listener's error is reported with
+        internal sealed record Observer
+        {
+            internal required Action<DebugEvent, (Exception? Error, string? ConnectionHandle)> Emit { get; init; }
+
+            internal required Func<bool> IsDebugging { get; init; }
+        }
+
         internal sealed record Options
         {
             internal required TimeProvider Clock { get; init; }
 
             internal required Func<RouterSide> Side { get; init; }
-
-            internal required Action<Exception, string?> Report { get; init; }
         }
 
         internal bool IsDebugging
         {
             get
             {
-                return listeners() is not null;
+                return observer.IsDebugging();
             }
         }
 
@@ -36,11 +43,10 @@ public sealed partial class ServiceManager
             return new Started(options.Clock.GetUtcNow(), 0);
         }
 
-        // tells Debug of one step of a call, each listener within a guard: what one throws is reported
-        // through the router, and changes nothing of the call; nothing is built when nobody hears it
+        // tells Debug of one step of a call; nothing is built when nobody hears it
         internal void Trace(Procedure procedure, DebugStep step)
         {
-            if (listeners() is not { } debug)
+            if (!observer.IsDebugging())
             {
                 return;
             }
@@ -62,17 +68,7 @@ public sealed partial class ServiceManager
                 Type = step.Type,
             };
 
-            foreach (var listener in debug.GetInvocationList())
-            {
-                try
-                {
-                    ((Action<Exception?, DebugEvent>)listener)(step.Error, debugEvent);
-                }
-                catch (Exception reason)
-                {
-                    options.Report(reason, step.ConnectionHandle);
-                }
-            }
+            observer.Emit(debugEvent, (step.Error, step.ConnectionHandle));
         }
 
         // the connection a step's call is on, as its envelopes name it: a client's one peer, the server,

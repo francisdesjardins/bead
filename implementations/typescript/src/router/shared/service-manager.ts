@@ -171,7 +171,8 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
 
   const serviceTrace = createServiceTrace<Handle>(
     {
-      isDebugging,
+      // each listener within a guard: what one throws is reported through the router, with the
+      // call's connection, and changes nothing of the call
       emit: ({ connectionHandle, error, info }) => {
         emitter.emitEach(DEBUG_EVENT, {
           onError: (thrown) => {
@@ -180,6 +181,7 @@ export const createServiceManager = <Handle extends string = ConnectionHandle>(
           params: [error, info],
         });
       },
+      isDebugging,
     },
     {
       clock,
