@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
@@ -155,6 +155,45 @@ const latin1Of = (bytes: Uint8Array): string => {
 // definition
 
 test.describe('the panel', () => {
+  test('defines every custom property its styles and its views draw with, on penumbra’s sheets or its own skin', async () => {
+    const devtools = new URL('../', import.meta.url);
+    const read = (path: string): Promise<string> => {
+      return readFile(new URL(path, devtools), 'utf8');
+    };
+    const views = (await readdir(new URL('views/', devtools))).filter((name) => {
+      return name.endsWith('.ts');
+    });
+    const sheets = await Promise.all(
+      ['panel.html', 'penumbra/tokens.system.css', 'penumbra/tokens.skin.base.css'].map(read)
+    );
+    const scripts = await Promise.all(
+      [
+        'panel.ts',
+        ...views.map((name) => {
+          return `views/${name}`;
+        }),
+      ].map(read)
+    );
+    const defined = new Set(
+      sheets.flatMap((text) => {
+        return [...text.matchAll(/(--[\w-]+)\s*:/gu)].map(([, name]) => {
+          return name;
+        });
+      })
+    );
+    const undefinedOnes = [...sheets, ...scripts]
+      .flatMap((text) => {
+        return [...text.matchAll(/var\((--[\w-]+)/gu)].map(([, name]) => {
+          return name;
+        });
+      })
+      .filter((name) => {
+        return !defined.has(name);
+      });
+
+    expect([...new Set(undefinedOnes)]).toEqual([]);
+  });
+
   test('greets the background with its tab, follows DevTools’ theme, and reads the registries as its Metrics view opens', async ({
     page,
   }) => {
@@ -163,7 +202,7 @@ test.describe('the panel', () => {
     expect((await fakeOf(page)).posted).toEqual([{ tabId: 7, type: 'panel' }]);
     expect(
       await page.evaluate(() => {
-        return document.documentElement.dataset['theme'];
+        return document.documentElement.dataset['colorScheme'];
       })
     ).toBe('dark');
 

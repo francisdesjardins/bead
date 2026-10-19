@@ -976,7 +976,7 @@ export const startPanel = (host: IPanelHost): void => {
   };
 
   // the panel follows DevTools' theme, not the system's
-  document.documentElement.dataset['theme'] = host.theme;
+  document.documentElement.dataset['colorScheme'] = host.theme;
 
   const closeFilterHelp = (): void => {
     shown.filterHelp.hidden = true;

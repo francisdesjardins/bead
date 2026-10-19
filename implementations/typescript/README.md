@@ -1596,7 +1596,9 @@ leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each o
 `messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
 extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
 page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
-panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed.
+panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed. Its scale, spacing
+and neutral colours are penumbra's two sheets, copied whole into `devtools/penumbra/` with the
+commit they came from, and the panel's skin over them, in `panel.html`, holds DevTools' own colours.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
 unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's

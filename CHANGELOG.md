@@ -24,8 +24,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- The DevTools panel reads larger and sits tighter: its controls and tabs are compact and of one
-  look in both themes, and its bar holds on one line. Its tabs move on the arrow keys, Home and End,
+- The DevTools panel reads larger and sits tighter, on penumbra's type scale and spacing under a
+  skin of DevTools' own colours: its controls and tabs are compact and of one look in both themes,
+  and its bar holds on one line. Its tabs move on the arrow keys, Home and End,
   its filter's syntax opens from a `?` beside it, and an exchange's labels stop short of the next
   lane, whole in a tooltip.
 - The `json` codec reads and writes a large payload in a fraction of the time, its output the

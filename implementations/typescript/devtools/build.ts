@@ -34,6 +34,12 @@ const PAGES: Readonly<Record<string, string>> = Object.freeze({
   'panel.html': 'panel.html',
 });
 
+/** Penumbra's two sheets, which the panel links under its own skin. */
+const STYLES: readonly string[] = Object.freeze([
+  'penumbra/tokens.skin.base.css',
+  'penumbra/tokens.system.css',
+]);
+
 /** What the manifest holds in place of the package's version. */
 const VERSION = '%VERSION%';
 
@@ -74,5 +80,12 @@ await writeFile(pathOf('manifest.json', OUT), manifest.replace(VERSION, version)
 await Promise.all(
   Object.entries(PAGES).map(([page, path]) => {
     return copyFile(pathOf(path), pathOf(page, OUT));
+  })
+);
+
+await mkdir(new URL('penumbra/', OUT), { recursive: true });
+await Promise.all(
+  STYLES.map((path) => {
+    return copyFile(pathOf(path), pathOf(path, OUT));
   })
 );
