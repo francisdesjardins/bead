@@ -546,6 +546,8 @@ test.describe('the panel', () => {
     await page.keyboard.press('Home');
     await expect(page.locator('[data-tab="calls"]')).toBeFocused();
     await expect(page.locator('.tabs [tabindex="0"]')).toHaveCount(1);
+    // ! the view comes back at the next frame: a tab of its detail takes no focus while hidden
+    await expect(page.locator('[data-view="calls"]')).toBeVisible();
 
     await page.locator('[data-detail="overview"]').focus();
     await page.keyboard.press('ArrowRight');
