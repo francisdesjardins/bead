@@ -376,7 +376,9 @@ supervision link or a relay's, is the C side's to decide.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-six rounds. Its objections, each with the answer that holds:
+six rounds. A closing connection's teardown, with debugging 9.7 and an exit of
+`spec/metrics.json`, met it in [0001](0001-the-envelope-sits-at-fixed-offsets.md)'s round, which
+keeps its objections and answers. Its objections, each with the answer that holds:
 
 ### The first round
 
