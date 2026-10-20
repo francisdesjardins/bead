@@ -229,7 +229,7 @@ public sealed partial class RouterCoreTests
     {
         var server = new Peer(RouterSide.Server);
         var resolver = server.Resolve();
-        var payload = PatternOf(100);
+        var payload = RequesterBytesOf(100);
 
         await server.Deliver(RequestOpeningOf(1, (payload, 44)));
         await server.Deliver(ChunkOf(1, (payload, 44, 48)));
@@ -247,6 +247,17 @@ public sealed partial class RouterCoreTests
         });
         await resolver.Answer(0, new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
         Assert.IsType<ResultHeader>(server.Sent[^1].Header);
+        Assert.Equal(new byte[] { 1 }, server.Sent[^1].Payload.ToArray());
+
+        var waiting = new Peer(RouterSide.Server, Chunked with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
+        using var waitingCore = waiting.Core;
+        var waitingResolver = waiting.Resolve();
+        var never = new TaskCompletionSource();
+        waitingResolver.Handling = (_) => { return never.Task; };
+        await waiting.Deliver(new Envelope { Header = RequestOf(1) with { Total = 60 }, Payload = RequesterBytesOf(40) });
+        await waiting.Deliver(new Envelope { Header = new ChunkHeader { CallId = 1, Offset = 40, IsLast = true }, Payload = RequesterBytesOf(20) });
+        await waiting.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(new CreditHeader { CallId = 1, CreditEnd = 60 }, Assert.Single(waiting.Sent).Header);
     }
 
     [Fact]
@@ -303,7 +314,7 @@ public sealed partial class RouterCoreTests
     {
         var server = new Peer(RouterSide.Server, Chunked with { MaximumTransfers = 1 });
         var resolver = server.Resolve();
-        var payload = PatternOf(100);
+        var payload = RequesterBytesOf(100);
 
         await server.Deliver(RequestOpeningOf(1, (payload, 44)));
         await server.Deliver(ChunkOf(1, (payload, 44, 48)));
@@ -313,6 +324,22 @@ public sealed partial class RouterCoreTests
         await resolver.Answer(0, new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
         await server.Deliver(RequestOpeningOf(5, (payload, 44)));
         Assert.Equal(new CreditHeader { CallId = 5, CreditEnd = 100 }, server.Sent[^1].Header);
+        Assert.Equal(new IEnvelopeHeader[] { new CreditHeader { CallId = 1, CreditEnd = 100 }, new FailureHeader { CallId = 3 }, new ResultHeader { CallId = 1 }, new CreditHeader { CallId = 5, CreditEnd = 100 } }, server.Sent.Select((envelope) => { return envelope.Header; }));
+        Assert.Equal(new byte[] { 1 }, server.Sent[2].Payload.ToArray());
+
+        var small = new Peer(RouterSide.Server, Chunked with { MaximumTransfers = 1 });
+        using var smallCore = small.Core;
+        var smallResolver = small.Resolve();
+
+        await small.Deliver(RequestOpeningOf(1, (payload, 40)));
+        await small.Deliver(ChunkOf(1, (payload, 40, 48)));
+        await small.Deliver(ChunkOf(1, (payload, 88, 12)));
+        await small.Deliver(new Envelope { Header = RequestOf(3) with { Total = 8 }, Payload = new byte[] { 1 } });
+        await smallResolver.Answer(0, new byte[] { 9 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await small.Deliver(new Envelope { Header = RequestOf(5) with { Total = 8 }, Payload = new byte[] { 1 } });
+        Assert.Equal(new IEnvelopeHeader[] { new CreditHeader { CallId = 1, CreditEnd = 100 }, new FailureHeader { CallId = 3 }, new ResultHeader { CallId = 1 }, new CreditHeader { CallId = 5, CreditEnd = 8 } }, small.Sent.Select((envelope) => { return envelope.Header; }));
+        Assert.Equal((ushort)ProtocolCode.CapacityExceeded, small.Sent[1].Failure!.Code);
+        Assert.Equal(new byte[] { 9 }, small.Sent[2].Payload.ToArray());
     }
 
     [Fact]
@@ -322,7 +349,7 @@ public sealed partial class RouterCoreTests
 
         server.Resolve();
 
-        var payload = PatternOf(200);
+        var payload = RequesterBytesOf(200);
 
         await server.Deliver(RequestOpeningOf(1, (payload, 44)));
         await server.Deliver(RequestOpeningOf(3, (payload, 44)));
@@ -339,6 +366,23 @@ public sealed partial class RouterCoreTests
         await server.Deliver(ChunkOf(1, (payload, 188, 12)));
         Assert.Equal([172L, 200L, 172L], CreditsOf(server.Sent));
         Assert.Equal(3u, server.Sent[^1].Header.CallId);
+
+        var cross = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200, MaximumEnvelopeBytes = 64 });
+        using var crossCore = cross.Core;
+        var resolver = cross.Resolve();
+        var first = RequesterBytesOf(168);
+
+        await cross.Deliver(RequestOpeningOf(1, (first, 40)), "a");
+        await cross.Deliver(new Envelope { Header = RequestOf(3) with { Total = 100 }, Payload = new byte[32] }, "b");
+        await cross.Deliver(new Envelope { Header = RequestOf(5) with { Total = 8 }, Payload = new byte[] { 1 } }, "a");
+        foreach (var offset in new[] { 40, 88, 136 })
+        {
+            await cross.Deliver(ChunkOf(1, (first, offset, Math.Min(48, first.Length - offset))), "a");
+        }
+        Assert.Single(resolver.Requests);
+        Assert.Equal(new IEnvelopeHeader[] { new CreditHeader { CallId = 1, CreditEnd = 168 }, new FailureHeader { CallId = 5 }, new CreditHeader { CallId = 3, CreditEnd = 100 } }, cross.Sent.Select((envelope) => { return envelope.Header; }));
+        Assert.Equal((ushort)ProtocolCode.CapacityExceeded, cross.Sent[1].Failure!.Code);
+        Assert.Equal(["a", "a", "b"], cross.SentOn);
     }
 
     // spec 12.10
@@ -349,7 +393,7 @@ public sealed partial class RouterCoreTests
 
         server.Resolve();
 
-        var payload = PatternOf(200);
+        var payload = RequesterBytesOf(200);
 
         await server.Deliver(RequestOpeningOf(1, (payload, 44)));
         await server.Deliver(RequestOpeningOf(3, (payload, 44)));
@@ -360,36 +404,58 @@ public sealed partial class RouterCoreTests
         server.Core.Dispose();
         await server.Deliver(RequestOpeningOf(5, (payload, 44)));
         Assert.Equal([172L], CreditsOf(server.Sent));
+
+        var cross = new Peer(RouterSide.Server, Chunked with { BufferedBytesBudget = 200, MaximumPayloadBytes = 200, MaximumEnvelopeBytes = 64 });
+        cross.Resolve();
+        await cross.Deliver(new Envelope { Header = RequestOf(1) with { Total = 168 }, Payload = new byte[40] }, "a");
+        await cross.Deliver(new Envelope { Header = RequestOf(3) with { Total = 100 }, Payload = new byte[16] }, "a");
+        await cross.Deliver(new Envelope { Header = RequestOf(1) with { Total = 100 }, Payload = new byte[16] }, "b");
+        cross.Core.RejectPending("gone", "a");
+        await cross.Settle();
+        await cross.Deliver(new Envelope { Header = RequestOf(3) with { Total = 200 }, Payload = new byte[44] }, "b");
+        cross.Core.Dispose();
+        await cross.Settle();
+        Assert.Equal(new IEnvelopeHeader[] { new CreditHeader { CallId = 1, CreditEnd = 168 }, new CreditHeader { CallId = 1, CreditEnd = 100 } }, cross.Sent.Select((envelope) => { return envelope.Header; }));
+        Assert.Empty(cross.Reports);
+        Assert.Equal(["a", "b"], cross.SentOn);
     }
 
     [Fact]
     public async Task Sends_a_result_as_a_transfer_its_call_held_open_until_its_last_chunk_is_handed_off()
     {
-        var server = new Peer(RouterSide.Server);
-        var resolver = server.Resolve();
-        var payload = PatternOf(100);
+        foreach (var total in new[] { 100, 150 })
+        {
+            var server = new Peer(RouterSide.Server);
+            var resolver = server.Resolve();
+            var payload = RequesterBytesOf(total);
 
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
 
-        var answered = resolver.Answer(0, payload);
+            var answered = resolver.Answer(0, payload);
 
-        await server.Settle();
-        Assert.Equal(new ResultHeader { CallId = 1, Total = 100 }, server.Sent[^1].Header);
-        Assert.Equal(payload[..28], server.Sent[^1].Payload.ToArray());
+            await server.Settle();
+            Assert.Equal(new ResultHeader { CallId = 1, Total = total }, server.Sent[^1].Header);
+            Assert.Equal(payload[..28], server.Sent[^1].Payload.ToArray());
 
-        // its call is open still: the same call id is refused
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
-        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, Assert.IsType<FailureException>(Assert.Single(server.Reports)).Code);
-        await server.Deliver(CreditOf(1, 76));
-        Assert.Equal([(28L, false)], ChunksOf(server.Sent));
-        Assert.False(answered.IsCompleted);
-        await server.Deliver(CreditOf(1, 100));
-        await answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.Equal([(28L, false), (76L, true)], ChunksOf(server.Sent));
+            // its call is open still: the same call id is refused
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
+            Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, Assert.IsType<FailureException>(Assert.Single(server.Reports)).Code);
+            await server.Deliver(CreditOf(1, total == 100 ? 76 : 80));
+            Assert.Equal([(28L, false)], ChunksOf(server.Sent));
+            Assert.False(answered.IsCompleted);
+            await server.Deliver(CreditOf(1, total));
+            await answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            Assert.Equal(total == 100 ? [(28L, false), (76L, true)] : new List<(long, bool)> { (28L, false), (76L, false), (124L, true) }, ChunksOf(server.Sent));
+            Assert.Equal(payload, server.Sent.SelectMany((envelope) => { return envelope.Payload.ToArray(); }).ToArray());
+            int[] sizes = total == 100 ? [44, 64, 40] : [44, 64, 64, 42];
+            Assert.Equal(sizes, server.Sent.Select((envelope) => { return EnvelopeCodec.WriteEnvelope(envelope).Length; }));
+            Assert.All(server.Sent, (envelope) => { Assert.True(EnvelopeCodec.WriteEnvelope(envelope).Length <= 64); });
+            Assert.Equal([Handle], server.ReportedOn);
 
-        // answered: a request on its call id is dispatched
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 3 } });
-        Assert.Equal(2, resolver.Requests.Count);
+            // answered: a request on its call id is dispatched
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 3 } });
+            Assert.Equal(2, resolver.Requests.Count);
+        }
     }
 
     [Fact]
@@ -480,34 +546,52 @@ public sealed partial class RouterCoreTests
 
         var subscribing = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return resolver.Answer(0, PatternOf(100)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            return resolver.Answer(0, RequesterBytesOf(100)).WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
 
         Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, subscribing.Code);
         await Assert.ThrowsAsync<ArgumentException>(() =>
         {
-            return server.Core.Respond(RouterAnswer.OfPayload(PatternOf(100)), new AnswerTarget(Handle, RequestOf(3)))
+            return server.Core.Respond(RouterAnswer.OfPayload(RequesterBytesOf(100)), new AnswerTarget(Handle, RequestOf(3)))
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         Assert.Equal(0, server.BeforeAnswers);
         Assert.Empty(server.Sent);
+
+        var boundary = new Peer(RouterSide.Server, Chunked with { MaximumEnvelopeBytes = 64 });
+        using var boundaryCore = boundary.Core;
+        var boundaryResolver = boundary.Resolve();
+        await boundary.Deliver(new Envelope { Header = RequestOf(1) with { OpensSubscription = true } });
+        var tooLarge = await Assert.ThrowsAsync<FailureException>(() => { return boundaryResolver.Answer(0, new byte[37]).WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, tooLarge.Code);
+        Assert.Equal("a subscription's result goes in one envelope, of 64 bytes at most", tooLarge.Detail);
+        await Assert.ThrowsAsync<ArgumentException>(() => { return boundaryCore.Respond(RouterAnswer.OfPayload(new byte[37]), new AnswerTarget(Handle, RequestOf(3))).WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        Assert.Equal(0, boundary.BeforeAnswers);
+        Assert.Empty(boundary.Sent);
+        await boundaryResolver.Answer(0, new byte[36]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        Assert.Equal(1, boundary.BeforeAnswers);
+        Assert.Equal(new ResultHeader { CallId = 1 }, Assert.Single(boundary.Sent).Header);
+        Assert.Equal(new byte[36], boundary.Sent[0].Payload.ToArray());
     }
 
     [Fact]
     public async Task Announces_a_session_on_a_result_s_opening_which_leaves_room_for_it_within_its_envelope()
     {
-        var server = new Peer(RouterSide.Server) { Session = SessionToken.FromBytes(PatternOf(16)) };
+        var server = new Peer(RouterSide.Server) { Session = SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray()) };
         var resolver = server.Resolve();
-        var payload = PatternOf(100);
+        var payload = RequesterBytesOf(100);
 
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-        _ = resolver.Answer(0, payload);
+        var answering = resolver.Answer(0, payload);
         await server.Settle();
 
         var opening = server.Sent[^1];
 
         Assert.Equal(new ResultHeader { CallId = 1, Total = 100, Credential = server.Session }, opening.Header);
         Assert.Equal(64, EnvelopeCodec.WriteEnvelope(opening).Length);
+        await server.Deliver(CreditOf(1, 100));
+        await answering.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        Assert.Equal([64, 64, 40], server.Sent.Select((envelope) => { return EnvelopeCodec.WriteEnvelope(envelope).Length; }));
     }
 
     // spec 12.10
@@ -537,6 +621,25 @@ public sealed partial class RouterCoreTests
         });
         await disposed.Deliver(CreditOf(1, 300));
         Assert.Single(disposed.Sent);
+
+        var both = new Peer(RouterSide.Server, Chunked with { MaximumEnvelopeBytes = 64, MaximumPayloadBytes = 1_024, BufferedBytesBudget = 1_024 });
+        using var bothCore = both.Core;
+        var resolver = both.Resolve();
+        var asking = bothCore.Request(RequesterBytesOf(200), new CoreRequest { ConnectionHandle = "b", Procedure = Echo, Options = new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) } });
+        await both.Deliver(new Envelope { Header = RequestOf(1) }, "a");
+        var responding = resolver.Answer(0, RequesterBytesOf(150));
+        await both.Settle();
+        bothCore.RejectPending("gone", "a");
+        await both.Deliver(CreditOf(1, 150), "a");
+        Assert.Equal("gone", (await Assert.ThrowsAsync<DisconnectException>(() => { return responding.WaitAsync(Patience, TestContext.Current.CancellationToken); })).Message);
+        Assert.False(asking.IsCompleted);
+        bothCore.Dispose();
+        await both.Deliver(CreditOf(2, 200), "b");
+        await Assert.ThrowsAsync<DisconnectException>(() => { return asking.WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        Assert.Equal(new IEnvelopeHeader[] { RequestOf(2) with { Total = 200 }, new ResultHeader { CallId = 1, Total = 150 } }, both.Sent.Select((envelope) => { return envelope.Header; }));
+        Assert.Equal([44, 28], both.Sent.Select((envelope) => { return envelope.Payload.Length; }));
+        Assert.Equal(["b", "a"], both.SentOn);
+        Assert.Empty(both.Reports);
     }
 
     [Fact]
@@ -914,6 +1017,8 @@ public sealed partial class RouterCoreTests
 
         public List<Envelope> Sent { get; } = [];
 
+        public List<string> SentOn { get; } = [];
+
         public List<Exception> Reports { get; } = [];
 
         // the connection each report came with, in order
@@ -1060,6 +1165,7 @@ public sealed partial class RouterCoreTests
         public Task Send(TransportMessage message, string connectionHandle)
         {
             Carried.Add(message.Credential);
+            SentOn.Add(connectionHandle);
 
             var envelope = EnvelopeCodec.ReadEnvelope(
                 message.Bytes.Span,
