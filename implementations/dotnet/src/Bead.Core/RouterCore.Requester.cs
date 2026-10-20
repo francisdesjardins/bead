@@ -282,8 +282,8 @@ internal sealed partial class RouterCore
         }
 
         // what a request of the side's own goes out as, or why it does not, before it goes: a
-        // connection not open, its credential, no call id free, its payload past its limit, or a
-        // transfer its opening's header leaves no room
+        // connection not open, its credential, as many calls waiting as its peer answers, no call id
+        // free, its payload past its limit, or a transfer its opening's header leaves no room
         private (RequestHeader Header, OutgoingTransfer? Outgoing, string? Carried) HeaderOf(
             ReadOnlyMemory<byte> payload,
             (CoreRequest Request, int MaximumPayloadBytes) going)
@@ -309,6 +309,22 @@ internal sealed partial class RouterCore
             if (!_port.IsOpen(request.ConnectionHandle))
             {
                 throw new DisconnectException($"{request.ConnectionHandle} is not an open connection");
+            }
+
+            // ! as many calls waiting as its peer answers at once: one more would be refused, so it
+            // fails before it goes, drawing no call id, as an HTTP/2 endpoint never passes the streams
+            // its peer lets it open (spec 9.1; RFC 9113 §5.1.2)
+            if (_pendingCalls.CountOn(request.ConnectionHandle) >= _limits.MaximumAnsweringCalls)
+            {
+                throw new FailureException(
+                    ProtocolFailureOf(
+                        ProtocolCode.CapacityExceeded,
+                        string.Create(CultureInfo.InvariantCulture, $"the calls waiting on {request.ConnectionHandle} are {_limits.MaximumAnsweringCalls} at most")),
+                    new FailureException.Raised(FailureOrigin.Local, _side))
+                {
+                    DestinationId = options.DestinationId,
+                    ProcedureAddress = procedure.Address,
+                };
             }
 
             var callId = _pendingCalls.Draw(request.ConnectionHandle)

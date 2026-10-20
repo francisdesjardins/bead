@@ -1311,4 +1311,64 @@ public sealed class WebSocketServerTests
             await server.DisposeAsync();
         }
     }
+
+    [Fact]
+    public async Task Answers_leg_A_DESTINATION_LOST_when_its_leg_B_over_WebSocket_is_dropped_behind_its_socket()
+    {
+        // a relay whose sockets hold 256 bytes waiting at most, admitting every call
+        await using var hub = new WebSocketServer<string>(new WebSocketServerOptions
+        {
+            Server = new ServerOptions
+            {
+                Relay = new RelayOptions
+                {
+                    BeforeRoute = new BeforeRequest((_) =>
+                    {
+                        return true;
+                    }),
+                },
+            },
+            Transport = new WebSocketTransportServerOptions { MaximumUnsentBytes = 256 },
+        });
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+        var opened = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        hub.Transport.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue((reason, connectionHandle));
+        };
+        hub.Transport.Connection += (connectionHandle) =>
+        {
+            opened.TrySetResult(connectionHandle);
+        };
+
+        var port = await PortOf(hub);
+
+        // the device behind it, at destination 7, on the hub's own connection to it: leg B
+        await using var device = new WebSocketClient();
+
+        device.Services.GetRequestResolver(Echo, TextAnswered)((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        await Connect(device, port);
+
+        var legB = await opened.Task.WaitAsync(Patience, Cancelled);
+
+        hub.Router.RegisterDestination(new ConnectionTarget(legB), new DestinationOptions { DestinationId = 7 });
+
+        await using var requester = new WebSocketClient();
+
+        await Connect(requester, port);
+
+        // a request leg B cannot hold waiting for its socket: leg B is dropped, and leg A answered
+        var lost = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return requester.Services.GetRequest(Echo, TextAsked)(new string('x', 400))(new RequestOptions { DestinationId = 7 }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.DestinationLost, lost.Code);
+        Assert.Equal(legB, Assert.Single(reported).ConnectionHandle);
+        Assert.Contains(nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+    }
 }

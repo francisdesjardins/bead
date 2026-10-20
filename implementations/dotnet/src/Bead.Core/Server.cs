@@ -104,7 +104,7 @@ public sealed record ServerOptions
     /// <summary>
     /// What its router resolves a request's <see cref="CredentialScheme.Jwt"/> and
     /// <see cref="CredentialScheme.Elsewhere"/> with, on the server's clock; it takes no other when
-    /// none (spec 9.2, step 5).
+    /// none (spec 9.2, step 6).
     /// </summary>
     public Credentials? Credentials { get; init; }
 
@@ -213,19 +213,28 @@ public sealed class Server<TData> : IBeadServer<TData>
             {
                 return request.Session is not null;
             },
-            Failure.OfProtocol(ProtocolCode.SessionRequired));
+            Failure.OfProtocol(ProtocolCode.SessionRequired))
+        {
+            Name = "requireSession",
+        };
         RequireCredential = new BeforeRequest(
             (request) =>
             {
                 return request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
             },
-            Failure.OfProtocol(ProtocolCode.AccessDenied, RelayAdmitsCredentialsAlone));
+            Failure.OfProtocol(ProtocolCode.AccessDenied, RelayAdmitsCredentialsAlone))
+        {
+            Name = "requireCredential",
+        };
         ShareLegBSession = new BeforeRequest(
             (request) =>
             {
                 return request.Session is not null || request.Header.Credential?.Scheme is CredentialScheme.Jwt or CredentialScheme.Elsewhere;
             },
-            Failure.OfProtocol(ProtocolCode.SessionRequired));
+            Failure.OfProtocol(ProtocolCode.SessionRequired))
+        {
+            Name = "shareLegBSession",
+        };
 
         // before the router's own, in the order handlers run: a resolver that stores a session as
         // the router reads the envelope finds its connection open already
@@ -347,7 +356,7 @@ public sealed class Server<TData> : IBeadServer<TData>
     /// <summary>
     /// The admission of a procedure that needs a session: a call in none — its call's session, never
     /// its connection's — is refused with SESSION_REQUIRED, which a call that presented a credential
-    /// is answered ACCESS_DENIED in place of (spec 9.2, step 5). A relay's in its place so refuses
+    /// is answered ACCESS_DENIED in place of (spec 9.2, step 6). A relay's in its place so refuses
     /// every credential it forwards without verifying, which resolves to no session there, and a call
     /// in none that presented none with SESSION_REQUIRED.
     /// </summary>

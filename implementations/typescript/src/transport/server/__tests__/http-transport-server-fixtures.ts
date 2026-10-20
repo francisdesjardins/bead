@@ -374,3 +374,11 @@ export const rawSocketOn = async (port: number) => {
 
   return { read, socket };
 };
+
+/** A POST's head on a connection, declaring `length` bytes of body. */
+export const postHeadOf = (connectionToken: string, length: number): string => {
+  return (
+    `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+    `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\nContent-Length: ${String(length)}\r\n\r\n`
+  );
+};

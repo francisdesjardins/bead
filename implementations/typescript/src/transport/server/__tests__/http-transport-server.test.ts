@@ -10,6 +10,7 @@ import {
 import { request as requestHTTPS } from 'node:https';
 import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
+import { WebSocketServer } from 'ws';
 import {
   EnvelopeKind,
   LIMIT_DEFAULTS,
@@ -23,6 +24,7 @@ import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   BODY_BYTES_BUDGET,
+  BODY_GRACE_PERIOD,
   BURIAL_MILLISECONDS,
   CONNECTION_TOKEN_HEADER,
   createHTTPTransportServer,
@@ -42,6 +44,8 @@ import {
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
 import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
+import type { IHeadBoundServerLike } from '../server-bounds';
+import { createWSTransportServer } from '../ws-transport-server';
 import {
   bindError,
   holdIPv6Loopback,
@@ -68,6 +72,8 @@ import {
   rawConnectOf,
   recordOf,
   refusalOf,
+  portOf,
+  rawSocketOn,
   refusalsOf,
   startScripted,
   startTransport,
@@ -1757,7 +1763,9 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
   test('lets a burial lapse, buries only the client’s call ids and so many of them, and answers a body still coming as its connection closes', async () => {
     const clock = createTestClock();
+    // a body's grace apart from a burial's, so the burials are counted alone
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
+      bodyGracePeriod: 6_000,
       clock,
       maximumWaitingExchanges: 2,
     });
@@ -1819,13 +1827,18 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
       fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
 
-      // one idle timer per connection as drawn; the one asking lost its own as its exchange came
+      // one idle timer per connection as drawn; the one asking lost its own as its exchange came,
+      // and its body's pace, armed at its head and again at its bytes, went once it was whole
       const delays = clock.armed.map(({ delay }) => {
         return delay;
       });
 
-      expect(delays).toEqual([2_000, 2_000, 1_000]);
-      expect(clock.cleared).toEqual([clock.armed[0]?.handle]);
+      expect(delays).toEqual([2_000, 2_000, BODY_GRACE_PERIOD, BODY_GRACE_PERIOD, 1_000]);
+      expect(clock.cleared).toEqual(
+        [0, 2, 3].map((index) => {
+          return clock.armed[index]?.handle;
+        })
+      );
 
       clock.tick(999);
 
@@ -2028,11 +2041,17 @@ test.describe('createHTTPTransportServer, its edges', () => {
     });
     const { connectionToken: foreverToken } = forever.connectScripted();
     const asking = forever.exchangeOf(foreverToken);
-    const { armed: armedForever } = timersBy(foreverClock, () => {
+    const { armed: armedForever, cleared } = timersBy(foreverClock, () => {
       forever.fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     });
 
-    expect([asking.response.status, armedForever]).toEqual([200, []]);
+    // its body's pace alone was armed, and went once its body was whole
+    expect([
+      asking.response.status,
+      armedForever.filter(({ handle }) => {
+        return !cleared.includes(handle);
+      }),
+    ]).toEqual([200, []]);
     await forever.server.stop();
   });
 
@@ -2487,16 +2506,21 @@ test.describe('createHTTPTransportServer, listening', () => {
     listenOf(connectionToken, { wait: '20000' });
 
     const cancel = exchangeOf(connectionToken);
-    // a cancel, handed on and ended at once: the listen still holds the connection awake
-    const { armed } = timersBy(clock, () => {
+    // a cancel, handed on and ended at once: the listen still holds the connection awake, and
+    // its body's pace went once it was whole
+    const { armed, cleared } = timersBy(clock, () => {
       fake.feed(cancel.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 })]);
     });
 
     expect([
       cancel.response.status,
-      armed.map(({ delay }) => {
-        return delay;
-      }),
+      armed
+        .filter(({ handle }) => {
+          return !cleared.includes(handle);
+        })
+        .map(({ delay }) => {
+          return delay;
+        }),
     ]).toEqual([204, [BURIAL_MILLISECONDS]]);
     await server.stop();
   });
@@ -3092,5 +3116,265 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       ['0.0.0.0', false],
       ['::', false],
     ]);
+  });
+});
+
+// a notification's kind, which the transport reads no differently from any envelope of its own
+const NOTIFICATION = 0x13;
+
+test.describe('createHTTPTransportServer, its bounds', () => {
+  test('loses an answer whose client reads slower than minimumSendBytesPerSecond, its connection closed at both ends, and reports it', async () => {
+    const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
+      minimumSendBytesPerSecond: 1_000,
+      sendGracePeriod: 200,
+    });
+    const { connectionHandle, connectionToken } = connectScripted();
+    const asking = exchangeOf(connectionToken);
+
+    fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+    // * its client takes nothing of the answer: the platform's socket holds it, on any platform,
+    // which a loopback's buffers would hide where they take it all
+    asking.response.isFinishing = false;
+
+    const sending = server
+      .send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 92 }) }, connectionHandle)
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'close');
+      })
+      .toEqual([['close', false, connectionHandle]]);
+    expect(namesOf(events, 'error')).toEqual([
+      [
+        'error',
+        'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+        connectionHandle,
+      ],
+    ]);
+    // its exchange lost at its client's end, its connection gone at the server's
+    expect([asking.response.isDestroyed, await sending]).toEqual([true, expect.any(Error)]);
+
+    const after = exchangeOf(connectionToken);
+
+    fake.feed(after.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 })]);
+
+    expect([after.response.status, after.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
+    await server.stop();
+  });
+
+  test('loses a listen whose client reads its batch slower than minimumSendBytesPerSecond, and reports it, its connection kept and the batch brought again to the next', async () => {
+    const { connectScripted, events, listenOf, server } = await startScripted({
+      minimumSendBytesPerSecond: 1_000,
+      sendGracePeriod: 200,
+    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
+    const stalled = listenOf(connectionToken, { wait: '20000' });
+    const envelope = envelopeOf(NOTIFICATION, { callId: 2, extra: 40 });
+
+    // * its client takes nothing of the batch: the platform's socket holds it
+    stalled.response.isFinishing = false;
+    await server.send({ data: envelope }, connectionHandle);
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'error');
+      })
+      .toEqual([
+        [
+          'error',
+          'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+          connectionHandle,
+        ],
+      ]);
+    expect([stalled.response.isDestroyed, namesOf(events, 'close')]).toEqual([true, []]);
+
+    // what it carried comes again to the next (spec 15.10)
+    const next = listenOf(connectionToken, { after: '0', wait: '0' });
+
+    expect([
+      next.response.status,
+      next.response.headers?.[SEQUENCE_HEADER],
+      [...(next.response.body ?? [])],
+    ]).toEqual([200, '1', batchOf(envelope)]);
+    await server.stop();
+  });
+
+  test('keeps an answer whose client takes it within its deadline, and times nothing once it is taken', async () => {
+    await using started = await startTransport({
+      minimumSendBytesPerSecond: 240,
+      sendGracePeriod: 200,
+    });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const answered = post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken,
+    });
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'message').length;
+      })
+      .toBe(1);
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 1_048_576 }) },
+      connectionHandle
+    );
+
+    expect((await bytesOf(await answered)).length).toBe(1_048_584);
+
+    // past what its grace and its rate would have judged, nothing was dropped
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1_200);
+    });
+
+    expect([namesOf(events, 'error'), namesOf(events, 'close')]).toEqual([[], []]);
+  });
+
+  test('reports an outbox that passes maximumOutboxBytes as it closes its connection', async () => {
+    const { connectScripted, events, server } = await startScripted({ maximumOutboxBytes: 64 });
+    const { connectionHandle } = connectScripted({ isListening: true });
+
+    await server.send(
+      { data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) },
+      connectionHandle
+    );
+    await server.send(
+      { data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) },
+      connectionHandle
+    );
+
+    expect(
+      events.filter(([name]) => {
+        return name === 'error' || name === 'close';
+      })
+    ).toEqual([
+      [
+        'error',
+        'the client fell behind: its outbox would pass maximumOutboxBytes, 64 bytes',
+        connectionHandle,
+      ],
+      ['close', false, connectionHandle],
+    ]);
+    await server.stop();
+  });
+
+  test('answers 408 a head that does not come whole within headersTimeout, at its address and its WebSocket’s, within a second of it', async () => {
+    await using started = await startTransport({ headersTimeout: 500 });
+    const webSocket = createWSTransportServer({ headersTimeout: 500, WebSocketServer });
+    const { port: webSocketPort } = await webSocket.start({ address: host, findOpenPort: true });
+
+    try {
+      for (const [port, head] of [
+        [portOf(started.url), `POST /bead HTTP/1.1\r\nHost: ${host}\r\n`],
+        [webSocketPort, `GET / HTTP/1.1\r\nHost: ${host}\r\n`],
+      ] as const) {
+        const { read, socket } = await rawSocketOn(port);
+        const sentAt = Date.now();
+
+        socket.write(head);
+        await expect
+          .poll(
+            () => {
+              return read.text.includes('\r\n\r\n');
+            },
+            { timeout: 5_000 }
+          )
+          .toBe(true);
+
+        const tookFor = Date.now() - sentAt;
+
+        expect(read.text.split('\r\n')[0], head).toBe('HTTP/1.1 408 Request Timeout');
+        expect(read.text, head).not.toContain('bead-refusal');
+        expect(tookFor, head).toBeGreaterThanOrEqual(450);
+        expect(tookFor, head).toBeLessThan(500 + 1_000 + 500);
+        socket.destroy();
+      }
+    } finally {
+      await webSocket.stop();
+    }
+  });
+
+  test('sets headersTimeout, no requestTimeout and a connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second of its time', async () => {
+    const built: ReturnType<typeof createServer>[] = [];
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        const instance = createServer(listener);
+
+        built.push(instance);
+
+        return instance;
+      },
+      headersTimeout: 700,
+    });
+    const { port } = await server.start({ findOpenPort: true });
+
+    try {
+      // on localhost, one for each loopback
+      expect(
+        built.map((instance) => {
+          const { connectionsCheckingInterval, headersTimeout, requestTimeout } =
+            instance as IHeadBoundServerLike;
+
+          return [headersTimeout, requestTimeout, connectionsCheckingInterval];
+        })
+      ).toEqual([
+        [700, 0, 1_000],
+        [700, 0, 1_000],
+      ]);
+
+      const { read, socket } = await rawSocketOn(port);
+      const sentAt = Date.now();
+
+      socket.write(`POST /bead HTTP/1.1\r\nHost: ${host}\r\n`);
+      await expect
+        .poll(() => {
+          return read.text.includes('\r\n\r\n');
+        })
+        .toBe(true);
+
+      expect(read.text.split('\r\n')[0]).toBe('HTTP/1.1 408 Request Timeout');
+      expect(Date.now() - sentAt).toBeLessThan(700 + 1_000 + 500);
+      socket.destroy();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses a headersTimeout, a sendGracePeriod, a bodyGracePeriod, a minimumSendBytesPerSecond or a minimumBodyBytesPerSecond it cannot hold, as it is built', () => {
+    for (const [options, refusal] of [
+      [
+        { headersTimeout: 0 },
+        'headersTimeout is a number of milliseconds from 1 to 2147483647, not 0',
+      ],
+      [
+        { sendGracePeriod: Infinity },
+        'sendGracePeriod is a number of milliseconds from 1 to 2147483647, not Infinity',
+      ],
+      [
+        { bodyGracePeriod: -1 },
+        'bodyGracePeriod is a number of milliseconds from 1 to 2147483647, not -1',
+      ],
+      [{ minimumSendBytesPerSecond: 1.5 }, 'minimumSendBytesPerSecond is a whole number, not 1.5'],
+      [
+        { minimumBodyBytesPerSecond: 0 },
+        'minimumBodyBytesPerSecond is a whole number above 0, not 0',
+      ],
+    ] as const) {
+      expect(() => {
+        return createHTTPTransportServer({
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+          ...options,
+        });
+      }).toThrow(new ProgrammerError(refusal));
+    }
   });
 });

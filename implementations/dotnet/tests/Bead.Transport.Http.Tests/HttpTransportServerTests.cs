@@ -3496,4 +3496,361 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal(1, Count("outboxEnvelopes"));
     }
+
+    [Fact]
+    public async Task Loses_an_answer_whose_client_reads_slower_than_minimumSendBytesPerSecond_its_connection_closed_at_both_ends_and_reports_it()
+    {
+        var isStalled = false;
+
+        // ! a client that stops reading, its socket's writes stalled: a platform that takes every
+        // write into its own buffers, Windows', never stalls them itself
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        _server = new HttpTransportServer(new HttpTransportServerOptions { SendGracePeriod = TimeSpan.FromMilliseconds(200), Clock = _time })
+        {
+            Connecting = (next) =>
+            {
+                return (connection) =>
+                {
+                    var transport = connection.Transport;
+
+                    connection.Transport = new Pipes(transport.Input, new Stalling(transport.Output, (() =>
+                    {
+                        return Volatile.Read(ref isStalled);
+                    }, connection.ConnectionClosed)));
+
+                    return next(connection);
+                };
+            },
+        };
+        _server.Connection += _connections.Enqueue;
+        _server.Close += (wasClean, connectionHandle) =>
+        {
+            _closes.Enqueue((wasClean, connectionHandle));
+        };
+        _port = (await _server.Start(Loopback, Cancelled)).Port;
+
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue((reason, connectionHandle));
+        };
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var request = EnvelopeOf(EnvelopeKind.Request, 1);
+        using var stalled = await Wire.Open(_port);
+
+        await stalled.Write(PostHead(connectionToken, $"Content-Length: {request.Length}"));
+        await stalled.Write(request);
+        Assert.Equal(200, (await stalled.ReadHead()).Status);
+
+        // an answer of 240 bytes, given the grace alone, its socket taking none of it
+        Volatile.Write(ref isStalled, true);
+
+        var answer = EnvelopeOf(EnvelopeKind.Result, (1, 232));
+
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+        {
+            return _server.Send(new TransportMessage(answer, false), connectionHandle).WaitAsync(Patience, Cancelled);
+        });
+        await Until(() =>
+        {
+            return !_closes.IsEmpty;
+        });
+
+        // lost, its connection closed and reported naming its bound; refused 404 from then on
+        Assert.Equal([(false, connectionHandle)], _closes);
+        Assert.Contains(nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+        Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
+        Volatile.Write(ref isStalled, false);
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 3))));
+    }
+
+    [Fact]
+    public async Task Loses_a_listen_whose_client_reads_its_batch_slower_than_minimumSendBytesPerSecond_and_reports_it_its_connection_kept_and_the_batch_brought_again_to_the_next()
+    {
+        var isStalled = false;
+
+        // ! a client that stops reading, its socket's writes stalled, as the answer's twin above
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        _server = new HttpTransportServer(new HttpTransportServerOptions { SendGracePeriod = TimeSpan.FromMilliseconds(200), Clock = _time })
+        {
+            Connecting = (next) =>
+            {
+                return (connection) =>
+                {
+                    var transport = connection.Transport;
+
+                    connection.Transport = new Pipes(transport.Input, new Stalling(transport.Output, (() =>
+                    {
+                        return Volatile.Read(ref isStalled);
+                    }, connection.ConnectionClosed)));
+
+                    return next(connection);
+                };
+            },
+        };
+        _server.Connection += _connections.Enqueue;
+        _server.Close += (wasClean, connectionHandle) =>
+        {
+            _closes.Enqueue((wasClean, connectionHandle));
+        };
+        _port = (await _server.Start(Loopback, Cancelled)).Port;
+
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue((reason, connectionHandle));
+        };
+
+        var (connectionToken, connectionHandle) = await Connect(true);
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, 1);
+        using var stalled = await Wire.Open(_port);
+
+        await stalled.Write($"GET /bead HTTP/1.1\r\nHost: {Host}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n{HttpTransport.AfterHeader}: 0\r\n{HttpTransport.WaitHeader}: 20000\r\n\r\n");
+        await Until(() =>
+        {
+            return Count("listens") == 1;
+        });
+
+        // its batch, given the grace alone, its socket taking none of it
+        Volatile.Write(ref isStalled, true);
+        await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
+        await Until(() =>
+        {
+            return !reported.IsEmpty;
+        });
+        Volatile.Write(ref isStalled, false);
+
+        // lost and reported naming its bound, its connection kept: what it carried comes again to
+        // the next (spec 15.10)
+        Assert.Contains(nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+        Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
+
+        using var next = await ListenOf(connectionToken, new() { After = "0", Wait = "0" });
+
+        Assert.Equal((200, "1", Convert.ToHexString(BatchOf(envelope))), ((int)next.StatusCode, HeaderOf(next, HttpTransport.SequenceHeader), Convert.ToHexString(await BytesOf(next))));
+        Assert.Empty(_closes);
+    }
+
+    /// <summary>A connection's pipes, either end replaced.</summary>
+    private sealed class Pipes(System.IO.Pipelines.PipeReader input, System.IO.Pipelines.PipeWriter output) : System.IO.Pipelines.IDuplexPipe
+    {
+        public System.IO.Pipelines.PipeReader Input { get; } = input;
+
+        public System.IO.Pipelines.PipeWriter Output { get; } = output;
+    }
+
+    /// <summary>
+    /// A connection's writer whose flushes wait, once it is stalled, until the connection cancels or
+    /// completes them, or closes, as a socket's writer completes a write its socket's close cuts: a
+    /// client that stops reading.
+    /// </summary>
+    private sealed class Stalling(System.IO.Pipelines.PipeWriter writer, (Func<bool> IsStalled, CancellationToken Closed) stall) : System.IO.Pipelines.PipeWriter
+    {
+        private readonly TaskCompletionSource<System.IO.Pipelines.FlushResult> _held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override void Advance(int bytes)
+        {
+            writer.Advance(bytes);
+        }
+
+        public override Memory<byte> GetMemory(int sizeHint = 0)
+        {
+            return writer.GetMemory(sizeHint);
+        }
+
+        public override Span<byte> GetSpan(int sizeHint = 0)
+        {
+            return writer.GetSpan(sizeHint);
+        }
+
+        public override void CancelPendingFlush()
+        {
+            _held.TrySetResult(new System.IO.Pipelines.FlushResult(isCanceled: true, isCompleted: false));
+            writer.CancelPendingFlush();
+        }
+
+        public override void Complete(Exception? exception = null)
+        {
+            _held.TrySetResult(new System.IO.Pipelines.FlushResult(isCanceled: false, isCompleted: true));
+            writer.Complete(exception);
+        }
+
+        public override ValueTask<System.IO.Pipelines.FlushResult> FlushAsync(CancellationToken cancellationToken = default)
+        {
+            return stall.IsStalled() ? new ValueTask<System.IO.Pipelines.FlushResult>(Held(cancellationToken)) : writer.FlushAsync(cancellationToken);
+        }
+
+        // a flush held until it is released, cancelled, or its connection closes, which completes it
+        private async Task<System.IO.Pipelines.FlushResult> Held(CancellationToken cancellationToken)
+        {
+            using var either = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stall.Closed);
+
+            try
+            {
+                return await _held.Task.WaitAsync(either.Token);
+            }
+            catch (OperationCanceledException) when (stall.Closed.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                return new System.IO.Pipelines.FlushResult(isCanceled: false, isCompleted: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Reports_an_outbox_that_passes_maximumOutboxBytes_as_it_closes_its_connection()
+    {
+        await Start(new HttpTransportServerOptions { MaximumOutboxBytes = 20 });
+
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+        var (_, connectionHandle) = await Connect(true);
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 2));
+
+        _server.Error += (reason, handle) =>
+        {
+            reported.Enqueue((reason, handle));
+        };
+        _server.Close += (_, handle) =>
+        {
+            // ! reported before its close
+            reported.Enqueue((new InvalidOperationException("closed"), handle));
+        };
+
+        // 10 bytes, 20, then 30: past it
+        foreach (var _ in Enumerable.Range(0, 3))
+        {
+            await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
+        }
+
+        Assert.Equal(
+            [(nameof(HttpTransportServerOptions.MaximumOutboxBytes), connectionHandle), ("closed", connectionHandle)],
+            reported.Select((report) =>
+            {
+                return (report.Reason.Message.Contains(nameof(HttpTransportServerOptions.MaximumOutboxBytes), StringComparison.Ordinal)
+                    ? nameof(HttpTransportServerOptions.MaximumOutboxBytes)
+                    : report.Reason.Message, report.ConnectionHandle);
+            }));
+        Assert.Equal([(false, connectionHandle)], _closes);
+    }
+
+    [Fact]
+    public async Task Answers_408_a_head_that_does_not_come_whole_within_headersTimeout_at_its_address_and_its_WebSocket_s_within_a_second_of_it()
+    {
+        await Start(new HttpTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(1) });
+
+        await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(1) });
+        var webSocketPort = (await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+
+        foreach (var (port, start) in new[] { (_port, "POST /bead HTTP/1.1"), (webSocketPort, "GET / HTTP/1.1") })
+        {
+            using var wire = await Wire.Open(port);
+            var watch = Stopwatch.StartNew();
+
+            // a head that never ends
+            await wire.Write($"{start}\r\nHost: {Host}\r\n");
+
+            var (head, body) = await wire.Read();
+
+            // HTTP's own: unmarked, none of the path's fields, its body empty, its socket closed
+            Assert.Equal((408, (string?)null, (string?)null, 0), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("cache-control"), body.Length));
+            // ! Kestrel arms its timeout a heartbeat late, and checks it each heartbeat, a second
+            Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(0.9), TimeSpan.FromSeconds(3.5));
+            Assert.True(await wire.IsClosed());
+        }
+
+        Assert.Empty(_refusals);
+    }
+
+    [Fact]
+    public async Task Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener()
+    {
+        var built = new List<Microsoft.AspNetCore.Builder.WebApplication>();
+
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        _server = new HttpTransportServer(new HttpTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(7) });
+        _server.Built += built.Add;
+        await _server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+
+        await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(9) });
+
+        webSocket.Built += built.Add;
+        await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+
+        // every listener of each start, both loopbacks among them, by its one configuration
+        Assert.Equal(
+            [(TimeSpan.FromSeconds(7), true, true), (TimeSpan.FromSeconds(9), false, false)],
+            built.Select((application) =>
+            {
+                var limits = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                    .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>>(application.Services)
+                    .Value.Limits;
+
+                return (limits.RequestHeadersTimeout, limits.MinRequestBodyDataRate is null, limits.MinResponseDataRate is null);
+            }));
+    }
+
+    [Fact]
+    public async Task Keeps_an_answer_whose_client_takes_it_within_its_deadline_and_times_nothing_once_it_is_taken()
+    {
+        await Start(new HttpTransportServerOptions { MinimumSendBytesPerSecond = 240, SendGracePeriod = TimeSpan.FromMilliseconds(200) });
+
+        var reported = new ConcurrentQueue<Exception>();
+
+        _server.Error += (reason, _) =>
+        {
+            reported.Enqueue(reason);
+        };
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var answered = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        await Until(() =>
+        {
+            return !_messages.IsEmpty;
+        });
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, (1, 1_048_576)), false), connectionHandle).WaitAsync(Patience, Cancelled);
+
+        using (var answer = await answered)
+        {
+            Assert.Equal(1_048_584, (await BytesOf(answer)).Length);
+        }
+
+        // past what its grace and its rate would have judged, nothing was dropped
+        await Task.Delay(1_200, Cancelled);
+        Assert.Empty(reported);
+        Assert.Empty(_closes);
+    }
+
+    [Fact]
+    public void Refuses_a_HeadersTimeout_a_SendGracePeriod_a_BodyGracePeriod_a_MinimumSendBytesPerSecond_or_a_MinimumBodyBytesPerSecond_it_cannot_hold_as_it_is_built()
+    {
+        foreach (var (options, name, refusal) in new (HttpTransportServerOptions, string, string)[]
+        {
+            (new() { HeadersTimeout = TimeSpan.Zero }, "HeadersTimeout", "HeadersTimeout is a number of milliseconds from 1 to 2147483647, not 0"),
+            (new() { SendGracePeriod = Timeout.InfiniteTimeSpan }, "SendGracePeriod", "SendGracePeriod is a number of milliseconds from 1 to 2147483647, not infinite"),
+            (new() { BodyGracePeriod = TimeSpan.FromMilliseconds(-2) }, "BodyGracePeriod", "BodyGracePeriod is a number of milliseconds from 1 to 2147483647, not -2"),
+            (new() { MinimumSendBytesPerSecond = -1 }, "MinimumSendBytesPerSecond", "MinimumSendBytesPerSecond is a whole number, not -1"),
+            (new() { MinimumBodyBytesPerSecond = 0 }, "MinimumBodyBytesPerSecond", "MinimumBodyBytesPerSecond is a whole number above 0, not 0"),
+        })
+        {
+            var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new HttpTransportServer(options);
+            });
+
+            Assert.Equal((name, true), (refused.ParamName, refused.Message.StartsWith(refusal[..refusal.LastIndexOf(", not ", StringComparison.Ordinal)], StringComparison.Ordinal)));
+        }
+
+        // 0 holds no pace, and every bound at its least holds
+        _ = new HttpTransportServer(new HttpTransportServerOptions
+        {
+            MinimumSendBytesPerSecond = 0,
+            MinimumBodyBytesPerSecond = 1,
+            HeadersTimeout = TimeSpan.FromMilliseconds(1),
+            SendGracePeriod = TimeSpan.FromMilliseconds(1),
+            BodyGracePeriod = TimeSpan.FromMilliseconds(1),
+        });
+    }
 }

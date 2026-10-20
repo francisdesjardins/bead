@@ -34,6 +34,22 @@ test.describe('createRouterCore', () => {
       }
     });
 
+    test('refuses a maximumAnsweringCalls that is not a whole number above 0', () => {
+      const { port } = createPort();
+
+      for (const maximumAnsweringCalls of [0, -1, 1.5, Number.NaN, Infinity, 2 ** 53]) {
+        expect(() => {
+          return createRouterCore(port, { limits: { maximumAnsweringCalls } });
+        }, String(maximumAnsweringCalls)).toThrow(
+          /^maximumAnsweringCalls is a whole number above 0, not /
+        );
+      }
+
+      // a call at once holds, and the default is 64
+      expect(limitsOf({ maximumAnsweringCalls: 1 }).maximumAnsweringCalls).toBe(1);
+      expect(LIMIT_DEFAULTS.maximumAnsweringCalls).toBe(64);
+    });
+
     test('refuse limits that do not hold together, each rule by its own failure', () => {
       const { port } = createPort();
 

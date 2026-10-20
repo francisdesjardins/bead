@@ -709,6 +709,30 @@ jwt_verdicts_against_a_set = [
 ]
 
 
+# ── A credential refused, told (section 13.12) ─────────────────────────────────────────────────
+
+SESSION_REQUIRED, CREDENTIAL_UNSUPPORTED = 32, 36
+
+# each credential a server refuses as it resolves, but a JWT's verdicts, which jwtVerdicts give: the
+# scheme it presents, the situation both sides' tests set up, the code answered, and the one word an
+# access refused is told with
+credential_refusals = [
+    ('an OPAQUE of a session another connection holds', ['9.2.6', '13.2', '13.12'], 'OPAQUE', 'another-connections-session',
+     SESSION_REQUIRED, 'session'),
+    ('an OPAQUE no session holds', ['9.2.6', '13.12'], 'OPAQUE', 'no-session', SESSION_REQUIRED, 'session'),
+    ('an ELSEWHERE whose transport carried nothing', ['9.2.6', '13.12', '15.1'], 'ELSEWHERE', 'nothing-carried',
+     SESSION_REQUIRED, 'nothing-carried'),
+    ('an ELSEWHERE its verifier makes no session of', ['13.11', '13.12'], 'ELSEWHERE', 'verifier-makes-none',
+     SESSION_REQUIRED, 'verifier'),
+    ('an ELSEWHERE whose end the wall clock has reached as its verifier settles', ['13.10.4', '13.11', '13.12'], 'ELSEWHERE',
+     'end-come', SESSION_REQUIRED, 'end'),
+    ('a credential scheme to come', ['9.2.6', '13.12'], 4, 'scheme-to-come', CREDENTIAL_UNSUPPORTED, 'scheme'),
+    ('an ELSEWHERE to a server given no verifier', ['9.2.6', '13.11', '13.12'], 'ELSEWHERE', 'no-verifier',
+     CREDENTIAL_UNSUPPORTED, 'scheme'),
+    ('a JWT to a server given no keys', ['9.2.6', '13.12'], 'JWT', 'no-keys', CREDENTIAL_UNSUPPORTED, 'scheme'),
+]
+
+
 def entry(**fields):
     return {key: value for key, value in fields.items() if value is not None}
 
@@ -732,6 +756,7 @@ document = {
         "side is the side that reads: a failure says which side raised it.",
         'clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.',
         "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
+        "A credential refusal gives the scheme a request presents, by its name or, to come, its number, and the situation a test sets up on a server of its own before it: another-connections-session, an OPAQUE of the session another connection holds; no-session, an OPAQUE no session holds; nothing-carried, an ELSEWHERE whose transport carried nothing; verifier-makes-none, an ELSEWHERE its verifier settles with no session of; end-come, an ELSEWHERE whose end the wall clock has reached as its verifier settles; scheme-to-come; no-verifier, an ELSEWHERE to a server given no verifier; no-keys, a JWT to a server given no keys and no key set. Then the code the request is answered with, and the one word the server tells the access it refused with (section 13.12); a JWT's reasons are its verdicts', the step of section 13.8 that refused it.",
     ],
     'specVersion': spec_version(),
     'headers': [entry(name=name, clauses=clauses, bytes=data, header=header) for name, clauses, data, header in headers],
@@ -751,6 +776,9 @@ document = {
                      'keys': keys, 'audience': audience, 'now': instant(now), 'verdict': verdict}
                     for audience, verdicts in ((AUDIENCE, jwt_verdicts), (AUDIENCES, jwt_verdicts_against_a_set))
                     for name, units, token, keys, now, verdict in verdicts],
+    'credentialRefusals': [{'name': name, 'clauses': clauses, 'scheme': scheme, 'situation': situation, 'code': code,
+                            'reason': reason}
+                           for name, clauses, scheme, situation, code, reason in credential_refusals],
 }
 
 with open(OUT, 'w', encoding='utf-8', newline='\n') as file:

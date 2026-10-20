@@ -774,11 +774,20 @@ const heldByHTTPServer = async (
 
   try {
     const connectionToken = drawn(fake);
-    const { armed } = timersBy(clock, () => {
+    const { armed, cleared } = timersBy(clock, () => {
       measured(fake, connectionToken);
     });
 
-    return { held: dueOf(armed.map(delayOf)) };
+    // a body's pace is armed as it comes, and goes once it is whole: the timers left are held
+    return {
+      held: dueOf(
+        armed
+          .filter(({ handle }) => {
+            return !cleared.includes(handle);
+          })
+          .map(delayOf)
+      ),
+    };
   } finally {
     await server.stop();
   }
@@ -838,6 +847,53 @@ const maximumWaitOfOptions: Way = (given) => {
     },
     { exchangeTimeout: Infinity, inactivityTimeout: Infinity, ...optionOf('maximumWait', given) }
   );
+};
+
+// a POST declaring a body that has not come: its body's pace, armed at its head
+const bodyGraceOfOptions: Way = (given) => {
+  return heldByHTTPServer(
+    {
+      drawn: (fake) => {
+        return connectOn(fake, false);
+      },
+      measured: (fake, connectionToken) => {
+        fake.exchange({
+          headers: {
+            'content-length': '100',
+            'content-type': BEAD_MEDIA_TYPE,
+            [CONNECTION_TOKEN_HEADER]: connectionToken,
+          },
+        });
+      },
+    },
+    {
+      exchangeTimeout: Infinity,
+      inactivityTimeout: Infinity,
+      ...optionOf('bodyGracePeriod', given),
+    }
+  );
+};
+
+// an HTTP server's option `name`, on the real clock, as it is built
+const ofHTTPServer = (name: 'headersTimeout' | 'sendGracePeriod'): Way => {
+  return (given) => {
+    const fake = createFakeHTTPServer();
+    const building = attempt(() => {
+      return createHTTPTransportServer({
+        createServer: fake.createServer,
+        ...optionOf(name, given),
+      });
+    });
+
+    return Promise.resolve(
+      'refusal' in building
+        ? {
+            moved: movedOf({ 'a server made': fake.servers.length > 0 }),
+            refusal: building.refusal,
+          }
+        : {}
+    );
+  };
 };
 
 /**
@@ -958,7 +1014,9 @@ const heartbeatOfClient: Way = (given) => {
 };
 
 // a WebSocket server's option `name`, as it is built
-const ofWSServer = (name: 'closeTimeout' | 'heartbeat'): Way => {
+const ofWSServer = (
+  name: 'closeTimeout' | 'headersTimeout' | 'heartbeat' | 'sendGracePeriod'
+): Way => {
   return (given) => {
     const fake = createFakeWebSocketServer();
     const building = attempt(() => {
@@ -1295,6 +1353,18 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'maximumWait',
     ways: { options: maximumWaitOfOptions },
   },
+  'httpTransportServer.sendGracePeriod': {
+    phrase: 'sendGracePeriod',
+    ways: { options: ofHTTPServer('sendGracePeriod') },
+  },
+  'httpTransportServer.headersTimeout': {
+    phrase: 'headersTimeout',
+    ways: { options: ofHTTPServer('headersTimeout') },
+  },
+  'httpTransportServer.bodyGracePeriod': {
+    phrase: 'bodyGracePeriod',
+    ways: { options: bodyGraceOfOptions },
+  },
   'httpTransportClient.inactivityTimeout': {
     phrase: 'inactivityTimeout',
     ways: { options: clientRestOfOptions },
@@ -1322,6 +1392,14 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'webSocketTransportServer.closeTimeout': {
     phrase: 'a close timeout',
     ways: { options: ofWSServer('closeTimeout') },
+  },
+  'webSocketTransportServer.sendGracePeriod': {
+    phrase: 'sendGracePeriod',
+    ways: { options: ofWSServer('sendGracePeriod') },
+  },
+  'webSocketTransportServer.headersTimeout': {
+    phrase: 'headersTimeout',
+    ways: { options: ofWSServer('headersTimeout') },
   },
 });
 

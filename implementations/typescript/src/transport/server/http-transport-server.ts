@@ -41,11 +41,23 @@ import {
   LOCALHOST,
   listenOn,
 } from './transport-server';
+import {
+  assertCount,
+  boundHeadOf,
+  createSendPace,
+  HEADERS_TIMEOUT,
+  type ISendPaceOptions,
+  MAXIMUM_CONNECTIONS,
+  MAXIMUM_CONNECTIONS_PER_ADDRESS,
+  MINIMUM_SEND_BYTES_PER_SECOND,
+  SEND_GRACE_PERIOD,
+} from './server-bounds';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import { createHTTPRequestExchange, type IExchange } from './http-request-exchange';
 import {
   authorityNamedBy,
   countOf,
+  endClosing,
   endWith,
   ENVELOPE_KINDS,
   ENVELOPE_PREFIX,
@@ -101,6 +113,13 @@ export type {
   IHTTPTransportServerOptions,
 } from './types';
 export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
+export {
+  HEADERS_TIMEOUT,
+  MAXIMUM_CONNECTIONS,
+  MAXIMUM_CONNECTIONS_PER_ADDRESS,
+  MINIMUM_SEND_BYTES_PER_SECOND,
+  SEND_GRACE_PERIOD,
+} from './server-bounds';
 
 // interfaces
 
@@ -149,6 +168,15 @@ interface IDrawn extends IDrawnConnection {
 /** The bytes of body the exchanges under way may hold together, by default: 256 MiB. */
 export const BODY_BYTES_BUDGET = 268_435_456;
 
+/** How long a body comes, by default, before its rate is held: 5 seconds, Kestrel's grace. */
+export const BODY_GRACE_PERIOD = 5_000;
+
+/**
+ * The slowest a body may come, by default, once its grace passed: 240 bytes a second, Kestrel's
+ * `MinRequestBodyDataRate` (spec 15.12).
+ */
+export const MINIMUM_BODY_BYTES_PER_SECOND = 240;
+
 /** How long a request handed on waits for its answer, by default: 5 minutes. */
 export const EXCHANGE_TIMEOUT = 300_000;
 
@@ -157,12 +185,6 @@ export const INACTIVITY_TIMEOUT = 300_000;
 
 /** The largest body by default: a router's largest envelope. */
 export const MAXIMUM_BODY_BYTES = 16_778_240;
-
-/** The connections drawn at once, by default. */
-export const MAXIMUM_CONNECTIONS = 10_000;
-
-/** The connections one address holds at once, by default. */
-export const MAXIMUM_CONNECTIONS_PER_ADDRESS = 64;
 
 /** The bytes one connection's outbox holds, by default: two of the largest envelopes. */
 export const MAXIMUM_OUTBOX_BYTES = 33_556_480;
@@ -287,9 +309,11 @@ export const createHTTPTransportServer = (
 ): HTTPTransportServer => {
   const {
     bodyBytesBudget = BODY_BYTES_BUDGET,
+    bodyGracePeriod: givenBodyGracePeriod = BODY_GRACE_PERIOD,
     clock = PLATFORM_CLOCK,
     createServer,
     exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
+    headersTimeout: givenHeadersTimeout = HEADERS_TIMEOUT,
     hosts,
     inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
     maximumBodyBytes = MAXIMUM_BODY_BYTES,
@@ -298,9 +322,12 @@ export const createHTTPTransportServer = (
     maximumOutboxBytes = MAXIMUM_OUTBOX_BYTES,
     maximumWait: givenMaximumWait = MAXIMUM_WAIT,
     maximumWaitingExchanges = MAXIMUM_WAITING_EXCHANGES,
+    minimumBodyBytesPerSecond = MINIMUM_BODY_BYTES_PER_SECOND,
+    minimumSendBytesPerSecond = MINIMUM_SEND_BYTES_PER_SECOND,
     origins = [],
     pathname = PATHNAME,
     secure,
+    sendGracePeriod: givenSendGracePeriod = SEND_GRACE_PERIOD,
     trustedProxies,
     unnamedProxies,
   } = options;
@@ -314,6 +341,16 @@ export const createHTTPTransportServer = (
   assertOption('maximumOutboxBytes', { value: maximumOutboxBytes });
   const maximumWait = assertHeldFinite('maximumWait', givenMaximumWait);
   assertOption('maximumWaitingExchanges', { value: maximumWaitingExchanges });
+  const headersTimeout = assertHeldFinite('headersTimeout', givenHeadersTimeout);
+  assertOption('minimumBodyBytesPerSecond', { value: minimumBodyBytesPerSecond });
+  const bodyGracePeriod = assertHeldFinite('bodyGracePeriod', givenBodyGracePeriod);
+  const pace: ISendPaceOptions = {
+    minimumSendBytesPerSecond: assertCount('minimumSendBytesPerSecond', {
+      mayBeNone: true,
+      value: minimumSendBytesPerSecond,
+    }),
+    sendGracePeriod: assertHeldFinite('sendGracePeriod', givenSendGracePeriod),
+  };
   assertHosts(hosts);
   assertOrigins(origins);
   const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
@@ -355,8 +392,8 @@ export const createHTTPTransportServer = (
       };
 
       // ends an exchange the transport answers itself, telling a refusal once written (spec 15.1);
-      // over HTTP/1, a refusal of a body it will not read closes its socket, lest the rest read as
-      // the next request
+      // over HTTP/1, a refusal of a body it will not read closes its socket, in stages, lest the rest
+      // read as the next request and so its client reads it as it sends
       const finish = ({ request, response }: IExchangeIn, end: IEnd): void => {
         const isClosing = end.status >= 400 && request.httpVersionMajor === 1 && hasBody(request);
         const { reason, status } = end;
@@ -373,10 +410,11 @@ export const createHTTPTransportServer = (
                 status,
               };
 
-        endWith(
-          response,
-          isClosing ? { ...end, headers: { ...end.headers, connection: 'close' } } : end
-        );
+        if (isClosing) {
+          endClosing({ request, response }, end);
+        } else {
+          endWith(response, end);
+        }
 
         if (refusal !== undefined) {
           tell(REFUSAL_EVENT, [refusal]);
@@ -434,10 +472,11 @@ export const createHTTPTransportServer = (
             sendHead(exchange.response);
           }
 
+          // * one whose body still comes is answered before it is whole: its socket closes in stages
           if (exchange.response.headersSent) {
             exchange.response.destroy();
           } else {
-            endWith(exchange.response, UNKNOWN_CONNECTION);
+            endClosing(exchange, UNKNOWN_CONNECTION);
           }
         }
 
@@ -450,6 +489,46 @@ export const createHTTPTransportServer = (
         }
 
         tell(CLOSE_EVENT, [isClean, connectionHandle]);
+      };
+
+      // a connection behind its bounds, reported as it is dropped, naming the bound, so an operator
+      // tells it from a network that failed
+      const report = ({ connectionHandle }: IDrawn, why: string): void => {
+        server.emit(
+          ERROR_EVENT,
+          new GenericError(`the client fell behind: ${why}`),
+          connectionHandle
+        );
+      };
+
+      // an answer's bytes, held to the pace its socket takes them at; `late` hears, naming the
+      // bound, once its socket still holds them past their deadline
+      const paceAnswer = (
+        response: IHTTPResponseLike,
+        { bytes, late }: { bytes: number; late: (why: string) => void }
+      ): void => {
+        if (response.writableFinished) {
+          return;
+        }
+
+        const paced = createSendPace(
+          {
+            late: () => {
+              late(
+                `its answer was not taken by its deadline, at minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} past sendGracePeriod ${String(pace.sendGracePeriod)} ms`
+              );
+            },
+            unsent: () => {
+              return response.writableFinished ? 0 : Math.max(1, response.writableLength ?? 1);
+            },
+          },
+          pace
+        );
+
+        paced.hand(bytes);
+        response.on('close', () => {
+          paced.stop();
+        });
       };
 
       // a listen ends: with what waits for it, as a batch, or, nothing waiting, with `end`
@@ -485,12 +564,26 @@ export const createHTTPTransportServer = (
         }
 
         response.end();
+        // ! held to its pace: one past its deadline is lost, and what it carried comes again in
+        // the next listen, its connection kept (spec 15.10, 15.12)
+        paceAnswer(response, {
+          bytes: length,
+          late: (why) => {
+            report(connection, why);
+            response.destroy();
+          },
+        });
       };
 
       // an envelope of the server's own waits in its connection's outbox, numbered, for a listen to
       // bring it back; past the outbox's bound the connection closes, as one whose client fell behind
       const enqueue = (connection: IDrawn, bytes: Uint8Array): void => {
         if (connection.outboxBytes + bytes.length > maximumOutboxBytes) {
+          report(
+            connection,
+            `its outbox would pass maximumOutboxBytes, ${String(maximumOutboxBytes)} bytes`
+          );
+
           return (closeDrawn(connection, false), undefined);
         }
 
@@ -681,12 +774,13 @@ export const createHTTPTransportServer = (
           admitExchange: (connection) => {
             return connection.open < 2 * maximumWaitingExchanges;
           },
-          createExchange: (response) => {
+          createExchange: ({ request, response }) => {
             return {
               isCancelled: false,
               isDelivered: false,
               isEnded: false,
               prefix: undefined,
+              request,
               response,
               timer: undefined,
             };
@@ -810,6 +904,10 @@ export const createHTTPTransportServer = (
           message: (connection, message) => {
             tell(MESSAGE_EVENT, [message, connection.connectionHandle]);
           },
+          // * the exchange's own, whichever socket or proxy brought its connect (spec 15.1)
+          originOf: (request) => {
+            return { address: addressOf(request), port: request.socket.remotePort };
+          },
           cancel: (connection, callId) => {
             const cancelled = connection.waiting.get(callId);
 
@@ -832,7 +930,7 @@ export const createHTTPTransportServer = (
           },
           finish,
         },
-        { maximumBodyBytes }
+        { bodyGracePeriod, clock, maximumBodyBytes, minimumBodyBytesPerSecond }
       );
 
       const onExchange: HTTPRequestListener = (request, response) => {
@@ -969,8 +1067,14 @@ export const createHTTPTransportServer = (
               return known;
             }
 
+            const instance = createServer(onExchange, { address: host });
+
+            // * its head within `headersTimeout`, judged each second, its 408 the server's own; no
+            // time for the whole request, which a body's rate holds instead (spec 15.12)
+            boundHeadOf(instance, headersTimeout);
+
             const entry = {
-              instance: createServer(onExchange, { address: host }),
+              instance,
               onError: (error: Error): void => {
                 server.emit(ERROR_EVENT, error, '');
               },
@@ -1184,6 +1288,16 @@ export const createHTTPTransportServer = (
             }
 
             response.end(bytes);
+            // ! held to its pace: one past its deadline is an answer that could not be written,
+            // its exchange lost, which closes its connection at both ends (spec 15.7, 15.12)
+            paceAnswer(response, {
+              bytes: bytes.length,
+              late: (why) => {
+                report(connection, why);
+                response.destroy();
+                closeDrawn(connection, false);
+              },
+            });
           });
         },
       };

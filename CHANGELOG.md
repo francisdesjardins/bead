@@ -30,6 +30,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DisconnectError`, `DisconnectException`, even when the signal it was given is that of a call the
   close ends; an exit of `spec/metrics.json` closes a connection while a call on it awaits its
   command, and counts both `closed`, once each.
+- A router limit of the protocol's, `maximumAnsweringCalls`, `MaximumAnsweringCalls`, 64: a
+  requester holds its calls on a connection to it, failing one past it before it goes, and a request
+  past it is answered `CAPACITY_EXCEEDED` before anything else of it is read, on every transport
+  (spec 9.1, 9.2's new step 3; decision 0033). Each side gauges `largestAnsweringCalls`, the busiest
+  connection's, which its health warns on at 80%.
+- A server holds what waits for a client's socket to `minimumSendBytesPerSecond`, 240, past
+  `sendGracePeriod`, 5 s, and a WebSocket server to `maximumUnsentBytes` besides, dropping and
+  reporting a client behind them, its close unclean; over HTTP, a listen's batch behind its pace is
+  lost and reported, and comes again to the next listen (spec 15.10, 15.12; decision 0033).
+- Both transports' servers bound a request's head, `headersTimeout`, 30 s, answered 408 as HTTP
+  answers it, and an HTTP server a body, `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`,
+  5 s, refused 408 `too-slow`, marked and told (spec 15.6, 15.12; decision 0033).
+- A server's router tells each access it refuses, `accessRefused`, `AccessRefused`: its stage, the
+  code answered, its reason, the credential's scheme, what was called, the connection, and the
+  refused request's own address and port, which its transport hands beside each envelope; never the
+  credential, nor a claim (spec 13.12, 15.1; decision 0034). `spec/vectors.json` gains
+  `credentialRefusals`, the reason of each credential refused but a `JWT`'s.
+- The conversations of 9.2's new step 3 and of a request held to `chunkBytes`; the transports'
+  cases of a WebSocket server's connections, a body's rate and a head's time; the durations of
+  `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod`; and an exit that counts a request past
+  the calls its connection has answered.
 
 ### Changed
 
@@ -70,6 +91,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `HandedCredential`, says a `JWT`'s scheme alone, so a procedure that reads a `JWT`'s token there
   no longer compiles. The C# side's `RequestHeader` says so with a `Credential` whose `Token` is
   none.
+- A WebSocket server bounds its connections, `maximumConnections`, 10,000, and
+  `maximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its 101: behind
+  a proxy it now needs `trustedProxies` or `unnamedProxies`, as an HTTP server does, or every client
+  past the 64th is refused (spec 15.2, step 8, 15.12; decision 0033).
+- A request that came whole, and a transfer's opening, is held to `chunkBytes`, answered
+  `ENVELOPE_TOO_LARGE` past it, as its requester sends it (spec 12.2). An HTTP server's
+  `maximumWaitingExchanges` follows its router's `maximumAnsweringCalls`.
+- The TypeScript HTTP server's answers are held to `minimumSendBytesPerSecond`, as the C# one's were
+  to Kestrel's `MinResponseDataRate`, which the C# side sets to none, Bead's rule in its place, as
+  Bead's body rate replaces Kestrel's `MinRequestBodyDataRate`; a head is answered 408 at 30 s,
+  where Node's 60 s held, the transport setting `headersTimeout`, `requestTimeout` and
+  `connectionsCheckingInterval` on every server it listens on, those its `createServer` builds
+  among them.
+- An HTTP outbox past its bound is reported as it closes its connection (spec 15.9).
+- Spec 9.2's steps 3 to 8 are steps 4 to 9, and 15.6's rows from 409 on one later, past its new 408;
+  debugging 9.4's rows from its second on are one later. Spec 15.12's table names the transports
+  each bound holds on.
+- Three conversations ask `bytes` for the result they send as a transfer, and the one of a relay's
+  legs' payload limit sends leg A's request whole within `chunkBytes`; leg B's header, counted call
+  by call, is its twins'.
 
 ### Removed
 
@@ -110,6 +151,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On the C# side, an HTTP body whose read Kestrel fails — slower than its rate, a malformed chunked
   one — is answered the status of its failure, unmarked, its connection closed, never 200 and empty,
   which said the server had the envelope (spec 15.7).
+- Every answer an HTTP server writes before its request's body is whole closes its socket in
+  stages, its write side first, so its client reads it before the close, the TypeScript side's 404
+  `connection-unknown` among them, which kept its socket and drained the body (spec 15.12).
+- Spec 8.3's open point closes: a receiver bounds the calls a peer has it answer on a connection
+  that keeps it, a WebSocket's or a Web Worker's, and what it holds of their requests in bytes (spec
+  9.2, step 3, 12.2).
 
 ### Security
 

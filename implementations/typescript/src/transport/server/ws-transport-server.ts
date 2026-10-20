@@ -18,8 +18,10 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   TRANSPORT_WS,
 } from '../shared/constants';
-import { assertHeld } from '../shared/clock';
+import { assertHeld, assertHeldFinite } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
+import { GenericError } from '../shared/errors';
+import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
 import type { Data } from '../shared/types';
@@ -29,6 +31,16 @@ import {
   assertOrigins,
   credentialOf,
 } from './hosts-and-origins';
+import {
+  assertCount,
+  createSendPace,
+  HEADERS_TIMEOUT,
+  type ISendPace,
+  MAXIMUM_CONNECTIONS,
+  MAXIMUM_CONNECTIONS_PER_ADDRESS,
+  MINIMUM_SEND_BYTES_PER_SECOND,
+  SEND_GRACE_PERIOD,
+} from './server-bounds';
 import {
   createTransportServer,
   generateHandle,
@@ -60,6 +72,13 @@ import {
 export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export { HOST_REFUSAL, ORIGIN_REFUSAL } from './hosts-and-origins';
+export {
+  HEADERS_TIMEOUT,
+  MAXIMUM_CONNECTIONS,
+  MAXIMUM_CONNECTIONS_PER_ADDRESS,
+  MINIMUM_SEND_BYTES_PER_SECOND,
+  SEND_GRACE_PERIOD,
+} from './server-bounds';
 export type {
   IDrawingRequest,
   IIncomingMessageLike,
@@ -79,6 +98,14 @@ export const CLOSE_TIMEOUT = 5_000;
 
 /** The largest message by default: a router's largest envelope by default (spec 15.3). */
 export const MAXIMUM_MESSAGE_BYTES = 16_778_240;
+
+/**
+ * What waits for one connection's socket at most, by default: what a peer that keeps every rule can
+ * be owed at once under a router's limits by default — the answers to the 64 calls it has answered
+ * and the server's 64 commands to it, a chunk each, the 4 transfers it receives, a window each, and
+ * two envelopes of the server's own besides, as an HTTP outbox holds (spec 15.12).
+ */
+export const MAXIMUM_UNSENT_BYTES = 184_551_424;
 
 /** What an omitted start option resolves to. */
 export const START_DEFAULTS = Object.freeze({
@@ -137,6 +164,15 @@ const forwardedOf = (request: IIncomingMessageLike): string | undefined => {
   return lines.length === 0 ? undefined : lines.join(', ');
 };
 
+// the bytes an envelope handed to a socket holds: a text message's encoded, as it goes
+const bytesOf = (data: Data): number => {
+  if (typeof data === 'string') {
+    return Buffer.byteLength(data);
+  }
+
+  return data instanceof Blob ? data.size : data.byteLength;
+};
+
 // ! an upgrade that carries an `Origin` carries no credential: a page's browser writes its own
 // authentication on it (Fetch, credentials mode `include`), as the server's JSDoc says
 const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined => {
@@ -186,17 +222,32 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
+    headersTimeout: givenHeadersTimeout = HEADERS_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     hosts,
     maxPayload = MAXIMUM_MESSAGE_BYTES,
+    maximumConnections = MAXIMUM_CONNECTIONS,
+    maximumConnectionsPerAddress = MAXIMUM_CONNECTIONS_PER_ADDRESS,
+    maximumUnsentBytes = MAXIMUM_UNSENT_BYTES,
+    minimumSendBytesPerSecond = MINIMUM_SEND_BYTES_PER_SECOND,
     origins = [],
     secure,
+    sendGracePeriod: givenSendGracePeriod = SEND_GRACE_PERIOD,
     trustedProxies,
     unnamedProxies,
     WebSocketServer,
   } = options;
   const heartbeat = assertHeartbeat(givenHeartbeat);
   const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
+  const headersTimeout = assertHeldFinite('headersTimeout', givenHeadersTimeout);
+  assertCount('maximumConnections', { value: maximumConnections });
+  assertCount('maximumConnectionsPerAddress', { value: maximumConnectionsPerAddress });
+  assertCount('maximumUnsentBytes', { value: maximumUnsentBytes });
+  assertCount('minimumSendBytesPerSecond', { mayBeNone: true, value: minimumSendBytesPerSecond });
+  const pace = {
+    minimumSendBytesPerSecond,
+    sendGracePeriod: assertHeldFinite('sendGracePeriod', givenSendGracePeriod),
+  };
   assertHosts(hosts);
   assertOrigins(origins);
   const proxies = trustedProxiesOf(trustedProxies, { unnamedProxies });
@@ -210,6 +261,65 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       const listeners = new Set<IListener>();
       // the rank of the last connection taken, across its starts: no handle is given twice
       let ordinal = 0;
+      // the places upgrades took, across every address bound, and those each client address took;
+      // an address that holds none is not kept
+      let placed = 0;
+      const perAddress = new Map<string, number>();
+      // the upgrades refused for those bounds, which `onRequest` answers busy
+      const refusedBusy = new WeakSet<IIncomingMessageLike>();
+      // what waits for each connection's socket, held to its pace
+      const paces = new WeakMap<IServerSocketLike, ISendPace>();
+
+      const heldBy = (address: string): number => {
+        return perAddress.get(address) ?? 0;
+      };
+
+      // ! a place is taken as its upgrade is judged, before its handshake completes, and given back
+      // once its socket closes, whatever became of it, so upgrades that cross take no more than are
+      // left (spec 15.2, step 8)
+      const place = (request: IncomingMessage, address: string): boolean => {
+        if (placed >= maximumConnections || heldBy(address) >= maximumConnectionsPerAddress) {
+          return false;
+        }
+
+        let isHeld = true;
+
+        placed += 1;
+        perAddress.set(address, heldBy(address) + 1);
+        request.socket.once(CLOSE_EVENT, () => {
+          if (!isHeld) {
+            return;
+          }
+
+          isHeld = false;
+          placed -= 1;
+
+          const others = heldBy(address) - 1;
+
+          if (others === 0) {
+            perAddress.delete(address);
+          } else {
+            perAddress.set(address, others);
+          }
+        });
+
+        return true;
+      };
+
+      // a connection behind its bounds is dropped, its close unclean, and reported first, naming
+      // the bound, so an operator tells it from a network that failed (RFC 6455 §7.1.7)
+      const drop = (
+        { connectionHandle, socket }: ITransportServerClientAware<IServerSocketLike>,
+        why: string
+      ): void => {
+        paces.get(socket)?.stop();
+        server.emit(
+          ERROR_EVENT,
+          new GenericError(`the client fell behind: ${why}`),
+          connectionHandle
+        );
+        socket.terminate();
+      };
 
       // resolves once `socket` has closed, dropping it when the handshake takes longer than allowed:
       // on the real clock, whatever the server's is, since it bounds the platform's own close against
@@ -310,11 +420,11 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
       // server's stop began, so a head that ends after it is judged by its own server, not a later one
       const answersOf = (isStopped: () => boolean) => {
         // ! Node raises `request` for no upgrade the callback takes: one the judgement takes here is
-        // one the stop refused, busy, or one Node did not read as an upgrade, malformed
+        // one the stop or the bounds refused, busy, or one Node did not read as an upgrade, malformed
         const onRequest = (request: IncomingMessage, response: ServerResponse): void => {
           const refusal =
             refusalOfHandshake(request, judged) ??
-            (isStopped() ? BUSY_HANDSHAKE : MALFORMED_HANDSHAKE);
+            (isStopped() || refusedBusy.has(request) ? BUSY_HANDSHAKE : MALFORMED_HANDSHAKE);
 
           refuse(request, {
             refusal,
@@ -330,6 +440,16 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         // found; once the stop began, ws listens no more, and Node would drop the upgrade unanswered
         const shouldUpgradeCallback = (request: IncomingMessage): boolean => {
           if (isStopped() || refusalOfHandshake(request, judged) !== undefined) {
+            return false;
+          }
+
+          // its bounds judged after its origin; a socket already gone has no address, and is
+          // dropped as it connects
+          const address = addressOf(request);
+
+          if (address !== undefined && !place(request, address)) {
+            refusedBusy.add(request);
+
             return false;
           }
 
@@ -397,6 +517,23 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         };
 
         connections.set(connectionHandle, connection);
+        paces.set(
+          socket,
+          createSendPace(
+            {
+              late: () => {
+                drop(
+                  connection,
+                  `what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond ${String(minimumSendBytesPerSecond)} past sendGracePeriod ${String(pace.sendGracePeriod)} ms`
+                );
+              },
+              unsent: () => {
+                return socket.bufferedAmount ?? 0;
+              },
+            },
+            pace
+          )
+        );
 
         socket.binaryType = binaryType;
 
@@ -419,6 +556,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         // a connection the registry no longer holds, which a stop cleared, tells no close of its own
         socket.on(CLOSE_EVENT, (code) => {
           beating.stop();
+          paces.get(socket)?.stop();
 
           if (connections.get(connectionHandle) !== connection) {
             return;
@@ -438,8 +576,13 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           // a text frame arrives as bytes whatever `binaryType` says
           const delivered = isBinary ? (data as Data) : decoder.decode(data as ArrayBufferView);
 
+          // handed with the address and port of its connection, which an access refused names
           return (
-            tell(MESSAGE_EVENT, [{ credential, data: delivered }, connectionHandle]), undefined
+            tell(MESSAGE_EVENT, [
+              { address, credential, data: delivered, port: remotePort },
+              connectionHandle,
+            ]),
+            undefined
           );
         });
 
@@ -481,7 +624,17 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
               const { onRequest, shouldUpgradeCallback } = answersOf(() => {
                 return !isServing;
               });
-              const http = createServer({ shouldUpgradeCallback }, onRequest);
+              // its head within `headersTimeout`, judged each second, its 408 Node's own; no time
+              // for the whole request, which an upgrade has no body to need
+              const http = createServer(
+                {
+                  connectionsCheckingInterval: 1_000,
+                  headersTimeout,
+                  requestTimeout: 0,
+                  shouldUpgradeCallback,
+                },
+                onRequest
+              );
               const listener: IListener = {
                 http,
                 instance: new WebSocketServer({ maxPayload, server: http }),
@@ -581,14 +734,60 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           return closeSocket(socket, 1000);
         },
 
+        // what each socket holds that it has not taken yet, all together and the most one holds,
+        // under its ceiling; and the places upgrades hold, the busiest address's under its own
+        gauges: () => {
+          let unsentBytes = 0;
+          let largestUnsentBytes = 0;
+          let largestAddressConnections = 0;
+
+          for (const { socket } of connections.values()) {
+            const unsent = socket.bufferedAmount ?? 0;
+
+            unsentBytes += unsent;
+            largestUnsentBytes = Math.max(largestUnsentBytes, unsent);
+          }
+
+          for (const held of perAddress.values()) {
+            largestAddressConnections = Math.max(largestAddressConnections, held);
+          }
+
+          return gaugesOf({
+            ceilings: {
+              connections: maximumConnections,
+              largestAddressConnections: maximumConnectionsPerAddress,
+              largestUnsentBytes: maximumUnsentBytes,
+            },
+            counts: { largestAddressConnections, largestUnsentBytes, unsentBytes },
+          });
+        },
+
         // a credential given here is not carried: nothing is toward a client, and the router fails a
         // command that presents one before it goes, DESTINATION_UNREACHABLE (decision 0032)
-        send: ({ data }, { socket }) => {
+        send: ({ data }, connection) => {
+          const { socket } = connection;
+
           return createPromise((resolve) => {
             // `ReadyState` keeps the WebSocket numbering, so its OPEN is the socket's
-            if (socket.readyState === ReadyState.OPEN) {
-              socket.send(data);
+            if (socket.readyState !== ReadyState.OPEN) {
+              return (resolve(), undefined);
             }
+
+            const bytes = bytesOf(data);
+
+            // ! the backstop judged before it goes: what the socket holds never passes it, and the
+            // envelope is one the transport had, lost with the connection (spec 15.12)
+            if ((socket.bufferedAmount ?? 0) + bytes > maximumUnsentBytes) {
+              drop(
+                connection,
+                `what waits for its socket would pass maximumUnsentBytes, ${String(maximumUnsentBytes)} bytes`
+              );
+
+              return (resolve(), undefined);
+            }
+
+            socket.send(data);
+            paces.get(socket)?.hand(bytes);
 
             return (resolve(), undefined);
           });

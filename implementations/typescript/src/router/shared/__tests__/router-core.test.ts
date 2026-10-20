@@ -281,6 +281,89 @@ test.describe('createRouterCore', () => {
       });
     });
 
+    test('answers CAPACITY_EXCEEDED a request past the calls its peer has it answer on its connection, before its route, its credential or its transfer, and takes one once a call ends', async () => {
+      let asked = 0;
+      const { port, sent } = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          if (header.credential === undefined) {
+            return undefined;
+          }
+
+          asked += 1;
+
+          return Promise.resolve(undefined);
+        },
+      });
+      const seen: IRequestResolverProps<Handle>[] = [];
+      using core = createRouterCore(port, {
+        limits: { ...limits, maximumAnsweringCalls: 2, maximumEnvelopeBytes: 1_024 },
+      });
+      const jwt = { scheme: CredentialScheme.JWT, token: 'a.b.c' } as const;
+
+      core.registerResolver(resolverOf(echo, seen));
+      core.receive(requestOf(1), 'a');
+      core.receive(requestOf(3), 'a');
+      // another connection's calls are its own
+      core.receive(requestOf(1), 'b');
+      core.receive(requestOf(5, { procedure: { ...echo, serviceId: 8 } }), 'a');
+      core.receive(requestOf(7, { destinationId: 4 }), 'a');
+      core.receive(requestOf(9, { credential: jwt }), 'a');
+      core.receive(requestOf(11, { payload: patternOf(8), total: 100 }), 'a');
+      await sleep(0);
+
+      expect(seen).toHaveLength(3);
+      expect(asked).toBe(0);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 5, ProtocolCode.CAPACITY_EXCEEDED],
+        ['a', 'failure', 7, ProtocolCode.CAPACITY_EXCEEDED],
+        ['a', 'failure', 9, ProtocolCode.CAPACITY_EXCEEDED],
+        ['a', 'failure', 11, ProtocolCode.CAPACITY_EXCEEDED],
+      ]);
+      expect(sent[0]?.envelope).toMatchObject({
+        failure: { detail: 'the calls a connection has answered at once are 2 at most' },
+      });
+
+      // a call answered gives its place back, and the next request is taken
+      await answerOf({ core, seen }, { payload: new Uint8Array(0) });
+      core.receive(requestOf(13), 'a');
+      await sleep(0);
+
+      expect(seen).toHaveLength(4);
+      expect(seen[3]?.header.callId).toBe(13);
+    });
+
+    test('answers ENVELOPE_TOO_LARGE a request that came whole past chunkBytes, and holds nothing of it', async () => {
+      const { port, sent } = createPort();
+      const seen: IRequestResolverProps<Handle>[] = [];
+      using core = createRouterCore(port, {
+        limits: { ...limits, maximumEnvelopeBytes: 1_024 },
+      });
+
+      core.registerResolver(resolverOf(echo, seen));
+      // 12 bytes of header, then 53 of payload: one past chunkBytes, within an envelope
+      core.receive(requestOf(1, { payload: patternOf(53) }), 'a');
+      // an opening past it too
+      core.receive(requestOf(3, { payload: patternOf(49), total: 300 }), 'a');
+      // a request of chunkBytes, taken
+      core.receive(requestOf(5, { payload: patternOf(52) }), 'a');
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 1, ProtocolCode.ENVELOPE_TOO_LARGE],
+        ['a', 'failure', 3, ProtocolCode.ENVELOPE_TOO_LARGE],
+      ]);
+      expect(sent[0]?.envelope).toMatchObject({
+        failure: { detail: 'a request is 64 bytes at most, not 65' },
+      });
+      expect(
+        seen.map(({ header }) => {
+          return header.callId;
+        })
+      ).toEqual([5]);
+      expect(core.gauges().counts).toMatchObject({ answeringCalls: 1, receivingTransfers: 0 });
+    });
+
     test('takes a request for a destination to the handler its port gives, and answers it by that handler, never a resolver at the same address', async () => {
       const told: unknown[] = [];
       const handled: IRequestResolverProps<Handle>[] = [];
@@ -2654,22 +2737,24 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent)).toEqual([['a', 'credit', 1, 60]]);
     });
 
-    test('refuses CHUNK_INVALID the chunks of a sender whose chunkBytes is larger than its own, and smaller, both ends setting their limits alike', async () => {
+    test('refuses the opening of a sender whose chunkBytes is larger than its own ENVELOPE_TOO_LARGE, and the chunks of one whose chunkBytes is smaller CHUNK_INVALID, both ends setting their limits alike', async () => {
       const payload = patternOf(300);
 
-      for (const [requester, receiver, chunks, detail] of [
-        // its opening of 108 bytes taken, its first chunk of 112 past the receiver's full of 48
+      for (const [requester, receiver, chunks, code, detail] of [
+        // its opening of 128 bytes past the receiver's request of 64 at most, nothing credited
         [
           { chunkBytes: 128, windowBytes: 256 },
           { chunkBytes: 64, windowBytes: 128 },
-          [112],
-          'a chunk before the last carries 48 bytes, not 112',
+          undefined,
+          ProtocolCode.ENVELOPE_TOO_LARGE,
+          'a request is 64 bytes at most, not 128',
         ],
         // its chunks of 48 under the receiver's full of 112, every one under the credit
         [
           { chunkBytes: 64, windowBytes: 128 },
           { chunkBytes: 128, windowBytes: 256 },
           [48, 48, 48, 48, 48, 16],
+          ProtocolCode.CHUNK_INVALID,
           'a chunk before the last carries 112 bytes, not 48',
         ],
       ] as const) {
@@ -2694,12 +2779,8 @@ test.describe('createRouterCore', () => {
 
         const label = `${String(requester.chunkBytes)} to ${String(receiver.chunkBytes)}`;
 
-        expect(await failed, label).toMatchObject({
-          code: ProtocolCode.CHUNK_INVALID,
-          detail,
-          origin: 'peer',
-        });
-        // the opening taken and credited, then the first chunk refused
+        expect(await failed, label).toMatchObject({ code, detail, origin: 'peer' });
+        // the opening refused; or taken and credited, then the first chunk refused
         expect(
           loop.traffic.sent.map(({ bytes, to }) => {
             return [to, bytes[1], bytes.length];
@@ -2707,10 +2788,14 @@ test.describe('createRouterCore', () => {
           label
         ).toEqual([
           ['server', EnvelopeKind.REQUEST, requester.chunkBytes],
-          ['client', EnvelopeKind.CREDIT, 16],
-          ...chunks.map((bytes) => {
-            return ['server', EnvelopeKind.CHUNK, 16 + bytes];
-          }),
+          ...(chunks === undefined
+            ? []
+            : [
+                ['client', EnvelopeKind.CREDIT, 16],
+                ...chunks.map((bytes) => {
+                  return ['server', EnvelopeKind.CHUNK, 16 + bytes];
+                }),
+              ]),
           ['client', EnvelopeKind.FAILURE, expect.any(Number)],
         ]);
         expect(heard, label).toEqual([]);
@@ -3080,7 +3165,7 @@ test.describe('createRouterCore', () => {
   test.describe('its metrics', () => {
     const answered = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
 
-    // debugging 9.2 and 9.4.19
+    // debugging 9.2 and 9.4.20
     test('count a call answered whose answer its transport throws on as an error, and one its transport rejects once it has it as answered', async () => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');

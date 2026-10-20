@@ -64,8 +64,54 @@ public sealed record HttpTransportServerOptions
     /// <summary>The connections one address holds at once: 64 by default.</summary>
     public int MaximumConnectionsPerAddress { get; init; } = 64;
 
-    /// <summary>The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the connection closes.</summary>
+    /// <summary>
+    /// The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the
+    /// connection closes, reported through <see cref="HttpTransportServer.Error"/> (spec 15.9).
+    /// </summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
+
+    /// <summary>
+    /// The slowest a client may take an answer, in bytes a second, once <see cref="SendGracePeriod"/>
+    /// passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>, which this replaces (spec 15.12).
+    /// Each answer of <i>S</i> bytes is given the longer of the grace and <i>S</i> at this rate; one
+    /// its socket still holds past that is lost, its connection closed and reported through
+    /// <see cref="HttpTransportServer.Error"/>, naming the bound. 0 holds none, on a network the
+    /// application trusts; below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is
+    /// built. On the real clock, as what it bounds is the platform's socket.
+    /// </summary>
+    public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
+
+    /// <summary>
+    /// The least time an answer is given to be taken by its socket: 5 seconds by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
+    /// infinite are refused (spec 15.12). On the real clock.
+    /// </summary>
+    public TimeSpan SendGracePeriod { get; init; } = ServerBounds.SendGracePeriod;
+
+    /// <summary>
+    /// How long a request's head may take to come whole: 30 seconds by default, Kestrel's
+    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, within a second of it
+    /// (spec 15.12). From 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest
+    /// whole one; zero and infinite are refused. On the real clock, as the platform's parser holds it.
+    /// </summary>
+    public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
+
+    /// <summary>
+    /// The slowest a body may come, in bytes a second, once <see cref="BodyGracePeriod"/> passed since
+    /// its head: 240 by default, Kestrel's <c>MinRequestBodyDataRate</c>, which this replaces. One
+    /// that has brought <i>R</i> bytes, and none more, by its head plus the longer of the grace and
+    /// <i>R</i> at this rate is refused 408, <c>too-slow</c>, its socket closed in stages and its
+    /// connection kept (spec 15.12). A whole number above 0; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public int MinimumBodyBytesPerSecond { get; init; } = ServerBounds.MinimumBodyBytesPerSecond;
+
+    /// <summary>
+    /// How long a body comes before its rate is held: 5 seconds by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
+    /// infinite are refused (spec 15.12). On the server's clock.
+    /// </summary>
+    public TimeSpan BodyGracePeriod { get; init; } = ServerBounds.BodyGracePeriod;
 
     /// <summary>
     /// The longest a listen waits for something to bring back: 30 seconds by default, under an
@@ -74,8 +120,25 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public TimeSpan MaximumWait { get; init; } = TimeSpan.FromSeconds(30);
 
+    private readonly int _maximumWaitingExchanges = LimitDefaults.MaximumAnsweringCalls;
+
     /// <summary>The requests one connection has waiting at once: 64 by default; the exchanges under way on it, twice that.</summary>
-    public int MaximumWaitingExchanges { get; init; } = 64;
+    public int MaximumWaitingExchanges
+    {
+        get
+        {
+            return _maximumWaitingExchanges;
+        }
+        init
+        {
+            _maximumWaitingExchanges = value;
+            IsMaximumWaitingExchangesGiven = true;
+        }
+    }
+
+    // whether MaximumWaitingExchanges was given, its default 64 among what may be, so the HTTP server
+    // takes its router's number for none given alone
+    internal bool IsMaximumWaitingExchangesGiven { get; private init; }
 
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
@@ -214,9 +277,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // and a client that does not read holds the stop back no longer than this
     private static readonly TimeSpan EndsGrace = TimeSpan.FromSeconds(1);
 
+    private const int LingerReadBytes = 65_536;
+
     private static readonly End Nothing = new(StatusCodes.Status204NoContent);
     private static readonly End Malformed = new(StatusCodes.Status400BadRequest, HttpRefusals.Malformed);
     private static readonly End Unknown = new(StatusCodes.Status404NotFound, HttpRefusals.ConnectionUnknown);
+    private static readonly End TooSlow = new(StatusCodes.Status408RequestTimeout, HttpRefusals.TooSlow);
     private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy) { Headers = new Dictionary<string, string> { ["retry-after"] = "1" } };
 
     private readonly HttpTransportServerOptions _options;
@@ -275,7 +341,25 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         var maximumWait = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.MaximumWait), nameof(HttpTransportServerOptions.MaximumWait)), given.MaximumWait);
 
         AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), given.MaximumWaitingExchanges));
-        _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
+        AssertWhole((nameof(HttpTransportServerOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
+
+        ServerBounds.AssertCountOrNone((nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), given.MinimumSendBytesPerSecond));
+
+        // ! never refused: a head, a body or an answer bounded by nothing would hold its socket for
+        // ever (spec 15.12)
+        var sendGracePeriod = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.SendGracePeriod), nameof(HttpTransportServerOptions.SendGracePeriod)), given.SendGracePeriod);
+        var headersTimeout = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.HeadersTimeout), nameof(HttpTransportServerOptions.HeadersTimeout)), given.HeadersTimeout);
+        var bodyGracePeriod = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.BodyGracePeriod), nameof(HttpTransportServerOptions.BodyGracePeriod)), given.BodyGracePeriod);
+
+        _options = given with
+        {
+            ExchangeTimeout = exchangeTimeout,
+            InactivityTimeout = inactivityTimeout,
+            MaximumWait = maximumWait,
+            SendGracePeriod = sendGracePeriod,
+            HeadersTimeout = headersTimeout,
+            BodyGracePeriod = bodyGracePeriod,
+        };
         _isSecure = _options.Secure ?? _options.Certificate is not null;
         _clock = _options.Clock ?? TimeProvider.System;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
@@ -300,11 +384,21 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             {
                 _listeners.Tell(Message, (message, connection.ConnectionHandle));
             },
+            AddressOf = AddressOf,
+            Drop = Drop,
             Answering = () =>
             {
                 return Answering;
             },
-        }, _options.MaximumBodyBytes);
+        }, new HttpRequestExchange<Drawn>.Bounds
+        {
+            MaximumBodyBytes = _options.MaximumBodyBytes,
+            MinimumBodyBytesPerSecond = _options.MinimumBodyBytesPerSecond,
+            BodyGracePeriod = _options.BodyGracePeriod,
+            MinimumSendBytesPerSecond = _options.MinimumSendBytesPerSecond,
+            SendGracePeriod = _options.SendGracePeriod,
+            Clock = _clock,
+        });
     }
 
     /// <inheritdoc/>
@@ -335,6 +429,16 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// failure, as the TypeScript side's can be: Kestrel tells a failure of its own only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
+
+    /// <summary>Each application a start builds, as it is built: the tests' way to read what it set on Kestrel.</summary>
+    internal event Action<WebApplication>? Built;
+
+    /// <summary>
+    /// What each connection Kestrel takes goes through before its exchanges: the tests' way to stall
+    /// a socket's writes, as a client that stops reading stalls them where its platform's buffers
+    /// fill, which a platform that takes every write never does.
+    /// </summary>
+    internal Func<Microsoft.AspNetCore.Connections.ConnectionDelegate, Microsoft.AspNetCore.Connections.ConnectionDelegate>? Connecting { get; init; }
 
     /// <summary>
     /// Each listen, its connection found by its token, before it is held: the tests' way to close
@@ -534,12 +638,25 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
                 kestrel.AllowHostHeaderOverride = true;
 
-                // the transport counts each body against its own limit and budget
+                // the transport counts each body against its own limit and budget, and holds it to
+                // its own rate, as each answer to its own pace (spec 15.12): Kestrel's would abort
+                // unreported, its bound unnamed, and answer a body it failed 200
                 kestrel.Limits.MaxRequestBodySize = null;
+                kestrel.Limits.MinRequestBodyDataRate = null;
+                kestrel.Limits.MinResponseDataRate = null;
+
+                // * a head is the platform's parser's, which no Bead code sees until it is whole:
+                // answered 408 on Kestrel's heartbeat, within a second of its time
+                kestrel.Limits.RequestHeadersTimeout = _options.HeadersTimeout;
                 foreach (var address in listening.Addresses)
                 {
                     kestrel.Listen(address, listening.Port, (listen) =>
                     {
+                        if (Connecting is { } connecting)
+                        {
+                            listen.Use(connecting);
+                        }
+
                         if (_options.Certificate is { } certificate)
                         {
                             listen.Protocols = HttpProtocols.Http1AndHttp2;
@@ -549,6 +666,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 }
             });
             application = builder.Build();
+            Built?.Invoke(application);
             application.Run(Exchanging);
             await application.StartAsync(cancellationToken);
 
@@ -681,9 +799,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             }
         }
 
+        // * reported, naming its bound, as it closes: its client fell behind (spec 15.9)
         if (overflowing is not null)
         {
-            CloseDrawn(overflowing, false);
+            Drop((overflowing, nameof(HttpTransportServerOptions.MaximumOutboxBytes)));
         }
 
         // its body still coming: its answer goes now, and it is never handed on
@@ -701,10 +820,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // a whole number above 0
     private static void AssertWhole((string Name, long Value) bound)
     {
-        if (bound.Value < 1)
-        {
-            throw new ArgumentOutOfRangeException(bound.Name, $"{bound.Name} is a whole number above 0, not {bound.Value}");
-        }
+        ServerBounds.AssertCount(bound);
     }
 
     // a token as the server draws it: 22 characters of base64url
@@ -844,6 +960,94 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 _exchanging.Remove(exchange);
             }
         }
+
+        await Linger(context);
+    }
+
+    // ! an answer written before its body is whole closes its socket in stages, its write side
+    // first (RFC 9112 §9.6): what still comes is read and dropped until its client closes or 2
+    // seconds pass, on the real clock, since what it waits on is the network's, so a reset never
+    // erases an answer its client has not read yet. A body read whole ends at once
+    private static async Task Linger(HttpContext context)
+    {
+        if (!HttpServerFields.IsLingering(context))
+        {
+            return;
+        }
+
+        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        var dropped = new byte[LingerReadBytes];
+
+        lingering.CancelAfter(ServerBounds.Linger);
+
+        try
+        {
+            while (await context.Request.Body.ReadAsync(dropped, lingering.Token) > 0)
+            {
+                // dropped
+            }
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException or Microsoft.AspNetCore.Http.BadHttpRequestException)
+        {
+            // its client gone, its 2 seconds passed, or its body no more to read
+        }
+    }
+
+    // * an answer's bytes written at its pace (spec 15.12): given the longer of its grace and its
+    // bytes at the rate, judged each second on the real clock, since what it bounds is the
+    // platform's socket; its socket still holding them past that, its exchange is aborted, and
+    // true. A rate of 0 holds none. Kestrel drops a write to a client gone without a word, before
+    // its abort is told: a flush that finds nothing reading says the answer never went out whole,
+    // an IOException
+    private static async Task<bool> WritePaced(HttpContext context, (ReadOnlyMemory<byte> Bytes, (int BytesPerSecond, TimeSpan Grace) Pace) answer)
+    {
+        var (bytes, (bytesPerSecond, grace)) = answer;
+        var isLate = false;
+        long unsent = bytes.Length;
+
+        void Late()
+        {
+            Volatile.Write(ref isLate, true);
+            context.Abort();
+        }
+
+        long Unsent()
+        {
+            return Interlocked.Read(ref unsent);
+        }
+
+        var pace = new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = bytesPerSecond, SendGracePeriod = grace });
+
+        pace.Hand(bytes.Length);
+
+        try
+        {
+            await context.Response.Body.WriteAsync(bytes, context.RequestAborted);
+
+            if ((await context.Response.BodyWriter.FlushAsync(context.RequestAborted)).IsCompleted)
+            {
+                throw new IOException("the exchange closed before its answer went out");
+            }
+        }
+        catch (Exception reason) when (Volatile.Read(ref isLate) && reason is IOException or OperationCanceledException)
+        {
+            return true;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref unsent, 0);
+            pace.Stop();
+        }
+
+        return Volatile.Read(ref isLate);
+    }
+
+    // a connection dropped behind a bound of its own, reported naming it before its close (spec
+    // 15.9, 15.12): its exchange lost, as an answer that could not be written is (spec 15.7)
+    private void Drop((Drawn Connection, string Bound) dropped)
+    {
+        Error?.Invoke(new IOException($"{dropped.Connection.ConnectionHandle} is dropped behind its {dropped.Bound}"), dropped.Connection.ConnectionHandle);
+        CloseDrawn(dropped.Connection, false);
     }
 
     private async Task Exchange(HttpContext context)
@@ -1414,7 +1618,16 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 response.ContentType = HttpTransport.BatchMediaType;
                 response.ContentLength = ending.Bytes.Length;
                 response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                await response.Body.WriteAsync(ending.Bytes, context.RequestAborted);
+
+                // ! at its pace: past it, the listen is lost, reported, and what it carried comes again
+                // to the next, its connection kept (spec 15.10, 15.12)
+                if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))))
+                {
+                    Error?.Invoke(new IOException($"{connection.ConnectionHandle}'s listen is lost behind its {nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)}"), connection.ConnectionHandle);
+
+                    return;
+                }
+
                 await response.CompleteAsync();
             }
             else

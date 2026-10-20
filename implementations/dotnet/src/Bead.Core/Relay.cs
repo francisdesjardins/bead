@@ -391,7 +391,7 @@ internal sealed class Relay
     {
         if (_beforeRoute is not { } beforeRoute)
         {
-            return Failure.OfProtocol(ProtocolCode.AccessDenied, "this relay admits nobody: it has no beforeRoute");
+            return AdmissionRefusals.Marked(Failure.OfProtocol(ProtocolCode.AccessDenied, "this relay admits nobody: it has no beforeRoute"), "no-before-route");
         }
 
         return beforeRoute.RefusalOf(request);

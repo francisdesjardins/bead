@@ -20,6 +20,7 @@ import type {
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
+import type { IHeadBoundServerLike, ILingeringSocketLike } from './server-bounds';
 
 // interfaces
 
@@ -339,6 +340,8 @@ export type TransportServerOnRefusalCallback = EmitterListener<
 /** The part of a connection's socket this transport touches — met by `ws`'s. */
 export interface IServerSocketLike {
   binaryType: string;
+  /** The bytes handed to it that its socket has not taken yet: what waits for it. */
+  readonly bufferedAmount?: number | undefined;
   readonly readyState: number;
   close(code?: number, reason?: string): void;
   on(event: 'close', listener: (code: number) => void): unknown;
@@ -417,6 +420,13 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   closeTimeout?: number | undefined;
   /**
+   * Milliseconds a request's head may take to come whole, judged each second by Node's own parser,
+   * which answers it 408 past them, unmarked, its connection closed (spec 15.12): from 1 to
+   * 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. Defaults to
+   * {@link HEADERS_TIMEOUT}.
+   */
+  headersTimeout?: number | undefined;
+  /**
    * Milliseconds between two pings of each connection, rounded to the nearest whole one, from 1 to
    * 2³¹ − 1, and `Infinity` for none; 0 is refused: a connection that has not answered one by the
    * next is dropped, and its `close` says it was not clean. Defaults to
@@ -448,6 +458,36 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   maxPayload?: number | undefined;
   /**
+   * The connections the server holds at once, across every address it listens on; past them, an
+   * upgrade is refused 503 `busy` before its 101, with `Retry-After` (spec 15.2, step 8). An upgrade
+   * takes its place as it is judged, after its origin, and holds it until its socket closes. A whole
+   * number above 0. Defaults to {@link MAXIMUM_CONNECTIONS}.
+   */
+  maximumConnections?: number | undefined;
+  /**
+   * The connections one client address holds at once, read as `trustedProxies` and
+   * `unnamedProxies` read it; past them, its upgrade is refused 503 `busy`. Behind a proxy it
+   * neither names nor counts, every client is the proxy's address, and the connections past this
+   * number are refused. A whole number above 0. Defaults to {@link MAXIMUM_CONNECTIONS_PER_ADDRESS}.
+   */
+  maximumConnectionsPerAddress?: number | undefined;
+  /**
+   * The bytes that may wait for one connection's socket — handed to it and not yet taken: an
+   * envelope that would take them past it drops the connection, reported on `error` naming it, its
+   * close unclean (spec 15.12). A whole number above 0. Defaults to {@link MAXIMUM_UNSENT_BYTES};
+   * `createWSServer` derives it from its router's limits.
+   */
+  maximumUnsentBytes?: number | undefined;
+  /**
+   * The slowest, in bytes a second, a connection's socket may take what waits for it, once
+   * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`: each
+   * envelope handed moves the connection's deadline by the time its bytes take at it, and one whose
+   * socket holds something past its deadline, judged each second on the real clock, is dropped,
+   * reported on `error` naming it, its close unclean (spec 15.12). A whole number; 0 holds none.
+   * Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   */
+  minimumSendBytesPerSecond?: number | undefined;
+  /**
    * The origins an upgrade that sends an `Origin` may come from, besides the server's own —
    * `http://` or `https://` followed by its authority, in any ASCII case, when its host is one the
    * server takes by name, never by `*` — each compared exactly, checked on the upgrade, after its
@@ -466,16 +506,23 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   secure?: boolean | undefined;
   /**
+   * The least milliseconds an envelope handed to a connection's socket is given to be taken, before
+   * `minimumSendBytesPerSecond` holds it: from 1 to 2³¹ − 1, rounded to the nearest whole one; 0 and
+   * `Infinity` are refused. Defaults to {@link SEND_GRACE_PERIOD}.
+   */
+  sendGracePeriod?: number | undefined;
+  /**
    * The proxies whose `X-Forwarded-For` the transport believes, on an upgrade (spec 15.12): each an
    * IP address in the form a server listens on, or a network, that address, `/` and its prefix's
    * length (RFC 4632 §3.1, RFC 4291 §2.3), from 1, its bits past the prefix zero. While the address
    * reached is one they hold, the field's next entry from the right is the client's, when it is an
    * address — bare, or as RFC 7239 §6 writes a node, its port dropped — held in one form,
    * IPv4-mapped as IPv4 and IPv6 as RFC 5952 writes it: the address a connection's handle and
-   * `clients` name, and a refusal tells; its port stays the socket's; `unnamedProxies` counts those
-   * it cannot name. The transport bounds no address, so a proxy neither listed nor counted costs
-   * nothing but that: every client behind it is named by the proxy's address. None, when not
-   * given, the loopback among them. A name, and a network of prefix 0, which would trust what every
+   * `clients` name, its bound per address counts, and a refusal tells; its port stays the
+   * socket's; `unnamedProxies` counts those it cannot name. A proxy neither listed nor counted is a
+   * client as any other: every client behind it is named and counted by the proxy's address, past
+   * whose `maximumConnectionsPerAddress` an upgrade is refused. None, when not given, the loopback
+   * among them. A name, and a network of prefix 0, which would trust what every
    * client writes, are a {@link ProgrammerError} as the server is built, as is any other entry.
    * `Forwarded` is never read.
    */
@@ -543,7 +590,8 @@ export interface IHTTPRequestLike {
    * `Host` given twice, which `headers` keeps once.
    */
   readonly rawHeaders: readonly string[];
-  readonly socket: {
+  /** Its socket's peer; over HTTP/1, Node's socket, which an answer written early closes in stages. */
+  readonly socket: Partial<ILingeringSocketLike> & {
     readonly remoteAddress?: string | undefined;
     readonly remotePort?: number | undefined;
   };
@@ -558,6 +606,8 @@ export interface IHTTPRequestLike {
 export interface IHTTPResponseLike {
   readonly headersSent: boolean;
   readonly writableFinished: boolean;
+  /** The bytes written that its socket has not taken yet; Node's has it. */
+  readonly writableLength?: number | undefined;
   destroy(): unknown;
   end(): unknown;
   // oxlint-disable-next-line typescript/unified-signatures -- two, as HTTP/2's response has them: one optional parameter would meet neither its `end(callback)` nor its `end(data)`
@@ -583,7 +633,7 @@ export interface IHTTPSessionLike {
  * The part of an HTTP server this transport touches — met by `node:http`'s, `node:https`'s and
  * `node:http2`'s.
  */
-export interface IHTTPServerLike {
+export interface IHTTPServerLike extends IHeadBoundServerLike {
   address(): { address: string; port: number } | string | null;
   close(callback?: (error?: Error) => void): unknown;
   /** Ends the keep-alive sockets too, without which a stop waits on them; HTTP/1's since Node 18.2. */
@@ -602,10 +652,18 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   bodyBytesBudget?: number | undefined;
   /**
+   * Milliseconds a body may come before `minimumBodyBytesPerSecond` holds it, from its head: from 1
+   * to 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. Defaults to
+   * {@link BODY_GRACE_PERIOD}.
+   */
+  bodyGracePeriod?: number | undefined;
+  /**
    * Builds a server on the transport's listener: `(listener) => createServer(listener)` from
    * `node:http`, `(listener) => createServer({ key, cert }, listener)` from `node:https`, or
-   * `createSecureServer({ allowHTTP1: true, … }, listener)` from `node:http2`. Its own timeouts —
-   * `headersTimeout`, `requestTimeout`, `keepAliveTimeout` — are the application's to set. It is
+   * `createSecureServer({ allowHTTP1: true, … }, listener)` from `node:http2`. The transport sets
+   * its `headersTimeout` to its own, its `requestTimeout` to 0 and its `connectionsCheckingInterval`
+   * to a second before it listens, where the server has them, as `node:http`'s and `node:https`'s
+   * do; its `keepAliveTimeout` is the application's to set. It is
    * called once per address the transport binds, told it as `address`: on `localhost`, twice,
    * `127.0.0.1` then `::1`, so every server it builds is to be configured alike — a certificate
    * rotated by `setSecureContext`, an SNI context added, a timeout, a `tlsClientError` listener —
@@ -635,6 +693,13 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    */
   hosts?: readonly string[] | undefined;
   /**
+   * Milliseconds a request's head may take to come whole, judged each second by the server's own
+   * parser, which answers it 408 past them, unmarked, its connection closed (spec 15.12): from 1 to
+   * 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. Defaults to
+   * {@link HEADERS_TIMEOUT}.
+   */
+  headersTimeout?: number | undefined;
+  /**
    * Milliseconds a connection may go with no exchange under way before it is closed: from 1 to
    * 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for never; 0 is refused. It tells a
    * client alive from one gone, as a WebSocket's heartbeat does: a listen held is an exchange under
@@ -656,8 +721,8 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumConnectionsPerAddress?: number | undefined;
   /**
    * The bytes one connection's outbox holds — what the server sent of its own and no listen
-   * acknowledged yet; past them, the connection closes, as one whose client fell behind. Defaults to
-   * {@link MAXIMUM_OUTBOX_BYTES}.
+   * acknowledged yet; past them, the connection closes, as one whose client fell behind, reported on
+   * `error`. Defaults to {@link MAXIMUM_OUTBOX_BYTES}.
    */
   maximumOutboxBytes?: number | undefined;
   /**
@@ -671,6 +736,22 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * 429, and a cancel, which takes no place, never is. Defaults to {@link MAXIMUM_WAITING_EXCHANGES}.
    */
   maximumWaitingExchanges?: number | undefined;
+  /**
+   * The slowest, in bytes a second, a body may come once `bodyGracePeriod` passed, on the server's
+   * clock: a body that brought _R_ bytes and none more by its head's reading plus the longer of the
+   * grace and _R_ at this rate is refused 408 `too-slow`, its connection closed in stages, its Bead
+   * connection kept (spec 15.12). A whole number above 0. Defaults to
+   * {@link MINIMUM_BODY_BYTES_PER_SECOND}.
+   */
+  minimumBodyBytesPerSecond?: number | undefined;
+  /**
+   * The slowest, in bytes a second, a socket may take an answer, or a listen's batch, once
+   * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`, judged each
+   * second on the real clock: an answer past its deadline is lost, its connection closed, and a
+   * batch's listen with it, its connection kept; each reported on `error` naming it (spec 15.12). A
+   * whole number; 0 holds none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   */
+  minimumSendBytesPerSecond?: number | undefined;
   /**
    * The origins an exchange that sends an `Origin` may come from, besides the server's own —
    * `http://` or `https://` followed by its authority, in any ASCII case, when its host is one the
@@ -694,6 +775,12 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * loopback address.
    */
   secure?: boolean | undefined;
+  /**
+   * The least milliseconds an answer, or a listen's batch, is given to be taken by its socket, before
+   * `minimumSendBytesPerSecond` holds it: from 1 to 2³¹ − 1, rounded to the nearest whole one; 0 and
+   * `Infinity` are refused. Defaults to {@link SEND_GRACE_PERIOD}.
+   */
+  sendGracePeriod?: number | undefined;
   /**
    * The proxies whose `X-Forwarded-For` the transport believes (spec 15.12): each an IP address in
    * the form a server listens on, or a network, that address, `/` and its prefix's length (RFC 4632

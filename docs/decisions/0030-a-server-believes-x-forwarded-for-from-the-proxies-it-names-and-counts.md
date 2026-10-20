@@ -8,7 +8,8 @@
   The bound itself is 15.12's table; the refusal told,
   [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s;
   the listening address and the form of an IP literal,
-  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s.
+  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; a
+  WebSocket server's bound per address, [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s.
 
 ## Context
 
@@ -181,8 +182,10 @@ before checking its known proxies; this is the same reading, stated.
 **`X-Forwarded-For` alone is read**; `Forwarded` is not, and 15.12 says so. **A WebSocket server
 takes the same list and the same count, refuses the same entries and counts as it is built, and
 walks the field of the request that asks its upgrade**, by the module the HTTP transport walks it
-with, on each side. It bounds no address, so what the walk moves is the address its handles and its
-refusals name: behind the proxies it names and counts, the client's, where the proxy's would be.
+with, on each side. It bounds its connections by address as an HTTP server does
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)), so what the walk moves is the address its
+bound, its handles and its refusals name: behind the proxies it names and counts, the client's,
+where the proxy's would be.
 One option of each on both transports, as `hosts` and `origins` are, so a deployment that puts both
 behind one proxy tells each alike.
 

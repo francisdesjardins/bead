@@ -171,7 +171,7 @@ public interface IRequestHandler
     /// Whether a request may reach the handler, asked on its header before its payload is read:
     /// none admits it; a failure refuses it, and the router answers with it — but SESSION_REQUIRED
     /// to a call whose header presents a credential, which it answers ACCESS_DENIED, its detail
-    /// kept (spec 9.2, step 5); one that throws refuses it as failed, and is reported.
+    /// kept (spec 9.2, step 6); one that throws refuses it as failed, and is reported.
     /// </summary>
     Failure? Admit(AdmissionRequest request);
 }
@@ -188,7 +188,7 @@ internal interface IDestinationHandler : IRequestHandler
     /// <see cref="CredentialScheme.Elsewhere"/> its transport carried, reaches its admission in
     /// none, every scheme the protocol names taken, and its session is not asked; one presenting none
     /// or <see cref="CredentialScheme.Opaque"/> resolves as any other. Only a relay's handler
-    /// forwards: a procedure resolves its call's credential at its side (spec 9.2, step 5).
+    /// forwards: a procedure resolves its call's credential at its side (spec 9.2, step 6).
     /// </summary>
     bool ForwardsCredentials { get; }
 }
@@ -598,7 +598,7 @@ internal interface IRouterCorePort
     /// <summary>
     /// The call's session a request's credential resolves to, asked once per request of a scheme the
     /// side takes, between holding its call id and its admission, with the call's signal, which a
-    /// cancel or its connection closing cancels (spec 9.2, step 5). None, for a request presenting
+    /// cancel or its connection closing cancels (spec 9.2, step 6). None, for a request presenting
     /// none, runs it in none; for one presenting a credential, says that credential does not hold,
     /// and it is refused SESSION_REQUIRED. One that throws or faults fails it, PROCEDURE_FAILED, and
     /// is reported. It may wait, never for a request presenting none or
@@ -612,6 +612,42 @@ internal interface IRouterCorePort
         return ValueTask.FromResult(CallSession.ConnectionSessionOf(
             request.Header.Credential,
             (KnownSessionTokenOf(request.ConnectionHandle), null)));
+    }
+
+    /// <summary>
+    /// What <see cref="SessionOf"/> resolves to, and why a credential that does not hold does not
+    /// (spec 13.12): by default, <c>session</c>, as an OPAQUE does not hold.
+    /// </summary>
+    ValueTask<CredentialResolution> ResolutionOf(SessionRequest request, CancellationToken signal)
+    {
+        return ResolutionOfSession(SessionOf(request, signal));
+    }
+
+    /// <summary>
+    /// A session a side's own resolution resolves to, as <see cref="ResolutionOf"/> gives it: a
+    /// credential that does not hold, by <c>session</c>; settled in the turn it settled, so one that
+    /// settled at once has.
+    /// </summary>
+    static async ValueTask<CredentialResolution> ResolutionOfSession(ValueTask<CallSession?> resolving)
+    {
+        return new CredentialResolution(await resolving, CredentialResolution.SessionReason);
+    }
+
+    /// <summary>
+    /// Whether anyone hears <see cref="TellAccessRefused"/>: a refusal's record is built only while
+    /// one does (spec 13.12). Nobody does by default, as on a client's router, which tells none.
+    /// </summary>
+    bool TellsAccessRefusals
+    {
+        get
+        {
+            return false;
+        }
+    }
+
+    /// <summary>An access refused, as its refusal is answered, while <see cref="TellsAccessRefusals"/>.</summary>
+    void TellAccessRefused(AccessRefusal refusal)
+    {
     }
 
     /// <summary>

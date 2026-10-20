@@ -50,9 +50,26 @@ ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form
 request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
 13, the one it speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an
 `Origin` neither its own nor among `origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it
-would take once its stop began. Each refusal but HTTP's own is marked, its body empty, closes its
-connection, and is told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken
-— see [HTTP](#http).
+would take past `maximumConnections`, 10,000, or `maximumConnectionsPerAddress`, 64, or once its
+stop began. Each refusal but HTTP's own is marked, its body empty, closes its connection, and is
+told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
+[HTTP](#http). An upgrade takes its place as it is judged, after its origin, and holds it until its
+socket closes, so upgrades that cross take no more places than there are; behind a proxy, every
+client is the proxy's address unless `trustedProxies` or `unnamedProxies` names it, and its health
+warns once its busiest address holds 80% of `maximumConnectionsPerAddress`, before the first 503,
+gauged `largestAddressConnections`. A head that does not come whole within `headersTimeout`, 30
+seconds, is answered 408 by Node's own parser.
+
+What waits for a client's socket — what the server handed it that the socket has not taken — is
+held to a pace, as Kestrel holds a response to its `MinResponseDataRate`: each envelope moves the
+connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`, 240, its grace
+`sendGracePeriod`, 5 seconds, at least, and a socket that still holds something past it, judged
+each second on the real clock, is dropped. An envelope that would take what waits past
+`maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once, 184,551,424
+bytes under the limits by default, which `createWSServer` derives from its router's. Each drop is
+reported on `error`, naming its bound, and its close is not clean; the heartbeat drops a reader that
+stops behind a large backlog besides. A paced subscription queues on the server what a client that
+falls behind has not credited.
 
 A server listens on `localhost` unless `start` is given an `address`: both loopbacks, `127.0.0.1`
 and `::1`, on one port, as Kestrel's `ListenLocalhost` does, so no other process can answer a client
@@ -705,7 +722,7 @@ that opens a subscription always go in one envelope.
 | Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                     |
 | --------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWSServer` and `createWSClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                                                                                                                |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                        |
 | `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                             |
 | `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                      |
 | `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                  |
@@ -713,12 +730,13 @@ that opens a subscription always go in one envelope.
 | `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                       |
 | `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                             |
 | `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                         |
+| `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                  |
 
 The limits are options of each router and each facade — `createClient(layers, { limits })`,
 `createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
-from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a timeout a timer
-holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
+from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a call at once at
+least, a timeout a timer holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
 least, since its header holds 1,020. Nothing announces them: both ends of a connection are set
 alike. A transport that carries transfers delimits its messages, knows the envelope's size at both
 ends, delivers every chunk and credit — in any order, a copy tolerated — and carries both ways.
@@ -907,6 +925,7 @@ redirect followed", and a send or a listen loses its connection, nothing of the 
 | 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                       |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                                                        |
 | 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                            |
+| 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed                                                                                                                                                                                      |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                             |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
@@ -915,8 +934,19 @@ redirect followed", and a send or a listen loses its connection, nothing of the 
 | 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                  |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
-`maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
-read at once across them all.
+`maximumWaitingExchanges`, 64 requests waiting on one connection, its router's
+`maximumAnsweringCalls` in `createHTTPServer`; `bodyBytesBudget`, 256 MiB of body read at once
+across them all. A head comes whole within `headersTimeout`, 30 seconds, or Node's own parser
+answers it 408: the transport sets `headersTimeout`, a `requestTimeout` of 0 and a
+`connectionsCheckingInterval` of a second on every server `createServer` builds, before it listens.
+A body comes at `minimumBodyBytesPerSecond`, 240, once `bodyGracePeriod`, 5 seconds, passed since
+its head, on the server's clock, or is refused 408 `too-slow`, its Bead connection kept. An answer
+written before its body is whole carries `connection: close`, and its socket closes in stages, its
+write side first, reading on and dropping what still comes until its client closes or 2 seconds
+pass, so a client that goes on sending reads it (RFC 9112 §9.6). An answer, and a listen's batch,
+are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: an
+answer past its deadline is lost, its connection closed, a batch's listen with it, its connection
+kept, each reported on `error`.
 
 A request names its authority by its target when the target is in absolute-form, `http://` or
 `https://` in lower case, read as it came, its `Host` judged as one field line alone, which an
@@ -1011,7 +1041,7 @@ and `clients` name and what a refusal tells; its port stays the socket's. A prox
 counted is a client as any other: every client behind it is its address. Over HTTP,
 `maximumConnectionsPerAddress` counts it, so a told `busy` whose `address` is your proxy's, or a
 `largestAddressConnections` near its ceiling on `/health`, is a proxy to list; a WebSocket server
-bounds no address, so there it costs nothing but the address its handles and refusals name. A proxy
+counts it alike, at its upgrade. A proxy
 whose platform publishes its addresses is listed: Google Cloud's global load balancer by
 `130.211.0.0/22`, `35.191.0.0/16` and the forwarding rule's own address, Cloudflare by its ranges,
 an AWS ALB by its VPC's network. One whose addresses its platform does not publish — Heroku's
@@ -1057,8 +1087,8 @@ ignored; a listen without `bead-after`, or with a count that does not read so, i
 comes whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard
-twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, closes its connection, its client
-having fallen behind; a paced subscription queues on the server what its client has not credited,
+twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, closes its connection, reported on
+`error`, its client having fallen behind; a paced subscription queues on the server what its client has not credited,
 so that never reaches the outbox. The client listens from its connect on, asking a `wait` of 25 seconds; a
 listen lost is listened again from where it was, as EventSource reconnects: at once, then after 1,
 2, 4 seconds and on to 30, each wait drawn between half of it and all of it, so the clients one
@@ -1105,9 +1135,10 @@ no counterpart to mirror.
 ### What a server holds
 
 `server.gauges()` counts what each layer holds right now: the server's connections, the transport's
-— and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read and
-the connections its busiest address holds, `largestAddressConnections` —
-the router's calls waited on and answered, the call ids it reserved, its transfers and the bytes
+— and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read, over
+a WebSocket what waits for its sockets, `largestUnsentBytes` the most one holds, and on both the
+connections its busiest address holds, `largestAddressConnections` —
+the router's calls waited on and answered, the busiest connection's, `largestAnsweringCalls`, the call ids it reserved, its transfers and the bytes
 they hold, its subscriptions in flight, waiting or notified, those paced whose credit is spent and
 what they queue — all together, and the fullest queue, at its bounds — its destinations, and the
 credentials' sessions it keeps and those of them timed, `credentialSessions` and
@@ -1125,6 +1156,19 @@ demo on `/health`, on this machine alone, 503 when it fails. A relay's destinati
 connection on purpose, and is counted for none. What timers hold in closures — a heartbeat's, a
 stalled transfer's — no gauge sees; the tests' timer spies do. Every end-to-end test ends at rest:
 each layer back to nothing once its clients are gone, and a health that passes.
+
+A server's router tells each call it refuses as its credential resolves or as it is admitted,
+`accessRefused` (spec 13.12): its `stage`, `credential` or `admission`; the `code` answered; why, in
+one word — for a `JWT` the step of section 13.8 that refused it, for an `OPAQUE` `session`, for an
+`ELSEWHERE` `nothing-carried`, `verifier` or `end`, for a scheme it takes none of `scheme`, for an
+admission the one Bead gives that refused it, `requireSession`, `requireCredential`,
+`shareLegBSession`, or `no-before-route` for a relay with none, and none for the application's own;
+the credential's scheme, what was called, the connection, and the `address` and `port` of the
+request as its transport handed them — over HTTP its exchange's, not its connect's. Never the
+credential, any part of it, a claim, or an admission's detail, as OWASP's ASVS logs authentication
+and authorization failures. A verifier or an admission that fails is reported on `error` instead,
+and a call refused as it would wait for its issuer is neither. The record is built only while a
+listener listens; what one throws is reported with its connection, and the refusal stands.
 
 ### Debugging and metrics
 

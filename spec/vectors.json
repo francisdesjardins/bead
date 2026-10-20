@@ -9,7 +9,8 @@
     "maximumEnvelopeBytes and maximumDetailBytes, where given, are the reader's bounds; where not, the vector is within any bound.",
     "side is the side that reads: a failure says which side raised it.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8.",
-    "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it."
+    "A JWT verdict gives a token, the keys, each a JWK with its issuer and its algorithm, the receiver's audience, or the set of them a relay that verifies holds, an array, any of which aud may name, and now, the wall clock's reading, which a test gives as W; then whether the token holds, with its session's identifier, its claims set and its end, in milliseconds since the epoch, or why it does not: the step of section 13.8 that refused it.",
+    "A credential refusal gives the scheme a request presents, by its name or, to come, its number, and the situation a test sets up on a server of its own before it: another-connections-session, an OPAQUE of the session another connection holds; no-session, an OPAQUE no session holds; nothing-carried, an ELSEWHERE whose transport carried nothing; verifier-makes-none, an ELSEWHERE its verifier settles with no session of; end-come, an ELSEWHERE whose end the wall clock has reached as its verifier settles; scheme-to-come; no-verifier, an ELSEWHERE to a server given no verifier; no-keys, a JWT to a server given no keys and no key set. Then the code the request is answered with, and the one word the server tells the access it refused with (section 13.12); a JWT's reasons are its verdicts', the step of section 13.8 that refused it."
   ],
   "specVersion": "0.6.0",
   "headers": [
@@ -3869,6 +3870,100 @@
         "holds": false,
         "reason": "aud"
       }
+    }
+  ],
+  "credentialRefusals": [
+    {
+      "name": "an OPAQUE of a session another connection holds",
+      "clauses": [
+        "9.2.6",
+        "13.2",
+        "13.12"
+      ],
+      "scheme": "OPAQUE",
+      "situation": "another-connections-session",
+      "code": 32,
+      "reason": "session"
+    },
+    {
+      "name": "an OPAQUE no session holds",
+      "clauses": [
+        "9.2.6",
+        "13.12"
+      ],
+      "scheme": "OPAQUE",
+      "situation": "no-session",
+      "code": 32,
+      "reason": "session"
+    },
+    {
+      "name": "an ELSEWHERE whose transport carried nothing",
+      "clauses": [
+        "9.2.6",
+        "13.12",
+        "15.1"
+      ],
+      "scheme": "ELSEWHERE",
+      "situation": "nothing-carried",
+      "code": 32,
+      "reason": "nothing-carried"
+    },
+    {
+      "name": "an ELSEWHERE its verifier makes no session of",
+      "clauses": [
+        "13.11",
+        "13.12"
+      ],
+      "scheme": "ELSEWHERE",
+      "situation": "verifier-makes-none",
+      "code": 32,
+      "reason": "verifier"
+    },
+    {
+      "name": "an ELSEWHERE whose end the wall clock has reached as its verifier settles",
+      "clauses": [
+        "13.10.4",
+        "13.11",
+        "13.12"
+      ],
+      "scheme": "ELSEWHERE",
+      "situation": "end-come",
+      "code": 32,
+      "reason": "end"
+    },
+    {
+      "name": "a credential scheme to come",
+      "clauses": [
+        "9.2.6",
+        "13.12"
+      ],
+      "scheme": 4,
+      "situation": "scheme-to-come",
+      "code": 36,
+      "reason": "scheme"
+    },
+    {
+      "name": "an ELSEWHERE to a server given no verifier",
+      "clauses": [
+        "9.2.6",
+        "13.11",
+        "13.12"
+      ],
+      "scheme": "ELSEWHERE",
+      "situation": "no-verifier",
+      "code": 36,
+      "reason": "scheme"
+    },
+    {
+      "name": "a JWT to a server given no keys",
+      "clauses": [
+        "9.2.6",
+        "13.12"
+      ],
+      "scheme": "JWT",
+      "situation": "no-keys",
+      "code": 36,
+      "reason": "scheme"
     }
   ]
 }

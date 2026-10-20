@@ -2,7 +2,7 @@
 
 // dependencies
 
-import type { TimeoutId } from '../shared/clock';
+import type { IClock, TimeoutId } from '../shared/clock';
 import type { ITransportMessage } from '../shared/types';
 import { credentialOf } from './hosts-and-origins';
 import {
@@ -17,12 +17,14 @@ import {
   sendHead,
   UNKNOWN_CONNECTION,
 } from './http-server-fields';
-import type { IHTTPResponseLike } from './types';
+import type { IHTTPRequestLike, IHTTPResponseLike } from './types';
 
 // interfaces
 
 /** An exchange of a request, from its first 8 bytes to its answer. */
 export interface IExchange {
+  /** Its request, which an end written before its body is whole closes in stages. */
+  readonly request: IHTTPRequestLike;
   /** A cancel came for it while its body was still coming: it is read to its end, then 204. */
   isCancelled: boolean;
   /** Its request went on to the router, which owes it an answer. */
@@ -49,8 +51,8 @@ interface IExchangePrefix {
 export interface IHTTPRequestExchangePort<Connection> {
   /** Whether a connection may take another exchange, under the bound on what it has under way. */
   admitExchange: (connection: Connection) => boolean;
-  /** The state of an exchange, answered on `response`. */
-  createExchange: (response: IHTTPResponseLike) => IExchange;
+  /** The state of an exchange of `request`, answered on `response`. */
+  createExchange: (exchange: IExchangeIn) => IExchange;
   /** An exchange under way on its connection, its idle timer stopped. */
   beginExchange: (connection: Connection) => void;
   /** Bytes of body charged against the server's budget: whether it is now past it. */
@@ -87,8 +89,16 @@ export interface IHTTPRequestExchangePort<Connection> {
   ) => boolean;
   /** Ends an exchange's connection, as lost, once its request waited past `exchangeTimeout`. */
   armExchangeTimer: (connection: Connection, state: IExchange) => void;
-  /** An envelope handed on to the router, with the credential its exchange carried. */
+  /**
+   * An envelope handed on to the router, with the credential its exchange carried, and the address
+   * and port of the exchange that brought it.
+   */
   message: (connection: Connection, message: ITransportMessage) => void;
+  /** The client's address and port of an exchange, as the server reads them (spec 15.12). */
+  originOf: (request: IHTTPRequestLike) => {
+    address?: string | undefined;
+    port?: number | undefined;
+  };
   /** A cancel's call ended: the response of its exchange to end empty, when its head went. */
   cancel: (connection: Connection, callId: number) => IHTTPResponseLike | undefined;
   /** Ends an exchange the transport answers itself. */
@@ -135,13 +145,29 @@ const append = (body: IBody, { chunk, limit }: { chunk: Uint8Array; limit: numbe
 
 // definition
 
+/** What bounds a body as it comes: its bytes, and its pace, on the server's clock. */
+export interface IHTTPRequestExchangeOptions {
+  /** How long, in milliseconds, a body comes before its rate is held, from its head. */
+  bodyGracePeriod: number;
+  clock: IClock;
+  maximumBodyBytes: number;
+  /** The slowest, in bytes a second, a body may come once its grace passed. */
+  minimumBodyBytesPerSecond: number;
+}
+
 /**
- * The exchanges of one HTTP server: each body read to `maximumBodyBytes` at most, charged against
- * its `port`'s budget and given back, its prefix judged, and its request handed on to its connection.
+ * The exchanges of one HTTP server: each body read to `maximumBodyBytes` at most, at
+ * `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed, charged against its `port`'s budget and
+ * given back, its prefix judged, and its request handed on to its connection.
  */
 export const createHTTPRequestExchange = <Connection>(
   port: IHTTPRequestExchangePort<Connection>,
-  { maximumBodyBytes }: { maximumBodyBytes: number }
+  {
+    bodyGracePeriod,
+    clock,
+    maximumBodyBytes,
+    minimumBodyBytesPerSecond,
+  }: IHTTPRequestExchangeOptions
 ): IHTTPRequestExchange<Connection> => {
   // one envelope: read into one buffer, its prefix checked from its first 8 bytes, then handed on
   const receive = (exchange: IExchangeIn, connection: Connection): void => {
@@ -165,7 +191,7 @@ export const createHTTPRequestExchange = <Connection>(
       return (port.finish(exchange, { reason: REFUSALS.BUSY, status: 429 }), undefined);
     }
 
-    const state = port.createExchange(response);
+    const state = port.createExchange(exchange);
     const body: IBody = {
       bytes: new Uint8Array(
         Number.isFinite(declared) ? Math.min(declared, FIRST_BODY_BYTES) : FIRST_BODY_BYTES
@@ -176,12 +202,21 @@ export const createHTTPRequestExchange = <Connection>(
     let received = 0;
     // under way until both its request and its response are done
     let sides = 2;
+    // * its body's pace, on the server's clock from its head's reading: due once it has not brought
+    // what the longer of its grace and its rate asks of it (spec 15.12)
+    const headAt = clock.performance.now();
+    let slow: TimeoutId | undefined;
 
     port.beginExchange(connection);
 
     const release = (): void => {
       port.releaseBody(charged);
       charged = 0;
+    };
+
+    const unpace = (): void => {
+      clock.clearTimeout(slow);
+      slow = undefined;
     };
 
     const done = (): void => {
@@ -192,11 +227,35 @@ export const createHTTPRequestExchange = <Connection>(
       }
     };
 
-    // ends it now, before its body or its answer; what still comes is counted, and dropped
+    // ends it now, before its body or its answer; what still comes is dropped
     const endEarly = (end: IEnd): void => {
+      unpace();
       port.endEarly(connection, state);
 
       port.finish(exchange, end);
+    };
+
+    // the body due by the longer of its grace and what its bytes take at its rate; past it, refused
+    // 408, its charge released, what still comes dropped
+    const pace = (): void => {
+      const due =
+        headAt +
+        Math.max(bodyGracePeriod, Math.ceil((received * 1_000) / minimumBodyBytesPerSecond));
+
+      clock.clearTimeout(slow);
+      slow = clock.setTimeout(
+        () => {
+          slow = undefined;
+
+          if (!port.isEnded(state)) {
+            release();
+            endEarly({ reason: REFUSALS.TOO_SLOW, status: 408 });
+          }
+        },
+        Math.max(0, due - clock.performance.now())
+      );
+      // a browser's timer has no `unref`
+      (slow as { unref?: () => unknown }).unref?.();
     };
 
     // what the first 8 bytes say: a request waits under its call id from now on
@@ -215,6 +274,7 @@ export const createHTTPRequestExchange = <Connection>(
     };
 
     response.on('close', () => {
+      unpace();
       release();
       // closed before the transport ended it: lost, as a dropped socket's frames are
       port.lose(connection, state);
@@ -223,31 +283,42 @@ export const createHTTPRequestExchange = <Connection>(
     });
 
     request.on('close', () => {
+      unpace();
       release();
       done();
     });
 
     request.on('data', (chunk) => {
+      // ! what comes once it ended is dropped, and charged nothing: an answer written before its
+      // body is whole reads on until its client closes, and a body refused holds no budget
+      if (port.isEnded(state)) {
+        return (unpace(), undefined);
+      }
+
       received += chunk.length;
       charged += chunk.length;
       const isOverBudget = port.chargeBody(chunk.length);
 
-      // past the limit, it is refused, and then no more of it is read
+      // past the limit, it is refused, its charge released
       if (received > maximumBodyBytes) {
-        if (!port.isEnded(state)) {
-          endEarly({ reason: REFUSALS.TOO_LARGE, status: 413 });
-        }
+        unpace();
+        release();
 
-        return (request.destroy(), undefined);
+        return (endEarly({ reason: REFUSALS.TOO_LARGE, status: 413 }), undefined);
       }
 
-      if (isOverBudget && !port.isEnded(state)) {
+      if (isOverBudget) {
         const busy = { headers: { 'retry-after': '1' }, reason: REFUSALS.BUSY, status: 503 };
+
+        unpace();
+        release();
 
         return (endEarly(busy), undefined);
       }
 
-      if (port.isEnded(state) || port.isCancelled(state)) {
+      pace();
+
+      if (port.isCancelled(state)) {
         return undefined;
       }
 
@@ -261,10 +332,14 @@ export const createHTTPRequestExchange = <Connection>(
     });
 
     request.on('error', () => {
+      unpace();
       release();
     });
 
+    pace();
+
     request.on('end', () => {
+      unpace();
       release();
 
       const outcome = port.finishBody(connection, state);
@@ -298,7 +373,7 @@ export const createHTTPRequestExchange = <Connection>(
         const credential = credentialOf(authorizations);
 
         port.beginHandOff(state);
-        port.message(connection, { credential, data: envelope });
+        port.message(connection, { ...port.originOf(request), credential, data: envelope });
 
         // still waiting — not answered as it came — its head goes now, so its client knows the
         // router has it; and it waits for its answer no longer than it may
@@ -311,7 +386,11 @@ export const createHTTPRequestExchange = <Connection>(
         return undefined;
       }
 
-      port.message(connection, { credential: undefined, data: envelope });
+      port.message(connection, {
+        ...port.originOf(request),
+        credential: undefined,
+        data: envelope,
+      });
 
       if (kind === ENVELOPE_KINDS.CANCEL) {
         const cancelled = port.cancel(connection, callId);

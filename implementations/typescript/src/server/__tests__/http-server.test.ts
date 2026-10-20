@@ -1,10 +1,14 @@
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
 import { createHTTPClient, type HTTPClient } from '../../client/http-client';
 import { createWSClient } from '../../client/ws-client';
+import { envelopeOf } from '../../router/shared/__tests__/fixtures';
+import { EnvelopeKind } from '../../router/shared/constants';
 import type { IProcedure } from '../../router/shared/types';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
 import { createFakeFetch } from '../../transport/client/__tests__/fake-fetch';
@@ -28,6 +32,7 @@ import {
   ProtocolCode,
   shareLegBSession,
   type HTTPServer,
+  type IAccessRefusal,
 } from '../http-server';
 import { createWSServer } from '../ws-server';
 import { expectAtRest } from './fixtures';
@@ -553,6 +558,63 @@ test.describe('an HTTP server and client', () => {
     });
   });
 
+  test('give its transport maximumWaitingExchanges from its router’s maximumAnsweringCalls, unless given', async () => {
+    // its transport's default, given, is given
+    for (const [transport, taken] of [
+      [{}, 1],
+      [{ maximumWaitingExchanges: 2 }, 2],
+      [{ maximumWaitingExchanges: 64 }, 64],
+    ] as const) {
+      await using connected = await connectHTTP({
+        server: {
+          limits: { maximumAnsweringCalls: 1 },
+          transport: {
+            ...transport,
+            createServer: (listener) => {
+              return createServer(listener);
+            },
+          },
+        },
+      });
+      const url = `http://${host}:${String(connected.port)}/bead`;
+      const drawn = await fetch(url, {
+        headers: { 'content-type': BEAD_MEDIA_TYPE },
+        method: 'POST',
+      });
+      const token = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+      const statuses: string[] = [];
+
+      for (const callId of [1, 3]) {
+        const answered = await fetch(url, {
+          body: Buffer.from(
+            envelopeOf({
+              header: {
+                callId,
+                kind: EnvelopeKind.REQUEST,
+                procedureId: slow.procedureId,
+                serviceId: slow.serviceId,
+              },
+              kind: EnvelopeKind.REQUEST,
+              payload: new Uint8Array(0),
+            })
+          ),
+          headers: { 'content-type': BEAD_MEDIA_TYPE, [CONNECTION_TOKEN_HEADER]: token },
+          method: 'POST',
+        });
+
+        statuses.push(`${String(answered.status)} ${String(answered.headers.get(REFUSAL_HEADER))}`);
+      }
+
+      // past the calls its router answers at once, its transport refuses 429 first
+      expect(statuses, JSON.stringify(transport)).toEqual(
+        taken === 1 ? ['200 null', '429 busy'] : ['200 null', '200 null']
+      );
+
+      // the connection drawn by hand, ended by hand, which ends its calls
+      await fetch(url, { headers: { [CONNECTION_TOKEN_HEADER]: token }, method: 'DELETE' });
+    }
+  });
+
   test('build its router with the pacing its options give', async () => {
     await using server = createHTTPServer({
       pacing: { maximumQueuedNotifications: 3 },
@@ -596,4 +658,101 @@ test.describe('an HTTP server and client', () => {
       "a connection's inactivity timeout is a number of milliseconds from 1 to 2147483647, or Infinity for never, not 0"
     );
   });
+});
+
+test('tells over HTTP the address and port of the exchange refused, not its connect’s', async () => {
+  const server = createHTTPServer({
+    transport: {
+      createServer: (listener) => {
+        return createServer(listener);
+      },
+      trustedProxies: [host],
+    },
+  });
+  const told: IAccessRefusal[] = [];
+
+  server.services.getRequestResolver(read, {
+    beforeRequest: server.requireSession,
+    serializer: text,
+  })((request, response) => {
+    return response(request.payload);
+  });
+  server.router.on('accessRefused', (refusal) => {
+    told.push(refusal);
+  });
+
+  const { port } = await server.transport.start({ address: host, findOpenPort: true });
+  // a request written raw on a socket of its own, from behind a proxy that names `forwarded`: its
+  // answer's head, and the port it was sent from
+  const exchange = async (head: string, body: Uint8Array) => {
+    const socket = createConnection(port, host);
+    let answer = '';
+
+    socket.on('data', (chunk: Buffer) => {
+      answer += chunk.toString('latin1');
+    });
+    await once(socket, 'connect');
+    socket.write(head);
+    socket.write(body);
+    await expect
+      .poll(() => {
+        return answer.includes('\r\n\r\n');
+      })
+      .toBe(true);
+
+    const { localPort } = socket;
+
+    return { answer, localPort, socket };
+  };
+  const headOf = (forwarded: string, { fields, length }: { fields: string; length: number }) => {
+    return (
+      `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+      `X-Forwarded-For: ${forwarded}\r\n${fields}Content-Length: ${String(length)}\r\n\r\n`
+    );
+  };
+
+  try {
+    const drawn = await exchange(headOf('192.0.2.1', { fields: '', length: 0 }), new Uint8Array(0));
+    const token = new RegExp(`${CONNECTION_TOKEN_HEADER}: (.*)\r\n`, 'iu').exec(drawn.answer)?.[1];
+    const request = Buffer.from(
+      envelopeOf({
+        header: {
+          callId: 1,
+          kind: EnvelopeKind.REQUEST,
+          procedureId: read.procedureId,
+          serviceId: read.serviceId,
+        },
+        kind: EnvelopeKind.REQUEST,
+        payload: new Uint8Array(0),
+      })
+    );
+    const refused = await exchange(
+      headOf('198.51.100.7', {
+        fields: `${CONNECTION_TOKEN_HEADER}: ${String(token)}\r\n`,
+        length: request.length,
+      }),
+      request
+    );
+
+    await expect
+      .poll(() => {
+        return told.length;
+      })
+      .toBe(1);
+    expect(told[0]).toMatchObject({
+      address: '198.51.100.7',
+      code: ProtocolCode.SESSION_REQUIRED,
+      port: refused.localPort,
+      reason: 'requireSession',
+      stage: 'admission',
+    });
+    expect(told[0]?.port).not.toBe(drawn.localPort);
+
+    for (const { socket } of [drawn, refused]) {
+      socket.destroy();
+    }
+  } finally {
+    await server[Symbol.asyncDispose]();
+    await tcpSocketsClosed();
+  }
 });

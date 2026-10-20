@@ -55,7 +55,7 @@ public sealed record CallSession
     public long? End { get; init; }
 
     /// <summary>
-    /// What CREDENTIAL_UNSUPPORTED's detail says (spec 9.2, step 5): the names of the credential
+    /// What CREDENTIAL_UNSUPPORTED's detail says (spec 9.2, step 6): the names of the credential
     /// schemes a side takes, in the order of their numbers, a comma and a space between —
     /// <c>OPAQUE, JWT, ELSEWHERE</c> from a side that takes them all.
     /// </summary>

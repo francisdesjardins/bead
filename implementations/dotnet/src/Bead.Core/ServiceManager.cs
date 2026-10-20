@@ -141,7 +141,7 @@ public interface IRequestSerializerServer<TRequest, TResponse>
 /// anything else refuses it, with <see cref="Refusal"/>, or with
 /// <see cref="ProtocolCode.AccessDenied"/>. The router answers a refusal SESSION_REQUIRED of a
 /// call that presented a credential ACCESS_DENIED, its detail kept: the credential may hold, and
-/// its requester would withdraw it (spec 9.2, step 5). It is handed the request's connection, its
+/// its requester would withdraw it (spec 9.2, step 6). It is handed the request's connection, its
 /// header and its call's session alone, never a bearer credential its call came with: what its
 /// transport carried stays with the side, and a <see cref="CredentialScheme.Jwt"/> says its scheme
 /// alone (spec 13.1).
@@ -170,6 +170,9 @@ public sealed class BeforeRequest
     /// <summary>What a refused request is answered with; ACCESS_DENIED when none.</summary>
     public Failure? Refusal { get; }
 
+    /// <summary>The name of Bead's own admission it is, which its refusals are told by (spec 13.12); none for the application's.</summary>
+    internal string? Name { get; init; }
+
     /// <summary>Whether <paramref name="failure"/> refuses admission: one of the two protocol failures that do.</summary>
     public static bool IsAdmissionFailure(Failure failure)
     {
@@ -188,7 +191,7 @@ public sealed class BeforeRequest
     /// <summary>
     /// What the admission makes of a request: none admits it; any other its refusal, or
     /// ACCESS_DENIED. The router answers a refusal SESSION_REQUIRED of a call whose header presents
-    /// a credential ACCESS_DENIED, whatever the admission (spec 9.2, step 5). An admission that
+    /// a credential ACCESS_DENIED, whatever the admission (spec 9.2, step 6). An admission that
     /// throws throws.
     /// </summary>
     internal Failure? RefusalOf(AdmissionRequest request)
@@ -204,7 +207,8 @@ public sealed class BeforeRequest
             return null;
         }
 
-        return Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied);
+        // * marked as an admission's, which its router tells, by its name when it is Bead's own
+        return AdmissionRefusals.Marked(Refusal ?? Failure.OfProtocol(ProtocolCode.AccessDenied), Name);
     }
 }
 

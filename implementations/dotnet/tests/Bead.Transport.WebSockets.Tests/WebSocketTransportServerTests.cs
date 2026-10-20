@@ -1934,9 +1934,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             var gauges = _server.Gauges();
 
             Assert.Empty(gauges.Anomalies);
-            Assert.Empty(gauges.Ceilings);
+            Assert.Equal(
+                new Dictionary<string, long> { ["connections"] = 10_000, ["largestAddressConnections"] = 64, ["largestUnsentBytes"] = 184_551_424 },
+                gauges.Ceilings);
             Assert.Equal(new HashSet<string> { firstHandle, secondHandle }, new HashSet<string>(gauges.ConnectionHandles));
-            Assert.Equal(new Dictionary<string, long> { ["connections"] = 2 }, gauges.Counts);
+            Assert.Equal(
+                new Dictionary<string, long> { ["connections"] = 2, ["largestAddressConnections"] = 2, ["largestUnsentBytes"] = 0, ["unsentBytes"] = 0 },
+                gauges.Counts);
         }
     }
 
@@ -2316,7 +2320,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 (port, port),
                 (_server.Clients[0].Port, _server.Clients[1].Port));
             Assert.Equal([firstHandle, secondHandle], HandlesOf(_server.Clients));
-            Assert.Equal(new Dictionary<string, long> { ["connections"] = 2 }, _server.Gauges().Counts);
+            Assert.Equal(2, _server.Gauges().Counts["connections"]);
 
             await first.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
 
@@ -2364,13 +2368,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.Equal(new byte[] { 1 }, (await ReceiveOf(newer)).Bytes);
             Assert.Equal([newerHandle], _server.ConnectionHandles);
-            Assert.Equal(new Dictionary<string, long> { ["connections"] = 1 }, _server.Gauges().Counts);
+            Assert.Equal(1, _server.Gauges().Counts["connections"]);
 
             await newer.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
 
             Assert.Equal((true, newerHandle), await Next(_closes));
             Assert.Empty(_server.ConnectionHandles);
-            Assert.Equal(new Dictionary<string, long> { ["connections"] = 0 }, _server.Gauges().Counts);
+            Assert.Equal(0, _server.Gauges().Counts["connections"]);
             Assert.True(_closes.Reader.Count == 0);
         }
     }
@@ -2520,5 +2524,398 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.True(_closes.Reader.Count == 0);
             Assert.False(reading.IsCompleted);
         }
+    }
+
+    // an upgrade from behind a proxy that writes the client's address, as a socket of its own
+    private static byte[] UpgradeFrom(string forwarded)
+    {
+        return Encoding.ASCII.GetBytes(
+            $"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nX-Forwarded-For: {forwarded}\r\n" +
+            $"Sec-WebSocket-Key: {Convert.ToBase64String(RandomNumberGenerator.GetBytes(16))}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    }
+
+    // a socket upgraded, held open: the status of its answer's head, read to its blank line
+    private async Task<(TcpClient Socket, int Status)> Upgraded(byte[] request)
+    {
+        var tcp = await OpenTcp();
+        var stream = tcp.GetStream();
+        var head = new StringBuilder();
+        var octet = new byte[1];
+
+        await stream.WriteAsync(request, Cancelled);
+
+        while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+        {
+            await stream.ReadExactlyAsync(octet, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            head.Append((char)octet[0]);
+        }
+
+        return (tcp, int.Parse(head.ToString().Split(' ')[1], CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task Bounds_its_connections_and_those_of_one_address_refusing_an_upgrade_past_them_503_busy_before_its_101_with_Retry_After_and_takes_one_once_a_connection_closes()
+    {
+        await Start(new WebSocketTransportServerOptions { MaximumConnections = 2, MaximumConnectionsPerAddress = 1, TrustedProxies = ["127.0.0.1"], Clock = new FakeTimeProvider(Now) });
+
+        // one address's one place taken, then another's: the server's two
+        var (first, firstStatus) = await Upgraded(UpgradeFrom("192.0.2.1"));
+        var (second, secondStatus) = await Upgraded(UpgradeFrom("192.0.2.2"));
+
+        using (second)
+        {
+            using (first)
+            {
+                Assert.Equal((101, 101), (firstStatus, secondStatus));
+
+                // past the first address's bound, then past the server's: 503 busy, no 101
+                foreach (var forwarded in new[] { "192.0.2.1", "198.51.100.7" })
+                {
+                    var (status, fields, body) = await AnswerOf(UpgradeFrom(forwarded));
+
+                    Assert.Equal((503, WebSocketRefusals.Busy, "1", ""), (status, fields["bead-refusal"], fields["retry-after"], body));
+                }
+
+                Assert.Equal(
+                    [(503, WebSocketRefusals.Busy, "192.0.2.1"), (503, WebSocketRefusals.Busy, "198.51.100.7")],
+                    _refusals.Select((refusal) =>
+                    {
+                        return (refusal.Status, refusal.Reason, refusal.Address!);
+                    }));
+                Assert.Equal((2, 1), (_server.Gauges().Counts["connections"], _server.Gauges().Counts["largestAddressConnections"]));
+            }
+
+            // a connection gone gives its place back
+            await Next(_closes);
+
+            var (again, againStatus) = await Upgraded(UpgradeFrom("192.0.2.1"));
+
+            using (again)
+            {
+                Assert.Equal(101, againStatus);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Takes_no_more_upgrades_than_its_places_when_they_cross()
+    {
+        await Start(new WebSocketTransportServerOptions { MaximumConnections = 4 });
+
+        // sixteen at once against four places
+        var clients = Enumerable.Range(0, 16).Select((_) =>
+        {
+            return new ClientWebSocket();
+        }).ToList();
+
+        try
+        {
+            var outcomes = await Task.WhenAll(clients.Select(async (client) =>
+            {
+                try
+                {
+                    await client.ConnectAsync(UriOf(_port), Cancelled);
+
+                    return true;
+                }
+                catch (WebSocketException)
+                {
+                    return false;
+                }
+            }));
+
+            Assert.Equal((4, 12), (outcomes.Count((taken) =>
+            {
+                return taken;
+            }), outcomes.Count((taken) =>
+            {
+                return !taken;
+            })));
+            Assert.Equal(4, _server.Gauges().Counts["connections"]);
+            Assert.All(_refusals, (refusal) =>
+            {
+                Assert.Equal((503, WebSocketRefusals.Busy), (refusal.Status, refusal.Reason));
+            });
+        }
+        finally
+        {
+            foreach (var client in clients)
+            {
+                client.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public void Refuses_a_MaximumConnections_or_a_MaximumConnectionsPerAddress_that_is_not_a_whole_number_above_0()
+    {
+        foreach (var (name, options) in new (string, WebSocketTransportServerOptions)[]
+        {
+            (nameof(WebSocketTransportServerOptions.MaximumConnections), new() { MaximumConnections = 0 }),
+            (nameof(WebSocketTransportServerOptions.MaximumConnections), new() { MaximumConnections = -1 }),
+            (nameof(WebSocketTransportServerOptions.MaximumConnectionsPerAddress), new() { MaximumConnectionsPerAddress = 0 }),
+            (nameof(WebSocketTransportServerOptions.MaximumConnectionsPerAddress), new() { MaximumConnectionsPerAddress = int.MinValue }),
+        })
+        {
+            Assert.Equal(name, Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new WebSocketTransportServer(options);
+            }).ParamName);
+        }
+
+        // a place at once holds; and by default, 10,000 in all, 64 an address
+        _ = new WebSocketTransportServer(new WebSocketTransportServerOptions { MaximumConnections = 1, MaximumConnectionsPerAddress = 1 });
+        Assert.Equal((10_000, 64), (new WebSocketTransportServerOptions().MaximumConnections, new WebSocketTransportServerOptions().MaximumConnectionsPerAddress));
+    }
+
+    [Fact]
+    public async Task Keeps_a_client_that_reads_through_a_burst_of_answers_to_the_calls_it_has_it_answer_each_of_chunkBytes()
+    {
+        await Start(new WebSocketTransportServerOptions());
+
+        var reported = new ConcurrentQueue<Exception>();
+
+        _server.Error += (reason, _) =>
+        {
+            reported.Enqueue(reason);
+        };
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            // the answers to as many calls as a connection has answered at once, each of a chunk, in
+            // one turn: given the time their bytes take at the rate, never dropped
+            var answer = new byte[LimitDefaults.ChunkBytes];
+            var sending = Enumerable.Range(0, LimitDefaults.MaximumAnsweringCalls).Select((_) =>
+            {
+                return _server.Send(new TransportMessage(answer, false), connectionHandle);
+            }).ToList();
+            var buffer = new byte[LimitDefaults.ChunkBytes];
+
+            Assert.InRange(_server.Gauges().Counts["largestUnsentBytes"], 0, (long)LimitDefaults.MaximumAnsweringCalls * LimitDefaults.ChunkBytes);
+
+            for (var received = 0; received < LimitDefaults.MaximumAnsweringCalls; received += 1)
+            {
+                var length = 0;
+                ValueWebSocketReceiveResult result;
+
+                do
+                {
+                    result = await client.ReceiveAsync(buffer.AsMemory(length), Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+                    length += result.Count;
+                }
+                while (!result.EndOfMessage);
+
+                Assert.Equal(LimitDefaults.ChunkBytes, length);
+            }
+
+            await Task.WhenAll(sending).WaitAsync(Patience, Cancelled);
+            Assert.Equal(WebSocketState.Open, client.State);
+            Assert.Equal(0, _server.Gauges().Counts["unsentBytes"]);
+            Assert.Empty(reported);
+            Assert.True(_closes.Reader.Count == 0);
+        }
+    }
+
+    // spec 15.12.11 and 15.12.12
+    [Fact]
+    public async Task Drops_a_client_that_stops_reading_once_its_socket_holds_what_waits_for_it_past_its_deadline_and_reports_it()
+    {
+        PausedWebSocket? paused = null;
+
+        // ! a client that stops reading, its socket's sends held: a platform that takes every send
+        // into its own buffers, Windows', never holds them itself
+        await Start(new WebSocketTransportServer(new WebSocketTransportServerOptions { SendGracePeriod = TimeSpan.FromMilliseconds(200) })
+        {
+            Accepted = (socket, connectionHandle) =>
+            {
+                paused = new PausedWebSocket(socket);
+
+                return (paused, connectionHandle);
+            },
+        });
+
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue((reason, connectionHandle));
+        };
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            paused!.Pause();
+
+            // what waits for its socket, past its deadline of 200 ms: dropped at the next check
+            _ = _server.Send(new TransportMessage(new byte[16], false), connectionHandle);
+
+            Assert.Equal(16, _server.Gauges().Counts["largestUnsentBytes"]);
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+            Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
+            Assert.Contains(nameof(WebSocketTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+            Assert.Empty(_server.ConnectionHandles);
+        }
+    }
+
+    // spec 15.12.13
+    [Fact]
+    public async Task Drops_a_client_once_what_waits_for_it_would_pass_maximumUnsentBytes_the_bytes_it_holds_never_past_them_its_close_unclean_and_reports_it()
+    {
+        PausedWebSocket? paused = null;
+
+        await Start(new WebSocketTransportServer(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan, MaximumUnsentBytes = 65_536 })
+        {
+            Accepted = (socket, connectionHandle) =>
+            {
+                paused = new PausedWebSocket(socket);
+
+                return (paused, connectionHandle);
+            },
+        });
+
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Error += (reason, connectionHandle) =>
+        {
+            reported.Enqueue((reason, connectionHandle));
+        };
+
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            paused!.Pause();
+
+            // sixteen KiB at a time, each sampled under the bound, until one would pass it
+            var samples = new List<long>();
+
+            for (var sent = 0; sent < 8 && _server.ConnectionHandles.Count > 0; sent += 1)
+            {
+                _ = _server.Send(new TransportMessage(new byte[16_384], false), connectionHandle);
+                samples.Add(_server.Gauges().Counts["largestUnsentBytes"]);
+            }
+
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+            Assert.All(samples, (sample) =>
+            {
+                Assert.InRange(sample, 0, 65_536);
+            });
+            Assert.Equal(65_536, samples.Max());
+            Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
+            Assert.Contains(nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A socket whose sends wait, once paused, until it is aborted: a client that stops reading. The
+    /// rest is the socket it wraps.
+    /// </summary>
+    private sealed class PausedWebSocket(WebSocket socket) : WebSocket
+    {
+        private readonly TaskCompletionSource _aborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private volatile bool _isPaused;
+
+        public override WebSocketCloseStatus? CloseStatus
+        {
+            get
+            {
+                return socket.CloseStatus;
+            }
+        }
+
+        public override string? CloseStatusDescription
+        {
+            get
+            {
+                return socket.CloseStatusDescription;
+            }
+        }
+
+        public override WebSocketState State
+        {
+            get
+            {
+                return socket.State;
+            }
+        }
+
+        public override string? SubProtocol
+        {
+            get
+            {
+                return socket.SubProtocol;
+            }
+        }
+
+        public void Pause()
+        {
+            _isPaused = true;
+        }
+
+        public override void Abort()
+        {
+            _aborted.TrySetException(new WebSocketException("aborted"));
+            socket.Abort();
+        }
+
+        public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+        {
+            return socket.CloseAsync(closeStatus, statusDescription, cancellationToken);
+        }
+
+        public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
+        {
+            return socket.CloseOutputAsync(closeStatus, statusDescription, cancellationToken);
+        }
+
+        public override void Dispose()
+        {
+            socket.Dispose();
+        }
+
+        public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken)
+        {
+            return socket.ReceiveAsync(buffer, cancellationToken);
+        }
+
+        public override ValueTask<ValueWebSocketReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        {
+            return socket.ReceiveAsync(buffer, cancellationToken);
+        }
+
+        public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+        {
+            return _isPaused ? _aborted.Task : socket.SendAsync(buffer, messageType, endOfMessage, cancellationToken);
+        }
+
+        public override ValueTask SendAsync(ReadOnlyMemory<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken)
+        {
+            return _isPaused ? new ValueTask(_aborted.Task) : socket.SendAsync(buffer, messageType, endOfMessage, cancellationToken);
+        }
+    }
+
+    [Fact]
+    public void Refuses_a_MaximumUnsentBytes_a_MinimumSendBytesPerSecond_or_a_SendGracePeriod_it_cannot_hold_as_it_is_built()
+    {
+        foreach (var (options, name, refusal) in new (WebSocketTransportServerOptions, string, string)[]
+        {
+            (new() { MaximumUnsentBytes = 0 }, nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), "MaximumUnsentBytes is a whole number above 0, not 0"),
+            (new() { MinimumSendBytesPerSecond = -1 }, nameof(WebSocketTransportServerOptions.MinimumSendBytesPerSecond), "MinimumSendBytesPerSecond is a whole number, not -1"),
+            (new() { SendGracePeriod = Timeout.InfiniteTimeSpan }, nameof(WebSocketTransportServerOptions.SendGracePeriod), "SendGracePeriod is a number of milliseconds from 1 to 2147483647, not infinite"),
+        })
+        {
+            var refused = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                return new WebSocketTransportServer(options);
+            });
+
+            Assert.Equal((name, true), (refused.ParamName, refused.Message.StartsWith(refusal[..refusal.LastIndexOf(", not ", StringComparison.Ordinal)], StringComparison.Ordinal)));
+        }
+
+        // 0 holds no pace; a transport built alone holds what a peer that keeps every rule can be owed
+        Assert.Equal(184_551_424, new WebSocketTransportServer(new WebSocketTransportServerOptions { MinimumSendBytesPerSecond = 0 }).MaximumUnsentBytes);
     }
 }

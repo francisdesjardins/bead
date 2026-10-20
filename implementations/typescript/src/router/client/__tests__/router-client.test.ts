@@ -2109,6 +2109,54 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([]);
     });
 
+    test('answers CAPACITY_EXCEEDED a command past the calls its server has it answer', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { limits: { maximumAnsweringCalls: 2 } });
+      const errors = recordErrors(router);
+      const held: IRequestResolverProps<'server'>[] = [];
+
+      router.registerResolver(
+        Object.assign((props: IRequestResolverProps<'server'>) => {
+          held.push(props);
+
+          return Promise.resolve();
+        }, service)
+      );
+
+      for (const callId of [30, 32, 34]) {
+        deliver({
+          header: requestHeaderOf(callId),
+          kind: EnvelopeKind.REQUEST,
+          payload: new Uint8Array(0),
+        });
+      }
+
+      await sleep(0);
+
+      expect(held).toHaveLength(2);
+      expect(sent).toMatchObject([
+        {
+          failure: { code: ProtocolCode.CAPACITY_EXCEEDED },
+          header: { callId: 34, kind: EnvelopeKind.FAILURE },
+        },
+      ]);
+
+      // one answered, the next is taken
+      await router.respond(
+        { payload: Uint8Array.of(1) },
+        held[0] as IRequestResolverProps<'server'>
+      );
+      deliver({
+        header: requestHeaderOf(36),
+        kind: EnvelopeKind.REQUEST,
+        payload: new Uint8Array(0),
+      });
+      await sleep(0);
+
+      expect(held).toHaveLength(3);
+      expect(errors).toEqual([]);
+    });
+
     test('of the client’s own parity are reported, and never answered', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);

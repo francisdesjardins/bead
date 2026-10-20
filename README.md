@@ -65,12 +65,8 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
 own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: the bounds a server keeps against a peer that holds it — the calls a peer holds open
-  over a WebSocket or a Web Worker (spec 8.3), a WebSocket server's connections, what a WebSocket
-  server queues for a client that no longer reads, a request whose headers or body trickle in — and
-  a security event for a credential refused, each by a decision of its own; then each side's
-  parsers fuzzed, guided by coverage, Jazzer.js on the TypeScript side and SharpFuzz on the C#
-  side, both held to read one corpus alike, a short run in CI.
+- **Next**: each side's parsers fuzzed, guided by coverage, Jazzer.js on the TypeScript side and
+  SharpFuzz on the C# side, both held to read one corpus alike, a short run in CI.
 - **0.6.0**: a topic-based publish/subscribe broker as one more transport, one core and one
   adapter a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
@@ -122,16 +118,16 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 
 | File                                                    | What it holds                                                                                                                                                                                         |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
+| [`vectors.json`](spec/vectors.json)                     | 238 named vectors in 11 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, and the credentials refused with their told reason  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 116 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
+| [`transports.json`](spec/transports.json)               | 122 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
-| [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
+| [`durations.json`](spec/durations.json)                 | 26 places that take a duration an application gives a side, by 36 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
 | [`codecs.json`](spec/codecs.json)                       | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
 | [`codecs.proto`](spec/codecs.proto)                     | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
 | [`debug-filters.json`](spec/debug-filters.json)         | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                   |
-| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 51 exits of the interop service's server, the series each step moved                                                |
+| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 52 exits of the interop service's server, the series each step moved                                                |
 | [`interop-blueprint.json`](spec/interop-blueprint.json) | the interop service's API: its one service, its 18 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                    |
 | [`interop-service.json`](spec/interop-service.json)     | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                      |
 

@@ -121,7 +121,16 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
         return _dispatched.TryGetValue(header, out var call) ? call : null;
     }
 
-    /// <summary>What it holds: the calls being answered, those abandoned, and their connections.</summary>
+    /// <summary>The calls a connection's peer has this side answer right now.</summary>
+    public int CountOn(string connectionHandle)
+    {
+        return _answering.TryGetValue(connectionHandle, out var calls) ? calls.Count : 0;
+    }
+
+    /// <summary>
+    /// What it holds: the calls being answered, the most on one connection under its ceiling,
+    /// <see cref="RouterLimits.MaximumAnsweringCalls"/>, those abandoned, and their connections.
+    /// </summary>
     public Gauges Gauges()
     {
         return Bead.Gauges.Of(
@@ -135,8 +144,15 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
                 {
                     return (long)calls.Count;
                 }),
+                ["largestAnsweringCalls"] = _answering.Values.Select((calls) =>
+                {
+                    return (long)calls.Count;
+                }).DefaultIfEmpty().Max(),
             },
-            _answering.Keys.Concat(_abandoned.Keys));
+            _answering.Keys.Concat(_abandoned.Keys)) with
+        {
+            Ceilings = new Dictionary<string, long> { ["largestAnsweringCalls"] = options.Limits.MaximumAnsweringCalls },
+        };
     }
 
     /// <summary>Whether the peer's call is open on a call id, whichever request opened it.</summary>

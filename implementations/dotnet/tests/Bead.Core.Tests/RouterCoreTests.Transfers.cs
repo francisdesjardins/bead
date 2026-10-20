@@ -646,17 +646,17 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_CHUNK_INVALID_the_chunks_of_a_sender_whose_chunkBytes_is_larger_than_its_own_and_smaller_both_ends_setting_their_limits_alike()
+    public async Task Refuses_the_opening_of_a_sender_whose_chunkBytes_is_larger_than_its_own_ENVELOPE_TOO_LARGE_and_the_chunks_of_one_whose_chunkBytes_is_smaller_CHUNK_INVALID_both_ends_setting_their_limits_alike()
     {
         var larger = Chunked with { ChunkBytes = 128, WindowBytes = 256 };
 
-        foreach (var (requesterLimits, receiverLimits, chunks, detail) in new (RouterLimits, RouterLimits, int[], string)[]
+        foreach (var (requesterLimits, receiverLimits, chunks, refusal) in new (RouterLimits, RouterLimits, int[]?, (ProtocolCode Code, string Detail))[]
         {
-            // its opening of 108 bytes taken, its first chunk of 112 past the receiver's full of 48
-            (larger, Chunked, [112], "a chunk before the last carries 48 bytes, not 112"),
+            // its opening of 128 bytes past the receiver's request of 64 at most, nothing credited
+            (larger, Chunked, null, (ProtocolCode.EnvelopeTooLarge, "a request is 64 bytes at most, not 128")),
 
             // its chunks of 48 under the receiver's full of 112, every one under the credit
-            (Chunked, larger, [48, 48, 48, 48, 48, 16], "a chunk before the last carries 112 bytes, not 48"),
+            (Chunked, larger, [48, 48, 48, 48, 48, 16], (ProtocolCode.ChunkInvalid, "a chunk before the last carries 112 bytes, not 48")),
         })
         {
             var requester = new Peer(RouterSide.Client, requesterLimits);
@@ -690,12 +690,12 @@ public sealed partial class RouterCoreTests
             });
 
             Assert.Equal(
-                ((ushort)ProtocolCode.ChunkInvalid, detail, FailureOrigin.Peer),
+                ((ushort)refusal.Code, refusal.Detail, FailureOrigin.Peer),
                 (failed.Code, failed.Detail, failed.Origin));
 
-            // the opening taken and credited, then the first chunk refused
+            // the opening refused; or taken and credited, then the first chunk refused
             Assert.Equal(
-                [(EnvelopeKind.Request, requesterLimits.ChunkBytes), .. chunks.Select((bytes) =>
+                [(EnvelopeKind.Request, requesterLimits.ChunkBytes), .. (chunks ?? []).Select((bytes) =>
                 {
                     return (EnvelopeKind.Chunk, 16 + bytes);
                 })],
@@ -704,7 +704,7 @@ public sealed partial class RouterCoreTests
                     return (envelope.Kind, EnvelopeCodec.WriteEnvelope(envelope).Length);
                 }));
             Assert.Equal(
-                [EnvelopeKind.Credit, EnvelopeKind.Failure],
+                chunks is null ? [EnvelopeKind.Failure] : [EnvelopeKind.Credit, EnvelopeKind.Failure],
                 receiver.Sent.Select((envelope) =>
                 {
                     return envelope.Kind;

@@ -157,6 +157,25 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
   503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`,
   on both transports, is read by one rule of its own, `TrustedProxies`, as the section below says.
+  Kestrel's `MinRequestBodyDataRate` and `MinResponseDataRate` are none, Bead's own rules in their
+  place (spec 15.12): a body that comes slower than `MinimumBodyBytesPerSecond`, 240, once
+  `BodyGracePeriod`, 5 s, passed is refused 408 `too-slow`, marked and told, its connection kept;
+  an answer its socket still holds past the longer of `SendGracePeriod` and its bytes at
+  `MinimumSendBytesPerSecond` is lost, its connection closed and reported through `Error`, naming
+  the bound, as an outbox past `MaximumOutboxBytes` is; a listen's batch so held is lost and
+  reported, its connection kept, what it carried coming again to the next listen. A head is Kestrel's
+  `RequestHeadersTimeout`, the transport's `HeadersTimeout`, 30 s, on both transports, answered 408
+  as HTTP answers it. Every answer written before its body is whole closes its socket in stages
+  (RFC 9112 §9.6): its end flushed, what still comes read and dropped until its client closes or 2
+  seconds pass, so a reset never erases it.
+- **A WebSocket server** bounds its connections as an HTTP server does, `MaximumConnections`,
+  10,000, and `MaximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its
+  101, its place taken as it is judged (spec 15.2, step 8), so behind a proxy it needs
+  `TrustedProxies` or `UnnamedProxies`, its health warning once its busiest address holds 80% of
+  `MaximumConnectionsPerAddress`, gauged `largestAddressConnections`, before the first 503; and
+  holds what waits for a client's socket to `MinimumSendBytesPerSecond` past `SendGracePeriod` and
+  to `MaximumUnsentBytes`, the facade's drawn from its router's limits, a client behind either
+  dropped, its close unclean, and reported through `Error`, naming the bound.
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
@@ -339,8 +358,8 @@ prefix are set, and a network of prefix 0, which would trust what every client w
 `ArgumentException` as the transport is built. `Forwarded` is never read. The client's address so
 read names its connection, `ip=` in its handle, and its refusals; its port is the socket's, the
 nearest proxy's connection's behind one. A proxy neither listed nor counted is a client as any
-other: every client behind it is its address, which names them on either transport and which an
-HTTP server's `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
+other: every client behind it is its address, which names them on either transport and which
+either server's `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
 proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A
 proxy whose platform publishes its addresses is listed: Google Cloud's global load balancer by
 `130.211.0.0/22`, `35.191.0.0/16` and the forwarding rule's own address, Cloudflare by its ranges,
@@ -379,6 +398,23 @@ WebSocket reads nothing past its close, 1006, and its server's tell is then what
 server.Transport.Refusal += (refusal) =>
 {
     Console.Error.WriteLine($"refused {refusal.Status} {refusal.Reason}: authority {JsonSerializer.Serialize(refusal.Authority)}, origin {JsonSerializer.Serialize(refusal.Origin)}, from {refusal.Address}:{refusal.Port}");
+};
+```
+
+A server's router tells each access it refuses, `AccessRefused`, an `AccessRefusal` of its stage,
+`Credential` or `Admission`, the code answered, its reason — a `JWT`'s step of section 13.8, an
+`OPAQUE`'s `session`, an `ELSEWHERE`'s `nothing-carried`, `verifier` or `end`, `scheme` for a scheme
+the server takes none of, or the admission of Bead's own that refused, `requireSession`,
+`requireCredential`, `shareLegBSession`, `no-before-route` — the scheme, what was called, the
+connection, and the refused request's own address and port, over HTTP its exchange's, never its
+connect's; never the credential, a claim of a token nor an admission's detail (spec 13.12). A
+scanner's every token is an event: what the listener writes, and at what rate, is the
+application's.
+
+```csharp
+server.Router.AccessRefused += (refusal) =>
+{
+    Console.Error.WriteLine($"access refused {refusal.Stage} {refusal.Code} {refusal.Reason}: {refusal.ServiceId}/{refusal.ProcedureId} from {refusal.Address}:{refusal.Port}");
 };
 ```
 

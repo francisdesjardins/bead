@@ -152,7 +152,7 @@ TOKEN_BYTES = '00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F'
 # what an answer announces, by the scheme of its CREDENTIAL block: a session's token, or its end
 OPENED, ENDED = 'OPAQUE', 'NONE'
 
-# the schemes the interop server takes, which code 36's detail names (9.2, step 5), in the order of
+# the schemes the interop server takes, which code 36's detail names (9.2, step 6), in the order of
 # their numbers: a request that presents none is always taken, and names no scheme
 SCHEMES_TAKEN = 'OPAQUE, JWT, ELSEWHERE'
 
@@ -177,7 +177,7 @@ assert detail_of('ticks', 'answers') == FAILS_ON_PURPOSE
 CREDENTIAL_ALONE, NAMED_SCHEMES = re.findall(r'detail "([^"]*)"', SERVICE['relay']['admits'])
 assert NAMED_SCHEMES == SCHEMES_TAKEN
 
-# what SESSION_REQUIRED's detail says of a credential that does not resolve (9.2, step 5)
+# what SESSION_REQUIRED's detail says of a credential that does not resolve (9.2, step 6)
 NO_CREDENTIAL, DOES_NOT_HOLD = 'no credential came', 'the credential does not hold'
 
 
@@ -253,6 +253,9 @@ LONG = json_string(300).encode('utf-8')
 # the result bytes answers to a length of 35: 37 bytes, past what an envelope of 64 holds behind a
 # result's header and an announcement's 20 bytes
 RESULT_37 = ('"' + 'x' * 35 + '"').encode('utf-8')
+# the result bytes answers to a length of 98, 100 bytes, which goes as a transfer under chunks of 64
+# while its request goes whole
+RESULT_100 = ('"' + 'x' * 98 + '"').encode('utf-8')
 
 # ── 13.8 to 13.10: a JWT's session, its key set, and its end ────────────────────────────────────
 
@@ -405,7 +408,7 @@ def jwt_conversations():
     many calls at once as it lets wait."""
     return [
         ('a request presenting a JWT that verifies runs in its credential\'s session, never its connection\'s',
-         ['9.2.5', '13.1', '13.5', '13.8'], None, [
+         ['9.2.6', '13.1', '13.5', '13.8'], None, [
              login(1, 'ada'), result(1, '"ada"', OPENED),
              presenting(3, 'whoami', 'null', jwt(HS_GRACE)), result(3, '"grace"'),
              presenting(5, 'whoami', 'null', jwt(ES_GRACE)), result(5, '"grace"'),
@@ -413,17 +416,17 @@ def jwt_conversations():
         # its exp at the wall clock's start: it holds 60 s past it, and not a millisecond more; echo admits
         # anyone, so its refusal is the credential's
         ('a JWT holds while the server\'s wall clock is before its exp plus 60 s, a millisecond either side',
-         ['9.2.5', '13.8.9', '13.10.1'], None, [
+         ['9.2.6', '13.8.9', '13.10.1'], None, [
              presenting(1, 'whoami', 'null', jwt(HS_AT_START)), result(1, '"grace"'),
              wall(LEEWAY - 1),
              presenting(3, 'whoami', 'null', jwt(HS_AT_START)), result(3, '"grace"'),
              wall(1),
              presenting(5, 'echo', '"x"', jwt(HS_AT_START)), failure(5, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
-        ('a JWT for another audience is refused SESSION_REQUIRED, whatever its procedure requires', ['9.2.5', '13.8.11'], None, [
+        ('a JWT for another audience is refused SESSION_REQUIRED, whatever its procedure requires', ['9.2.6', '13.8.11'], None, [
             presenting(1, 'echo', '"x"', jwt(HS_OTHER_AUDIENCE)), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
             presenting(3, 'echo', '"y"', jwt(HS_GRACE)), result(3, '"y"')]),
         ('logout, in a credential\'s session, is refused ACCESS_DENIED, and its connection\'s session stays',
-         ['9.2.5', '13.5'], None, [
+         ['9.2.6', '13.5'], None, [
              login(1, 'ada'), result(1, '"ada"', OPENED),
              presenting(3, 'logout', 'null', jwt(HS_GRACE)), failure(3, ACCESS_DENIED, detail=ENDS_NO_CONNECTIONS),
              json_request(5, 'whoami', 'null'), result(5, '"ada"')]),
@@ -543,7 +546,7 @@ def jwt_conversations():
         # the key set fails at once when asked for an issuer it does not name, so an ask would show as
         # PROCEDURE_FAILED; none goes, and nothing waits on the server's clock
         ('a key set is asked for the issuers it names alone: a token of another, whose kid no key names, is refused at once, asking nothing, the application\'s own issuers among them',
-         ['9.2.5', '13.8.4', '13.9', '13.9.1'], None, [
+         ['9.2.6', '13.8.4', '13.9', '13.9.1'], None, [
              presenting(1, 'echo', '"x"', jwt(UNNAMED_GRACE)), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
              presenting(3, 'echo', '"y"', jwt(HS_UNNAMED)), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
              presenting(5, 'whoami', 'null', jwt(HS_GRACE)), result(5, '"grace"')]),
@@ -551,7 +554,7 @@ def jwt_conversations():
         # it; a call that came meanwhile and cancelled left its own wait alone; past the deadline, the
         # next ask goes at once, with a deadline of its own
         ('a key set\'s ask that never settles fails at its deadline, a minute after it went, for the calls that wait on it, and the next ask goes',
-         ['9.2.5', '10.2', '13.9', '13.9.2', '13.9.3'], None, [
+         ['9.2.6', '10.2', '13.9', '13.9.2', '13.9.3'], None, [
              presenting(1, 'whoami', 'null', jwt(STALLED_GRACE)), armed(KEY_SET_DEADLINE), advance(KEY_SET_DEADLINE // 2),
              presenting(3, 'whoami', 'null', jwt(STALLED_GRACE)), cancel(3),
              armed(KEY_SET_DEADLINE // 2), advance(KEY_SET_DEADLINE // 2),
@@ -598,7 +601,7 @@ def jwt_conversations():
         # answered at one instant are each on a connection of their own, so that each is expected on
         # its own
         ('a key set lets maximumWaitingCalls calls wait for an issuer\'s deadline at once, a call that waits on its ask never counted: however many wait on an ask, none is refused; one more for the deadline is refused CAPACITY_EXCEEDED at once, and one an answer moves onto a deadline that holds them as it moves, neither reported, while a call whose key serves and a call that comes once one left are not',
-         ['8.2', '9.2.5', '13.9', '13.9.6'], None, [
+         ['8.2', '9.2.6', '13.9', '13.9.6'], None, [
              opened('a'), opened('b'), opened('c'), opened('d'),
              on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'a'), armed(KEY_SET_WAIT),
              on(presenting(1, 'whoami', 'null', jwt(SET_GRACE)), 'b'),
@@ -652,7 +655,7 @@ def elsewhere_opening(call_id, procedure, data, total, carried):
 
 
 def elsewhere_conversations():
-    """9.2, step 5, 10.2 and 13.10: an ELSEWHERE, which the interop server's verifier resolves from what
+    """9.2, step 6, 10.2 and 13.10: an ELSEWHERE, which the interop server's verifier resolves from what
     its transport carried (interop-service.json, credentials.elsewhere): at once, or once the timer a
     value asks for fires on the server's clock, whatever its call's signal, so that a settling can
     come once its call ended. None subscribes, so no credential's session is kept past its call."""
@@ -660,18 +663,18 @@ def elsewhere_conversations():
         # an auth-scheme is compared case-insensitively (RFC 9110 §11.1), and a call presenting none
         # runs in its connection's session, whatever its transport carried
         ('an ELSEWHERE is resolved by the server\'s verifier from what its transport carried, and its call runs in that credential\'s session, never announced: whoami answers the sub it names',
-         ['9.2.5', '13.1', '13.11', '15.1'], None, [
+         ['9.2.6', '13.1', '13.11', '15.1'], None, [
              elsewhere(1, 'whoami', 'null', 'Interop sub=ada'), result(1, '"ada"'),
              elsewhere(3, 'whoami', 'null', 'interop sub=bob'), result(3, '"bob"'),
              carrying(json_request(5, 'whoami', 'null'), 'Interop sub=ada'), failure(5, SESSION_REQUIRED)]),
         # echo admits anyone: a credential that does not hold is refused all the same. The first is a
         # bearer token, RFC 6750's own example, of which the verifier's grammar holds nothing
         ('an ELSEWHERE its verifier does not hold is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying the credential does not hold',
-         ['9.2.5', '13.5', '13.11'], None, [
+         ['9.2.6', '13.5', '13.11'], None, [
              elsewhere(1, 'echo', '"x"', 'Bearer mF_9.B5f-4.1JqM'), failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD),
              elsewhere(3, 'echo', '"y"', 'Interop sub=Ada'), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
         ('an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED',
-         ['9.2.5', '13.11'], None, [
+         ['9.2.6', '13.11'], None, [
              elsewhere(1, 'whoami', 'null', 'Interop fail=true'), failure(1, PROCEDURE_FAILED), report('exception')]),
         # the first timer is armed before the cancel goes, so its verifier was asked; the second call on
         # call id 1 still resolves when the first one's settling comes, which must not answer it
@@ -711,23 +714,98 @@ def elsewhere_conversations():
              advance(1000), failure(3, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
     ]
 
+TWO_CALLS = {'maximumAnsweringCalls': 2}
+
+
+def answering_calls_conversations():
+    """9.2, step 3, and 9.1: the calls a connection has its side answer at once, two here, which a
+    request past them is refused for before anything else of it is read, and which the side's own
+    commands to its client keep to before they go."""
+    return [
+        # each slow answers on the server's clock; the second's timer is due a second after the first's
+        ('past the calls its peer has it answer on a connection, a request is answered CAPACITY_EXCEEDED, the calls it answers untouched, and one is taken once a call ends',
+         ['8.2', '9.2.3', '12.2.10'], TWO_CALLS, [
+             json_request(1, 'slow', '{"milliseconds":1000}'), armed(1000),
+             json_request(3, 'slow', '{"milliseconds":2000}'), armed(2000),
+             json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+             armed(1000), advance(1000), result(1, '1000'),
+             json_request(7, 'echo', '"y"'), result(7, '"y"'),
+             armed(1000), advance(1000), result(3, '2000')]),
+        ('a cancel frees its call\'s place at once', ['9.2.3', '10.2'], TWO_CALLS, [
+            json_request(1, 'slow', SLOW), json_request(3, 'slow', SLOW),
+            json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+            cancel(1), json_request(7, 'echo', '"y"'), result(7, '"y"'), cancel(3)]),
+        # the key set answers on the server's clock, a second after it is asked
+        ('a call whose credential still resolves holds its place', ['9.2.3', '9.2.6', '13.9'], TWO_CALLS, [
+            presenting(1, 'whoami', 'null', jwt(SET_GRACE)), armed(KEY_SET_WAIT),
+            json_request(3, 'slow', SLOW),
+            json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+            armed(KEY_SET_WAIT), advance(KEY_SET_WAIT), result(1, '"grace"'),
+            json_request(7, 'echo', '"y"'), result(7, '"y"'), cancel(3)]),
+        # the result goes as a transfer of 100 bytes, its opening and two chunks, each sent as a credit
+        # lets it
+        ('a result that goes as a transfer holds its call\'s place until its last chunk', ['9.2.3', '12.1', '12.5'],
+         {**CHUNKED, **TWO_CALLS}, [
+             json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
+             json_request(3, 'slow', SLOW),
+             json_request(5, 'echo', '"x"'), failure(5, CAPACITY_EXCEEDED),
+             credit_in(1, 76), chunk_out(1, 28, RESULT_100[28:76], False),
+             json_request(7, 'echo', '"y"'), failure(7, CAPACITY_EXCEEDED),
+             credit_in(1, 100), chunk_out(1, 76, RESULT_100[76:], True),
+             json_request(9, 'echo', '"z"'), result(9, '"z"'), cancel(3)]),
+        ('a subscription once answered holds no place', ['9.2.3', '11.3'], TWO_CALLS, [
+            subscribe(1), result(1, 'null'),
+            json_request(3, 'slow', SLOW),
+            tick(5, 1), notification(1, '1'), result(5, 'null'),
+            json_request(7, 'slow', SLOW),
+            json_request(9, 'echo', '"x"'), failure(9, CAPACITY_EXCEEDED), cancel(3), cancel(7)]),
+        ('a request past the bound is refused before its route, its credential or its transfer', ['9.2.3', '12.3'],
+         {**CHUNKED, **TWO_CALLS}, [
+             json_request(1, 'slow', SLOW), json_request(3, 'slow', SLOW),
+             json_request(5, 1, '{}', service_id=9), failure(5, CAPACITY_EXCEEDED),
+             json_request(7, 'echo', 'null', flags=0x02, words=4, tail='00 00 00 05'), failure(7, CAPACITY_EXCEEDED),
+             presenting(9, 'echo', '"x"', '00 04 00 00'), failure(9, CAPACITY_EXCEEDED),
+             opening(11, 'echo', LONG[:44], 300), failure(11, CAPACITY_EXCEEDED), cancel(1), cancel(3)]),
+        ('a request on a call id open is reported, never answered for the bound', ['9.2.2', '9.2.3'], TWO_CALLS, [
+            json_request(1, 'slow', SLOW), json_request(3, 'slow', SLOW),
+            json_request(1, 'echo', '"again"'), report(MALFORMED), cancel(1), cancel(3)]),
+        # ask's command waits on with its call cancelled, so the server's commands outnumber the calls
+        # it answers; the third fails before it goes, drawing no call id, and the next goes on 6
+        ('the server\'s commands past the calls its client answers at once fail before they go, and go once one is answered',
+         ['9.1', '12.2.10'], TWO_CALLS, [
+             json_request(1, 'ask', 'null'), command(2, 'clock', QUESTION),
+             json_request(3, 'ask', 'null'), command(4, 'clock', QUESTION), cancel(1),
+             json_request(5, 'ask', 'null'), failure(5, PROCEDURE_FAILED), report(CAPACITY_EXCEEDED),
+             answer(2, '"noon"'),
+             json_request(7, 'ask', 'null'), command(6, 'clock', QUESTION),
+             answer(4, '"noon"'), result(3, '"noon"'), answer(6, '"noon"'), result(7, '"noon"')]),
+        # 12.2: a request, whole or an opening, held to chunkBytes, of 64 here, and a request of 64 taken
+        ('a request that came whole past chunkBytes is answered ENVELOPE_TOO_LARGE, and nothing of it is held',
+         ['9.6.2', '12.1', '12.2'], CHUNKED, [
+             json_request(1, 'echo', json_string(53)), failure(1, TOO_LARGE),
+             json_request(1, 'echo', '"y"'), result(1, '"y"'),
+             opening(3, 'echo', LONG[:45], 300), failure(3, TOO_LARGE),
+             json_request(5, 'cancellations', json_string(52)), result(5, '0')]),
+    ]
+
+
 conversations = [
     # 9.2: a request routed, admitted and answered
-    ('echo answers with its request\'s payload', ['9.2.8', '9.3'], None, [
+    ('echo answers with its request\'s payload', ['9.2.9', '9.3'], None, [
         json_request(1, 'echo', '{"a":1}'), result(1, '{"a":1}')]),
     ('fail answers with its own failure, of the application', ['9.5'], None, [
         json_request(3, 'fail', 'null'), failure(3, ON_PURPOSE, APPLICATION, detail=FAILS_ON_PURPOSE)]),
-    ('a service unknown is answered SERVICE_UNKNOWN', ['9.2.4'], None, [
+    ('a service unknown is answered SERVICE_UNKNOWN', ['9.2.5'], None, [
         json_request(1, 1, '{}', service_id=9), failure(1, SERVICE_UNKNOWN)]),
-    ('a request to service 0 is read, and answered SERVICE_UNKNOWN by routing', ['4.7', '9.2.4'], None, [
+    ('a request to service 0 is read, and answered SERVICE_UNKNOWN by routing', ['4.7', '9.2.5'], None, [
         json_request(1, 1, '{}', service_id=0), failure(1, SERVICE_UNKNOWN)]),
-    ('a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN', ['9.2.4'], None, [
+    ('a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN', ['9.2.5'], None, [
         json_request(1, 99, '{}'), failure(1, PROCEDURE_UNKNOWN)]),
-    ('an admission that refuses is answered with its refusal', ['9.2.5'], None, [
+    ('an admission that refuses is answered with its refusal', ['9.2.6'], None, [
         json_request(1, 'denied', 'null'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY)]),
-    ('a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN', ['9.2.3', '14.1'], None, [
+    ('a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN', ['9.2.4', '14.1'], None, [
         json_request(1, 'echo', 'null', flags=0x02, words=4, tail='00 00 00 05'), failure(1, DESTINATION_UNKNOWN)]),
-    ('a request that opens a transfer, to a server that takes none, is answered PAYLOAD_TOO_LARGE', ['9.2.7', '12.2.6'],
+    ('a request that opens a transfer, to a server that takes none, is answered PAYLOAD_TOO_LARGE', ['9.2.8', '12.2.6'],
      {'maximumTransfers': 0}, [
          json_request(1, 'echo', '"', flags=0x04, words=5, tail='00 00 00 00 00 00 01 00'),
          failure(1, PAYLOAD_TOO_LARGE)]),
@@ -767,7 +845,7 @@ conversations = [
         json_request(1, 'echo', '[' * 65 + ']' * 65), failure(1, PAYLOAD_UNDECODABLE)]),
     ('a payload whose number is past a double is answered PAYLOAD_UNDECODABLE', ['17.2.1', '17.5.6'], None, [
         json_request(1, 'echo', '1E400'), failure(1, PAYLOAD_UNDECODABLE)]),
-    ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.5'], None, [
+    ('an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable', ['9.2.6'], None, [
         request(1, 'denied', 'FF'), failure(1, ACCESS_DENIED, detail=ADMITS_NOBODY),
         request(3, 'whoami', 'FF'), failure(3, SESSION_REQUIRED)]),
     ('an answer too large for one envelope, from a server that sends no transfer, is answered PROCEDURE_FAILED, and reported PAYLOAD_TOO_LARGE', ['9.0', '12.1'],
@@ -864,34 +942,34 @@ conversations = [
         tick(7, 1), result(7, 'null')]),
     # 13.8 and 13.10: a JWT's session, kept while it bounds a subscription, and its end
     *jwt_conversations(),
-    # 9.2, step 5: a request's credential resolves to its call's session, which its admission reads
-    ('a request presenting its connection\'s OPAQUE is taken, and runs in that session', ['9.2.5', '13.1', '13.4'], None, [
+    # 9.2, step 6: a request's credential resolves to its call's session, which its admission reads
+    ('a request presenting its connection\'s OPAQUE is taken, and runs in that session', ['9.2.6', '13.1', '13.4'], None, [
         login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
         presenting(3, 'whoami', 'null', opaque('<ada>')), result(3, '"ada"'),
         presenting(5, 'logout', 'null', opaque('<ada>')), result(5, 'null', ENDED)]),
     # echo admits anyone: a credential that does not hold is refused all the same
     ('a request presenting an OPAQUE no session holds is refused SESSION_REQUIRED, whatever its procedure requires, and its connection\'s session stays',
-     ['9.2.5', '13.5'], None, [
+     ['9.2.6', '13.5'], None, [
          presenting(1, 'echo', '"x"', opaque(TOKEN_BYTES)), failure(1, SESSION_REQUIRED),
          login(3, 'ada'), result(3, '"ada"', OPENED),
          presenting(5, 'echo', '"y"', opaque(TOKEN_BYTES)), failure(5, SESSION_REQUIRED),
          json_request(7, 'whoami', 'null'), result(7, '"ada"')]),
     ('a request presenting another connection\'s OPAQUE is refused SESSION_REQUIRED: a token holds on its own connection alone',
-     ['9.2.5', '13.2'], None, [
+     ['9.2.6', '13.2'], None, [
          opened('client'), opened('other'),
          on(login(1, 'ada'), 'client'), on(named(result(1, '"ada"', OPENED), 'ada'), 'client'),
          on(login(1, 'bob'), 'other'), on(named(result(1, '"bob"', OPENED), 'bob'), 'other'),
          on(presenting(3, 'whoami', 'null', opaque('<ada>')), 'other'), on(failure(3, SESSION_REQUIRED), 'other'),
          on(presenting(5, 'whoami', 'null', opaque('<bob>')), 'other'), on(result(5, '"bob"'), 'other'),
          on(presenting(3, 'whoami', 'null', opaque('<ada>')), 'client'), on(result(3, '"ada"'), 'client')]),
-    ('a request presenting the OPAQUE of a session ended is refused SESSION_REQUIRED', ['9.2.5', '13.4'], None, [
+    ('a request presenting the OPAQUE of a session ended is refused SESSION_REQUIRED', ['9.2.6', '13.4'], None, [
         login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
         json_request(3, 'logout', 'null'), result(3, 'null', ENDED),
         presenting(5, 'echo', '"x"', opaque('<ada>')), failure(5, SESSION_REQUIRED),
         json_request(7, 'echo', '"y"'), result(7, '"y"')]),
     # login opens its connection's session whatever its call presents, under a token drawn anew
     ('a request presenting the OPAQUE of a session opened anew under a new token is refused SESSION_REQUIRED',
-     ['9.2.5', '13.2', '13.4'], None, [
+     ['9.2.6', '13.2', '13.4'], None, [
          login(1, 'ada'), named(result(1, '"ada"', OPENED), 'ada'),
          presenting(3, 'login', '{"name":"bob"}', opaque('<ada>')), named(result(3, '"bob"', OPENED), 'bob'),
          presenting(5, 'whoami', 'null', opaque('<ada>')), failure(5, SESSION_REQUIRED),
@@ -899,20 +977,20 @@ conversations = [
     # a scheme the server takes none of is refused after its procedure is known and before its
     # admission, whatever its length
     ('a credential scheme to come is answered CREDENTIAL_UNSUPPORTED, its detail naming the schemes the server takes, before its admission',
-     ['9.2.4', '9.2.5'], None, [
+     ['9.2.5', '9.2.6'], None, [
          presenting(1, 'echo', '"x"', '00 04 00 00'), failure(1, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
          presenting(3, 'whoami', 'null', 'FF FF 00 02  01 02  00 00'),
          failure(3, CREDENTIAL_UNSUPPORTED, detail=SCHEMES_TAKEN),
          presenting(5, 99, '{}', '00 07 00 00'), failure(5, PROCEDURE_UNKNOWN)]),
     # a.b.c reads as no token (13.8, step 1): a credential that came and does not hold
     ('a JWT that does not verify is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying one came and did not hold',
-     ['9.2.5', '13.8.1'], None, [
+     ['9.2.6', '13.8.1'], None, [
          presenting(1, 'echo', '"x"', '00 02 00 05  61 2E 62 2E 63  00 00 00'),
          failure(1, SESSION_REQUIRED, detail=DOES_NOT_HOLD)]),
     # echo admits anyone: an ELSEWHERE that carried nothing is refused all the same, and its verifier
     # is never asked
     ('an ELSEWHERE whose transport carried nothing is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying no credential came',
-     ['9.2.5', '15.1'], None, [
+     ['9.2.6', '15.1'], None, [
          elsewhere(1, 'echo', '"x"'), failure(1, SESSION_REQUIRED, detail=NO_CREDENTIAL)]),
     *elsewhere_conversations(),
     # 9.2, steps 1 and 2: what would answer another call
@@ -921,6 +999,8 @@ conversations = [
     ('a request on a call id still open is reported, never answered', ['9.2.2'], None, [
         json_request(1, 'slow', SLOW), json_request(1, 'echo', '"again"'), report(MALFORMED),
         cancel(1), json_request(3, 'cancellations', 'null'), result(3, '1')]),
+    # 9.2, step 3: the calls a connection has answered at once
+    *answering_calls_conversations(),
     # 9.4 and 10: the cancel, and the answer that goes out only while its call is open
     ('a cancel ends its call, and the answer its resolver gives after goes nowhere', ['9.4', '10.2'], None, [
         json_request(1, 'slow', SLOW), cancel(1), json_request(3, 'cancellations', 'null'), result(3, '1')]),
@@ -977,9 +1057,9 @@ conversations = [
         chunk_in(1, 188, LONG[188:236], False), chunk_in(1, 140, LONG[140:188], False), credited(1, 300),
         cancel(1)]),
     ('a result is sent as far as its credit, a full chunk at a time, and a credit lower than the last grants nothing', ['12.4', '12.5'], CHUNKED, [
-        json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:28], 100),
-        credit_in(1, 75), credit_in(1, 76), chunk_out(1, 28, ECHOED[28:76], False),
-        credit_in(1, 60), credit_in(1, 100), chunk_out(1, 76, ECHOED[76:], True)]),
+        json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
+        credit_in(1, 75), credit_in(1, 76), chunk_out(1, 28, RESULT_100[28:76], False),
+        credit_in(1, 60), credit_in(1, 100), chunk_out(1, 76, RESULT_100[76:], True)]),
     ('a chunk past its credit is answered CREDIT_EXCEEDED, and a late one under it is dropped in silence', ['12.6.2', '12.9.4'], CHUNKED, [
         opening(1, 'echo', LONG[:44], 300), credited(1, 172),
         chunk_in(1, 172, LONG[172:220], False), failure(1, CREDIT_EXCEEDED),
@@ -1024,7 +1104,7 @@ conversations = [
         opening(5, 'echo', LONG[:44], 200), failure(5, CAPACITY_EXCEEDED),
         cancel(1), credited(3, 172)]),
     ('a cancel ends the transfer of a result, and a credit after it is dropped in silence', ['12.7', '12.9.5'], CHUNKED, [
-        json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:28], 100),
+        json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
         cancel(1), credit_in(1, 100)]),
     # 12.7 to 12.9: a transfer's inactivity, on the server's clock. A restart shows by an advance past
     # the first due and short of the second, then a send, before which nothing more went. The first
@@ -1048,8 +1128,8 @@ conversations = [
          armed(20_000), advance(20_000), chunk_in(2, 76, LONG[76:124], False), report(CALL_UNKNOWN)]),
     ('a result that gets no credit is ended TRANSFER_STALLED, a credit that grants setting it going again, one that grants nothing not',
      ['12.7', '12.8'], {**CHUNKED, 'transferInactivityTimeout': 15_000}, [
-         json_request(1, 'echo', ECHOED.decode('utf-8')), result_opening(1, ECHOED[:28], 100),
-         armed(15_000), advance(5_000), credit_in(1, 76), chunk_out(1, 28, ECHOED[28:76], False),
+         json_request(1, 'bytes', '{"length":98}'), result_opening(1, RESULT_100[:28], 100),
+         armed(15_000), advance(5_000), credit_in(1, 76), chunk_out(1, 28, RESULT_100[28:76], False),
          armed(15_000), advance(12_000), credit_in(1, 60),
          armed(3_000), advance(3_000), failure(1, TRANSFER_STALLED), report(TRANSFER_STALLED)]),
 ]
@@ -1246,11 +1326,11 @@ def credentials_through_a_relay():
     unreadable = '00 02 00 05  61 2E 62 2E 63  00 00 00'
     no_credential_came, does_not_hold = NO_CREDENTIAL, DOES_NOT_HOLD
 
-    # leg B's header with this token: the prefix, the service and the procedure, then its CREDENTIAL
-    # block; the largest payload an envelope of 1,024 bytes holds behind it
-    leg_b_header = 12 + 4 + len(token) + -len(token) % 4
-    fits = 1024 - leg_b_header
-    assert 12 + fits + 1 <= 1024, 'a payload a byte past it fits behind a header that presents none'
+    # the legs' payload limit, which leg A's request presenting this token, its destination and its
+    # CREDENTIAL block before it, holds a byte past within an envelope of 1,024 bytes
+    limit = 512
+    leg_a_header = 12 + 4 + 4 + len(token) + -len(token) % 4
+    assert leg_a_header + limit + 1 <= 1024, 'a payload a byte past the limit comes whole within chunkBytes'
 
     relayed_conversations = [
         # 14.2's table, row by row
@@ -1325,19 +1405,20 @@ def credentials_through_a_relay():
              opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE, audience),
              to(3, '"x"', elsewhere), refused_with(3, SESSION_REQUIRED, no_credential_came),
              to(5, '"x"', elsewhere, destination=99), refused_with(5, SESSION_REQUIRED, no_credential_came)]),
-        # 14.3, step 6: leg B's header, with the token's block, leaves an envelope of 1,024 bytes `fits`
-        # bytes of payload, and 4 more without it; leg A's request comes whole, past chunkBytes and
-        # within maximumEnvelopeBytes, since the server takes no transfer
-        sharing_leg_b(('leg B\'s header counts its credential, call by call, against the smaller of the two legs\' limits, once its route holds',
-         ['14.3.5', '14.3.6', '14.5.3'], {'maximumEnvelopeBytes': 2048, 'chunkBytes': 1024, 'maximumTransfers': 0}, [
+        # 14.3, step 6: a payload past the smaller of the two legs' limits, its route judged first. Leg
+        # A's request comes whole, within chunkBytes (12.2), so its header, a destination longer than
+        # leg B's, binds before leg B's ever does: leg B's header, counted call by call, is held by
+        # the twins, whose legs' limits differ
+        sharing_leg_b(('a payload past the smaller of the two legs\' limits is answered PAYLOAD_TOO_LARGE once its route holds, whatever it presents',
+         ['14.3.5', '14.3.6', '14.5.3'],
+         {'maximumEnvelopeBytes': 1024, 'chunkBytes': 1024, 'maximumTransfers': 0, 'maximumPayloadBytes': limit}, [
              opened('client'), opened('device'), opened('other'), *logged_in_as_ada(),
              *registered_as(DEVICE, audience), *registered_as(13, other, connection='other'),
-             to(3, json_string(fits), jwt(token)),
-             *crosses(3, 2, json_string(fits), leg_b_presenting(2, json_string(fits), as_jwt(token)), answer_value='"ok"'),
-             to(5, json_string(fits + 1), jwt(token)), refused_with(5, PAYLOAD_TOO_LARGE),
-             on(relayed(7, 'echo', json_string(fits + 1)), 'client'),
-             *crosses(7, 4, json_string(fits + 1), leg_b_presenting(4, json_string(fits + 1)), answer_value='"ok"'),
-             to(9, json_string(fits + 1), jwt(token), destination=13), refused_with(9, DESTINATION_UNREACHABLE)])),
+             to(3, json_string(limit), jwt(token)),
+             *crosses(3, 2, json_string(limit), leg_b_presenting(2, json_string(limit), as_jwt(token)), answer_value='"ok"'),
+             to(5, json_string(limit + 1), jwt(token)), refused_with(5, PAYLOAD_TOO_LARGE),
+             on(relayed(7, 'echo', json_string(limit + 1)), 'client'), refused_with(7, PAYLOAD_TOO_LARGE),
+             to(9, json_string(limit + 1), jwt(token), destination=13), refused_with(9, DESTINATION_UNREACHABLE)])),
         # 14.3: a relay that verifies, at its first step, against its destinations' audiences
         with_relay({'verifies': True}, ('a relay that verifies answers a JWT that does not hold SESSION_REQUIRED at its first step, before its destination is looked up, and forwards one that holds',
          ['14.3.1'], None, [
@@ -1374,9 +1455,9 @@ def credentials_through_a_relay():
              to(1, '"x"', jwt(token)), *crosses(1, 2, '"x"', leg_b_presenting(2, '"x"', as_jwt(token))),
              on(relayed(3, 'echo', '"y"'), 'client'), refused_with(3, SESSION_REQUIRED)])),
         # ACCESS_DENIED, never SESSION_REQUIRED, which would have the client withdraw a credential
-        # that may hold (9.2, step 5)
+        # that may hold (9.2, step 6)
         with_relay({'beforeRoute': 'requireSession'}, ('a relay whose admission is requireSession refuses every credential it forwards without verifying with ACCESS_DENIED, whatever leg A\'s connection\'s session',
-         ['9.2.5', '13.5', '14.3.1'], None, [
+         ['9.2.6', '13.5', '14.3.1'], None, [
              opened('client'), opened('device'), *logged_in_as_ada(), *registered_as(DEVICE, audience),
              to(3, '"x"', jwt(token)), refused_with(3, ACCESS_DENIED),
              to(5, '"x"', elsewhere, carried=bearer), refused_with(5, ACCESS_DENIED),
@@ -1398,6 +1479,26 @@ for name, _, _, *rest in conversations:
             assert token in tokens, f'{name}: presents <{token}>, which no step before it named'
 
         tokens |= {step['token']} if 'token' in step else set()
+
+# ! a request, whole or an opening, past its chunkBytes is answered ENVELOPE_TOO_LARGE (12.2): one sent
+# so is the conversation's point, its next expect on its connection that refusal, or it would be
+# refused in silence of its intent
+for name, _, limits, *rest in conversations:
+    chunk_bytes = (limits or {}).get('chunkBytes', 1_048_576)
+    steps = rest[-1]
+
+    for index, step in enumerate(steps):
+        octets = step.get('send', '').replace('|', ' ').split()
+
+        if len(octets) < 8 or octets[1] != '10' or len(octets) <= chunk_bytes:
+            continue
+
+        call_id = int(''.join(octets[4:8]), 16)
+        answer_ = next((later['expect'] for later in steps[index + 1:]
+                        if 'expect' in later and later.get('on') == step.get('on')), None)
+        assert answer_ is not None and answer_.get('callId') == call_id and \
+            answer_.get('failure', {}).get('code') == TOO_LARGE, \
+            f'{name}: sends a request of {len(octets)} bytes past its chunkBytes, {chunk_bytes}, refused in silence of its intent'
 
 document = {
     '$schema': 'schemas/conversations.schema.json',

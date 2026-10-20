@@ -14,7 +14,8 @@
     "envelopeRefusals",
     "failures",
     "failureRefusals",
-    "jwtVerdicts"
+    "jwtVerdicts",
+    "credentialRefusals"
   ],
   "additionalProperties": false,
   "properties": {
@@ -244,6 +245,42 @@
               }
             ]
           }
+        }
+      }
+    },
+    "credentialRefusals": {
+      "description": "Credentials a server refuses as they resolve, other than a JWT's verdicts, each in the situation both sides' tests set up, and the reason the access refused is told with (section 13.12).",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "clauses", "scheme", "situation", "code", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/name" },
+          "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+          "scheme": {
+            "description": "The credential scheme the request presents: by its name, or a scheme to come by its number.",
+            "oneOf": [
+              { "enum": ["OPAQUE", "JWT", "ELSEWHERE"] },
+              { "type": "integer", "minimum": 4, "maximum": 65535 }
+            ]
+          },
+          "situation": {
+            "description": "What the test sets up before the request: an OPAQUE of a session another connection holds, or of none; an ELSEWHERE whose transport carried nothing, whose verifier settles with no session, or whose end the wall clock has reached as it settles; a scheme to come; an ELSEWHERE to a server given no verifier; a JWT to a server given no keys.",
+            "enum": [
+              "another-connections-session",
+              "no-session",
+              "nothing-carried",
+              "verifier-makes-none",
+              "end-come",
+              "scheme-to-come",
+              "no-verifier",
+              "no-keys"
+            ]
+          },
+          "code": { "$ref": "common.schema.json#/$defs/protocolCode" },
+          "reason": { "enum": ["session", "nothing-carried", "verifier", "end", "scheme"] }
         }
       }
     }

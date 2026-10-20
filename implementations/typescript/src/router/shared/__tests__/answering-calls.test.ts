@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { healthOf, layerGaugesOf } from '../../../server/health';
 import { createTestClock, hasRef } from '../../../transport/shared/__tests__/fixtures';
+import { gaugesOf } from '../../../transport/shared/gauges';
 import { createAnsweringCalls } from '../answering-calls';
 import { EnvelopeKind } from '../constants';
 import { CallEnding, type IProcedureSeries } from '../metrics-registry';
@@ -296,5 +298,44 @@ test.describe('createAnsweringCalls', () => {
       connectionHandles: new Set(),
       counts: { abandonedCalls: 0, answeringCalls: 0 },
     });
+  });
+
+  test('gauges largestAnsweringCalls under its ceiling maximumAnsweringCalls, which health warns at', () => {
+    const limits = {
+      maximumAnsweringCalls: 5,
+      maximumTransfers: 4,
+      transferInactivityTimeout: 30_000,
+    };
+    const calls = createAnsweringCalls<Handle, IReceivingOf>({ clock: createTestClock(), limits });
+    const healthOfCalls = () => {
+      return healthOf({
+        router: layerGaugesOf(calls.gauges(), new Set(['a', 'b'])),
+        server: layerGaugesOf(gaugesOf({ counts: {} }), new Set()),
+        sessions: layerGaugesOf(gaugesOf({ counts: {} }), new Set()),
+        transport: layerGaugesOf(gaugesOf({ counts: {} }), new Set()),
+      }).checks['router:largestAnsweringCalls']?.[0];
+    };
+
+    for (const callId of [1, 3, 5]) {
+      calls.open({ connectionHandle: 'a', header: headerOf(callId) });
+    }
+
+    calls.open({ connectionHandle: 'b', header: headerOf(1) });
+
+    // the busiest connection's, never the sum of them, under the bound of one connection
+    expect(calls.gauges()).toMatchObject({
+      ceilings: { largestAnsweringCalls: 5 },
+      counts: { answeringCalls: 4, largestAnsweringCalls: 3 },
+    });
+    expect(calls.countOn('a')).toBe(3);
+    expect(healthOfCalls()).toMatchObject({ output: '3 of 5', status: 'pass' });
+
+    calls.open({ connectionHandle: 'a', header: headerOf(7) });
+
+    expect(healthOfCalls()).toMatchObject({ output: '4 of 5', status: 'warn' });
+
+    calls.takeAll('a');
+
+    expect(calls.gauges().counts).toMatchObject({ largestAnsweringCalls: 1 });
   });
 });

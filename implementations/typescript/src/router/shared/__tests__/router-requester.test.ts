@@ -531,6 +531,59 @@ test.describe('createRouterCore', () => {
       }).toThrow(ProgrammerError);
     });
 
+    test('fails before it goes a call past the calls its peer answers at once, and sends one once a call is answered', async () => {
+      const { port, sent } = createPort();
+      using core = createRouterCore(port, { limits: { maximumAnsweringCalls: 2 } });
+      const drawn: number[] = [];
+      const request = (connectionHandle: Handle) => {
+        return core.request(new Uint8Array(0), {
+          connectionHandle,
+          onCallId: (callId) => {
+            drawn.push(callId);
+          },
+          options,
+          procedure: echo,
+        });
+      };
+
+      const first = request('a');
+      const second = request('a');
+      // another connection's calls are its own
+      const other = request('b');
+
+      // past them, it fails at once, drawing no call id and sending nothing
+      await expect(request('a')).rejects.toMatchObject({
+        code: ProtocolCode.CAPACITY_EXCEEDED,
+        detail: 'the calls waiting on a are 2 at most',
+        side: 'server',
+      });
+      expect(drawn).toEqual([2, 4, 6]);
+      expect(sent).toHaveLength(3);
+
+      // answered, a call gives its place back in the turn its answer came
+      core.receive(resultOf(2), 'a');
+
+      const third = request('a');
+
+      expect(drawn).toEqual([2, 4, 6, 8]);
+      await first;
+      await sleep(0);
+
+      expect(
+        sent.map(({ connectionHandle, envelope }) => {
+          return [connectionHandle, envelope?.header.callId];
+        })
+      ).toEqual([
+        ['a', 2],
+        ['a', 4],
+        ['b', 6],
+        ['a', 8],
+      ]);
+
+      core.rejectPending('all gone');
+      await Promise.allSettled([second, other, third]);
+    });
+
     test('are cancelled by their signal: at once, drawing nothing, or once sent, telling the peer', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port);

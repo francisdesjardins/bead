@@ -67,6 +67,7 @@ internal static class ConversationPlayer
                 "bufferedBytesBudget" => limits with { BufferedBytesBudget = value },
                 "maximumChunkRuns" => limits with { MaximumChunkRuns = value },
                 "maximumDetailBytes" => limits with { MaximumDetailBytes = value },
+                "maximumAnsweringCalls" => limits with { MaximumAnsweringCalls = value },
                 "transferInactivityTimeout" => limits with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(value) },
                 _ => throw new ArgumentException($"a conversation sets a limit no test reads: {limit.Name}", nameof(conversation)),
             };

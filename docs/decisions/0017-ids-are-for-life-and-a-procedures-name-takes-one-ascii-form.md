@@ -275,7 +275,7 @@ it, and is checked there, once.
 holds to their form ([0006](0006-a-rule-has-its-gate.md)).
 
 **What a peer sees.** Ids in each request, a code in each application failure, and whether a server
-holds a service or a procedure, by `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN` (9.2, step 4). Never a
+holds a service or a procedure, by `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN` (9.2, step 5). Never a
 name, a revision or a reservation.
 
 | Identity             | On the wire | A side holds it                                                   | `beadc` holds it                                         |

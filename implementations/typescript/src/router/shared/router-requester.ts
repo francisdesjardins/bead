@@ -620,6 +620,18 @@ export const createRouterRequester = <Handle extends string>(
           return (reject(refusal), undefined);
         }
 
+        // ! past the calls its peer answers at once, it fails before it goes, drawing no call id,
+        // as an HTTP/2 endpoint never passes the streams its peer lets it open (spec 9.1)
+        if (pendingCalls.countOn(connectionHandle) >= limits.maximumAnsweringCalls) {
+          const detail = `the calls waiting on ${connectionHandle} are ${String(limits.maximumAnsweringCalls)} at most`;
+          const exceeded = new FailureError(
+            { ...failures.capacityExceeded, detail },
+            { destinationId, procedureAddress }
+          );
+
+          return (reject(exceeded), undefined);
+        }
+
         // drawn once the call starts: an aborted signal draws nothing
         const callId = pendingCalls.draw(connectionHandle);
 
