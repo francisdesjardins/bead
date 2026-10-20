@@ -1631,6 +1631,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await expect(starting).rejects.toBe(refused);
     expect([failing.servers[0]?.closes, server.isClosed()]).toEqual([1, true]);
 
+    const restarted = server.start({ findOpenPort: true });
+
+    await failing.listenEach(2);
+    expect((await restarted).port).not.toBe(4_321);
+    await server.stop();
+
     const aborting = createFakeHTTPServer();
     const aborted = createHTTPTransportServer({ createServer: aborting.createServer });
     const controller = new AbortController();
@@ -1639,7 +1645,27 @@ test.describe('createHTTPTransportServer, its edges', () => {
     controller.abort();
 
     await expect(abortedStart).rejects.toBeInstanceOf(CancelError);
-    expect(aborting.servers[0]?.closes).toBe(1);
+    expect([aborting.servers[0]?.closes, aborted.isClosed()]).toEqual([1, true]);
+
+    const resumed = aborted.start({ findOpenPort: true });
+
+    await aborting.listenEach(2);
+    expect((await resumed).port).not.toBe(0);
+    await aborted.stop();
+
+    // a signal cancelled before the start opens nothing
+    const cancelled = createFakeHTTPServer();
+    const before = createHTTPTransportServer({ createServer: cancelled.createServer });
+    const signal = AbortSignal.abort();
+
+    await expect(before.start({ port: 4_321, signal })).rejects.toBeInstanceOf(CancelError);
+    expect([cancelled.servers.length, before.isClosed()]).toEqual([0, true]);
+
+    const retrying = before.start({ findOpenPort: true });
+
+    await cancelled.listenEach(2);
+    expect((await retrying).port).not.toBe(0);
+    await before.stop();
   });
 
   // spec 15.12
@@ -2360,27 +2386,33 @@ test.describe('createHTTPTransportServer, listening', () => {
           listenOf(connectionToken, { wait: 'soon' }),
           listenOf(connectionToken, { after: '1' }),
         ].map(({ response }) => {
-          return response.status;
+          return [response.status, response.headers?.[REFUSAL_HEADER]];
         })
-      ).toEqual([409, 400, 400]);
+      ).toEqual([
+        [409, REFUSALS.LISTEN_UNDECLARED],
+        [400, REFUSALS.MALFORMED],
+        [400, REFUSALS.MALFORMED],
+      ]);
     });
 
     expect([told, refused]).toEqual([[], { armed: [], cleared: [] }]);
 
     // a second in the place of the first, which ends empty: each tells its own, the second first,
     // so a server's count never falls to none between them
-    listenOf(connectionToken, { wait: '20000' });
-    listenOf(connectionToken, { wait: '20000' });
+    const first = listenOf(connectionToken, { wait: '20000' });
+    const second = listenOf(connectionToken, { wait: '20000' });
 
     expect(told).toEqual([
       [true, connectionHandle],
       [true, connectionHandle],
       [false, connectionHandle],
     ]);
+    expect(first.response.status).toBe(204);
 
     // its connection closed: the listen it held ends untold
-    await server.close(connectionHandle);
+    await expect(server.close(connectionHandle)).resolves.toBe(true);
 
+    expect(second.response.status).toBe(404);
     expect(told).toHaveLength(3);
     await server.stop();
   });
@@ -2982,6 +3014,11 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       ['::1', 1, [50_000, '::1']],
     ]);
     await server.stop();
+    expect(
+      fake.servers.map(({ closes }) => {
+        return closes;
+      })
+    ).toEqual([2, 2]);
 
     // eight draws at most, then the last error
     const held = createFakeHTTPServer();
@@ -3016,6 +3053,7 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       2,
       1,
     ]);
+    expect(given.servers[1]?.closes).toBe(1);
   });
 
   test('listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1', async () => {
