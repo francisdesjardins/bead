@@ -17,7 +17,7 @@ import {
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
-import { presentedCredentialOf } from '../call-session';
+import { presentedCredentialOf, uncarriedOf } from '../call-session';
 import { DisconnectError, FailureError } from '../errors';
 import { createMetricsRegistry } from '../metrics-registry';
 import { createPayloadPlacement } from '../payload-placement';
@@ -2086,6 +2086,9 @@ test.describe('createRouterCore', () => {
         made('handled_total{outcome="failure",code="PAYLOAD_TOO_LARGE"} 1'),
         made('started_total{} 1'),
       ]);
+      expect(registry.exposition().text).toContain(
+        'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="command",le="0.0"} 1\n'
+      );
 
       // 40 bytes of token leave a 64-byte opening no byte
       const noOpening = ask(patternOf(100), {
@@ -2100,6 +2103,10 @@ test.describe('createRouterCore', () => {
         made('handled_total{outcome="failure",code="CAPACITY_EXCEEDED"} 1'),
         made('started_total{} 4'),
       ]);
+      expect(registry.exposition().text).toContain(
+        'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="command",le="0.0"} 3\n'
+      );
+      expect(registry.exposition().text).toContain(made('duration_seconds_sum{} 0'));
 
       // a programmer's error, a credential no header of its request holds among them, and a signal
       // aborted already: none is a call
@@ -2121,6 +2128,123 @@ test.describe('createRouterCore', () => {
 
       core.receive(resultOf(2), 'a');
       await Promise.all([tooLarge, noOpening, waiting, noCallId]);
+
+      const clientRegistry = createMetricsRegistry();
+      const clientMetrics = clientRegistry.attach('client');
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port, {
+        clock: createTestClock(),
+        lastCallId: 3,
+        limits,
+        metrics: clientMetrics,
+      });
+      const clientSeries = clientMetrics.declareRequester(echo);
+      let isConnected = true;
+      let isSecure = false;
+      const clientAsk = (
+        payload = Uint8Array.of(0),
+        asked: {
+          requested?: RequestCredential;
+          options?: Parameters<typeof clientCore.request>[1]['options'];
+          procedure?: Parameters<typeof clientCore.request>[1]['procedure'];
+        } = {}
+      ) => {
+        let credential: Parameters<typeof clientCore.request>[1]['credential'];
+        let carried: string | undefined;
+        let refusal: Error | undefined;
+        try {
+          const presented = presentedCredentialOf(asked.requested, {
+            failures: CLIENT_FAILURES,
+            token: undefined,
+          });
+          credential = presented.credential;
+          carried = presented.carried;
+          const uncarried = uncarriedOf(credential, {
+            carried,
+            carries: () => {
+              return false;
+            },
+            failures: CLIENT_FAILURES,
+            isSecure,
+          });
+          refusal =
+            uncarried === undefined
+              ? isConnected
+                ? undefined
+                : new DisconnectError('the connection is closed')
+              : new FailureError(uncarried);
+        } catch (reason) {
+          refusal = reason as Error;
+        }
+        return clientCore
+          .request(payload, {
+            connectionHandle: 'a',
+            options: asked.options ?? { timeout: Infinity },
+            procedure: asked.procedure ?? echo,
+            series: clientSeries,
+            credential,
+            transportCredential: carried,
+            refusal,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+      };
+      expect(
+        await clientAsk(Uint8Array.of(0), { requested: { scheme: CredentialScheme.OPAQUE } })
+      ).toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      expect(
+        await clientAsk(Uint8Array.of(0), {
+          requested: { scheme: CredentialScheme.ELSEWHERE, carried: 'x' },
+        })
+      ).toMatchObject({ code: ProtocolCode.DESTINATION_UNREACHABLE });
+      expect(
+        await clientAsk(new Uint8Array(8), { procedure: { ...echo, maximumPayloadBytes: 4 } })
+      ).toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+      isSecure = true;
+      expect(
+        await clientAsk(new Uint8Array(9), {
+          requested: { scheme: CredentialScheme.JWT, token: 'a'.repeat(40) },
+        })
+      ).toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+      isConnected = false;
+      expect(await clientAsk()).toBeInstanceOf(DisconnectError);
+      isConnected = true;
+      const pending = [clientAsk(), clientAsk()];
+      expect(await clientAsk()).toMatchObject({ code: ProtocolCode.CAPACITY_EXCEEDED });
+      const clientMade = lineOf('bead_client_call_', 'service="2",procedure="echo",type="request"');
+      expect(countedOf(clientRegistry)).toEqual([
+        clientMade('duration_seconds_count{} 6'),
+        clientMade('handled_total{outcome="failure",code="DESTINATION_UNREACHABLE"} 1'),
+        clientMade('handled_total{outcome="failure",code="SESSION_REQUIRED"} 1'),
+        clientMade('handled_total{outcome="failure",code="PAYLOAD_TOO_LARGE"} 2'),
+        clientMade('handled_total{outcome="failure",code="CAPACITY_EXCEEDED"} 1'),
+        clientMade('handled_total{outcome="closed"} 1'),
+        clientMade('started_total{} 8'),
+      ]);
+      expect(clientRegistry.exposition().text).toContain(
+        'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="request",le="0.0"} 6\n'
+      );
+      expect(clientRegistry.exposition().text).toContain(clientMade('duration_seconds_sum{} 0'));
+      isConnected = false;
+      const notCalls = await Promise.all([
+        clientAsk(new Uint8Array(0), { options: { timeout: 0 } }),
+        clientAsk(new Uint8Array(0), { procedure: { ...echo, maximumPayloadBytes: 0 } }),
+        clientAsk(new Uint8Array(0), {
+          requested: { scheme: CredentialScheme.JWT, token: 'a'.repeat(1_005) },
+        }),
+        clientAsk(new Uint8Array(0), {
+          options: { timeout: Infinity, signal: AbortSignal.abort() },
+        }),
+      ]);
+      expect(
+        notCalls.map((reason) => {
+          return (reason as Error).name;
+        })
+      ).toEqual(['ProgrammerError', 'ProgrammerError', 'ProgrammerError', 'CancelError']);
+      expect(countedOf(clientRegistry)).toContain(clientMade('started_total{} 8'));
+      clientCore[Symbol.dispose]();
+      await Promise.all(pending);
     });
 
     test('count a call it makes as its router settles it, timed to that instant', async () => {

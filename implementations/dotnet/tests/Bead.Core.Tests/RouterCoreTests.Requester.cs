@@ -1331,6 +1331,41 @@ public sealed partial class RouterCoreTests
         Assert.IsType<ArgumentException>(await Refused(call with { Options = call.Options with { Credential = Credential.Jwt(new string('a', 1_005)) } }));
         Assert.IsType<OperationCanceledException>(await Refused(call with { Options = call.Options with { CancellationToken = aborted.Token } }));
         Assert.Contains("bead_client_call_started_total{} 8", MadeOf(registry));
+
+        var serverRegistry = new MetricsRegistry();
+        var server = new CountedPort((RouterSide.Server, serverRegistry)) { LastCallId = 2 };
+        var serverCore = server.Core;
+        using var cleanup = serverCore;
+        var serverCall = CountedCallOf((server.DeclareRequester(Echo), TimeSpan.FromSeconds(1)));
+        async Task<Exception> RefusedByServer(CoreRequest request, int bytes = 0)
+        {
+            return await Assert.ThrowsAnyAsync<Exception>(() => { return serverCore.Request(new byte[bytes], request).WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        }
+        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, CodeOf(await RefusedByServer(serverCall with { Procedure = Echo with { MaximumPayloadBytes = 8 } }, 9)));
+        Assert.Equal([
+            "bead_client_call_duration_seconds_bucket{le=\"0.0\"} 1",
+            "bead_client_call_duration_seconds_count{} 1",
+            "bead_client_call_handled_total{outcome=\"failure\",code=\"PAYLOAD_TOO_LARGE\"} 1",
+            "bead_client_call_started_total{} 1",
+        ], MadeOf(serverRegistry, "command"));
+        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, CodeOf(await RefusedByServer(serverCall with { Options = serverCall.Options with { Credential = Credential.Jwt(new string('x', 40)) } }, 100)));
+        var waiting = serverCore.Request(ReadOnlyMemory<byte>.Empty, serverCall);
+        Assert.Equal((ushort)ProtocolCode.CapacityExceeded, CodeOf(await RefusedByServer(serverCall)));
+        Assert.Equal([
+            "bead_client_call_duration_seconds_bucket{le=\"0.0\"} 3",
+            "bead_client_call_duration_seconds_count{} 3",
+            "bead_client_call_handled_total{outcome=\"failure\",code=\"PAYLOAD_TOO_LARGE\"} 2",
+            "bead_client_call_handled_total{outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
+            "bead_client_call_started_total{} 4",
+        ], MadeOf(serverRegistry, "command"));
+        Assert.EndsWith("} 0", SumOf(serverRegistry), StringComparison.Ordinal);
+        Assert.IsType<ArgumentOutOfRangeException>(await RefusedByServer(serverCall with { Options = serverCall.Options with { Timeout = TimeSpan.Zero } }));
+        Assert.IsType<ArgumentException>(await RefusedByServer(serverCall with { Procedure = Echo with { MaximumPayloadBytes = 0 } }));
+        Assert.IsType<ArgumentException>(await RefusedByServer(serverCall with { Options = serverCall.Options with { Credential = Credential.Jwt(new string('x', 1_005)) } }));
+        Assert.IsType<OperationCanceledException>(await RefusedByServer(serverCall with { Options = serverCall.Options with { CancellationToken = aborted.Token } }));
+        Assert.Contains("bead_client_call_started_total{} 4", MadeOf(serverRegistry, "command"));
+        server.Deliver(new Envelope { Header = new ResultHeader { CallId = 2 } });
+        await waiting.WaitAsync(Patience, TestContext.Current.CancellationToken);
     }
 
     [Fact]
