@@ -24,6 +24,55 @@ This repository holds the protocol and its implementations, side by side:
 registry, so that the wire, the names and the API can change freely until then, with no deprecation
 cycle. Build on a commit, pinned.
 
+## At a glance
+
+A service is declared once, in a `.proto` with Bead's options, and `beadc` generates its server and
+its client in TypeScript and in C#. What is left to write is the resolvers and the calls, here
+abridged from [`examples/hello`](examples/hello), whose C# half writes the same:
+
+```ts
+// the server: its admission hooks, by the names the .proto gives them, and a resolver that asks
+// its caller back before it answers
+const hello = new HelloServer({ admissions: { greeted } });
+
+hello.on('sayHello', async ({ connectionHandle, payload }, response) => {
+  const name =
+    payload.name === ''
+      ? (await hello.command.askName({ question: 'What is your name?' })({ connectionHandle })).name
+      : payload.name;
+
+  return response({ greeting: `Hello, ${name}!` });
+});
+hello.offer(server);
+
+// the client: answers the server's command, calls, and follows a subscription at its own pace
+await using client = createWSClient();
+const greeter = new HelloClient(client, { windows: { countDown: 1 } });
+
+greeter.on('askName', (_request, response) => {
+  return response({ name: 'Ada' });
+});
+await client.connect({ host: '127.0.0.1', port });
+
+const { greeting } = await greeter.sayHello({ name: '' })(); // 'Hello, Ada!'
+
+await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
+  // a window of 1: the next tick waits until this callback settles
+})();
+```
+
+## Next to the alternatives
+
+- **gRPC-Web and Connect** carry unary calls and server streaming to a browser; neither carries a
+  client stream from it, nor the server's own calls to the client. Bead carries both, and
+  subscriptions the client paces, over a WebSocket or plain HTTP, with no proxy in between.
+- **JSON-RPC over a WebSocket, or a socket library**, carry messages; flow control, a large payload
+  beside the calls still under way, a credential relayed to the server that verifies it, and the
+  same behaviour in another language are each the application's to build. Bead specifies them, and
+  each implementation plays the same conformance files.
+- **What Bead is not yet**: published, or in more than two languages. It is a protocol with a
+  specification and two implementations at parity, ahead of its 1.0.0.
+
 ## Why Bead
 
 A client and its server talk in more ways than requests and answers. The server pushes changes the

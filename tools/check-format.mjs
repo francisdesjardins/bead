@@ -18,6 +18,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 // ! CI's typescript job runs this check: a root file outside this list is held by nothing
 const ROOT = [
   'README.md',
+  'SECURITY.md',
   'CLAUDE.md',
   'beadc.yaml',
   'implementations/dotnet/README.md',
