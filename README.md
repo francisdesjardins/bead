@@ -3,6 +3,10 @@
 [![CI](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
+a specification with its conformance files, two implementations at parity, and the tools around
+them. It is a personal project, kept at its author's pace.
+
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
 relays, and transfers of large payloads under credit. Each envelope is written at fixed big-endian
@@ -63,15 +67,9 @@ await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
 
 ## Next to the alternatives
 
-- **gRPC-Web and Connect** carry unary calls and server streaming to a browser; neither carries a
-  client stream from it, nor the server's own calls to the client. Bead carries both, and
-  subscriptions the client paces, over a WebSocket or plain HTTP, with no proxy in between.
-- **JSON-RPC over a WebSocket, or a socket library**, carry messages; flow control, a large payload
-  beside the calls still under way, a credential relayed to the server that verifies it, and the
-  same behaviour in another language are each the application's to build. Bead specifies them, and
-  each implementation plays the same conformance files.
-- **What Bead is not yet**: published, or in more than two languages. It is a protocol with a
-  specification and two implementations at parity, ahead of its 1.0.0.
+gRPC-Web and Connect carry unary calls and server streaming to a browser, neither a client's stream
+nor the server's own calls to the client; Bead carries both, and subscriptions the client paces,
+over a WebSocket or plain HTTP.
 
 ## Why Bead
 

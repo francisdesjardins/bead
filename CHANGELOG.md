@@ -12,7 +12,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - `SECURITY.md` says how to report a vulnerability, privately, and what to expect of a personal
-  project; the README shows Bead at a glance, and where it stands next to the alternatives.
+  project; the README opens on what Bead explores, shows it at a glance, and where it stands next
+  to the alternatives.
 - The benches measure HTTP and WebSocket, cross-language calls, notifications and allocation over
   repeated runs; `tools/bench-compare.mjs` compares their reports.
 - `implementations/typescript/tools/bench.mjs` and `implementations/dotnet/tools/Bead.Benchmarks`: the
