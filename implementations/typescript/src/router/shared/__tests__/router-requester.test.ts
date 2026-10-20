@@ -1248,7 +1248,61 @@ test.describe('createRouterCore', () => {
           }),
           `${ending}, ${String(timeout)}`
         ).toEqual([reservation]);
+        const settled = await asking;
+
+        if (ending === 'whole') {
+          expect(settled).toMatchObject({
+            payload: Uint8Array.from([...patternOf(32), ...patternOf(8)]),
+          });
+        } else if (ending === 'failure' || ending === 'invalid') {
+          expect(settled).toMatchObject(
+            ending === 'failure'
+              ? { code: 21, origin: 'peer' }
+              : { code: ProtocolCode.CHUNK_INVALID, origin: 'local' }
+          );
+        } else {
+          expect(settled).toBeInstanceOf(CancelError);
+        }
       }
+
+      // the reserved id stays unavailable until the abandonment interval ends
+      const { port, reported, sent } = createPort({ failures: CLIENT_FAILURES });
+      const clock = createTestClock();
+      using core = createRouterCore(port, {
+        clock,
+        lastCallId: 3,
+        limits: { ...limits, transferInactivityTimeout: 2_000 },
+      });
+      const controller = new AbortController();
+      const asking = core.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { signal: controller.signal, timeout: 1_000 },
+        procedure: echo,
+      });
+
+      core.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      controller.abort();
+      await expect(asking).rejects.toBeInstanceOf(CancelError);
+      clock.tick(1_500);
+      core.receive(
+        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        'a'
+      );
+      expect(reported).toEqual([]);
+      void settledOf(
+        core.request(Uint8Array.of(1), {
+          connectionHandle: 'a',
+          options: { timeout: 5_000 },
+          procedure: echo,
+        })
+      );
+      expect(sent.at(-1)?.envelope?.header.callId).toBe(3);
+      clock.tick(500);
+      core.receive(
+        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        'a'
+      );
+      expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
     });
   });
 
@@ -1300,40 +1354,60 @@ test.describe('createRouterCore', () => {
     });
 
     test('stop a request the peer answers, or its caller gives up, and send nothing more of it', async () => {
-      for (const [ending, reason] of [
-        ['failure', FailureError],
-        ['cancel', CancelError],
-        ['signal', CancelError],
+      for (const [ending, total, timeout, initialCredit, code, side] of [
+        ['failure', 200, 1_000, 92, 21, 'server'],
+        ['cancel', 200, 1_000, 92, 0, 'server'],
+        ['signal', 200, 1_000, 92, 0, 'server'],
+        ['failure', 300, 5_000, 100, 7, 'client'],
+        ['signal', 300, 5_000, undefined, 0, 'client'],
       ] as const) {
-        const { port, reported, sent } = createPort();
+        const { port, reported, sent } = createPort({
+          failures: side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES,
+        });
+        const callId = side === 'client' ? 1 : 2;
         using core = createRouterCore(port, { limits });
         const controller = new AbortController();
-        const asking = core.request(patternOf(200), {
+        const asking = core.request(patternOf(total), {
           connectionHandle: 'a',
-          options: { ...options, signal: controller.signal },
+          options: { signal: controller.signal, timeout },
           procedure: echo,
         });
 
-        core.receive(creditOf(2, 92), 'a');
+        if (initialCredit !== undefined) {
+          core.receive(creditOf(callId, initialCredit), 'a');
+        }
 
         if (ending === 'failure') {
-          core.receive(failedOf(2), 'a');
+          core.receive(
+            envelopeOf({
+              failure: { code, scope: FailureScope.APPLICATION },
+              header: { callId, kind: EnvelopeKind.FAILURE },
+              kind: EnvelopeKind.FAILURE,
+            }),
+            'a'
+          );
         } else if (ending === 'cancel') {
-          core.cancel({ callId: 2, connectionHandle: 'a' });
+          core.cancel({ callId, connectionHandle: 'a' });
         } else {
           controller.abort();
         }
 
-        await expect(asking, ending).rejects.toBeInstanceOf(reason);
-        core.receive(creditOf(2, 200), 'a');
+        await expect(asking, ending).rejects.toBeInstanceOf(
+          ending === 'failure' ? FailureError : CancelError
+        );
+        if (ending === 'failure') {
+          await expect(asking).rejects.toMatchObject({ code, origin: 'peer' });
+        }
+        core.receive(creditOf(callId, total), 'a');
         await sleep(0);
 
         // the peer ended its call itself; given up, it is told to
         expect(piecesOf(sent), ending).toEqual([
-          [EnvelopeKind.REQUEST, 2, 200, 44],
-          [EnvelopeKind.CHUNK, 2, 44, 48],
-          ...(ending === 'failure' ? [] : [[EnvelopeKind.CANCEL, 2]]),
+          [EnvelopeKind.REQUEST, callId, total, 44],
+          ...(initialCredit === undefined ? [] : [[EnvelopeKind.CHUNK, callId, 44, 48]]),
+          ...(ending === 'failure' ? [] : [[EnvelopeKind.CANCEL, callId]]),
         ]);
+        expect(sent[0]?.envelope).toMatchObject({ payload: patternOf(total).subarray(0, 44) });
         expect(reported).toEqual([]);
       }
     });
@@ -1430,18 +1504,21 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('set a call’s timer going again as the bytes of its result come, and not for bytes it has', () => {
-      const { port } = createPort();
+    test('set a call’s timer going again as the bytes of its result come, and not for bytes it has', async () => {
+      const { port, reported, sent } = createPort();
       const clock = createTestClock();
       using core = createRouterCore(port, {
         clock,
         limits: { ...limits, transferInactivityTimeout: 250 },
       });
       const chunk = chunkOf(2, { offset: 32, payload: new Uint8Array(48), total: 150 });
+      let waiting: Promise<unknown> = Promise.resolve();
       const { armed } = timersBy(clock, () => {
-        void settledOf(
-          core.request(new Uint8Array(0), { connectionHandle: 'a', options, procedure: echo })
-        );
+        waiting = core.request(new Uint8Array(0), {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+        });
         core.receive(resultOpeningOf(2, { payload: new Uint8Array(32), total: 150 }), 'a');
         core.receive(chunk, 'a');
         // again: nothing new
@@ -1453,6 +1530,52 @@ test.describe('createRouterCore', () => {
           return delay;
         })
       ).toEqual([1_000, 250, 250]);
+      let isEnded = false;
+
+      void settledOf(waiting).then(() => {
+        isEnded = true;
+      });
+      clock.tick(249);
+      await sleep(0);
+      expect(isEnded).toBe(false);
+      clock.tick(1);
+      await expect(waiting).rejects.toMatchObject({ name: 'TimeoutError', timeout: 250 });
+      expect(answersOf(sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 2]);
+      expect(reported).toEqual([]);
+
+      const timed = createPort({ failures: CLIENT_FAILURES });
+      const advanced = createTestClock();
+      using peer = createRouterCore(timed.port, {
+        clock: advanced,
+        limits: { ...limits, transferInactivityTimeout: 2_000 },
+      });
+      const asked = peer.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: echo,
+      });
+      let isSettled = false;
+
+      void settledOf(asked).then(() => {
+        isSettled = true;
+      });
+      peer.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      advanced.tick(1_500);
+      peer.receive(
+        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        'a'
+      );
+      advanced.tick(1_500);
+      peer.receive(
+        chunkOf(1, { offset: 32, payload: patternOf(300).subarray(32, 80), total: 300 }),
+        'a'
+      );
+      await sleep(0);
+      expect(isSettled).toBe(false);
+      advanced.tick(500);
+      await expect(asked).rejects.toMatchObject({ name: 'TimeoutError', timeout: 2_000 });
+      expect(answersOf(timed.sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 1]);
+      expect(timed.reported).toEqual([]);
     });
 
     test('arm no timer for a call its own send ended, by a failure or a cancel handed back as a chunk went', async () => {
@@ -1516,43 +1639,96 @@ test.describe('createRouterCore', () => {
     });
 
     test('keep the inactivity of a result that opens as the last chunk of its request goes', async () => {
-      const { port, sent } = createPort();
-      const clock = createTestClock();
-      const core: IRouterCore<Handle> = createRouterCore(
-        {
-          ...port,
-          // the peer, the request whole, answers with a transfer before the last chunk's send returns
-          send: (bytes, connectionHandle) => {
-            const sending = port.send(bytes, connectionHandle);
-            const envelope = sent.at(-1)?.envelope;
+      for (const holdLastSend of [false, true]) {
+        const { port, sent } = createPort();
+        const clock = createTestClock();
+        const handed = Promise.withResolvers<void>();
+        let opened = 0;
+        const core: IRouterCore<Handle> = createRouterCore(
+          {
+            ...port,
+            // the peer, the request whole, answers with a transfer before the last chunk's send returns
+            send: (bytes, connectionHandle) => {
+              const sending = port.send(bytes, connectionHandle);
+              const envelope = sent.at(-1)?.envelope;
 
-            if (envelope?.kind === EnvelopeKind.CHUNK && envelope.header.isLast) {
-              core.receive(resultOpeningOf(2, { payload: patternOf(32), total: 100 }), 'a');
-            }
+              if (envelope?.kind === EnvelopeKind.CHUNK && envelope.header.isLast) {
+                opened += 1;
+                core.receive(resultOpeningOf(2, { payload: patternOf(32), total: 100 }), 'a');
+                return holdLastSend ? handed.promise : sending;
+              }
 
-            return sending;
+              return sending;
+            },
           },
-        },
-        { clock, limits }
-      );
-      let asking: Promise<unknown> = Promise.resolve();
-      const { armed, cleared } = timersBy(clock, () => {
-        asking = core.request(patternOf(200), { connectionHandle: 'a', options, procedure: echo });
-        core.receive(creditOf(2, 200), 'a');
-      });
-      const live = armed.filter(({ handle }) => {
-        return !cleared.includes(handle);
-      });
+          { clock, limits }
+        );
+        let asking: Promise<unknown> = Promise.resolve();
+        const { armed, cleared } = timersBy(clock, () => {
+          asking = core.request(patternOf(200), {
+            connectionHandle: 'a',
+            options,
+            procedure: echo,
+          });
+          core.receive(creditOf(2, 200), 'a');
+        });
+        const live = armed.filter(({ handle }) => {
+          return !cleared.includes(handle);
+        });
 
-      // the result's inactivity, not the call's timeout, which counts no transfer
-      expect(
-        live.map(({ delay }) => {
-          return delay;
-        })
-      ).toEqual([30_000]);
+        // the result's inactivity, not the call's timeout, which counts no transfer
+        expect(
+          live.map(({ delay }) => {
+            return delay;
+          })
+        ).toEqual([30_000]);
+        expect(opened).toBe(1);
+        handed.resolve();
+        await sleep(0);
+        expect(
+          clock.armed
+            .filter(({ handle }) => {
+              return !clock.cleared.includes(handle);
+            })
+            .map(({ delay }) => {
+              return delay;
+            })
+        ).toEqual([30_000]);
 
-      core[Symbol.dispose]();
-      await expect(asking).rejects.toBeInstanceOf(DisconnectError);
+        core[Symbol.dispose]();
+        await expect(asking).rejects.toBeInstanceOf(DisconnectError);
+      }
+
+      // a result that opens before the final credit keeps its inactivity too
+      const { port, sent } = createPort({ failures: CLIENT_FAILURES });
+      const clock = createTestClock();
+      using core = createRouterCore(port, {
+        clock,
+        limits: { ...limits, transferInactivityTimeout: 2_000 },
+      });
+      const asking = core.request(patternOf(300), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
+      let isEnded = false;
+
+      void settledOf(asking).then(() => {
+        isEnded = true;
+      });
+      core.receive(creditOf(1, 172), 'a');
+      core.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      core.receive(creditOf(1, 300), 'a');
+      expect(sent.at(-1)?.envelope).toMatchObject({
+        header: { isLast: true },
+        kind: EnvelopeKind.CHUNK,
+      });
+      clock.tick(1_500);
+      await sleep(0);
+      expect(isEnded).toBe(false);
+      clock.tick(500);
+      await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout: 2_000 });
+      expect(answersOf(sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 1]);
     });
 
     test('stop a call’s timer as the call leaves, whichever way, so none keeps the process waiting', () => {
