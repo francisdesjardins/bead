@@ -166,12 +166,18 @@
         { "required": ["advance"] },
         { "required": ["wall"] }
       ],
+      "dependentRequired": { "after": ["expect"] },
       "properties": {
         "on": { "$ref": "#/$defs/exchange" },
         "within": {
           "description": "How long an expect waits, in milliseconds, where not a patience of its own.",
           "type": "integer",
           "minimum": 1
+        },
+        "after": {
+          "description": "The least an expect waits, in milliseconds from its step's start as within counts them: what it reads that comes sooner fails the step.",
+          "type": "integer",
+          "minimum": 0
         },
         "send": { "oneOf": [{ "$ref": "#/$defs/request" }, { "$ref": "#/$defs/message" }] },
         "expect": { "oneOf": [{ "$ref": "#/$defs/expectation" }, { "$ref": "#/$defs/heard" }] },

@@ -157,12 +157,18 @@ place: Kestrel's would abort unreported, its bound unnamed.
 
 **A head is held to `headersTimeout`, 30 s**, never without end, on both transports' servers, by the
 platform's parser, which alone sees a head before it is whole: its 408 is HTTP's own, unmarked and
-told by none. The TypeScript transport sets `headersTimeout`, `requestTimeout` 0 and
-`connectionsCheckingInterval` 1,000 on every server it listens on, its WebSocket server's own and
-each one an application's `createServer` builds, before the `listen` it calls itself, so the 408
-comes within a second of its time: 2,051 ms for a `headersTimeout` of 2,000 with the interval set,
-30,013 ms without. The C# transports set Kestrel's `RequestHeadersTimeout`, which its heartbeat
-checks each second. **A body is held to `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`,
+told by none, and comes past its time and within 2 seconds of it, on the platform's clock. The
+TypeScript transport sets `headersTimeout`, `requestTimeout` 0 and `connectionsCheckingInterval`
+1,000 on every server it listens on, its WebSocket server's own and each one an application's
+`createServer` builds, before the `listen` it calls itself, so Node's 408 comes at its check each
+second, within a second of its time: 2,051 ms for a `headersTimeout` of 2,000 with the interval set,
+30,013 ms without. The C# transports set Kestrel's `RequestHeadersTimeout`, whose deadline
+`TimeoutControl.AssignTimeout` sets a heartbeat past its time and `CheckForTimeout` meets on the
+first heartbeat after it, each second: a connection's first head is answered 1 to 2 seconds past its
+time, a kept connection's 0 to 2. That timing is the platform's, a row of the Differences: the
+heartbeat is internal, a timeout shortened by a heartbeat would refuse a kept connection's head up
+to a second early, and a timer of the transport's own would parse the head this record leaves to the
+platform's parser. **A body is held to `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`,
 5 s**, never without end, Bead's own, on the server's clock
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)), alike on both sides: one that
 brought _R_ bytes and none more by its head's reading plus max(`bodyGracePeriod`,
@@ -216,9 +222,10 @@ request past `chunkBytes` refused, nothing of it held, its generator holding eve
 conversation's requests within their `chunkBytes`. `spec/transports.json`: a WebSocket server's
 connections, in all and behind a proxy it names, refused 503 and told, its origin judged first; a
 body slower than its rate refused 408, its socket's end read and its Bead connection answering
-after; and a head that does not come whole answered 408 at either transport, on the real clock.
-`spec/durations.json`: `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod`, each refused for
-never; `spec/metrics.json`, the exit of a request past the bound. Twins by the same sentence
+after; and a head that does not come whole answered 408 at either transport, on the real clock, its
+`after` 100 ms short of its time and its `within` 4 seconds past it. `spec/durations.json`:
+`sendGracePeriod`, `headersTimeout` and `bodyGracePeriod`, each refused for never;
+`spec/metrics.json`, the exit of a request past the bound. Twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) hold what no runner plays: each router's `answers
 CAPACITY_EXCEEDED a request past the calls its peer has it answer on its connection, before its
 route, its credential or its transfer, and takes one once a call ends` and `answers
@@ -242,10 +249,11 @@ the head and the body, `refuses 408 too-slow a body that comes slower than its r
 passed, its client reading the 408 as it goes on sending, and keeps its connection; a body at its
 rate taken`, `closes in stages every answer written before its body is whole, so a client that sends
 at full speed reads it, and its connection then answers a POST`, `answers 408 a head that does not
-come whole within headersTimeout, at its address and its WebSocket’s, within a second of it`, and
-the TypeScript side's `sets headersTimeout, no requestTimeout and a connectionsCheckingInterval of a
-second on every server createServer builds, its 408 within a second of its time`, beside the C#
-side's `Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`, so a change of the
+come whole within headersTimeout, at its address and its WebSocket’s, past it and within 2 seconds
+of it`, and the TypeScript side's `sets headersTimeout, no requestTimeout and a
+connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second
+of its time`, beside the C# side's
+`Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`, so a change of the
 platform's fails a test. `docs/support.md` names them.
 
 ## The Tenth Man
@@ -254,11 +262,12 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 xhigh effort, in one round with
 [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s, whose rows on an
 access refused that record keeps. It met ten objections on the bounds, each claim checked against
-the code and against probes of its own, rerun where an answer reads a number: five accepted, five in
+the code and against probes of its own, rerun where an answer reads a number: six accepted, four in
 part, none refused. The user decided what no standard settles: the bound on the calls is a new step
 of 9.2, its third, steps 3 to 8 becoming 4 to 9; the bounds are this record's, an access refused
-0034's; and 0030's fit of the bound per address stays ahead, its own round, for both transports at
-once. Each objection, with the answer that holds:
+0034's; 0030's fit of the bound per address stays ahead, its own round, for both transports at once;
+and a head's 408 comes past its time and within 2 seconds of it, its cases held to a floor. Each
+objection, with the answer that holds:
 
 ### On the bounds against a peer that holds a side
 
@@ -273,4 +282,4 @@ once. Each objection, with the answer that holds:
 | Item 2 breaks every proxied WebSocket server and is filed as Added: the 65th client behind a proxy with no `trustedProxies` is refused 503, the failure 0030 measured over HTTP; and 0030 keeps the bound's fit for a NAT and an IPv6 network ahead.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Accepted. Filed under Changed, `trustedProxies` named as what a proxied WebSocket server now needs, in the README's WebSocket setup and the matrix, the health warning at 80% of the busiest address. Whether 0030's fit lands with it is put to the user, recommended kept ahead for both transports at once.                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | The TypeScript HTTP server's 408 need not come 30 s late: `connectionsCheckingInterval`, set as a property before `listen`, governs it, and the transport calls `listen` itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Accepted. Rerun: 408 at 2,051 ms with it set. The transport sets it to 1,000 on every server it listens on, beside `headersTimeout` and `requestTimeout`; a twin holds the 408 within a second of its time on a server the application's `createServer` built, so a change of Node's, which documents it as a constructor option, fails a test. No platform row.                                                                                                                                                                                                                                                                                                                                                                            |
 | Raising `maximumWaitingExchanges` from 64 to 100 loosens HTTP's bound in a round meant to tighten — 8,192 sockets an address become 12,800 — and RFC 9113 §6.5.2's 100 is advice for an announced number.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Accepted. `maximumAnsweringCalls` is 64, as `maximumWaitingExchanges` and 13.9's `maximumWaitingCalls` are; HTTP's bound does not move, and an honest HTTP client, holding itself to 64, never meets the 429.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| A head's 408 case holds `within` 3,000 ms for a `headersTimeout` of 1,000, which is Kestrel's latest by construction: `AssignTimeout` sets the deadline at the connection's last timestamp plus the timeout plus a heartbeat, and `CheckForTimeout` fires on the first heartbeat past it, so a head that comes before its connection's first heartbeat is answered between 2,000 and 3,000 ms after the connect, then a hop of the thread pool; the case fails on any machine, at the rate its overhead passes a second, and failed once in two runs of the Linux replay. 15.12's "within a second of its time" says what Kestrel never does there, the C# twin allows 500 ms over the same maximum, the number is bare, and the case holds no floor. | In part. The generator derives each case's `within` from its `headersTimeout`, plus Kestrel's 2 seconds, plus 2 for the real clock under load, 5,000, a comment citing `AssignTimeout` and `CheckForTimeout`; the C# twin takes the same ceiling. Kestrel's timing stays the platform's, a row of the Differences: its heartbeat is internal, a timeout shortened by a heartbeat refuses a kept connection's head up to a second early, and a timer of the transport's own would parse the head this record leaves to the platform's parser. 15.12's wording, the twins' titles that repeat it, a floor (`after`) on the case and a missed `within` that tells when the response came stay ahead, put to the user with the spec's sentence. |
+| A head's 408 case holds `within` 3,000 ms for a `headersTimeout` of 1,000, which is Kestrel's latest by construction: `AssignTimeout` sets the deadline at the connection's last timestamp plus the timeout plus a heartbeat, and `CheckForTimeout` fires on the first heartbeat past it, so a head that comes before its connection's first heartbeat is answered between 2,000 and 3,000 ms after the connect, then a hop of the thread pool; the case fails on any machine, at the rate its overhead passes a second, and failed once in two runs of the Linux replay. 15.12's "within a second of its time" says what Kestrel never does there, the C# twin allows 500 ms over the same maximum, the number is bare, and the case holds no floor. | Accepted, as the user decided. 15.12 says a head's 408 comes past its time and within 2 seconds of it, on the platform's clock: Node's at its check each second, Kestrel's 1 to 2 seconds past it on a connection's first head, a platform row of the Differences, as the C# transports' own comments say. Each case's `within` is its `headersTimeout` plus those 2 seconds plus 2 for the real clock, 5,000 ms, and its `after`, its `headersTimeout` less 100 ms, holds the floor; the twins, `… past it and within 2 seconds of it`, hold the C# side to both. A runner that misses a `within` tells when the response came, or that it never did. Kestrel's timing stays the platform's, its heartbeat internal, as the decision says. |

@@ -3886,11 +3886,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Answers_408_a_head_that_does_not_come_whole_within_headersTimeout_at_its_address_and_its_WebSocket_s_within_a_second_of_it()
+    public async Task Answers_408_a_head_that_does_not_come_whole_within_headersTimeout_at_its_address_and_its_WebSocket_s_past_it_and_within_2_seconds_of_it()
     {
-        await Start(new HttpTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(1) });
+        var timeout = TimeSpan.FromSeconds(1);
 
-        await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(1) });
+        await Start(new HttpTransportServerOptions { HeadersTimeout = timeout });
+
+        await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = timeout });
         var webSocketPort = (await webSocket.Start(new WebSockets.WebSocketTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
 
         foreach (var (port, start) in new[] { (_port, "POST /bead HTTP/1.1"), (webSocketPort, "GET / HTTP/1.1") })
@@ -3906,9 +3908,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             // HTTP's own: unmarked, none of the path's fields, its body empty, its socket closed
             Assert.Equal((408, (string?)null, (string?)null, 0), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("cache-control"), body.Length));
             // ! Kestrel arms its timeout a heartbeat late, and checks it each heartbeat, a second: a
-            // connection's first head is answered 1 to 2 seconds past its time, then 2 more for the
-            // real clock under load, as the transports' file allows
-            Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(0.9), TimeSpan.FromSeconds(5));
+            // connection's first head is answered 1 to 2 seconds past its time, as spec 15.12
+            // allows, then 2 more for the real clock under load; no sooner than 100 ms short of it,
+            // as the transports' file holds its cases
+            Assert.InRange(watch.Elapsed, timeout - TimeSpan.FromMilliseconds(100), timeout + TimeSpan.FromSeconds(2) + TimeSpan.FromSeconds(2));
             Assert.True(await wire.IsClosed());
         }
 

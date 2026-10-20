@@ -171,9 +171,10 @@ public sealed record WebSocketTransportServerOptions
 
     /// <summary>
     /// How long an upgrade's head may take to come whole: 30 seconds by default, Kestrel's
-    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, within a second of it
-    /// (spec 15.12). From 1 to 2³¹ − 1 milliseconds, rounded to the nearest whole one; zero and
-    /// infinite are refused. On the real clock, as the platform's parser holds it.
+    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, on its heartbeat, past
+    /// it and within 2 seconds of it (spec 15.12). From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one; zero and infinite are refused. On the real clock, as the platform's parser
+    /// holds it.
     /// </summary>
     public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
 }
@@ -521,7 +522,8 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 kestrel.AllowHostHeaderOverride = true;
 
                 // * a head is the platform's parser's, which no Bead code sees until it is whole:
-                // answered 408 on Kestrel's heartbeat, within a second of its time (spec 15.12)
+                // answered 408 on Kestrel's heartbeat, which arms its deadline a heartbeat late, a
+                // connection's first head 1 to 2 seconds past its time (spec 15.12)
                 kestrel.Limits.RequestHeadersTimeout = _options.HeadersTimeout;
             });
             application = builder.Build();

@@ -127,6 +127,7 @@ interface IMessage {
 /** One step of a case: what the test does, or what the server does next, on the exchange it names. */
 interface IStep {
   advance?: number;
+  after?: number;
   close?: true;
   expect?: IExpectation | IHeardExpectation;
   on?: string;
@@ -136,6 +137,16 @@ interface IStep {
   until?: { gauge: string; is: number } | { timer: number };
   wall?: number;
   within?: number;
+}
+
+/**
+ * How an expect is timed, in milliseconds from its step's start, on the real clock: `within`, its
+ * wait, a patience where it names none, and `after`, the soonest what it reads may come.
+ */
+interface ITiming {
+  after?: number | undefined;
+  startedAt: number;
+  within?: number | undefined;
 }
 
 interface ICase {
@@ -197,6 +208,7 @@ const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
 // unplayed
 const STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
+  'after',
   'close',
   'expect',
   'on',
@@ -376,6 +388,74 @@ const within = async <T>(
   }
 };
 
+/** Milliseconds on the real clock since `startedAt`, whole. */
+const sinceOf = (startedAt: number): number => {
+  return Math.round(performance.now() - startedAt);
+};
+
+/** What `promise` gives, or `undefined` once `milliseconds` are over; it rejects as `promise` does. */
+const settledWithin = async <T>(
+  promise: Promise<T>,
+  milliseconds: number
+): Promise<{ value: T } | undefined> => {
+  const over = Promise.withResolvers<undefined>();
+  const timer = setTimeout(() => {
+    over.resolve(undefined);
+  }, milliseconds);
+
+  try {
+    return await Promise.race([
+      promise.then((value) => {
+        return { value };
+      }),
+      over.promise,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** What befell `promise` in the patience past a wait it missed, as a failure tells it. */
+const lateOf = async (promise: Promise<unknown>, startedAt: number): Promise<string> => {
+  try {
+    const late = await settledWithin(promise, PATIENCE);
+
+    return late === undefined
+      ? `, nor in the ${String(PATIENCE)} ms past it`
+      : `: it came at ${String(sinceOf(startedAt))} ms`;
+  } catch (error) {
+    return `, and failed at ${String(sinceOf(startedAt))} ms: ${String(error)}`;
+  }
+};
+
+/**
+ * What `promise` gives within its step's wait, once it came no sooner than the step's `after`; past
+ * a `within` missed, it waits up to a patience more, so the failure tells when it came, or that it
+ * never did.
+ */
+const cameOf = async <T>(
+  promise: Promise<T>,
+  { timing, what }: { timing: ITiming; what: string }
+): Promise<T> => {
+  const { after, startedAt, within: bound } = timing;
+  const wait = bound ?? PATIENCE;
+  const came = await settledWithin(promise, wait);
+
+  if (came === undefined) {
+    const late = bound === undefined ? '' : await lateOf(promise, startedAt);
+
+    throw new Error(`${what} did not come within ${String(wait)} ms${late}`);
+  }
+
+  const cameAt = sinceOf(startedAt);
+
+  if (after !== undefined && cameAt < after) {
+    throw new Error(`${what} came at ${String(cameAt)} ms, before its ${String(after)} ms`);
+  }
+
+  return came.value;
+};
+
 /** Polls `isDone` on the real clock until it holds or the patience is over; the caller checks. */
 const pollWithinPatience = async (isDone: () => boolean): Promise<void> => {
   const deadline = Date.now() + PATIENCE;
@@ -504,11 +584,12 @@ const filledOf = (told: ITold, values: ReadonlyMap<string, string>): ITold => {
 };
 
 /**
- * Checks the response of `exchange` against `expectation`, and keeps what its fields capture; then
- * what the server told of it, when the case says.
+ * Checks the response of `exchange` against `expectation`, its head timed as its step says and its
+ * body within what is left of the step's wait, and keeps what its fields capture; then what the
+ * server told of it, when the case says.
  */
 const expectResponse = async (
-  { at, exchange, milliseconds }: { at: string; exchange: IExchange; milliseconds: number },
+  { at, exchange, timing }: { at: string; exchange: IExchange; timing: ITiming },
   {
     expectation,
     refusals,
@@ -518,34 +599,29 @@ const expectResponse = async (
   const { orLost, told, ...expected } = expectation;
   const hasBody =
     expected.body !== undefined || expected.envelope !== undefined || expected.batch !== undefined;
-
-  // a cut that overtook the head, where the case allows it; a head that did not come in time, or
-  // came unreadable, is no loss
-  if (orLost === true) {
-    const isLost = await within(exchange.reader.head, {
-      milliseconds,
-      what: `${at}: the response's head`,
-    }).then(
-      () => {
-        return false;
-      },
-      (reason: unknown) => {
-        if (exchange.reader.isLost) {
-          return true;
-        }
-
-        throw reason;
-      }
-    );
-
-    if (isLost) {
-      return;
+  const head = await cameOf(exchange.reader.head, {
+    timing,
+    what: `${at}: the response's head`,
+  }).catch((reason: unknown) => {
+    // a cut that overtook the head, where the case allows it; a head that did not come in time, or
+    // came unreadable, is no loss
+    if (orLost === true && exchange.reader.isLost) {
+      return undefined;
     }
+
+    throw reason;
+  });
+
+  if (head === undefined) {
+    return;
   }
 
   const response = hasBody
-    ? await within(exchange.reader.response, { milliseconds, what: `${at}: the response` })
-    : await within(exchange.reader.head, { milliseconds, what: `${at}: the response's head` });
+    ? await within(exchange.reader.response, {
+        milliseconds: Math.max(0, (timing.within ?? PATIENCE) - sinceOf(timing.startedAt)),
+        what: `${at}: the response`,
+      })
+    : head;
 
   expect(seenOf(response, expected), at).toEqual({
     ...expected,
@@ -577,17 +653,44 @@ const expectResponse = async (
   }
 };
 
+/**
+ * What the server sends next on the WebSocket of `exchange`, in the terms `expectation` names it by,
+ * or what came instead: nothing within the step's wait, or something sooner than its `after`; past a
+ * `within` missed, it waits up to a patience more, so the failure tells when it came, or that
+ * nothing did.
+ */
+const heardWithin = async (
+  { exchange, timing }: { exchange: IExchange; timing: ITiming },
+  expectation: IHeardExpectation
+): Promise<ReturnType<typeof heardOf> | string> => {
+  const { after, startedAt, within: bound } = timing;
+  const wait = bound ?? PATIENCE;
+  const heard = await exchange.next(wait);
+  const cameAt = sinceOf(startedAt);
+
+  if (heard === undefined && bound === undefined) {
+    return `nothing within ${String(wait)} ms`;
+  }
+
+  if (heard === undefined) {
+    const late = await exchange.next(PATIENCE);
+
+    return late === undefined
+      ? `nothing within ${String(wait)} ms, nor in the ${String(PATIENCE)} ms past it`
+      : `nothing within ${String(wait)} ms: ${JSON.stringify(heardOf(late, expectation))} came at ${String(sinceOf(startedAt))} ms`;
+  }
+
+  return after !== undefined && cameAt < after
+    ? `${JSON.stringify(heardOf(heard, expectation))} came at ${String(cameAt)} ms, before its ${String(after)} ms`
+    : heardOf(heard, expectation);
+};
+
 /** Checks the next thing the server sends on the WebSocket of `exchange` against `expectation`. */
 const expectHeard = async (
-  { at, exchange, milliseconds }: { at: string; exchange: IExchange; milliseconds: number },
+  { at, exchange, timing }: { at: string; exchange: IExchange; timing: ITiming },
   expectation: IHeardExpectation
 ): Promise<void> => {
-  const heard = await exchange.next(milliseconds);
-
-  expect(
-    heard === undefined ? `nothing within ${String(milliseconds)} ms` : heardOf(heard, expectation),
-    at
-  ).toEqual({
+  expect(await heardWithin({ exchange, timing }, expectation), at).toEqual({
     ...expectation,
     ...(expectation.binary === undefined ? {} : { binary: canonicalOf(expectation.binary) }),
   });
@@ -725,7 +828,11 @@ test.describe('the transports', () => {
       try {
         for (const [index, step] of steps.entries()) {
           const at = `step ${String(index + 1)}`;
-          const milliseconds = step.within ?? PATIENCE;
+          const timing: ITiming = {
+            after: step.after,
+            startedAt: performance.now(),
+            within: step.within,
+          };
 
           expect(
             Object.keys(step).filter((key) => {
@@ -733,11 +840,11 @@ test.describe('the transports', () => {
             }),
             `${at}: the keys this harness does not read`
           ).toEqual([]);
-          // a step is one act, on the exchange and within the time it may name: one that holds a
+          // a step is one act, on the exchange and within the times it may name: one that holds a
           // second act fails, never passes with it left unplayed
           expect(
             Object.keys(step).filter((key) => {
-              return key !== 'on' && key !== 'within';
+              return key !== 'on' && key !== 'within' && key !== 'after';
             }),
             `${at}: the acts it holds`
           ).toHaveLength(1);
@@ -762,11 +869,11 @@ test.describe('the transports', () => {
 
           if (step.expect !== undefined && 'status' in step.expect) {
             await expectResponse(
-              { at, exchange: exchangeOf(step.on, at), milliseconds },
+              { at, exchange: exchangeOf(step.on, at), timing },
               { expectation: step.expect, refusals, values }
             );
           } else if (step.expect !== undefined) {
-            await expectHeard({ at, exchange: exchangeOf(step.on, at), milliseconds }, step.expect);
+            await expectHeard({ at, exchange: exchangeOf(step.on, at), timing }, step.expect);
           }
 
           if (step.until !== undefined && 'timer' in step.until) {

@@ -116,6 +116,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Three conversations ask `bytes` for the result they send as a transfer, and the one of a relay's
   legs' payload limit sends leg A's request whole within `chunkBytes`; leg B's header, counted call
   by call, is its twins'.
+- Spec 15.12 states that a head's 408 comes past its time and within 2 seconds of it, on the
+  platform's clock, as Kestrel's heartbeat answers a connection's first head 1 to 2 seconds past it.
+  An `expect` of `spec/transports.json` may name `after`, the soonest what it reads may come, which
+  the head's two cases set to their `headersTimeout` less 100 ms; a runner that misses a `within`
+  tells when the response came, or that it never did.
 
 ### Removed
 

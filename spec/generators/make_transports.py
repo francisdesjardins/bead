@@ -214,11 +214,14 @@ def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{ho
 
 # a bearer credential, RFC 6750's own example, its auth-scheme included
 BEARER = 'Bearer mF_9.B5f-4.1JqM'
-# a head's 408, played on the real clock: its headersTimeout, then the latest a platform answers it.
+# a head's 408, played on the real clock: its headersTimeout; the soonest it comes, 100 ms short of
+# its time, which its server counts from its accept, before the step starts; and the latest, past its
+# time and within 2 seconds of it (spec 15.12), then 2 seconds more for the real clock under load.
 # ! Kestrel sets a head's deadline a heartbeat past its time (TimeoutControl.AssignTimeout) and fires
 # on the first heartbeat after it (CheckForTimeout), a heartbeat each second, so a connection's first
-# head is answered 1 to 2 seconds past its time; 2 seconds more for the real clock under load
+# head is answered 1 to 2 seconds past its time; Node checks each second, so within one
 HEAD_TIMEOUT = 1000
+HEAD_408_AFTER = HEAD_TIMEOUT - 100
 HEAD_408_WITHIN = HEAD_TIMEOUT + 2000 + 2000
 # what a 503 busy carries besides its mark
 BUSY ={'retry-after': {'shape': 'delay-seconds'}}
@@ -599,11 +602,12 @@ cases = [
          {'expect': {'end': True}, 'on': 'slow'},
          post('again', request(3, 'echo', '"y"')), answered('again', result(3, '"y"'))]),
     # played on the real clock: the platform's parser holds a head, which no Bead code sees until it is
-    # whole, and answers it past its time, as its platform checks it (HEAD_408_WITHIN)
+    # whole, and answers it past its time and within 2 seconds of it, as its platform checks it
+    # (HEAD_408_AFTER, HEAD_408_WITHIN)
     ('a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
      ['15.12', '15.12.14'], {'headersTimeout': HEAD_TIMEOUT}, [
          {'send': {'head': 'POST /bead HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
-         {**unmarked_as('slow', 408), 'within': HEAD_408_WITHIN}]),
+         {**unmarked_as('slow', 408), 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
     ('a DELETE ends its connection, and an exchange after it is refused 404', ['15.4', '15.6.3', '15.6.6'], None, [
         *drawn(), send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body=''),
         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
@@ -1179,7 +1183,7 @@ websocket = [
     ('a request at a WebSocket\'s address whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
      ['15.2.1', '15.12', '15.12.14'], {'options': {'headersTimeout': HEAD_TIMEOUT}, 'realTime': True}, [
          {'send': {'head': 'GET / HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
-         {**unmarked_as('slow', 408), 'within': HEAD_408_WITHIN}]),
+         {**unmarked_as('slow', 408), 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
     # played on the real clock: no clock given reaches the ping the C# side's platform times
     ('a side pings its peer every heartbeat', ['15.3'], {'options': {'heartbeat': 200}, 'realTime': True}, [
         *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=1000, ping=True)]),
@@ -1355,7 +1359,7 @@ document = {
         "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
         'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.',
         'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
-        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
+        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',

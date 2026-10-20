@@ -3303,7 +3303,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     await server.stop();
   });
 
-  test('answers 408 a head that does not come whole within headersTimeout, at its address and its WebSocket’s, within a second of it', async () => {
+  test('answers 408 a head that does not come whole within headersTimeout, at its address and its WebSocket’s, past it and within 2 seconds of it', async () => {
     await using started = await startTransport({ headersTimeout: 500 });
     const webSocket = createWSTransportServer({ headersTimeout: 500, WebSocketServer });
     const { port: webSocketPort } = await webSocket.start({ address: host, findOpenPort: true });
