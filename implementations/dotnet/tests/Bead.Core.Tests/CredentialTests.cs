@@ -66,7 +66,7 @@ public sealed class CredentialTests
         var carrying = new TransportMessage(new byte[] { 1, 2, 3 }, false) { Credential = "Bearer SECRET", MayOvertake = true };
 
         Assert.Equal(
-            "TransportMessage { Bytes = System.ReadOnlyMemory<Byte>[3], IsText = False, MayOvertake = True, Credential = carried }",
+            "TransportMessage { Bytes = System.ReadOnlyMemory<Byte>[3], IsText = False, Address = , Port = , MayOvertake = True, Credential = carried }",
             carrying.ToString());
         Assert.DoesNotContain("SECRET", carrying.ToString(), StringComparison.Ordinal);
         Assert.EndsWith("MayOvertake = False, Credential = none }", new TransportMessage(new byte[] { 1 }, true).ToString(), StringComparison.Ordinal);

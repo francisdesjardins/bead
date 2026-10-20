@@ -2323,6 +2323,21 @@ public sealed partial class RouterServerTests : IDisposable
             Message?.Invoke(new TransportMessage(Encoding.UTF8.GetBytes(text), true), connectionHandle);
         }
 
+        // an envelope, with the address and the port its transport hands beside it
+        public void DeliverFrom(string connectionHandle, (byte[] Bytes, string Address, int Port) message)
+        {
+            Message?.Invoke(new TransportMessage(message.Bytes, false) { Address = message.Address, Port = message.Port }, connectionHandle);
+        }
+
+        // an envelope, with what its transport carried beside it, and the address and the port it
+        // hands beside it
+        public void CarryingFrom(string connectionHandle, (byte[] Bytes, string Carried, (string Address, int Port) From) message)
+        {
+            Message?.Invoke(
+                new TransportMessage(message.Bytes, false) { Credential = message.Carried, Address = message.From.Address, Port = message.From.Port },
+                connectionHandle);
+        }
+
         // an envelope, with what its transport carried beside it
         public void Carrying(string connectionHandle, (byte[] Bytes, string Carried) message)
         {

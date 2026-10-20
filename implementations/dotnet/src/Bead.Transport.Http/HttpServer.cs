@@ -10,8 +10,9 @@ public sealed record HttpServerOptions
     public static TimeSpan ConnectionInactivityTimeoutDefault { get; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// The transport's options; the largest body is the limits' envelope, which they set. Its clock
-    /// is every layer's: the server's own options give none, or the same.
+    /// The transport's options; the largest body is the limits' envelope, which they set, and the
+    /// requests waiting on one connection their <see cref="RouterLimits.MaximumAnsweringCalls"/>
+    /// unless given. Its clock is every layer's: the server's own options give none, or the same.
     /// </summary>
     public HttpTransportServerOptions? Transport { get; init; }
 
@@ -48,9 +49,16 @@ public sealed class HttpServer<TData> : IBeadServer<TData>
         var server = options?.Server ?? new ServerOptions();
         var limits = RouterLimits.WholeEnvelopeOf(server.Limits);
 
-        Transport = new HttpTransportServer((options?.Transport ?? new HttpTransportServerOptions()) with
+        var transport = options?.Transport ?? new HttpTransportServerOptions();
+
+        // * one number for one thing: an honest client, holding itself to the calls its server answers
+        // at once, never meets the transport's 429
+        Transport = new HttpTransportServer(transport with
         {
             MaximumBodyBytes = limits.MaximumEnvelopeBytes,
+            MaximumWaitingExchanges = transport.IsMaximumWaitingExchangesGiven
+                ? transport.MaximumWaitingExchanges
+                : limits.MaximumAnsweringCalls,
         });
         _server = new Server<TData>(Transport, server with
         {

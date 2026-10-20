@@ -31,8 +31,10 @@ import { createWSServer } from '../../../server/ws-server';
 import { createTestClock, duesOn, type TestClock } from '../../shared/__tests__/fixtures';
 import {
   BODY_BYTES_BUDGET,
+  BODY_GRACE_PERIOD,
   createHTTPTransportServer,
   EXCHANGE_TIMEOUT,
+  HEADERS_TIMEOUT,
   INACTIVITY_TIMEOUT,
   MAXIMUM_BODY_BYTES,
   MAXIMUM_CONNECTIONS,
@@ -40,6 +42,9 @@ import {
   MAXIMUM_OUTBOX_BYTES,
   MAXIMUM_WAIT,
   MAXIMUM_WAITING_EXCHANGES,
+  MINIMUM_BODY_BYTES_PER_SECOND,
+  MINIMUM_SEND_BYTES_PER_SECOND,
+  SEND_GRACE_PERIOD,
   type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
@@ -48,7 +53,7 @@ import type {
   ITransportServerRefusal,
   TransportServerConnectionHandle,
 } from '../types';
-import { createWSTransportServer, HEARTBEAT } from '../ws-transport-server';
+import { createWSTransportServer, HEARTBEAT, MAXIMUM_UNSENT_BYTES } from '../ws-transport-server';
 import { createFakeWebSocketServer } from './fake-websocket-server';
 import {
   closeFrameOf,
@@ -142,6 +147,7 @@ interface ICase {
     connectionInactivityTimeout?: number;
     heartbeat?: number;
     maximumMessageBytes?: number;
+    maximumUnsentBytes?: number;
   };
   realTime?: true;
   steps: IStep[];
@@ -391,7 +397,13 @@ const serverOf = (
   { limits, options = {}, transport }: ICase,
   clock: TestClock
 ): ServerUnderTest => {
-  const { connectionInactivityTimeout, heartbeat, maximumMessageBytes, ...bounds } = options;
+  const {
+    connectionInactivityTimeout,
+    heartbeat,
+    maximumMessageBytes,
+    maximumUnsentBytes,
+    ...bounds
+  } = options;
 
   if (transport === 'websocket') {
     return createWSServer<string>({
@@ -399,10 +411,16 @@ const serverOf = (
       limits,
       transport: {
         clock,
+        headersTimeout: bounds.headersTimeout,
         heartbeat,
         hosts: bounds.hosts,
         maxPayload: maximumMessageBytes,
+        maximumConnections: bounds.maximumConnections,
+        maximumConnectionsPerAddress: bounds.maximumConnectionsPerAddress,
+        maximumUnsentBytes,
+        minimumSendBytesPerSecond: bounds.minimumSendBytesPerSecond,
         origins: bounds.origins,
+        sendGracePeriod: bounds.sendGracePeriod,
         trustedProxies: bounds.trustedProxies,
         unnamedProxies: bounds.unnamedProxies,
         WebSocketServer,
@@ -603,13 +621,17 @@ test.describe('the transports', () => {
     await starting;
 
     const built = fake.instances[0]?.options as { maxPayload?: number } | undefined;
+    // and the unsent bytes it holds a socket to, read from its ceiling
+    const { ceilings } = wsTransport.gauges();
 
     await wsTransport.stop();
 
     expect({
       bodyBytesBudget: BODY_BYTES_BUDGET,
+      bodyGracePeriod: BODY_GRACE_PERIOD,
       connectionInactivityTimeout: CONNECTION_INACTIVITY_TIMEOUT,
       exchangeTimeout: EXCHANGE_TIMEOUT,
+      headersTimeout: HEADERS_TIMEOUT,
       heartbeat: HEARTBEAT,
       inactivityTimeout: INACTIVITY_TIMEOUT,
       maximumBodyBytes: MAXIMUM_BODY_BYTES,
@@ -617,9 +639,14 @@ test.describe('the transports', () => {
       maximumConnectionsPerAddress: MAXIMUM_CONNECTIONS_PER_ADDRESS,
       maximumMessageBytes: built?.maxPayload,
       maximumOutboxBytes: MAXIMUM_OUTBOX_BYTES,
+      maximumUnsentBytes: ceilings['largestUnsentBytes'],
       maximumWait: MAXIMUM_WAIT,
       maximumWaitingExchanges: MAXIMUM_WAITING_EXCHANGES,
+      minimumBodyBytesPerSecond: MINIMUM_BODY_BYTES_PER_SECOND,
+      minimumSendBytesPerSecond: MINIMUM_SEND_BYTES_PER_SECOND,
+      sendGracePeriod: SEND_GRACE_PERIOD,
     }).toEqual(TRANSPORTS.defaults);
+    expect(MAXIMUM_UNSENT_BYTES).toBe(TRANSPORTS.defaults['maximumUnsentBytes']);
   });
 
   for (const { body, fields, name, pieces, status } of TRANSPORTS.responses) {

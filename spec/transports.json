@@ -2,8 +2,8 @@
   "$schema": "schemas/transports.schema.json",
   "$comment": [
     "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII; body, its octets in hexadecimal. close drops that socket.",
-    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
+    "A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server's host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.",
+    "expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\"} for a value of that shape, {\"capture\", \"shape\"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server's transport tells of it (spec 15.1): its status, its reason, the request's authority and origin as they came, or null, the client's address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step's to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.",
     "Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client's is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect's wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.",
     "until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.",
     "Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.",
@@ -26,6 +26,12 @@
     "exchangeTimeout": 300000,
     "inactivityTimeout": 300000,
     "connectionInactivityTimeout": 30000,
+    "minimumSendBytesPerSecond": 240,
+    "sendGracePeriod": 5000,
+    "maximumUnsentBytes": 184551424,
+    "headersTimeout": 30000,
+    "minimumBodyBytesPerSecond": 240,
+    "bodyGracePeriod": 5000,
     "maximumMessageBytes": 16778240,
     "heartbeat": 30000
   },
@@ -292,7 +298,7 @@
       "name": "a request on a call id already waiting is refused 409, marked",
       "clauses": [
         "15.5.3",
-        "15.6.8"
+        "15.6.9"
       ],
       "transport": "http",
       "steps": [
@@ -1068,7 +1074,7 @@
     {
       "name": "a body of another type, or encoded, is refused 415, marked",
       "clauses": [
-        "15.6.10"
+        "15.6.11"
       ],
       "transport": "http",
       "steps": [
@@ -1146,7 +1152,7 @@
     {
       "name": "a body past its bound is refused 413, marked",
       "clauses": [
-        "15.6.9",
+        "15.6.10",
         "15.12.5"
       ],
       "transport": "http",
@@ -3426,7 +3432,7 @@
     {
       "name": "past the connections a server holds, a connect is refused 503, with Retry-After",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12.1"
       ],
       "transport": "http",
@@ -3485,7 +3491,7 @@
     {
       "name": "past the connections one address holds, behind a proxy it names, a connect is refused 503",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -3553,7 +3559,7 @@
     {
       "name": "an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -3609,7 +3615,7 @@
     {
       "name": "behind proxies it names, the client is the rightmost X-Forwarded-For entry none of them holds, what a client wrote to its left never read",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -3678,7 +3684,7 @@
     {
       "name": "an X-Forwarded-For entry that is no address ends the walk at the proxy that wrote it",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -3775,7 +3781,7 @@
     {
       "name": "an X-Forwarded-For entry is read in RFC 7239's node forms, its port dropped, and held in one form, an IPv4-mapped one as IPv4 and IPv6 as RFC 5952 writes it; a zone, a name or unknown ends the walk at the proxy",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -3921,7 +3927,7 @@
     {
       "name": "behind the proxies it counts, whatever their address, the client is the X-Forwarded-For entry that many hops from its socket, what a client wrote to its left never read",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -4011,7 +4017,7 @@
     {
       "name": "unnamedProxies counts the addresses trustedProxies does not hold: one it holds costs none, and the walk stops at the first address past the count that it does not hold",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -4080,7 +4086,7 @@
     {
       "name": "a proxy both named and counted gives the client an entry it wrote: behind a socket trustedProxies holds, unnamedProxies 2 passes the one unnamed proxy and reads the entry to its left",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -4137,7 +4143,7 @@
     {
       "name": "an X-Forwarded-For entry that is no address ends the walk within the proxies it counts, and so does the field's end",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -4191,7 +4197,7 @@
     {
       "name": "unnamedProxies 0 counts none: the X-Forwarded-For of a socket trustedProxies does not hold is not read",
       "clauses": [
-        "15.6.13",
+        "15.6.14",
         "15.12",
         "15.12.2"
       ],
@@ -4245,7 +4251,7 @@
     {
       "name": "past the requests waiting on one connection, a request is refused 429, marked",
       "clauses": [
-        "15.6.12",
+        "15.6.13",
         "15.12.3"
       ],
       "transport": "http",
@@ -4309,6 +4315,134 @@
             }
           },
           "on": "more"
+        }
+      ]
+    },
+    {
+      "name": "a body that comes slower than its rate past its grace is refused 408, marked, its connection closed in stages, its Bead connection kept",
+      "clauses": [
+        "15.1",
+        "15.6.8",
+        "15.12",
+        "15.12.15",
+        "15.12.16"
+      ],
+      "transport": "http",
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "connect"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              },
+              "bead-listen": null
+            }
+          },
+          "on": "connect"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 100\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03 00 00 00 01 00 01 00 01"
+          },
+          "on": "slow"
+        },
+        {
+          "until": {
+            "timer": 5000
+          }
+        },
+        {
+          "advance": 5000
+        },
+        {
+          "expect": {
+            "status": 408,
+            "fields": {
+              "bead-refusal": "too-slow",
+              "connection": "close"
+            },
+            "body": "",
+            "told": {
+              "status": 408,
+              "reason": "too-slow",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "slow"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "slow"
+        },
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\nbead-connection-token: {token}\r\ncontent-type: application/prs.bead\r\ncontent-length: 15\r\nconnection: close\r\n\r\n",
+            "body": "A1 10 00 03  00 00 00 03  00 01 00 01 | 22 79 22"
+          },
+          "on": "again"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "content-type": "application/prs.bead"
+            },
+            "envelope": {
+              "kind": 17,
+              "callId": 3,
+              "payload": "22 79 22"
+            }
+          },
+          "on": "again"
+        }
+      ]
+    },
+    {
+      "name": "a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none",
+      "clauses": [
+        "15.12",
+        "15.12.14"
+      ],
+      "transport": "http",
+      "options": {
+        "headersTimeout": 1000
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\n"
+          },
+          "on": "slow"
+        },
+        {
+          "expect": {
+            "status": 408,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "slow",
+          "within": 5000
         }
       ]
     },
@@ -4808,7 +4942,7 @@
     {
       "name": "a listen of a client that did not say it listens is refused 409, marked",
       "clauses": [
-        "15.6.8",
+        "15.6.9",
         "15.8"
       ],
       "transport": "http",
@@ -5525,7 +5659,7 @@
       "name": "to a client that does not listen, a request that opens a subscription is answered SUBSCRIPTION_UNSUPPORTED",
       "clauses": [
         "15.8",
-        "9.2.6"
+        "9.2.7"
       ],
       "transport": "http",
       "steps": [
@@ -8706,7 +8840,7 @@
         "15.2.5",
         "15.2.7",
         "15.6.5",
-        "15.6.11",
+        "15.6.12",
         "15.12"
       ],
       "transport": "websocket",
@@ -9501,7 +9635,7 @@
       "clauses": [
         "15.2",
         "15.2.4",
-        "15.6.11"
+        "15.6.12"
       ],
       "transport": "websocket",
       "steps": [
@@ -9782,7 +9916,7 @@
       "clauses": [
         "15.2",
         "15.2.5",
-        "15.6.11"
+        "15.6.12"
       ],
       "transport": "websocket",
       "steps": [
@@ -10470,6 +10604,316 @@
             "close": 1001
           },
           "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "past the connections a WebSocket server holds, an upgrade is refused 503, marked, with Retry-After, and one is taken once a connection closes",
+      "clauses": [
+        "15.2",
+        "15.2.8",
+        "15.6.14",
+        "15.12.1"
+      ],
+      "transport": "websocket",
+      "options": {
+        "maximumConnections": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "close": 1000
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "close": 1000
+          },
+          "on": "first"
+        },
+        {
+          "until": {
+            "gauge": "connections",
+            "is": 0
+          }
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "third"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "third"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "third"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "third"
+        }
+      ]
+    },
+    {
+      "name": "past the connections one address holds, behind a proxy it names, an upgrade is refused 503",
+      "clauses": [
+        "15.2.8",
+        "15.6.14",
+        "15.12",
+        "15.12.2"
+      ],
+      "transport": "websocket",
+      "options": {
+        "maximumConnectionsPerAddress": 1,
+        "trustedProxies": [
+          "127.0.0.1"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 192.0.2.1\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 198.51.100.7, 192.0.2.1\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "192.0.2.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\nx-forwarded-for: 192.0.2.2\r\n\r\n"
+          },
+          "on": "other"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "other"
+        }
+      ]
+    },
+    {
+      "name": "at its bounds, an upgrade from an origin it does not take is refused 403, its origin judged before its bounds",
+      "clauses": [
+        "15.2",
+        "15.2.7",
+        "15.2.8"
+      ],
+      "transport": "websocket",
+      "options": {
+        "maximumConnections": 1
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "first"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "first"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\norigin: https://elsewhere.test\r\n\r\n"
+          },
+          "on": "foreign"
+        },
+        {
+          "expect": {
+            "status": 403,
+            "fields": {
+              "bead-refusal": "origin-refused",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff"
+            },
+            "body": "",
+            "told": {
+              "status": 403,
+              "reason": "origin-refused",
+              "authority": "{host}",
+              "origin": "https://elsewhere.test",
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "foreign"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "second"
+        },
+        {
+          "expect": {
+            "status": 503,
+            "fields": {
+              "bead-refusal": "busy",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "retry-after": {
+                "shape": "delay-seconds"
+              }
+            },
+            "body": "",
+            "told": {
+              "status": 503,
+              "reason": "busy",
+              "authority": "{host}",
+              "origin": null,
+              "address": "127.0.0.1",
+              "port": "{port}"
+            }
+          },
+          "on": "second"
+        }
+      ]
+    },
+    {
+      "name": "a request at a WebSocket's address whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none",
+      "clauses": [
+        "15.2.1",
+        "15.12",
+        "15.12.14"
+      ],
+      "transport": "websocket",
+      "options": {
+        "headersTimeout": 1000
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\n"
+          },
+          "on": "slow"
+        },
+        {
+          "expect": {
+            "status": 408,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "slow",
+          "within": 5000
         }
       ]
     },

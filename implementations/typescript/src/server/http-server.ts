@@ -2,6 +2,7 @@
 
 // dependencies
 
+import { LIMIT_DEFAULTS } from '../router/shared/constants';
 import { wholeEnvelopeLimitsOf } from '../router/shared/whole-envelope-limits';
 import {
   createHTTPTransportServer,
@@ -32,8 +33,9 @@ export interface IHTTPServerOptions<Data = unknown>
     Omit<IServerLayers<HTTPTransportServer, Data>, 'transport'>,
     Omit<IServerOptions, 'clock'> {
   /**
-   * The transport's options; the largest body is the limits' envelope, which they set, and the
-   * clock is every layer's.
+   * The transport's options; the largest body is the limits' envelope, which they set, the requests
+   * waiting on one connection their `maximumAnsweringCalls` unless given, and the clock is every
+   * layer's.
    */
   transport: Omit<IHTTPTransportServerOptions, 'maximumBodyBytes'>;
 }
@@ -81,6 +83,12 @@ export const createHTTPServer = <Data = unknown>(
       transport: createHTTPTransportServer({
         ...options.transport,
         maximumBodyBytes: limits.maximumEnvelopeBytes,
+        // * one number for one thing: an honest client, holding itself to the calls its server
+        // answers at once, never meets the transport's 429
+        maximumWaitingExchanges:
+          options.transport.maximumWaitingExchanges ??
+          limits.maximumAnsweringCalls ??
+          LIMIT_DEFAULTS.maximumAnsweringCalls,
       }),
     },
     {

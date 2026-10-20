@@ -18,6 +18,7 @@ import type {
   CallId,
   DebugDirection,
   DestinationId,
+  IAccessRefusal,
   IBeforeRequest,
   ICallAddress,
   ICredentials,
@@ -770,6 +771,13 @@ export type RelayTarget =
 
 /** Event name → the arguments its listeners receive. */
 export type RouterServerEventMap = {
+  /**
+   * Each call refused as its credential resolved or as it was admitted, in the turn its refusal is
+   * answered (spec 13.12): its stage, the code answered, why, what was called, the connection, and
+   * the address and port of the request; never the credential, a claim, or an admission's detail.
+   * Built only while someone listens; what a listener throws is reported with its connection.
+   */
+  accessRefused: [refusal: IAccessRefusal<TransportServerConnectionHandle>];
   activity: [activity: RouterServerActivity, connectionHandle: TransportServerConnectionHandle];
   /** Each envelope, out or in; built only while someone listens. */
   debug: [info: IRouterServerDebugInfo];

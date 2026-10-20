@@ -720,4 +720,80 @@ public sealed partial class RouterCoreTests
         Assert.Equal(2, resolver.Requests.Count);
         Assert.Empty(server.Reports);
     }
+
+    [Fact]
+    public async Task Answers_CAPACITY_EXCEEDED_a_request_past_the_calls_its_peer_has_it_answer_on_its_connection_before_its_route_its_credential_or_its_transfer_and_takes_one_once_a_call_ends()
+    {
+        var server = new Peer(RouterSide.Server, RouterLimits.Default with { MaximumAnsweringCalls = 2, MaximumEnvelopeBytes = 1_024, ChunkBytes = 64, WindowBytes = 128 })
+        {
+            Schemes = [CredentialScheme.Jwt],
+        };
+        var resolver = server.Resolve();
+        var payload = PatternOf(100);
+
+        await server.Deliver(new Envelope { Header = RequestOf(1) });
+        await server.Deliver(new Envelope { Header = RequestOf(3) });
+
+        // another connection's calls are its own
+        await server.Deliver(new Envelope { Header = RequestOf(1) }, "b");
+        await server.Deliver(new Envelope { Header = RequestOf(5) with { ServiceId = 8 } });
+        await server.Deliver(new Envelope { Header = RequestOf(7) with { DestinationId = 4 } });
+        await server.Deliver(new Envelope { Header = RequestOf(9) with { Credential = Credential.Jwt("a.b.c") } });
+        await server.Deliver(new Envelope { Header = RequestOf(11) with { Total = 100 }, Payload = payload.AsMemory(0, 8) });
+
+        Assert.Equal(3, resolver.Requests.Count);
+        Assert.DoesNotContain(server.Resolved, (resolved) =>
+        {
+            return resolved.Request.Header.Credential is not null;
+        });
+        Assert.Equal(
+            [(5u, (ushort)ProtocolCode.CapacityExceeded), (7u, (ushort)ProtocolCode.CapacityExceeded), (9u, (ushort)ProtocolCode.CapacityExceeded), (11u, (ushort)ProtocolCode.CapacityExceeded)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure!.Code);
+            }));
+        Assert.Equal("the calls a connection has answered at once are 2 at most", server.Sent[0].Failure!.Detail);
+
+        // a call answered gives its place back, and the next request is taken
+        await resolver.Answer(0, ReadOnlyMemory<byte>.Empty);
+        await server.Settle();
+        await server.Deliver(new Envelope { Header = RequestOf(13) });
+
+        Assert.Equal(4, resolver.Requests.Count);
+        Assert.Equal(13u, resolver.Requests[3].Header.CallId);
+    }
+
+    [Fact]
+    public async Task Answers_ENVELOPE_TOO_LARGE_a_request_that_came_whole_past_chunkBytes_and_holds_nothing_of_it()
+    {
+        var server = new Peer(RouterSide.Server, Chunked with { MaximumEnvelopeBytes = 1_024 });
+        var resolver = server.Resolve();
+
+        // 12 bytes of header, then 53 of payload: one past chunkBytes, within an envelope
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = PatternOf(53) });
+
+        // an opening past it too
+        await server.Deliver(new Envelope { Header = RequestOf(3) with { Total = 300 }, Payload = PatternOf(49) });
+
+        // a request of chunkBytes, taken
+        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = PatternOf(52) });
+
+        Assert.Equal(
+            [(1u, (ushort)ProtocolCode.EnvelopeTooLarge), (3u, (ushort)ProtocolCode.EnvelopeTooLarge)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure!.Code);
+            }));
+        Assert.Equal("a request is 64 bytes at most, not 65", server.Sent[0].Failure!.Detail);
+        Assert.Equal(
+            [5u],
+            resolver.Requests.Select((request) =>
+            {
+                return request.Header.CallId;
+            }));
+
+        var counts = (await GaugesOf(server)).Counts;
+
+        Assert.Equal((1L, 0L), (counts["answeringCalls"], counts["receivingTransfers"]));
+    }
 }

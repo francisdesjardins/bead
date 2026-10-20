@@ -98,6 +98,11 @@ export interface IGauges<Handle extends string = string> {
  * brings back carries none either.
  */
 export interface ITransportMessage {
+  /**
+   * The client's address of what brought it, as a server's transport reads it: over HTTP its
+   * exchange's, over a WebSocket its connection's; none over a Web Worker, nor toward a client.
+   */
+  readonly address?: string | undefined;
   /** None when nothing was carried: an empty field carries none. */
   readonly credential?: string | undefined;
   readonly data: Data;
@@ -106,6 +111,8 @@ export interface ITransportMessage {
    * which it may overtake: over HTTP, a listen's batch (spec 15.9). None for any other.
    */
   readonly mayOvertake?: boolean | undefined;
+  /** The port of what brought it, beside its `address`. */
+  readonly port?: number | undefined;
 }
 
 /** A message as a port or a worker's scope delivers it: its data, and the ports it carried. */

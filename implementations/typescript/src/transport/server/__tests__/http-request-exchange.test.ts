@@ -1,5 +1,6 @@
+import type { Socket } from 'node:net';
 import { expect, test } from '@playwright/test';
-import { tcpSocketsClosed } from '../../shared/__tests__/fixtures';
+import { createTestClock, tcpSocketsClosed } from '../../shared/__tests__/fixtures';
 import { createHTTPRequestExchange, type IHTTPRequestExchangePort } from '../http-request-exchange';
 import type { IEnd } from '../http-server-fields';
 import {
@@ -14,9 +15,14 @@ import {
   BEARER,
   connect,
   envelopeOf,
+  host,
   namesOf,
+  portOf,
   post,
+  postHeadOf,
+  rawSocketOn,
   refusalOf,
+  refusalsOf,
   requestLikeOf,
   startScripted,
   startTransport,
@@ -126,16 +132,22 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect([cancel.response.status, upload.response.status]).toEqual([204, 204]);
 
-    // cancelled, and still coming past the limit: refused, and read no more
-    const endless = exchangeOf(connectionToken);
+    // cancelled, and still coming past the limit: refused, its socket closed in stages, and what
+    // comes after dropped
+    const endless = exchangeOf(connectionToken, { 'transfer-encoding': 'chunked' });
 
     endless.request.emit('data', request.subarray(0, 16));
     fake.feed(exchangeOf(connectionToken).request, [
       envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }),
     ]);
     endless.request.emit('data', new Uint8Array(64));
+    endless.request.emit('data', new Uint8Array(64));
 
-    expect([endless.response.status, endless.request.isDestroyed]).toEqual([413, true]);
+    expect([
+      endless.response.status,
+      endless.response.headers?.['connection'],
+      endless.request.isDestroyed,
+    ]).toEqual([413, 'close', false]);
     expect(
       namesOf(events, 'message').map(([, bytes]) => {
         return (bytes as number[])[1];
@@ -211,7 +223,12 @@ test.describe('createHTTPRequestExchange', () => {
         };
       },
     });
-    const { receive } = createHTTPRequestExchange(port, { maximumBodyBytes: 16 });
+    const { receive } = createHTTPRequestExchange(port, {
+      bodyGracePeriod: 5_000,
+      clock: createTestClock(),
+      maximumBodyBytes: 16,
+      minimumBodyBytesPerSecond: 240,
+    });
     const response = {} as IHTTPResponseLike;
 
     for (const fields of [
@@ -231,5 +248,214 @@ test.describe('createHTTPRequestExchange', () => {
       { reason: REFUSALS.BUSY, status: 429 },
     ]);
     expect(asked).toEqual(['finish', 'finish', 'admitExchange', 'finish']);
+  });
+});
+
+/** Writes `bytes` on `socket` at full speed, a mebibyte at a time, until it closes or `limit` went. */
+const pumpOn = (socket: Socket, { limit = Infinity }: { limit?: number } = {}): void => {
+  const chunk = new Uint8Array(1_048_576);
+  let sent = 0;
+
+  const pump = (): void => {
+    while (!socket.destroyed && sent < limit) {
+      const piece = chunk.subarray(0, Math.min(chunk.length, limit - sent));
+
+      sent += piece.length;
+
+      if (!socket.write(piece)) {
+        return;
+      }
+    }
+  };
+
+  socket.on('drain', pump);
+  pump();
+};
+
+/** The status line of what `read` holds, once its head came. */
+const statusOf = async (read: { text: string }) => {
+  await expect
+    .poll(() => {
+      return read.text.includes('\r\n\r\n');
+    })
+    .toBe(true);
+
+  return read.text.split('\r\n')[0];
+};
+
+/** Whether the head `read` holds carries the field line `line`, in any case. */
+const carries = (read: { text: string }, line: string): boolean => {
+  return (read.text.split('\r\n\r\n')[0] ?? '').toLowerCase().split('\r\n').includes(line);
+};
+
+test.describe('createHTTPTransportServer, a body as it comes', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('refuses 408 too-slow a body that comes slower than its rate once its grace passed, its client reading the 408 as it goes on sending, and keeps its connection; a body at its rate taken', async () => {
+    const clock = createTestClock();
+    await using started = await startTransport({
+      bodyGracePeriod: 1_000,
+      clock,
+      minimumBodyBytesPerSecond: 1_000,
+    });
+    const { events, server, url } = started;
+    const refusals = refusalsOf(server);
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const bodyBytes = () => {
+      return server.gauges().counts['bodyBytes'];
+    };
+    const slow = await rawSocketOn(portOf(url));
+    const trickled = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 4_000 });
+
+    slow.socket.write(postHeadOf(connectionToken, trickled.length));
+    slow.socket.write(trickled.subarray(0, 12));
+    await expect.poll(bodyBytes).toBe(12);
+
+    // its grace passed with 12 bytes: refused as it goes on sending
+    await clock.tickAsync(1_000);
+    slow.socket.write(trickled.subarray(12, 2_000));
+
+    expect(await statusOf(slow.read)).toBe('HTTP/1.1 408 Request Timeout');
+    expect([
+      carries(slow.read, 'bead-refusal: too-slow'),
+      carries(slow.read, 'connection: close'),
+    ]).toEqual([true, true]);
+    slow.socket.write(trickled.subarray(2_000));
+    await expect
+      .poll(() => {
+        return slow.read.isClosed;
+      })
+      .toBe(true);
+    expect(
+      refusals.map(({ reason, status }) => {
+        return [status, reason];
+      })
+    ).toEqual([[408, REFUSALS.TOO_SLOW]]);
+    expect([bodyBytes(), namesOf(events, 'message'), namesOf(events, 'close')]).toEqual([
+      0,
+      [],
+      [],
+    ]);
+
+    // its Bead connection kept: a body that comes at its rate is taken, and answered
+    const paced = await rawSocketOn(portOf(url));
+    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3, extra: 3_000 });
+
+    paced.socket.write(postHeadOf(connectionToken, request.length));
+    paced.socket.write(request.subarray(0, 1_000));
+    await expect.poll(bodyBytes).toBe(1_000);
+    await clock.tickAsync(900);
+    paced.socket.write(request.subarray(1_000, 2_000));
+    await expect.poll(bodyBytes).toBe(2_000);
+    await clock.tickAsync(1_000);
+    paced.socket.write(request.subarray(2_000));
+    await expect
+      .poll(() => {
+        return namesOf(events, 'message').length;
+      })
+      .toBe(1);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }) }, connectionHandle);
+
+    expect(await statusOf(paced.read)).toBe('HTTP/1.1 200 OK');
+    expect(refusals).toHaveLength(1);
+    paced.socket.destroy();
+  });
+
+  test('closes in stages every answer written before its body is whole, so a client that sends at full speed reads it, and its connection then answers a POST', async () => {
+    await using started = await startTransport({ maximumBodyBytes: 16_000_000 });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+
+    // a 413 to a body declared past its limit, written before any of it is read
+    const large = await rawSocketOn(portOf(url));
+
+    large.socket.write(postHeadOf(connectionToken, 67_108_864));
+    pumpOn(large.socket);
+
+    expect(await statusOf(large.read)).toBe('HTTP/1.1 413 Payload Too Large');
+    expect(carries(large.read, 'connection: close')).toBe(true);
+    await expect
+      .poll(() => {
+        return large.read.isClosed;
+      })
+      .toBe(true);
+
+    // its connection answers a POST after it
+    const answered = post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken,
+    });
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'message').length;
+      })
+      .toBe(1);
+    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
+
+    expect((await answered).status).toBe(200);
+
+    // a 404 to a body still coming as its connection closes
+    const coming = await rawSocketOn(portOf(url));
+    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 });
+
+    coming.socket.write(postHeadOf(connectionToken, 15_000_000));
+    coming.socket.write(request);
+    await expect
+      .poll(() => {
+        return server.gauges().counts['bodyBytes'];
+      })
+      .toBe(request.length);
+    pumpOn(coming.socket, { limit: 14_000_000 });
+    await server.close(connectionHandle);
+
+    expect(await statusOf(coming.read)).toBe('HTTP/1.1 404 Not Found');
+    expect([
+      carries(coming.read, 'bead-refusal: connection-unknown'),
+      carries(coming.read, 'connection: close'),
+    ]).toEqual([true, true]);
+    await expect
+      .poll(() => {
+        return coming.read.isClosed;
+      })
+      .toBe(true);
+  });
+
+  test('answers a body whose read fails, a malformed chunked one, the status of its failure, unmarked, its connection closed, never 200 and empty', async () => {
+    await using started = await startTransport();
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const { read, socket } = await rawSocketOn(portOf(url));
+    const prefix = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 });
+
+    socket.write(
+      `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+        `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n`
+    );
+    socket.write(prefix);
+    await expect
+      .poll(() => {
+        return server.gauges().counts['bodyBytes'];
+      })
+      .toBe(prefix.length);
+    // a chunk size that is none
+    socket.write('\r\nzz\r\n');
+
+    expect(await statusOf(read)).toBe('HTTP/1.1 400 Bad Request');
+    expect(read.text).not.toMatch(/bead-refusal/iu);
+    await expect
+      .poll(() => {
+        return read.isClosed;
+      })
+      .toBe(true);
+    // the exchange lost, as a dropped socket's, which closes its connection; nothing handed on
+    await expect
+      .poll(() => {
+        return namesOf(events, 'close');
+      })
+      .toEqual([['close', false, connectionHandle]]);
+    expect([namesOf(events, 'message'), server.gauges().counts['bodyBytes']]).toEqual([[], 0]);
   });
 });

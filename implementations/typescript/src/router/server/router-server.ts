@@ -77,6 +77,7 @@ export {
 } from '../../transport/shared/errors';
 export type { TransportServerConnectionHandle } from '../../transport/server/types';
 export type {
+  AccessRefusalStage,
   AdmissionFailure,
   Announcement,
   CallId,
@@ -87,10 +88,12 @@ export type {
   EnvelopeHeader,
   FailureOrigin,
   HandedCredential,
+  IAccessRefusal,
   IAdmissionRequest,
   IBeforeRequest,
   ICallSession,
   ICancelHeader,
+  ICredentialRefused,
   ICredentials,
   IElsewhereSession,
   IJwtKeySet,
@@ -146,6 +149,9 @@ type ServerCall = ICallAddress<TransportServerConnectionHandle>;
 
 // what a subscription carries of its series while its router counts nothing
 const UNCOUNTED = Object.freeze({});
+
+// what an OPAQUE no session holds resolves to: refused, for its session
+const OPAQUE_REFUSED = Object.freeze({ refused: 'session' });
 
 // helpers
 
@@ -273,23 +279,36 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       credential?.scheme !== CredentialScheme.JWT &&
       credential?.scheme !== CredentialScheme.ELSEWHERE
     ) {
-      return options?.sessionOf?.({ connectionHandle, header }, signal);
+      const session = options?.sessionOf?.({ connectionHandle, header }, signal);
+
+      // an OPAQUE no session holds on its connection is refused for its session (spec 13.12)
+      return session === undefined && credential?.scheme === CredentialScheme.OPAQUE
+        ? OPAQUE_REFUSED
+        : session;
     }
+
+    // why it was refused, as its resolution says
+    let refused: string | undefined;
 
     return credentials
       .resolve(
         {
           ...(destinationId === undefined ? {} : { audience: relay.audiences() }),
           credential,
+          onRefused: (reason) => {
+            refused = reason;
+          },
           transportCredential,
         },
         signal
       )
       .then((session) => {
+        if (session === undefined) {
+          return refused === undefined ? undefined : Object.freeze({ refused });
+        }
+
         // ! one that settles once its call ended moves no end: it is dropped
-        return session === undefined || signal.aborted
-          ? undefined
-          : credentialSessions.resolved(session, connectionHandle);
+        return signal.aborted ? undefined : credentialSessions.resolved(session, connectionHandle);
       });
   };
 
@@ -365,8 +384,21 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
       },
       sessionOf,
       ...(options?.sessionTokenOf === undefined ? {} : { sessionTokenOf: options.sessionTokenOf }),
+      isTellingRefusals: () => {
+        return emitter.listenerCount('accessRefused') > 0;
+      },
       isTracing: () => {
         return emitter.listenerCount('debug') > 0;
+      },
+      // * told within a guard (spec 15.1): what a listener throws is reported with the connection,
+      // and the refusal stands as answered
+      tellRefusal: (refusal) => {
+        emitter.emitEach('accessRefused', {
+          onError: (error) => {
+            report(toError(error), refusal.connectionHandle);
+          },
+          params: [refusal],
+        });
       },
       trace: (direction, { connectionHandle, header }) => {
         emitter.emitEach('debug', {

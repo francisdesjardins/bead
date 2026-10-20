@@ -566,10 +566,11 @@ SECOND = 1_000_000
 # the units of spec/debugging.md the exits check: the gates, then the rows of the tables of exits
 SERVER_STARTS, SERVER_ENDS, CLIENT_STARTS, CLIENT_ENDS, GOES, HEARD, DROPPED = (
     '9.1.1', '9.1.2', '9.1.3', '9.1.4', '9.1.5', '9.1.6', '9.1.7')
-ROUTE, CREDENTIAL, ADMISSION, SUBSCRIPTION, TOO_LARGE, OPENING_REFUSED, OPENING_PAST, REQUEST_TRANSFER, \
-    UNREADABLE, UNDECODABLE, RESOLVER_FAILS, OWN_FAILURE, QUEUE_PAST, RESULT_STALLED, RELAYED, CANCELLED, CLOSED = (
+PAST_ANSWERING, ROUTE, CREDENTIAL, ADMISSION, SUBSCRIPTION, TOO_LARGE, OPENING_REFUSED, OPENING_PAST, \
+    REQUEST_TRANSFER, UNREADABLE, UNDECODABLE, RESOLVER_FAILS, OWN_FAILURE, QUEUE_PAST, RESULT_STALLED, RELAYED, \
+    CANCELLED, CLOSED = (
         '9.4.2', '9.4.3', '9.4.4', '9.4.5', '9.4.6', '9.4.7', '9.4.8', '9.4.9', '9.4.10', '9.4.11', '9.4.12', '9.4.13',
-        '9.4.14', '9.4.15', '9.4.16', '9.4.17', '9.4.18')
+        '9.4.14', '9.4.15', '9.4.16', '9.4.17', '9.4.18', '9.4.19')
 ANSWERED_RESULT = '9.4.1'
 MADE_RESULT, MADE_FAILURE, MADE_ENDED, MADE_TIMEOUT, MADE_CANCELLED, MADE_CLOSED = (
     '9.6.5', '9.6.6', '9.6.7', '9.6.8', '9.6.9', '9.6.10')
@@ -638,6 +639,10 @@ EXITS = [
     ('a request that names a destination, to a server that relays nothing, counts under _OTHER', [LABELED, ROUTE],
      'a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN',
      {2: answered_whole(None, 'failure', 'DESTINATION_UNKNOWN')}),
+    ('a request past the calls its connection has it answer at once counts CAPACITY_EXCEEDED under its procedure, started and ended in one turn',
+     [PAST_ANSWERING, SERVER_STARTS], 'a cancel frees its call\'s place at once',
+     {4: [opened('slow'), opened('slow'), *answered_whole('echo', 'failure', 'CAPACITY_EXCEEDED')],
+      7: [ended('slow', 'cancelled'), *answered_whole('echo', 'result')]}),
     ('a credential scheme to come counts its procedure\'s CREDENTIAL_UNSUPPORTED, and a procedure unknown _OTHER\'s', [CREDENTIAL, ROUTE],
      'a credential scheme to come is answered CREDENTIAL_UNSUPPORTED, its detail naming the schemes the server takes, before its admission',
      {2: answered_whole('echo', 'failure', 'CREDENTIAL_UNSUPPORTED'), 4: answered_whole('whoami', 'failure', 'CREDENTIAL_UNSUPPORTED'),
@@ -708,13 +713,13 @@ EXITS = [
      {2: opened('echo'), 5: [], 8: ended('echo', 'result')}),
     ('a result\'s transfer stalled before its last chunk counts TRANSFER_STALLED, timed to its failure', [RESULT_STALLED, LAST_CHUNK, BUCKETS],
      'a result that gets no credit is ended TRANSFER_STALLED, a credit that grants setting it going again, one that grants nothing not',
-     {2: opened('echo'), 6: [], 12: ended('echo', 'failure', 'TRANSFER_STALLED', 20 * SECOND)}),
+     {2: opened('bytes'), 6: [], 12: ended('bytes', 'failure', 'TRANSFER_STALLED', 20 * SECOND)}),
     ('a result\'s transfer cancelled before its last chunk counts cancelled', [CANCELLED, LAST_CHUNK],
      'a cancel ends the transfer of a result, and a credit after it is dropped in silence',
-     {2: opened('echo'), 6: [ended('echo', 'cancelled'), *answered_whole('echo', 'result')]}, echo_again(3, '"y"')),
+     {2: opened('bytes'), 6: [ended('bytes', 'cancelled'), *answered_whole('echo', 'result')]}, echo_again(3, '"y"')),
     ('a result\'s transfer closed before its last chunk counts closed', [CLOSED, LAST_CHUNK],
      'a cancel ends the transfer of a result, and a credit after it is dropped in silence',
-     {2: opened('echo'), 3: ended('echo', 'closed')}, [close()], 2),
+     {2: opened('bytes'), 3: ended('bytes', 'closed')}, [close()], 2),
     # a cancel and a close
     ('a call its requester cancels counts cancelled', [CANCELLED],
      'a cancel ends its call, and the answer its resolver gives after goes nowhere',

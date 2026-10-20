@@ -7,6 +7,7 @@ import { CancelError, ProgrammerError, toError } from '../../transport/shared/er
 import { mergeGauges } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { Data, ITransportMessage } from '../../transport/shared/types';
+import { admissionNameOf } from './admission';
 import { createAnsweringCalls } from './answering-calls';
 import { credentialSchemesDetailOf, handedHeaderOf } from './call-session';
 import { CredentialScheme, EnvelopeKind, EnvelopeLayout } from './constants';
@@ -25,12 +26,14 @@ import { createRouterWriter, DISPOSED } from './router-writer';
 import { createSendingTransfers } from './sending-transfers';
 import { ChunkOutcome, type IChunk, type IOutgoingTransfer } from './transfer';
 import type {
+  AccessRefusalStage,
   CallId,
   Credential,
   Envelope,
   IAdmissionRequest,
   ICallAddress,
   ICallSession,
+  ICredentialRefused,
   IEnvelopePrefix,
   IDestinationHandler,
   IFailure,
@@ -121,6 +124,18 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
 /** Whether every byte of a transfer came. */
 const isWhole = ({ incoming }: IReceiving<string>): boolean => {
   return incoming.contiguous === incoming.total;
+};
+
+/** Whether what a credential resolved to is its refusal, and why. */
+const isRefused = (
+  resolved: ICallSession | ICredentialRefused | undefined
+): resolved is ICredentialRefused => {
+  return typeof (resolved as Partial<ICredentialRefused> | undefined)?.refused === 'string';
+};
+
+/** Whether `failure` is of the admission's block, 32 to 47, the protocol's (spec 8.1). */
+const isAdmissionCode = ({ code, scope }: IFailure): boolean => {
+  return scope === 0 && code >= 32 && code <= 47;
 };
 
 /** Whether `value` is a promise, or anything that settles as one. */
@@ -256,6 +271,12 @@ export const createRouterCore = <Handle extends string>(
   // the failure each request dispatched was answered with, by the very header dispatched: one its
   // router answered in its resolver's place, which its resolver's answer tells (debugging 4.2)
   const failuresAnswered = new WeakMap<IHandedRequestHeader, IFailure>();
+  // the address and port each request came from, as its transport handed them, by the very header
+  // dispatched, which a refusal told names (spec 13.12, 15.1)
+  const origins = new WeakMap<
+    IHandedRequestHeader,
+    { address?: string | undefined; port?: number | undefined }
+  >();
 
   let isDisposed = false;
 
@@ -628,6 +649,40 @@ export const createRouterCore = <Handle extends string>(
     }
   };
 
+  // * tells the side a call refused as its credential resolved or as it was admitted, in the turn
+  // its refusal is answered, built only while someone listens; never the credential, nor a claim,
+  // nor an admission's detail (spec 13.12)
+  const tellRefused = (
+    { connectionHandle, header }: IDispatched<Handle>,
+    {
+      code,
+      reason,
+      stage,
+    }: { code: number; reason?: string | undefined; stage: AccessRefusalStage }
+  ): void => {
+    if (port.tellRefusal === undefined || port.isTellingRefusals?.() !== true) {
+      return;
+    }
+
+    const { address, port: from } = origins.get(header) ?? {};
+    const { credential, destinationId, procedureId, serviceId } = header;
+
+    port.tellRefusal(
+      Object.freeze({
+        ...(address === undefined ? {} : { address }),
+        code,
+        connectionHandle,
+        ...(credential === undefined ? {} : { credentialScheme: credential.scheme }),
+        ...(destinationId === undefined ? {} : { destinationId }),
+        ...(from === undefined ? {} : { port: from }),
+        procedureId,
+        ...(reason === undefined ? {} : { reason }),
+        serviceId,
+        stage,
+      })
+    );
+  };
+
   // a refusal answers a request of the peer's; the answer that cannot go out is reported
   const refuse = (
     failure: IFailure,
@@ -682,28 +737,14 @@ export const createRouterCore = <Handle extends string>(
     }
   };
 
-  // what refuses a request before its payload is read — or comes: its resolver's admission, on its
-  // header; one that throws refuses it as failed, and is reported
-  const refusalOf = (
-    resolver: IRequestHandler<Handle>,
-    request: IAdmissionRequest<Handle>
-  ): IFailure | undefined => {
-    let refusal: IFailure | undefined;
-
-    try {
-      refusal = resolver.admit?.(request);
-    } catch (reason) {
-      port.report(toError(reason), request.connectionHandle);
-
-      return failures.procedureFailed;
-    }
-
+  // an admission's refusal as it is answered
+  const answeredOf = (refusal: IFailure, request: IAdmissionRequest<Handle>): IFailure => {
     const { sessionRequired } = failures;
 
     // ! never SESSION_REQUIRED to a call that presented a credential, whatever its handler: the
-    // credential may hold, and its requester would withdraw it (spec 9.2, step 5)
+    // credential may hold, and its requester would withdraw it (spec 9.2, step 6)
     if (
-      refusal?.scope !== sessionRequired.scope ||
+      refusal.scope !== sessionRequired.scope ||
       refusal.code !== sessionRequired.code ||
       request.header.credential === undefined
     ) {
@@ -713,6 +754,32 @@ export const createRouterCore = <Handle extends string>(
     return refusal.detail === undefined
       ? failures.accessDenied
       : { ...failures.accessDenied, detail: refusal.detail };
+  };
+
+  // what refuses a request before its payload is read — or comes: its resolver's admission, on its
+  // header, told when it is the admission's own, by the name of the one Bead gives that refused it;
+  // one that throws refuses it as failed, and is reported, never told
+  const refusalOf = (
+    resolver: IRequestHandler<Handle>,
+    request: IAdmissionRequest<Handle>
+  ): { failure: IFailure; told?: { reason: string | undefined } } | undefined => {
+    let refusal: IFailure | undefined;
+
+    try {
+      refusal = resolver.admit?.(request);
+    } catch (reason) {
+      port.report(toError(reason), request.connectionHandle);
+
+      return { failure: failures.procedureFailed };
+    }
+
+    if (refusal === undefined) {
+      return undefined;
+    }
+
+    const told = isAdmissionCode(refusal) ? { reason: admissionNameOf(request.header) } : undefined;
+
+    return { failure: answeredOf(refusal, request), ...(told === undefined ? {} : { told }) };
   };
 
   // a chunk that did not read ends the transfer it was for, as invalid — unless its payload came
@@ -825,7 +892,15 @@ export const createRouterCore = <Handle extends string>(
     const refusal = refusalOf(resolver, { connectionHandle, header, session });
 
     if (refusal !== undefined) {
-      return (refuse(refusal, dispatched), undefined);
+      const { failure, told } = refusal;
+
+      refuse(failure, dispatched);
+
+      if (told !== undefined) {
+        tellRefused(dispatched, { code: failure.code, reason: told.reason, stage: 'admission' });
+      }
+
+      return undefined;
     }
 
     if (session !== undefined) {
@@ -899,15 +974,27 @@ export const createRouterCore = <Handle extends string>(
     const { credential } = request.header;
     const { signal } = controller;
 
-    const settle = (session: ICallSession | undefined): void => {
-      // a credential that does not hold refuses its call, whatever the procedure requires
+    const settle = (resolved: ICallSession | ICredentialRefused | undefined): void => {
+      const session = isRefused(resolved) ? undefined : resolved;
+
+      // a credential that does not hold refuses its call, whatever the procedure requires, told
+      // with why when its resolution said
       if (session === undefined && credential !== undefined) {
         const detail = CREDENTIAL_NOT_HELD;
 
-        return (refuse({ ...failures.sessionRequired, detail }, dispatched), undefined);
+        refuse({ ...failures.sessionRequired, detail }, dispatched);
+        tellRefused(dispatched, {
+          code: failures.sessionRequired.code,
+          reason: isRefused(resolved) ? resolved.refused : undefined,
+          stage: 'credential',
+        });
+
+        return undefined;
       }
 
       admitRouted({ ...routed, dispatched: { ...dispatched, session } });
+
+      return undefined;
     };
     // a bound of the side's own refuses the call: nothing failed, so nothing is reported
     const fail = (reason: unknown): void => {
@@ -933,6 +1020,11 @@ export const createRouterCore = <Handle extends string>(
         queueMicrotask(() => {
           if (!signal.aborted) {
             refuse({ ...failures.sessionRequired, detail: NO_CREDENTIAL }, dispatched);
+            tellRefused(dispatched, {
+              code: failures.sessionRequired.code,
+              reason: 'nothing-carried',
+              stage: 'credential',
+            });
           }
         }),
         undefined
@@ -1005,9 +1097,16 @@ export const createRouterCore = <Handle extends string>(
   const receiveRequest = (
     envelope: Extract<Envelope, { kind: typeof EnvelopeKind.REQUEST }>,
     {
+      address,
       connectionHandle,
+      port: from,
       transportCredential,
-    }: { connectionHandle: Handle; transportCredential: string | undefined }
+    }: {
+      address: string | undefined;
+      connectionHandle: Handle;
+      port: number | undefined;
+      transportCredential: string | undefined;
+    }
   ): void => {
     const { header, payload } = envelope;
     const { callId, destinationId, procedureId, serviceId } = header;
@@ -1032,6 +1131,9 @@ export const createRouterCore = <Handle extends string>(
       );
     }
 
+    // past the calls its connection has this side answer at once, it is refused before anything
+    // else of it is read — its route, its credential, its transfer — and counted all the same
+    const isPastBound = answeringCalls.countOn(connectionHandle) >= limits.maximumAnsweringCalls;
     // the resolver it is routed to, whose series it counts into: _OTHER's for any other
     const registered = destinationId === undefined ? resolvers.get(header) : undefined;
     // ! a procedure's call runs on a header made now, its JWT's scheme alone, which keys its call
@@ -1056,6 +1158,19 @@ export const createRouterCore = <Handle extends string>(
       ...(carried === undefined ? {} : { transportCredential: carried }),
     };
     const dispatched: IDispatched<Handle> = { ...request, controller };
+
+    if (address !== undefined || from !== undefined) {
+      origins.set(request.header, { address, port: from });
+    }
+
+    // ! opened and refused in one turn, as HTTP/2 refuses a stream past those it lets its peer
+    // open (spec 9.2, step 3)
+    if (isPastBound) {
+      const detail = `the calls a connection has answered at once are ${String(limits.maximumAnsweringCalls)} at most`;
+
+      return (refuse({ ...failures.capacityExceeded, detail }, dispatched), undefined);
+    }
+
     // one that names a destination goes to the handler this side has for it — a relay's
     const destination =
       destinationId === undefined ? undefined : port.handlerOfDestination?.(destinationId);
@@ -1091,7 +1206,12 @@ export const createRouterCore = <Handle extends string>(
       header.credential !== undefined &&
       !(isForwarded ? FORWARDED_SCHEMES : schemesTaken).has(header.credential.scheme)
     ) {
-      return (refuse(isForwarded ? unforwarded : unsupported, dispatched), undefined);
+      const refusal = isForwarded ? unforwarded : unsupported;
+
+      refuse(refusal, dispatched);
+      tellRefused(dispatched, { code: refusal.code, reason: 'scheme', stage: 'credential' });
+
+      return undefined;
     }
 
     resolveSession({ dispatched, payload, resolver }, { isForwarded, request: came });
@@ -1226,7 +1346,13 @@ export const createRouterCore = <Handle extends string>(
   };
 
   const receive = (message: Data | ITransportMessage, connectionHandle: Handle): void => {
-    const { credential: transportCredential, data, mayOvertake = false } = messageOf(message);
+    const {
+      address,
+      credential: transportCredential,
+      data,
+      mayOvertake = false,
+      port: from,
+    } = messageOf(message);
     let bytes: Uint8Array;
     let prefix: IEnvelopePrefix;
 
@@ -1242,6 +1368,7 @@ export const createRouterCore = <Handle extends string>(
 
     try {
       envelope = readEnvelope(bytes, {
+        chunkBytes: limits.chunkBytes,
         failures,
         maximumDetailBytes: limits.maximumDetailBytes,
         maximumEnvelopeBytes: limits.maximumEnvelopeBytes,
@@ -1272,7 +1399,10 @@ export const createRouterCore = <Handle extends string>(
 
     switch (envelope.kind) {
       case EnvelopeKind.REQUEST:
-        return (receiveRequest(envelope, { connectionHandle, transportCredential }), undefined);
+        return (
+          receiveRequest(envelope, { address, connectionHandle, port: from, transportCredential }),
+          undefined
+        );
       case EnvelopeKind.FAILURE:
       case EnvelopeKind.RESULT:
         return (requester.receiveAnswer(envelope, { connectionHandle, mayOvertake }), undefined);

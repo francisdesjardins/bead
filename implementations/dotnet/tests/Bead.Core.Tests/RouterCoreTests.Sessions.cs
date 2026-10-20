@@ -1,7 +1,7 @@
 namespace Bead.Tests;
 
 /// <summary>
-/// <see cref="RouterCore"/>'s call's session, as step 5 of section 9.2 of the spec has it: a scheme
+/// <see cref="RouterCore"/>'s call's session, as step 6 of section 9.2 of the spec has it: a scheme
 /// the side takes none of refused, the credential resolved by the port's session, waiting or not,
 /// then the admission, on the call's session; and the credential a call of its own presents.
 /// </summary>

@@ -257,7 +257,7 @@ What the server side does: `on` registers a resolver, before or after `offer`; `
 resolver, now and later, to one Bead server, once; `command` gives a requester of each command, made
 as the service is offered; `notify` notifies each procedure's subscribers;
 `proceduresWithoutResolver` lists what no `on` answered, which the router answers
-`PROCEDURE_UNKNOWN` (spec 9.2, step 4). What the client side does: a requester of each procedure its
+`PROCEDURE_UNKNOWN` (spec 9.2, step 5). What the client side does: a requester of each procedure its
 server answers and a notification of each that notifies, made as the client side is built, at the
 windows its caller gives, unpaced by default
 ([0002](0002-a-subscription-goes-at-its-clients-pace.md)); and `on`, for the commands it answers.

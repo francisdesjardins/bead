@@ -111,6 +111,40 @@ public sealed partial class HttpTransportServer
             });
         }
 
+        // whether an exchange's end leaves its body still to come behind a close: over HTTP/1, its
+        // socket then closes in stages, its server reading on behind its end (RFC 9112 §9.6)
+        internal static bool IsLingering(HttpContext context)
+        {
+            return !HttpProtocol.IsHttp2(context.Request.Protocol)
+                && !HttpProtocol.IsHttp3(context.Request.Protocol)
+                && HasBody(context)
+                && context.Response.Headers.Connection.ToString() == "close";
+        }
+
+        // ! an end written whole: completed; or, its body still coming behind a close, flushed alone,
+        // which a completion would follow at once with its socket's close, a reset that erases the
+        // end its client has not read yet; its server reads on behind it before it closes
+        internal static async Task Complete(HttpContext context)
+        {
+            var response = context.Response;
+
+            if (IsLingering(context))
+            {
+                // its length written, as a completion writes it of an end with no body
+                if (!response.HasStarted && response.ContentLength is null)
+                {
+                    response.ContentLength = 0;
+                }
+
+                await response.StartAsync(context.RequestAborted);
+                await response.Body.FlushAsync(context.RequestAborted);
+
+                return;
+            }
+
+            await response.CompleteAsync();
+        }
+
         // closes an HTTP/1 socket behind its exchange, whose body is not read: what follows would read as
         // the next request
         internal static void CloseBehind(HttpContext context)
@@ -144,7 +178,7 @@ public sealed partial class HttpTransportServer
                 }
             }
 
-            await response.CompleteAsync();
+            await Complete(context);
         }
 
         // what every response on the path carries: never stored, never sniffed, and which one a request
@@ -156,19 +190,19 @@ public sealed partial class HttpTransportServer
             response.Headers.Vary = "Origin";
         }
 
-        // what HTTP refuses of its own, as Kestrel answers it: 400, unmarked, none of the path's fields,
-        // its socket closed behind it, nothing told (spec 15.12)
-        internal static async Task RefuseMalformed(HttpContext context)
+        // what HTTP refuses of its own, as Kestrel answers it: its status, 400 for a request it cannot
+        // read, unmarked, none of the path's fields, its socket closed behind it, nothing told (spec 15.12)
+        internal static async Task RefuseAsHttp(HttpContext context, int status)
         {
             var response = context.Response;
 
             if (!response.HasStarted)
             {
-                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.StatusCode = status;
                 response.Headers.Connection = "close";
             }
 
-            await response.CompleteAsync();
+            await Complete(context);
         }
 
         // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer

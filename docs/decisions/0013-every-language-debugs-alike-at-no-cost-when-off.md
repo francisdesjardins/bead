@@ -75,8 +75,8 @@ Five ways were weighed for the surface and its counts:
   files, and a registry of Bead's own that writes the Prometheus text format.** Chosen.
 
 Where to count was weighed too. The service manager, where the trace is, sees a request only once
-its router admitted it: a refusal of its route, its credential or its admission (spec 9.2, steps 3
-to 7) and a relayed call never reach it — a server that refuses every call `ACCESS_DENIED` would
+its router admitted it: a refusal of its route, its credential or its admission (spec 9.2, steps 4
+to 8) and a relayed call never reach it — a server that refuses every call `ACCESS_DENIED` would
 count none failed — and its clock starts once the credential resolved and the transfer came whole,
 past the waits an operator looks for. Of a call it makes, it sees neither the refusals its router
 makes before the request goes nor the moment the request is handed to the transport. The router's

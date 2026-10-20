@@ -8,7 +8,7 @@ import { ProgrammerError, toError } from '../../transport/shared/errors';
 import { gaugesOf } from '../../transport/shared/gauges';
 import { noop } from '../../transport/shared/noop';
 import type { IGauges } from '../../transport/shared/types';
-import { admissionOf, isAdmissionFailure } from '../shared/admission';
+import { admissionOf, isAdmissionFailure, refusedBy } from '../shared/admission';
 import { CredentialScheme, EnvelopeKind, FailureScope, ProtocolCode } from '../shared/constants';
 import { FailureError } from '../shared/errors';
 import { headerBytesOf } from '../shared/header';
@@ -208,10 +208,13 @@ export const createRelay = ({
 
   const relayTimeout = heldTimeoutOf(givenTimeout);
 
-  // without a `beforeRoute`, the relay admits nobody: it is a door to what is behind it
+  // without a `beforeRoute`, the relay admits nobody: it is a door to what is behind it, which an
+  // access refused tells by its name
   const admission =
     beforeRoute === undefined
-      ? (): AdmissionFailure => {
+      ? ({ header }: CarriedAdmission): AdmissionFailure => {
+          refusedBy(header, 'no-before-route');
+
           return {
             ...failures.accessDenied,
             detail: 'this relay admits nobody: it has no beforeRoute',

@@ -4,7 +4,9 @@
 - **Scope**: the protocol, and every implementation: the envelope, its calls, its transfers, its
   cancel, and what a connection's close ends of them. A relay is
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)'s, and the connection HTTP
-  draws [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s.
+  draws [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s; the calls a
+  connection has its side answer at once, 9.2's step 3, and the bound a request is held to, 12.2's,
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s.
 
 ## Context
 

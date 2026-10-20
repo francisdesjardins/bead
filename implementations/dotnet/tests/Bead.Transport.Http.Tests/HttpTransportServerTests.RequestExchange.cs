@@ -183,6 +183,40 @@ public sealed partial class HttpTransportServerTests
     }
 
     [Fact]
+    public async Task Answers_a_body_whose_read_fails_a_malformed_chunked_one_the_status_of_its_failure_unmarked_its_connection_closed_never_200_and_empty()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var request = EnvelopeOf(EnvelopeKind.Request, (1, 8));
+        using var malformed = await Wire.Open(_port);
+
+        // its prefix first, in a chunk of its own, so the exchange waits under its call id; then a
+        // chunk whose size is no hexadecimal number
+        await malformed.Write(PostHead(connectionToken, "Transfer-Encoding: chunked"));
+        await malformed.Write(ChunkOf(request[..12]));
+        await Until(() =>
+        {
+            return Count("waitingExchanges") == 1;
+        });
+        await malformed.Write("zz\r\n");
+
+        var (head, body) = await malformed.Read();
+
+        Assert.Equal((400, (string?)null, "close", 0), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("connection"), body.Length));
+        Assert.True(await malformed.IsClosed());
+        await Until(() =>
+        {
+            return _closes.Any((close) =>
+            {
+                return close.ConnectionHandle == connectionHandle;
+            });
+        });
+        Assert.Empty(_messages);
+        Assert.Empty(_refusals);
+    }
+
+    [Fact]
     public async Task Answers_a_request_an_answer_comes_for_as_its_body_still_comes_at_once_never_handing_it_on()
     {
         await Start();
@@ -217,5 +251,143 @@ public sealed partial class HttpTransportServerTests
 
         Assert.True(await coming.IsClosed());
         Assert.Empty(_messages);
+    }
+
+    // what a client that goes on sending its body writes of it, as fast as its socket takes it,
+    // until its body is whole or the server lets go of its socket
+    private static async Task GoOnSending(Wire wire, long left)
+    {
+        var more = new byte[4_096];
+
+        Array.Fill(more, (byte)7);
+
+        try
+        {
+            for (; left > 0; left -= more.Length)
+            {
+                await wire.Write(left < more.Length ? more[..(int)left] : more);
+            }
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException or ObjectDisposedException)
+        {
+            // the server let go of its socket
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_408_too_slow_a_body_that_comes_slower_than_its_rate_once_its_grace_passed_its_client_reading_the_408_as_it_goes_on_sending_and_keeps_its_connection_a_body_at_its_rate_taken()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var request = EnvelopeOf(EnvelopeKind.Request, (1, 4_000));
+        using var slow = await Wire.Open(_port);
+        var before = _time.Armed.Count;
+
+        // its prefix, then nothing: its rate held once its grace of 5 s passed since its head
+        await slow.Write(PostHead(connectionToken, $"Content-Length: {request.Length}"));
+        await slow.Write(request[..12]);
+        await Until(() =>
+        {
+            return DelaysSince(before).Contains(TimeSpan.FromSeconds(5));
+        });
+        _time.Advance(TimeSpan.FromSeconds(5));
+
+        // refused, its client going on sending its body as it reads the 408, which a reset never erases
+        var sending = GoOnSending(slow, request.Length - 12);
+        var (head, body) = await slow.Read();
+
+        await sending;
+        Assert.Equal(
+            (408, (string?)HttpRefusals.TooSlow, (string?)"close", 0),
+            (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("connection"), body.Length));
+        await Until(() =>
+        {
+            return !_refusals.IsEmpty;
+        });
+        Assert.Equal([(408, HttpRefusals.TooSlow)], _refusals.Select((refusal) =>
+        {
+            return (refusal.Status, refusal.Reason);
+        }));
+        Assert.Empty(_messages);
+
+        // its connection kept: a body that keeps its rate is taken whole and handed on
+        var paced = EnvelopeOf(EnvelopeKind.Request, (3, 2_392));
+        using var steady = await Wire.Open(_port);
+
+        await steady.Write(PostHead(connectionToken, $"Content-Length: {paced.Length}"));
+        await steady.Write(paced[..12]);
+        await Until(() =>
+        {
+            return Count("waitingExchanges") == 1;
+        });
+        _time.Advance(TimeSpan.FromSeconds(4));
+        await steady.Write(paced[12..1_200]);
+        await Until(() =>
+        {
+            return Count("bodyBytes") == 1_200;
+        });
+        _time.Advance(TimeSpan.FromSeconds(0.9));
+        await steady.Write(paced[1_200..]);
+        await Until(() =>
+        {
+            return !_messages.IsEmpty;
+        });
+        Assert.Equal((200, paced.Length), ((await steady.ReadHead()).Status, Assert.Single(_messages).Bytes.Length));
+        Assert.Empty(_closes);
+        Assert.Contains(connectionHandle, _server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Closes_in_stages_every_answer_written_before_its_body_is_whole_so_a_client_that_sends_at_full_speed_reads_it_and_its_connection_then_answers_a_POST()
+    {
+        await Start(new HttpTransportServerOptions { MaximumBodyBytes = 1_024 });
+
+        var (connectionToken, _) = await Connect();
+
+        // a body past its bound, declared, and an exchange of a connection none holds: each answered
+        // before its body is whole, its client sending at full speed meanwhile
+        foreach (var (token, framing, status, reason) in new (string Token, string Framing, int Status, string Reason)[]
+        {
+            (connectionToken, "Content-Length: 1048576", 413, HttpRefusals.TooLarge),
+            (new string('A', 22), "Content-Length: 1048576", 404, HttpRefusals.ConnectionUnknown),
+        })
+        {
+            using var wire = await Wire.Open(_port);
+
+            await wire.Write(PostHead(token, framing));
+
+            var sending = GoOnSending(wire, 1_048_576);
+            var head = await wire.ReadHead();
+
+            await sending;
+            Assert.Equal(
+                (status, (string?)reason, (string?)"close"),
+                (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("connection")));
+            Assert.True(await wire.IsClosed());
+        }
+
+        // its connection stands: a cancel on it ends 204
+        using var cancelled = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 9)));
+
+        Assert.Equal(204, (int)cancelled.StatusCode);
+    }
+
+    [Fact]
+    public async Task Destroys_a_socket_whose_client_never_ends_it_after_2_s_on_the_platform_s_clock()
+    {
+        await Start(new HttpTransportServerOptions { MaximumBodyBytes = 1_024 });
+
+        var (connectionToken, _) = await Connect();
+        using var silent = await Wire.Open(_port);
+
+        // an answer written before its body is whole, whose client neither sends on nor closes
+        await silent.Write(PostHead(connectionToken, "Content-Length: 4096"));
+        Assert.Equal(413, (await silent.ReadHead()).Status);
+
+        var started = TimeProvider.System.GetTimestamp();
+
+        Assert.True(await silent.IsClosed());
+        Assert.InRange(TimeProvider.System.GetElapsedTime(started), TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(4));
     }
 }

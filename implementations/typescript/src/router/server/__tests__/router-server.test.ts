@@ -15,6 +15,7 @@ import { createServiceManager } from '../../shared/service-manager';
 import type {
   Credential,
   Envelope,
+  IBeforeRequest,
   ICredentials,
   IElsewhereSession,
   IFailure,
@@ -39,6 +40,7 @@ import {
   envelopeOf,
 } from '../../shared/__tests__/fixtures';
 import { createRouterClient } from '../../client/router-client';
+import { VECTORS } from '../../shared/__tests__/vectors';
 import {
   CancelError,
   CLIENT_FAILURES,
@@ -52,8 +54,10 @@ import {
   LIMIT_DEFAULTS,
   ProgrammerError,
   ProtocolCode,
+  requireCredential,
   requireSession,
   SERVER_FAILURES,
+  shareLegBSession,
   TimeoutError,
   type IJwtKey,
   type IJwtSetKey,
@@ -4639,7 +4643,7 @@ test.describe('createRouterServer, its metrics', () => {
     ).toEqual(['bead_notifications_sent_total{service="2",procedure="news",outcome="failed"} 2']);
   });
 
-  // debugging 9.4.5
+  // debugging 9.4.6
   test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, transport } = createScriptedTransport();
@@ -4871,5 +4875,366 @@ test.describe('createRouterServer, its metrics', () => {
         'the metrics registry holds 2/1 as "echo", and is given "clock": another name at its address'
       )
     );
+  });
+});
+
+test.describe('createRouterServer, the accesses it refuses', () => {
+  // where the requests of these tests come from, as their transport hands them
+  const FROM = { address: '192.0.2.1', port: 4_321 } as const;
+  const guarded: IProcedure = { ...echo, procedureId: 9, procedureName: 'guarded' };
+  const ELSEWHERE = Object.freeze({ scheme: CredentialScheme.ELSEWHERE });
+  // a relay's admission that admits every call
+  const admitsAll = () => {
+    return true;
+  };
+
+  /** A router on a scripted transport, `echo` answering, `guarded` behind `beforeRequest`. */
+  const createRefusing = ({
+    beforeRequest = requireSession,
+    ...options
+  }: NonNullable<Parameters<typeof createRouterServer>[1]> & {
+    beforeRequest?: IBeforeRequest<Handle>;
+  } = {}) => {
+    const scripted = createScriptedTransport();
+    const router = createRouterServer(scripted.transport, options);
+    const services = createServiceManager(router);
+    const told: unknown[] = [];
+
+    services.getRequestResolver(echo, { serializer: answering })((_request, response) => {
+      return response('ok');
+    });
+    services.getRequestResolver(guarded, { beforeRequest, serializer: answering })(
+      (_request, response) => {
+        return response('guarded');
+      }
+    );
+    router.on('accessRefused', (refusal) => {
+      told.push(refusal);
+    });
+
+    // a request as its transport hands it: from `FROM`, with what it carried
+    const send = (
+      envelope: OutgoingEnvelope,
+      { carried, connectionHandle = first }: { carried?: string; connectionHandle?: Handle } = {}
+    ) => {
+      scripted.emitter.emit(
+        'message',
+        {
+          ...FROM,
+          ...(carried === undefined ? {} : { credential: carried }),
+          data: envelopeOf(envelope),
+        },
+        connectionHandle
+      );
+    };
+
+    return { ...scripted, errors: recordErrors(router), router, send, told };
+  };
+
+  test('tells each access it refuses, its stage, its code, its reason and what was called, with the connection and the request’s address and port, never the credential', async () => {
+    const { send, sent, told } = createRefusing({
+      credentials: { audience: AUDIENCE, keys: [KEY] },
+    });
+    const token = 'eyJ.not.a-token';
+
+    send(requestOf(1, { credential: { scheme: CredentialScheme.JWT, token } }));
+    send(requestOf(3, { credential: { bytes: Uint8Array.of(1, 2), scheme: 4 } }));
+    send(requestOf(5, { procedure: guarded }));
+    await expect
+      .poll(() => {
+        return told.length;
+      })
+      .toBe(3);
+
+    expect(told).toEqual([
+      {
+        ...FROM,
+        code: ProtocolCode.CREDENTIAL_UNSUPPORTED,
+        connectionHandle: first,
+        credentialScheme: 4,
+        procedureId: echo.procedureId,
+        reason: 'scheme',
+        serviceId: echo.serviceId,
+        stage: 'credential',
+      },
+      {
+        ...FROM,
+        code: ProtocolCode.SESSION_REQUIRED,
+        connectionHandle: first,
+        procedureId: guarded.procedureId,
+        reason: 'requireSession',
+        serviceId: guarded.serviceId,
+        stage: 'admission',
+      },
+      {
+        ...FROM,
+        code: ProtocolCode.SESSION_REQUIRED,
+        connectionHandle: first,
+        credentialScheme: CredentialScheme.JWT,
+        procedureId: echo.procedureId,
+        reason: 'token',
+        serviceId: echo.serviceId,
+        stage: 'credential',
+      },
+    ]);
+    // told in the turn each is answered, a JWT's in a later turn, each answered as it would be
+    // untold, never the token
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 3, ProtocolCode.CREDENTIAL_UNSUPPORTED],
+      [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(JSON.stringify(told)).not.toContain(token);
+    expect(told.every(Object.isFrozen)).toBe(true);
+  });
+
+  test('tells a JWT refused by the step of section 13.8 that refused it, for every verdict of spec/vectors.json that refuses', async () => {
+    for (const { audience, keys, name, now, token, verdict } of VECTORS.jwtVerdicts) {
+      if (verdict.holds) {
+        continue;
+      }
+
+      const clock = createTestClock(Date.parse(now));
+      // a set of audiences is a relay's that verifies, one of its destinations each
+      const isSet = Array.isArray(audience);
+      const { open, router, send, told } = createRefusing({
+        clock,
+        credentials: { audience: isSet ? audience[0] : audience, keys },
+        ...(isSet ? { relay: { beforeRoute: admitsAll, verifies: true } } : {}),
+      });
+
+      if (isSet) {
+        open(second);
+
+        for (const [index, each] of audience.entries()) {
+          router.registerDestination(
+            { connectionHandle: second },
+            { audience: each, destinationId: 7 + index }
+          );
+        }
+      }
+
+      send(
+        requestOf(1, {
+          credential: { scheme: CredentialScheme.JWT, token },
+          ...(isSet ? { destinationId: 7 } : {}),
+        })
+      );
+      await expect
+        .poll(
+          () => {
+            return told.length;
+          },
+          { message: name }
+        )
+        .toBe(1);
+
+      expect(told[0], name).toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        reason: verdict.reason,
+        stage: 'credential',
+      });
+      router[Symbol.dispose]();
+    }
+  });
+
+  test('tells each credential refused by the reason spec/vectors.json’s credentialRefusals gives it', async () => {
+    for (const { code, name, reason, situation } of VECTORS.credentialRefusals) {
+      const clock = createTestClock(NOW);
+      // the verifier's settling, or none: none makes no session, a past end one whose end came
+      const settled =
+        situation === 'end-come' ? { data: 'ada', end: NOW - 1, id: 'ada' } : undefined;
+      const { router, send, told } = createRefusing({
+        clock,
+        ...(situation === 'no-verifier' || situation === 'no-keys' || situation === 'scheme-to-come'
+          ? {}
+          : {
+              credentials: {
+                verify: () => {
+                  return Promise.resolve(settled);
+                },
+              },
+            }),
+        // an OPAQUE holds on the connection whose session its token is: second's here
+        sessionOf: ({ connectionHandle, header }) => {
+          const { credential } = header;
+
+          return credential?.scheme === CredentialScheme.OPAQUE &&
+            'token' in credential &&
+            credential.token === TOKEN &&
+            connectionHandle === second
+            ? { data: 'ada' }
+            : undefined;
+        },
+      });
+      const credential: Credential = {
+        'another-connections-session': OPAQUE,
+        'end-come': ELSEWHERE,
+        'no-keys': { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        'no-session': { scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN },
+        'no-verifier': ELSEWHERE,
+        'nothing-carried': ELSEWHERE,
+        'scheme-to-come': { bytes: new Uint8Array(0), scheme: 4 },
+        'verifier-makes-none': ELSEWHERE,
+      }[situation];
+
+      send(
+        requestOf(1, { credential }),
+        situation === 'nothing-carried' ? {} : { carried: 'Interop sub=ada' }
+      );
+      await expect
+        .poll(
+          () => {
+            return told.length;
+          },
+          { message: name }
+        )
+        .toBe(1);
+
+      expect(told[0], name).toMatchObject({ code, reason, stage: 'credential' });
+      router[Symbol.dispose]();
+    }
+  });
+
+  test('tells the admission a relay or a procedure refused with, by its name, no-before-route for a relay with none, never its detail', async () => {
+    const detail = 'the application’s own reason, which is told nowhere';
+    const own = Object.assign(
+      () => {
+        return false;
+      },
+      { refusal: { ...SERVER_FAILURES.accessDenied, detail } }
+    );
+    const reasonsOf = async ({
+      beforeRequest,
+      relay,
+      request,
+    }: {
+      beforeRequest?: typeof own;
+      relay?: IRelayOptions;
+      request: OutgoingEnvelope;
+    }) => {
+      const { open, router, send, told } = createRefusing({
+        ...(beforeRequest === undefined ? {} : { beforeRequest }),
+        ...(relay === undefined ? {} : { relay }),
+      });
+
+      open(second);
+      router.registerDestination({ connectionHandle: second }, { destinationId: 7 });
+      send(request);
+      await expect
+        .poll(() => {
+          return told.length;
+        })
+        .toBe(1);
+      router[Symbol.dispose]();
+
+      return told[0];
+    };
+    const relayed = requestOf(1, { destinationId: 7 });
+
+    expect([
+      await reasonsOf({ request: requestOf(1, { procedure: guarded }) }),
+      await reasonsOf({ beforeRequest: own, request: requestOf(1, { procedure: guarded }) }),
+      await reasonsOf({ relay: {}, request: relayed }),
+      await reasonsOf({ relay: { beforeRoute: requireCredential }, request: relayed }),
+      await reasonsOf({ relay: { beforeRoute: shareLegBSession }, request: relayed }),
+    ]).toEqual([
+      expect.objectContaining({
+        code: ProtocolCode.SESSION_REQUIRED,
+        reason: 'requireSession',
+        stage: 'admission',
+      }),
+      {
+        ...FROM,
+        code: ProtocolCode.ACCESS_DENIED,
+        connectionHandle: first,
+        procedureId: guarded.procedureId,
+        serviceId: guarded.serviceId,
+        stage: 'admission',
+      },
+      expect.objectContaining({
+        code: ProtocolCode.ACCESS_DENIED,
+        destinationId: 7,
+        reason: 'no-before-route',
+        stage: 'admission',
+      }),
+      expect.objectContaining({ code: ProtocolCode.ACCESS_DENIED, reason: 'requireCredential' }),
+      expect.objectContaining({ code: ProtocolCode.SESSION_REQUIRED, reason: 'shareLegBSession' }),
+    ]);
+  });
+
+  test('tells nothing of a verifier or an admission that fails, or of a call past those let wait for an issuer', async () => {
+    const clock = createTestClock(NOW);
+    const { asks, keySet } = createKeySet();
+    const { errors, send, sent, told } = createRefusing({
+      beforeRequest: () => {
+        throw new Error('the admission fails');
+      },
+      clock,
+      credentials: {
+        audience: AUDIENCE,
+        keySet: { ...keySet, maximumWaitingCalls: 1 },
+        verify: () => {
+          return Promise.reject(new Error('the verifier fails'));
+        },
+      },
+    });
+    const presenting = {
+      credential: {
+        scheme: CredentialScheme.JWT,
+        token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      },
+    } as const;
+
+    send(requestOf(1, { credential: ELSEWHERE }), { carried: 'Interop sub=ada' });
+    send(requestOf(3, { procedure: guarded }));
+    // the ask the first call left answers no key: within the minute, a token waits for the
+    // deadline, and one more is past the bound
+    send(requestOf(5, presenting));
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
+    send(cancelOf(5));
+    asks[0]?.settle.resolve([]);
+    await sleep(0);
+    send(requestOf(7, presenting));
+    send(requestOf(9, presenting));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(3);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'failure', expect.any(Number), ProtocolCode.CAPACITY_EXCEEDED],
+    ]);
+    expect(reportedOf(errors)).toHaveLength(2);
+    expect(told).toEqual([]);
+  });
+
+  test('refuses as it would though an accessRefused listener throws, the throw reported with its connection', async () => {
+    const { errors, router, send, sent } = createRefusing();
+    const thrown = new Error('an accessRefused listener that throws');
+
+    router.on('accessRefused', () => {
+      throw thrown;
+    });
+    send(requestOf(1, { procedure: guarded }));
+    send(requestOf(3));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(2);
+
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+      [first, 'result', 3, 'ok'],
+    ]);
+    expect(errors).toEqual([[thrown, first]]);
   });
 });

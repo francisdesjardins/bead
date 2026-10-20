@@ -179,6 +179,13 @@ export interface IRouterLimits {
    * smaller. Both ends are set alike.
    */
   chunkBytes: number;
+  /**
+   * The calls a connection's peer has this side answer at once, from the turn a request opens one
+   * until its answer is wholly sent, it is cancelled or its connection closes; a request past them is
+   * answered `CAPACITY_EXCEEDED` before anything else of it is read. And the calls this side has wait
+   * on a connection: one past them fails before it goes. Both ends are set alike.
+   */
+  maximumAnsweringCalls: number;
   /** The runs of bytes apart one transfer received may hold before it is whole. */
   maximumChunkRuns: number;
   /** A failure's detail, in bytes, cut at a character's boundary, when written and when read. */
@@ -201,6 +208,41 @@ export interface IRouterLimits {
   transferInactivityTimeout: number;
   /** How far past the bytes it received, contiguous, a receiver lets its sender send. */
   windowBytes: number;
+}
+
+/**
+ * A call a server refused as its credential resolved or as it was admitted, as it tells it (spec
+ * 13.12): its stage, the code answered, why in one word, the credential's scheme, what was called,
+ * the connection, and the address and port of the request as its transport handed them. Never the
+ * credential, any part of it, a claim of a token, or an admission's detail.
+ */
+export interface IAccessRefusal<Handle extends string = ConnectionHandle> {
+  /** The client's address of the request, as its transport read it; none over a Web Worker. */
+  readonly address?: string | undefined;
+  /** The failure answered: `CREDENTIAL_UNSUPPORTED`, `SESSION_REQUIRED`, `ACCESS_DENIED`, … */
+  readonly code: number;
+  readonly connectionHandle: Handle;
+  /** The scheme its header named; none for a call that presented none. */
+  readonly credentialScheme?: number | undefined;
+  /** The destination it named, for a call to be relayed. */
+  readonly destinationId?: DestinationId | undefined;
+  readonly port?: number | undefined;
+  readonly procedureId: ProcedureId;
+  /**
+   * Why, in one word: at the credential's stage, for a `JWT` the step of section 13.8 that refused
+   * it, for an `OPAQUE` `session`, for an `ELSEWHERE` `nothing-carried`, `verifier` or `end`, for a
+   * scheme it takes none of `scheme`; at the admission's, the admission Bead gives that refused it —
+   * `requireSession`, `requireCredential`, `shareLegBSession`, `no-before-route` — none for the
+   * application's own.
+   */
+  readonly reason?: string | undefined;
+  readonly serviceId: ServiceId;
+  readonly stage: AccessRefusalStage;
+}
+
+/** A credential refused as it resolved, and why, in the one word section 13.12 gives. */
+export interface ICredentialRefused {
+  readonly refused: string;
 }
 
 /**
@@ -466,7 +508,7 @@ export interface IRequestHandler<Handle extends string = ConnectionHandle> {
    * comes, for one that opens a transfer: `undefined` admits it; a failure refuses it, and the router
    * answers with that failure, but for `SESSION_REQUIRED` to a request that presented a credential,
    * which it answers `ACCESS_DENIED`, its detail kept, since the credential may hold and its requester
-   * would withdraw it (spec 9.2, step 5); one that throws refuses it as failed, `PROCEDURE_FAILED`,
+   * would withdraw it (spec 9.2, step 6); one that throws refuses it as failed, `PROCEDURE_FAILED`,
    * and is reported. A router that asks says so with `isAdmitted`, so it is asked once.
    */
   admit?(request: IAdmissionRequest<Handle>): IFailure | undefined;
@@ -797,6 +839,11 @@ export interface IRouterCorePort<Handle extends string> {
     connectionHandle: Handle
   ): Promise<unknown>;
   /**
+   * Whether anyone listens for the calls the side refuses as their credential resolves or as they
+   * are admitted: a refusal's record is built only then. None, a client's, tells none.
+   */
+  isTellingRefusals?(): boolean;
+  /**
    * The call's session a request's credential resolves to, asked once per request, its call id
    * held, as {@link SessionOf} says — never for an `ELSEWHERE` its transport carried nothing beside,
    * which no credential came for — but for a rejection with a {@link CapacityError}, a bound of the
@@ -808,6 +855,11 @@ export interface IRouterCorePort<Handle extends string> {
     request: ISessionRequest<Handle> & ITransportCarried,
     signal: AbortSignal
   ): ReturnType<SessionOf<Handle>>;
+  /**
+   * Tells the side a call it refused as its credential resolved or as it was admitted (spec 13.12),
+   * in the turn the refusal is answered, while `isTellingRefusals` says someone listens.
+   */
+  tellRefusal?(refusal: IAccessRefusal<Handle>): void;
   /**
    * The session of `connectionHandle`, which its next answer announces when it changed; `undefined`
    * for none. Asked for each answer only; what it throws fails that answer. None when not given.
@@ -1018,7 +1070,7 @@ export interface IElsewhereSession {
 }
 
 /**
- * What a side resolves a request's `JWT` and `ELSEWHERE` with (spec 9.2, step 5): a `JWT`'s keys,
+ * What a side resolves a request's `JWT` and `ELSEWHERE` with (spec 9.2, step 6): a `JWT`'s keys,
  * each with its issuer and its one algorithm, its audience, and the key set the side asks for the
  * keys of an issuer it names; an `ELSEWHERE`'s verifier. The side takes a `JWT` once given keys or a
  * key set, and an `ELSEWHERE` once given its verifier; it verifies on the clock it runs on.
@@ -1082,7 +1134,7 @@ export interface IJwtSetKey {
 }
 
 /**
- * The call's session a request's credential resolves to (spec 9.2, step 5): its connection's
+ * The call's session a request's credential resolves to (spec 9.2, step 6): its connection's
  * session, for none or that session's `OPAQUE`, compared in constant time, in the turn the request
  * came, never a promise; a credential's, for a `JWT` or an `ELSEWHERE`, which may wait, and is
  * waited on in a later turn whether it waits or not. `undefined` runs a call presenting none in
@@ -1094,7 +1146,14 @@ export interface IJwtSetKey {
 export type SessionOf<Handle extends string = ConnectionHandle> = (
   request: ISessionRequest<Handle>,
   signal: AbortSignal
-) => ICallSession | undefined | PromiseLike<ICallSession | undefined>;
+) =>
+  | ICallSession
+  | ICredentialRefused
+  | undefined
+  | PromiseLike<ICallSession | ICredentialRefused | undefined>;
+
+/** The stage of a request's that refused it, told (spec 13.12): its credential, or its admission. */
+export type AccessRefusalStage = 'admission' | 'credential';
 
 /**
  * What a call of a procedure takes after its payload: options a server's router must have, naming

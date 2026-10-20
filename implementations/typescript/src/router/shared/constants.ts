@@ -174,6 +174,7 @@ export const RESERVATION_MILLISECONDS = 5_000;
 export const LIMIT_DEFAULTS: IRouterLimits = Object.freeze({
   bufferedBytesBudget: 268_435_456,
   chunkBytes: 1_048_576,
+  maximumAnsweringCalls: 64,
   maximumChunkRuns: 1_024,
   maximumDetailBytes: 1_024,
   maximumEnvelopeBytes: 16_778_240,

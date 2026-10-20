@@ -3,7 +3,9 @@
 - **Status**: accepted
 - **Scope**: the protocol, and every implementation's transports, server and client: the guard on a
   transport's listeners in section 15.1 of [`spec/spec.md`](../../spec/spec.md), and what a stop
-  answers what arrives as it runs, 15.2, 15.3, 15.6 and 15.7. HTTP's draw of a connection is
+  answers what arrives as it runs, 15.2, 15.3, 15.6 and 15.7; the bounds a WebSocket server's
+  upgrade is judged by beside its stop, 15.2's step 8, are
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s. HTTP's draw of a connection is
   [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)'s, and a debug listener's
   throw [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)'s.
 

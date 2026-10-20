@@ -12,18 +12,60 @@ namespace Bead.Transport.WebSockets;
 internal sealed class WebSocketConnection
 {
     private readonly (int MaximumMessageBytes, TimeSpan CloseTimeout) _bounds;
+    private readonly Pacing? _pace;
+    private readonly SendPace? _sendPace;
     private readonly Channel<(ReadOnlyMemory<byte> Bytes, WebSocketCloseStatus? Close, TaskCompletionSource Done)> _outgoing =
         Channel.CreateUnbounded<(ReadOnlyMemory<byte>, WebSocketCloseStatus?, TaskCompletionSource)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    // what waits for the socket — handed it, in the channel or under SendAsync — and whether the
+    // connection was dropped behind a bound; under the lock
+    private readonly Lock _gate = new();
+    private long _unsent;
+    private bool _isDropped;
+
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
+        : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
+    {
+    }
+
+    // a connection whose bounds may hold what waits for its socket to a pace, a server's
+    public WebSocketConnection(WebSocket socket, Bounds bounds)
     {
         Socket = socket;
-        _bounds = bounds;
+        _bounds = (bounds.MaximumMessageBytes, bounds.CloseTimeout);
+        _pace = bounds.Pace;
+        _sendPace = bounds.Pace is { } pace
+            ? new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = pace.MinimumSendBytesPerSecond, SendGracePeriod = pace.SendGracePeriod })
+            : null;
         _ = Write();
     }
 
     public WebSocket Socket { get; }
+
+    /// <summary>Whether it was dropped behind a bound of its pace, which was reported as it was.</summary>
+    public bool IsDropped
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _isDropped;
+            }
+        }
+    }
+
+    /// <summary>What waits for its socket right now, in bytes: what it was handed and the socket has not yet taken.</summary>
+    public long UnsentBytes
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _unsent;
+            }
+        }
+    }
 
     /// <summary>
     /// <paramref name="heartbeat"/> held: from 1 to <see cref="Clocks.LongestTimer"/> milliseconds,
@@ -47,17 +89,111 @@ internal sealed class WebSocketConnection
         return Clocks.AssertHeld(("a close timeout", option), closeTimeout);
     }
 
-    // what goes out once the socket is not open goes nowhere, as a send to a socket closing does
+    // what goes out once the socket is not open goes nowhere, as a send to a socket closing does;
+    // held to its pace and its bound, when the connection has one: one that would take what waits
+    // past its bound drops the connection, and goes nowhere
     public Task Send(ReadOnlyMemory<byte> bytes)
     {
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        if (_pace is { } pace && !Hold((bytes.Length, pace)))
+        {
+            done.TrySetResult();
+
+            return done.Task;
+        }
+
         if (!_outgoing.Writer.TryWrite((bytes, null, done)))
         {
+            Taken(bytes.Length);
             done.TrySetResult();
         }
 
         return done.Task;
+    }
+
+    // * what waits for the socket, held (spec 15.12): an envelope that would take it past its bound
+    // drops the connection; any other is handed to its pace. False once dropped
+    private bool Hold((int Bytes, Pacing Pace) handed)
+    {
+        var (bytes, pace) = handed;
+        bool isPast;
+
+        lock (_gate)
+        {
+            if (_isDropped)
+            {
+                return false;
+            }
+
+            isPast = _unsent + bytes > pace.MaximumUnsentBytes;
+
+            if (isPast)
+            {
+                _isDropped = true;
+            }
+            else
+            {
+                _unsent += bytes;
+            }
+        }
+
+        if (isPast)
+        {
+            Drop(nameof(pace.MaximumUnsentBytes));
+
+            return false;
+        }
+
+        _sendPace!.Hand(bytes);
+
+        return true;
+    }
+
+    // what waits for its socket, as its pace reads it
+    private long Unsent()
+    {
+        return UnsentBytes;
+    }
+
+    // what the socket took: what waits is less, and nothing waiting, its pace judges nothing
+    private void Taken(int bytes)
+    {
+        if (_pace is null)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _unsent -= bytes;
+        }
+    }
+
+    // what waits past its deadline drops the connection, but one dropped or gone already
+    private void Late()
+    {
+        lock (_gate)
+        {
+            if (_isDropped || _unsent == 0)
+            {
+                return;
+            }
+
+            _isDropped = true;
+        }
+
+        Drop(nameof(Pacing.MinimumSendBytesPerSecond));
+    }
+
+    // ! dropped with no closing handshake, its close unclean: a peer that does not read would read
+    // no close frame waiting behind what it does not read (RFC 6455 §7.1.7); reported first,
+    // naming its bound, so its close comes after
+    private void Drop(string bound)
+    {
+        _sendPace?.Stop();
+        _pace!.Dropped(bound);
+        Socket.Abort();
     }
 
     // sends a close behind what was sent before it, and drops the socket should the peer not
@@ -173,6 +309,7 @@ internal sealed class WebSocketConnection
     {
         _outgoing.Writer.TryComplete();
         _ended.TrySetResult();
+        _sendPace?.Stop();
     }
 
     private async Task Write()
@@ -207,8 +344,38 @@ internal sealed class WebSocketConnection
             }
             finally
             {
+                if (close is null)
+                {
+                    Taken(bytes.Length);
+                }
+
                 done.TrySetResult();
             }
         }
+    }
+
+    /// <summary>What a connection reads and closes within, and what holds what waits for its socket, a server's.</summary>
+    internal sealed record Bounds
+    {
+        public required int MaximumMessageBytes { get; init; }
+
+        public required TimeSpan CloseTimeout { get; init; }
+
+        public Pacing? Pace { get; init; }
+    }
+
+    /// <summary>
+    /// What holds what waits for a server's socket (spec 15.12): its pace past its grace, 0 holding
+    /// none, its bound, and what hears the bound a drop is behind, before the socket is aborted.
+    /// </summary>
+    internal sealed record Pacing
+    {
+        public required int MinimumSendBytesPerSecond { get; init; }
+
+        public required TimeSpan SendGracePeriod { get; init; }
+
+        public required long MaximumUnsentBytes { get; init; }
+
+        public required Action<string> Dropped { get; init; }
     }
 }

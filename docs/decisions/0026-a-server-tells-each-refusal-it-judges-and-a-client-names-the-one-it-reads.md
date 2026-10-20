@@ -10,7 +10,8 @@
   guard a listener is called within is
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
   what a transport carries of a credential is
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s.
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; an access a server's router
+  refuses, told, [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s.
 
 ## Context
 

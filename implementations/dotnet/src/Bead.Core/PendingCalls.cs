@@ -130,6 +130,12 @@ internal sealed class PendingCalls
         EntriesOf(_pending, call.ConnectionHandle)[call.CallId] = pendingRequest;
     }
 
+    /// <summary>The calls waiting on a connection for their answer.</summary>
+    public int CountOn(string connectionHandle)
+    {
+        return _pending.TryGetValue(connectionHandle, out var requests) ? requests.Count : 0;
+    }
+
     /// <summary>
     /// A call id of this side's for a connection, skipping those waited on, reserved, or in use by
     /// the side; none once every one is.

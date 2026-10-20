@@ -159,6 +159,11 @@ public sealed class TransportsTests
                 "origins" => options with { Origins = TextsOf(value) },
                 "trustedProxies" => options with { TrustedProxies = TextsOf(value) },
                 "unnamedProxies" => options with { UnnamedProxies = value.GetInt32() },
+                "minimumSendBytesPerSecond" => options with { MinimumSendBytesPerSecond = value.GetInt32() },
+                "sendGracePeriod" => options with { SendGracePeriod = TimeOf(value) },
+                "headersTimeout" => options with { HeadersTimeout = TimeOf(value) },
+                "minimumBodyBytesPerSecond" => options with { MinimumBodyBytesPerSecond = value.GetInt32() },
+                "bodyGracePeriod" => options with { BodyGracePeriod = TimeOf(value) },
 
                 // the server layer's, which ConnectionInactivityTimeoutOf reads
                 "connectionInactivityTimeout" => options,
@@ -200,6 +205,12 @@ public sealed class TransportsTests
                 "origins" => options with { Origins = TextsOf(option.Value) },
                 "trustedProxies" => options with { TrustedProxies = TextsOf(option.Value) },
                 "unnamedProxies" => options with { UnnamedProxies = option.Value.GetInt32() },
+                "maximumConnections" => options with { MaximumConnections = option.Value.GetInt32() },
+                "maximumConnectionsPerAddress" => options with { MaximumConnectionsPerAddress = option.Value.GetInt32() },
+                "minimumSendBytesPerSecond" => options with { MinimumSendBytesPerSecond = option.Value.GetInt32() },
+                "sendGracePeriod" => options with { SendGracePeriod = TimeOf(option.Value) },
+                "maximumUnsentBytes" => options with { MaximumUnsentBytes = option.Value.GetInt64() },
+                "headersTimeout" => options with { HeadersTimeout = TimeOf(option.Value) },
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }
@@ -231,6 +242,7 @@ public sealed class TransportsTests
                 "bufferedBytesBudget" => limits with { BufferedBytesBudget = value },
                 "maximumChunkRuns" => limits with { MaximumChunkRuns = value },
                 "maximumDetailBytes" => limits with { MaximumDetailBytes = value },
+                "maximumAnsweringCalls" => limits with { MaximumAnsweringCalls = value },
                 "transferInactivityTimeout" => limits with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(value) },
                 _ => throw new ArgumentException($"a case sets a limit no test reads: {limit.Name}", nameof(entry)),
             };
@@ -451,11 +463,27 @@ public sealed class TransportsTests
             // the HTTP server's own, which its server layer holds
             "connectionInactivityTimeout" => (long)HttpServerOptions.ConnectionInactivityTimeoutDefault.TotalMilliseconds,
 
+            // the bounds both servers hold alike, each the same on the WebSocket server's
+            "minimumSendBytesPerSecond" => Alike((http.MinimumSendBytesPerSecond, webSocket.MinimumSendBytesPerSecond)),
+            "sendGracePeriod" => Alike(((long)http.SendGracePeriod.TotalMilliseconds, (long)webSocket.SendGracePeriod.TotalMilliseconds)),
+            "headersTimeout" => Alike(((long)http.HeadersTimeout.TotalMilliseconds, (long)webSocket.HeadersTimeout.TotalMilliseconds)),
+            "minimumBodyBytesPerSecond" => http.MinimumBodyBytesPerSecond,
+            "bodyGracePeriod" => (long)http.BodyGracePeriod.TotalMilliseconds,
+
+            // what the WebSocket server holds for a socket when built alone, told none
+            "maximumUnsentBytes" => new WebSocketTransportServer(webSocket).MaximumUnsentBytes,
+
             // the bound the WebSocket server layer takes when built alone and told none
             "maximumMessageBytes" => new WebSocketTransportServer(webSocket).MaximumMessageBytes,
             "heartbeat" => (long)webSocket.Heartbeat.TotalMilliseconds,
             _ => throw new ArgumentException($"the file states a default no test reads: {bound}", nameof(bound)),
         };
+    }
+
+    // a default both servers hold alike; any other is a number no file states
+    private static long Alike((long Http, long WebSocket) defaults)
+    {
+        return defaults.Http == defaults.WebSocket ? defaults.Http : -1;
     }
 
     // an envelope sent, as a case writes what it expects; one that is none, as its bytes
@@ -1333,6 +1361,12 @@ public sealed class TransportsTests
             {
                 if ((await Head).Status != 101)
                 {
+                    // * past its response, the socket's end alone: what its server ends of it, which
+                    // an answer written before its body is whole has it do in stages (spec 15.12)
+                    await Body;
+                    await reader.UntilEnd();
+                    _heard.Writer.TryWrite(new Heard(Ended, []));
+
                     return;
                 }
 
@@ -1387,6 +1421,17 @@ public sealed class TransportsTests
     // its fields, and its body by its length, de-chunked, or to the end of what comes
     private sealed class Reader(Func<Memory<byte>, ValueTask<int>> read)
     {
+        // what comes past a response, dropped, until its socket ends
+        public async Task UntilEnd()
+        {
+            var dropped = new byte[ReadBytes];
+
+            while (await read(dropped) > 0)
+            {
+                // dropped
+            }
+        }
+
         // what came and is not read yet
         private readonly List<byte> _came = [];
 

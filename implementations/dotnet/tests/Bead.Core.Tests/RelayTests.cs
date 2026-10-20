@@ -375,8 +375,8 @@ public sealed class RelayTests
         }
 
         // not admitted: the same refusal whether the destination exists or not
-        Assert.Same(sessionRequired, AdmitOf(7)(new AdmissionRequest(Device, HeaderOf(1))));
-        Assert.Same(sessionRequired, AdmitOf(8)(new AdmissionRequest(Device, HeaderOf(1, 8))));
+        Assert.Equal(sessionRequired, AdmitOf(7)(new AdmissionRequest(Device, HeaderOf(1))));
+        Assert.Equal(sessionRequired, AdmitOf(8)(new AdmissionRequest(Device, HeaderOf(1, 8))));
 
         // admitted
         Assert.Equal(

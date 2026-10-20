@@ -6,8 +6,9 @@ public sealed record WebSocketServerOptions
     /// <summary>
     /// The transport's options. A message is an envelope at most — the server's limits' — unless
     /// they say more; less is an <see cref="ArgumentException"/>: the socket would cut off envelopes
-    /// the router takes. Its clock is every layer's: the server's own options give none, or the
-    /// same.
+    /// the router takes. What waits for a client's socket is held to what a peer that keeps every
+    /// rule can be owed at once under those limits, unless they say otherwise. Its clock is every
+    /// layer's: the server's own options give none, or the same.
     /// </summary>
     public WebSocketTransportServerOptions? Transport { get; init; }
 
@@ -50,7 +51,13 @@ public sealed class WebSocketServer<TData> : IBeadServer<TData>
                 nameof(options));
         }
 
-        Transport = new WebSocketTransportServer(transport with { MaximumMessageBytes = maximumMessageBytes });
+        // * what waits for a client's socket is held above what a peer that keeps every rule can be
+        // owed at once under the router's limits, unless given (spec 15.12)
+        Transport = new WebSocketTransportServer(transport with
+        {
+            MaximumMessageBytes = maximumMessageBytes,
+            MaximumUnsentBytes = transport.MaximumUnsentBytes ?? WebSocketTransportServer.UnsentBytesOf(limits),
+        });
         _server = new Server<TData>(Transport, server);
     }
 

@@ -652,6 +652,130 @@ public sealed class HttpServerTests
     }
 
     [Fact]
+    public async Task Give_its_transport_maximumWaitingExchanges_from_its_router_s_maximumAnsweringCalls_unless_given()
+    {
+        // its transport's default, given, is given
+        foreach (var (transport, taken) in new (HttpTransportServerOptions? Transport, int Taken)[] { (null, 1), (new() { MaximumWaitingExchanges = 2 }, 2), (new() { MaximumWaitingExchanges = 64 }, 64) })
+        {
+            await using var server = new HttpServer<string>(new HttpServerOptions
+            {
+                Server = new ServerOptions { Limits = RouterLimits.Default with { MaximumAnsweringCalls = 1 } },
+                Transport = transport,
+            });
+
+            server.Services.GetRequestResolver(Slow, new RequestResolverDependencies<string, string> { Serializer = Text })(async (request, _) =>
+            {
+                await Task.Delay(Timeout.Infinite, request.Signal);
+            });
+
+            var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+            using var http = new HttpClient();
+            var uri = new Uri($"http://{Host}:{address.Port}/bead");
+            using var connect = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent([]) };
+
+            connect.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
+
+            using var drawn = await http.SendAsync(connect, Cancelled);
+            var connectionToken = drawn.Headers.GetValues(HttpTransport.ConnectionTokenHeader).Single();
+            var statuses = new List<string>();
+            var answers = new List<HttpResponseMessage>();
+
+            foreach (var callId in new uint[] { 1, 3 })
+            {
+                var envelope = EnvelopeCodec.WriteEnvelope(new Envelope { Header = new RequestHeader { CallId = callId, ServiceId = Slow.ServiceId, ProcedureId = Slow.ProcedureId } });
+                using var posting = new HttpRequestMessage(HttpMethod.Post, uri) { Content = new ByteArrayContent(envelope) };
+
+                posting.Headers.Add(HttpTransport.ConnectionTokenHeader, connectionToken);
+                posting.Content.Headers.ContentType = new MediaTypeHeaderValue(HttpTransport.MediaType);
+
+                var answered = await http.SendAsync(posting, HttpCompletionOption.ResponseHeadersRead, Cancelled);
+
+                answers.Add(answered);
+                statuses.Add($"{(int)answered.StatusCode} {(answered.Headers.TryGetValues(HttpTransport.RefusalHeader, out var refusal) ? refusal.Single() : "none")}");
+            }
+
+            // past the calls its router answers at once, its transport refuses 429 first
+            Assert.Equal(taken == 1 ? ["200 none", "429 busy"] : ["200 none", "200 none"], statuses);
+
+            // the connection drawn by hand, ended by hand, which ends its calls
+            using var deleting = new HttpRequestMessage(HttpMethod.Delete, uri);
+
+            deleting.Headers.Add(HttpTransport.ConnectionTokenHeader, connectionToken);
+            using var deleted = await http.SendAsync(deleting, Cancelled);
+
+            foreach (var answer in answers)
+            {
+                answer.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Tells_over_HTTP_the_address_and_port_of_the_exchange_refused_not_its_connect_s()
+    {
+        await using var server = new HttpServer<string>(new HttpServerOptions { Transport = new HttpTransportServerOptions { TrustedProxies = ["127.0.0.1"] } });
+        var told = new TaskCompletionSource<AccessRefusal>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        server.Router.AccessRefused += (refusal) =>
+        {
+            told.TrySetResult(refusal);
+        };
+        server.Services.GetRequestResolver(Echo, new RequestResolverDependencies<string, string> { Serializer = Text })((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        var address = await server.Transport.Start(new HttpTransportStartOptions { Address = Host, FindOpenPort = true }, Cancelled);
+
+        // one socket and one proxy's walk for the connect, another for the POST
+        async Task<(TcpClient Socket, string Head)> Exchange(string forwarded, (string Fields, byte[] Body) request)
+        {
+            var socket = new TcpClient();
+
+            await socket.ConnectAsync(IPAddress.Loopback, address.Port, Cancelled);
+
+            var stream = socket.GetStream();
+
+            await stream.WriteAsync(Encoding.ASCII.GetBytes($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nX-Forwarded-For: {forwarded}\r\n{request.Fields}Content-Length: {request.Body.Length}\r\n\r\n"), Cancelled);
+            await stream.WriteAsync(request.Body, Cancelled);
+
+            var head = new StringBuilder();
+            var octet = new byte[1];
+
+            while (!head.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
+            {
+                await stream.ReadExactlyAsync(octet, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+                head.Append((char)octet[0]);
+            }
+
+            return (socket, head.ToString());
+        }
+
+        var (connecting, connected) = await Exchange("192.0.2.1", ("", []));
+        var connectionToken = connected.Split("\r\n").Single((line) =>
+        {
+            return line.StartsWith(HttpTransport.ConnectionTokenHeader + ":", StringComparison.OrdinalIgnoreCase);
+        })[(HttpTransport.ConnectionTokenHeader.Length + 1)..].Trim();
+        var presenting = EnvelopeCodec.WriteEnvelope(new Envelope
+        {
+            Header = new RequestHeader { CallId = 1, ServiceId = Echo.ServiceId, ProcedureId = Echo.ProcedureId, Credential = Credential.Of((CredentialScheme)4, []) },
+        });
+        var (posting, answered) = await Exchange("198.51.100.7", ($"{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\n", presenting));
+
+        using (connecting)
+        using (posting)
+        {
+            var refusal = await told.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.StartsWith("HTTP/1.1 200", answered, StringComparison.Ordinal);
+            Assert.Equal(
+                ("198.51.100.7", (int?)((IPEndPoint)posting.Client.LocalEndPoint!).Port, ProtocolCode.CredentialUnsupported),
+                (refusal.Address, refusal.Port, refusal.Code));
+            Assert.NotEqual(((IPEndPoint)connecting.Client.LocalEndPoint!).Port, refusal.Port);
+        }
+    }
+
+    [Fact]
     public async Task Build_its_router_with_the_pacing_its_options_give()
     {
         await using var server = new HttpServer<string>(new HttpServerOptions { Server = new ServerOptions { Pacing = new PacingLimits { MaximumQueuedNotifications = 3 } } });

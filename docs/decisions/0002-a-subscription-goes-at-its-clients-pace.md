@@ -1,7 +1,8 @@
 # 0002 — A client may pace its subscription, and what waits, waits by key
 
 - **Status**: accepted
-- **Scope**: the protocol, and every implementation
+- **Scope**: the protocol, and every implementation. What waits for a socket, and its pace, is
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s.
 
 ## Context
 

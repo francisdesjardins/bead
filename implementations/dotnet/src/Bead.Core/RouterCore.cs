@@ -608,8 +608,8 @@ internal sealed partial class RouterCore : IDisposable
     // what refuses a request before its payload is read: its resolver's admission, on its header,
     // whatever the resolver; one that throws refuses it as failed, and is reported. Its
     // SESSION_REQUIRED to a call whose header presents a credential goes out ACCESS_DENIED, its
-    // detail kept (spec 9.2, step 5)
-    private Failure? RefusalOf(IRequestHandler resolver, AdmissionRequest request)
+    // detail kept (spec 9.2, step 6)
+    private (Failure? Refusal, AdmissionRefusals.Mark? Mark) RefusalOf(IRequestHandler resolver, AdmissionRequest request)
     {
         Failure? refusal;
 
@@ -621,14 +621,22 @@ internal sealed partial class RouterCore : IDisposable
         {
             _port.Report(reason, request.ConnectionHandle);
 
-            return ProtocolFailureOf(ProtocolCode.ProcedureFailed);
+            return (ProtocolFailureOf(ProtocolCode.ProcedureFailed), null);
         }
+
+        if (refusal is null)
+        {
+            return (null, null);
+        }
+
+        // what an admission refused, by its mark: told, where a route's refusal is not
+        var mark = AdmissionRefusals.MarkOf(refusal);
 
         // ! never SESSION_REQUIRED to a call that presented a credential: it may hold, and its
         // requester would withdraw it (RFC 6750 §3.1, a token short of its scope answered 403)
         return refusal is { Scope: FailureScope.Protocol, Code: (ushort)ProtocolCode.SessionRequired } && request.Header.Credential is not null
-            ? refusal with { Code = (ushort)ProtocolCode.AccessDenied }
-            : refusal;
+            ? (refusal with { Code = (ushort)ProtocolCode.AccessDenied }, mark)
+            : (refusal, mark);
     }
 
     // what did not read: a request of the peer's on a free call id is answered; an answer of this
@@ -762,9 +770,9 @@ internal sealed partial class RouterCore : IDisposable
         }
     }
 
-    private void ReceiveRequest(RequestHeader arrived, (string ConnectionHandle, ReadOnlyMemory<byte> Payload, string? TransportCredential) received)
+    private void ReceiveRequest(RequestHeader arrived, (string ConnectionHandle, ReadOnlyMemory<byte> Payload, TransportMessage Message) received)
     {
-        var (connectionHandle, payload, _) = received;
+        var (connectionHandle, payload, message) = received;
         var callId = arrived.CallId;
 
         // ! no bearer credential reaches a procedure (spec 13.1): one routed to a resolver of this
@@ -797,7 +805,7 @@ internal sealed partial class RouterCore : IDisposable
         // ! what its transport carried stands for ELSEWHERE alone, and stays here for any other: its
         // SessionOf alone is handed it, and a destination's handler, which the call keeps it for; a
         // resolver and its admission are handed nothing beside it (spec 13.1, 15.1)
-        var carried = header.Credential?.Scheme == CredentialScheme.Elsewhere ? received.TransportCredential : null;
+        var carried = header.Credential?.Scheme == CredentialScheme.Elsewhere ? message.Credential : null;
 
         if (header.DestinationId is not null)
         {
@@ -818,6 +826,20 @@ internal sealed partial class RouterCore : IDisposable
         if (_metrics is { } metrics)
         {
             answering.Counted = StartedOf(registered?.Series?.Calls ?? metrics.Answered, _clock);
+        }
+
+        // * step 3 of section 9.2: past the calls its peer has it answer on the connection, refused
+        // before anything else of it is read — its route, its credential, its transfer — as an HTTP/2
+        // endpoint refuses a stream past those it lets its peer open (RFC 9113 §5.1.2, §8.7)
+        if (_answeringCalls.CountOn(connectionHandle) > Limits.MaximumAnsweringCalls)
+        {
+            Refuse(
+                ProtocolFailureOf(
+                    ProtocolCode.CapacityExceeded,
+                    string.Create(CultureInfo.InvariantCulture, $"the calls a connection has answered at once are {Limits.MaximumAnsweringCalls} at most")),
+                dispatched);
+
+            return;
         }
 
         // one this side has no handler for: this peer relays nothing, to that destination or elsewhere
@@ -842,7 +864,7 @@ internal sealed partial class RouterCore : IDisposable
         }
 
         _handlers.AddOrUpdate(header, resolver);
-        Resolve(resolver, new Arrival(target, answering, payload) { Arrived = arrived, TransportCredential = carried });
+        Resolve(resolver, new Arrival(target, answering, payload) { Arrived = arrived, TransportCredential = carried, From = (message.Address, message.Port) });
     }
 
     // whether a request whose credential resolves is still its call's: a cancel, its connection
@@ -855,6 +877,32 @@ internal sealed partial class RouterCore : IDisposable
             && _answeringCalls.IsAnswering(arrival.Target);
     }
 
+    // * an access refused, told as its refusal is answered, its record built only while someone
+    // listens (spec 13.12): never the credential, nor a claim, nor an admission's detail
+    private void TellRefused((AccessRefusalStage Stage, ProtocolCode Code, string? Reason) refused, Arrival arrival)
+    {
+        if (!_port.TellsAccessRefusals)
+        {
+            return;
+        }
+
+        var (connectionHandle, header) = arrival.Target;
+
+        _port.TellAccessRefused(new AccessRefusal
+        {
+            Stage = refused.Stage,
+            Code = refused.Code,
+            Reason = refused.Reason,
+            CredentialScheme = header.Credential?.Scheme,
+            ServiceId = header.ServiceId,
+            ProcedureId = header.ProcedureId,
+            DestinationId = header.DestinationId,
+            ConnectionHandle = connectionHandle,
+            Address = arrival.From.Address,
+            Port = arrival.From.Port,
+        });
+    }
+
     // a resolution that failed: PROCEDURE_FAILED, and why reported, never SESSION_REQUIRED, which
     // would have its requester withdraw a credential that holds
     private void Fail(Exception reason, Arrival arrival)
@@ -863,7 +911,7 @@ internal sealed partial class RouterCore : IDisposable
         Refuse(ProtocolFailureOf(ProtocolCode.ProcedureFailed), (arrival.Target, arrival.Answering));
     }
 
-    // step 5 of section 9.2, its first two steps: a scheme the side takes none of is refused, then
+    // step 6 of section 9.2, its first two steps: a scheme the side takes none of is refused, then
     // the credential resolves to the call's session, none and OPAQUE in the turn they came, JWT and
     // ELSEWHERE in a later one, whether their verifier waits or not. Meanwhile its call id stays
     // held, a cancel or its connection closing cancels the call's signal, which tells the verifier,
@@ -882,6 +930,7 @@ internal sealed partial class RouterCore : IDisposable
         if (credential is { } presented && !schemes.Contains(presented.Scheme))
         {
             Refuse(ProtocolFailureOf(ProtocolCode.CredentialUnsupported, CallSession.CredentialSchemesDetailOf(schemes)), (target, answering));
+            TellRefused((AccessRefusalStage.Credential, ProtocolCode.CredentialUnsupported, "scheme"), arrival);
 
             return;
         }
@@ -896,6 +945,7 @@ internal sealed partial class RouterCore : IDisposable
                 if (IsResolving(arrival))
                 {
                     Refuse(ProtocolFailureOf(ProtocolCode.SessionRequired, "no credential came"), (target, answering));
+                    TellRefused((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, "nothing-carried"), arrival);
                 }
             });
 
@@ -917,18 +967,18 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
-        ValueTask<CallSession?> resolving;
+        ValueTask<CredentialResolution> resolving;
 
         try
         {
-            resolving = _port.SessionOf(
+            resolving = _port.ResolutionOf(
                 new SessionRequest { ConnectionHandle = connectionHandle, Header = arrival.Arrived, TransportCredential = arrival.TransportCredential },
                 answering.Source.Token);
         }
         catch (Exception reason)
         {
             // one that throws as it is asked fails as one that faults does, in the same turn
-            resolving = ValueTask.FromException<CallSession?>(reason);
+            resolving = ValueTask.FromException<CredentialResolution>(reason);
         }
 
         if (waits)
@@ -970,7 +1020,7 @@ internal sealed partial class RouterCore : IDisposable
     // a credential resolved: dropped once its call ended; refused when it does not hold, or as it
     // would wait past the calls the side lets wait; otherwise the call runs in the session it
     // resolved to, whatever befell its connection's meanwhile
-    private void Settle(IRequestHandler resolver, (Arrival Arrival, Task<CallSession?> Resolution) resolved)
+    private void Settle(IRequestHandler resolver, (Arrival Arrival, Task<CredentialResolution> Resolution) resolved)
     {
         var (arrival, resolution) = resolved;
 
@@ -997,22 +1047,25 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
+        var (resolvedSession, why) = resolution.Result;
+
         // a credential that resolves to no session does not hold, whatever the procedure requires
-        if (resolution.Result is null && arrival.Target.Header.Credential is not null)
+        if (resolvedSession is null && arrival.Target.Header.Credential is not null)
         {
             Refuse(ProtocolFailureOf(ProtocolCode.SessionRequired, "the credential does not hold"), (arrival.Target, arrival.Answering));
+            TellRefused((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, why), arrival);
 
             return;
         }
 
         // a credential's session runs with the end its side keeps for its identifier, renewed by it
-        arrival.Answering.Session = resolution.Result is { Identifier: not null } session
+        arrival.Answering.Session = resolvedSession is { Identifier: not null } session
             ? _port.OnResolved(session, arrival.Target.ConnectionHandle)
-            : resolution.Result;
+            : resolvedSession;
         Admit(resolver, arrival);
     }
 
-    // step 5 of section 9.2, its last: its admission, on the call's session; then the steps after
+    // step 6 of section 9.2, its last: its admission, on the call's session; then the steps after
     // it, and its dispatch, or its transfer's first credit
     private void Admit(IRequestHandler resolver, Arrival arrival)
     {
@@ -1021,9 +1074,15 @@ internal sealed partial class RouterCore : IDisposable
         var dispatched = (target, answering);
 
         // routed, it is asked its admission, on its header and its call's session
-        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session, TransportCredential = answering.TransportCredential }) is { } refusal)
+        if (RefusalOf(resolver, new AdmissionRequest(connectionHandle, header) { Session = answering.Session, TransportCredential = answering.TransportCredential }) is ({ } refusal, var mark))
         {
             Refuse(refusal, dispatched);
+
+            // an admission's refusal, not a route's, nor an admission that failed
+            if (mark is not null)
+            {
+                TellRefused((AccessRefusalStage.Admission, (ProtocolCode)refusal.Code, mark.Name), arrival);
+            }
 
             return;
         }
@@ -1235,6 +1294,20 @@ internal sealed partial class RouterCore : IDisposable
             return;
         }
 
+        // ! a request, whole or a transfer's opening, is held to chunkBytes, as its requester sends it:
+        // one past it is answered at the gate, nothing of it read or held (spec 12.1, 12.2)
+        if (prefix.Kind == (byte)EnvelopeKind.Request && data.Length > Limits.ChunkBytes)
+        {
+            Gate(
+                FailureException.OfProtocol(
+                    ProtocolCode.EnvelopeTooLarge,
+                    _side,
+                    string.Create(CultureInfo.InvariantCulture, $"a request is {Limits.ChunkBytes} bytes at most, not {data.Length}")),
+                (connectionHandle, prefix, false));
+
+            return;
+        }
+
         Envelope? envelope;
 
         try
@@ -1284,7 +1357,7 @@ internal sealed partial class RouterCore : IDisposable
         switch (envelope.Header)
         {
             case RequestHeader request:
-                ReceiveRequest(request, (connectionHandle, envelope.Payload, message.Credential));
+                ReceiveRequest(request, (connectionHandle, envelope.Payload, message));
                 break;
             case ResultHeader or FailureHeader:
                 _requester.ReceiveAnswer(envelope, (connectionHandle, message.MayOvertake));
@@ -1681,13 +1754,16 @@ internal sealed partial class RouterCore : IDisposable
 
         public string? TransportCredential { get; init; }
 
+        // the address and port of what brought it, as its transport handed them (spec 15.1)
+        public (string? Address, int? Port) From { get; init; }
+
         // every member as the compiler writes it, but the credential, of which whether one was
         // carried; a header writes its credential's scheme alone
         private bool PrintMembers(StringBuilder builder)
         {
             // ! a credential's own string reaches no log, no exception's message and no debugger
             // (spec 15.1): whether there is one, alone
-            builder.Append(CultureInfo.CurrentCulture, $"Target = {Target}, Answering = {Answering}, Payload = {Payload}, Arrived = {Arrived}, TransportCredential = ");
+            builder.Append(CultureInfo.CurrentCulture, $"Target = {Target}, Answering = {Answering}, Payload = {Payload}, Arrived = {Arrived}, From = {From}, TransportCredential = ");
             builder.Append(TransportCredential is null ? "none" : "carried");
 
             return true;

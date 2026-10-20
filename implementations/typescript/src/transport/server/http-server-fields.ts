@@ -17,6 +17,7 @@ import {
   requestTargetOf,
   type IAuthority,
 } from './hosts-and-origins';
+import { lingerOn } from './server-bounds';
 import type { IHTTPRequestLike, IHTTPResponseLike } from './types';
 
 // interfaces
@@ -68,6 +69,7 @@ export const REFUSALS = Object.freeze({
   ORIGIN: ORIGIN_REFUSAL,
   PATH: 'path-unknown',
   TOO_LARGE: 'too-large',
+  TOO_SLOW: 'too-slow',
   TYPE: 'type-refused',
 });
 
@@ -222,6 +224,29 @@ export const endWith = (response: IHTTPResponseLike, { headers, reason, status }
   }
 
   response.end();
+};
+
+/**
+ * Writes the end of an exchange whose body may still come, as `endWith` does; over HTTP/1 it says
+ * `connection: close`, and its socket closes in stages, its write side first, reading on and
+ * dropping what still comes, so its client reads it before the close (RFC 9112 §9.6). Over HTTP/2,
+ * its stream ends alone.
+ */
+export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void => {
+  if (request.httpVersionMajor !== 1) {
+    return (endWith(response, end), undefined);
+  }
+
+  const { socket } = request;
+
+  // a socket of the platform's alone: a fake of a test's lingers nothing
+  if (typeof socket.removeListener === 'function' && typeof socket.destroy === 'function') {
+    lingerOn(socket as Parameters<typeof lingerOn>[0], response);
+  }
+
+  endWith(response, { ...end, headers: { ...end.headers, connection: 'close' } });
+
+  return undefined;
 };
 
 // a malformed HTTP/2 request's end: its stream reset, nothing written (RFC 9113 §8.1.1)

@@ -352,3 +352,33 @@ export const refusalsOf = (server: HTTPTransportServer) => {
 
   return refusals;
 };
+
+/** The port of a transport's URL. */
+export const portOf = (url: string): number => {
+  return Number(new URL(url).port);
+};
+
+/** A raw socket on `port`, what it reads kept as text, and whether it closed. */
+export const rawSocketOn = async (port: number) => {
+  const socket = connectTcp(port, host);
+  const read = { isClosed: false, text: '' };
+
+  socket.on('data', (chunk: Buffer) => {
+    read.text += chunk.toString('latin1');
+  });
+  socket.on('error', () => {});
+  socket.on('close', () => {
+    read.isClosed = true;
+  });
+  await once(socket, 'connect');
+
+  return { read, socket };
+};
+
+/** A POST's head on a connection, declaring `length` bytes of body. */
+export const postHeadOf = (connectionToken: string, length: number): string => {
+  return (
+    `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+    `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\nContent-Length: ${String(length)}\r\n\r\n`
+  );
+};

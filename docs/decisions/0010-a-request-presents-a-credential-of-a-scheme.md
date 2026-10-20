@@ -7,7 +7,9 @@
   an HTTP server answers of CORS is
   [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)'s; the
   credential a WebSocket's upgrade carries, and a client that follows no redirect,
-  [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)'s.
+  [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)'s;
+  an access refused, told,
+  [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s.
 
 ## Context
 
@@ -17,7 +19,7 @@ broker hands it to a server that takes its procedure
 ([0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)); a server that never issued
 its token runs it on a token it verifies alone. Each of them has to know from the header whether the
 call presents a credential and of what kind, since admission reads the header and never the payload
-(spec, section 9.2, step 5), and a relay passes the payload on undecoded (section 14.2).
+(spec, section 9.2, step 6), and a relay passes the payload on undecoded (section 14.2).
 
 Six shapes were weighed:
 
@@ -117,7 +119,7 @@ none, and ends at its end, when the application ends it, or with its connection
 ### Resolution
 
 **A request runs in its call's session, which its admission reads and its resolver receives.**
-Within step 5 of section 9.2, in this order:
+Within step 6 of section 9.2, in this order:
 
 1. **a credential scheme the side takes none of** — one to come, or one it has no verifier for — is
    refused `CREDENTIAL_UNSUPPORTED`, the admission block's code 36, whose detail SHOULD name the
@@ -722,6 +724,6 @@ the C# core internal first. Its objections, each with the answer that holds:
 | Withholding the transport's credential and keeping a `JWT`'s answers one question with two principles: no standard or practice draws a line by where a credential travels, and one procedure would hold a page's caller's bearer bytes and not a backend's                | Accepted in part: one question, drawn by risk. A `JWT`'s token and the transport's credential are both bearer credentials (RFC 6750 §1.2); an `OPAQUE`'s resolves on its own connection alone (13.2) and stays in its header. The choice between the in-process practice and the gateway's was the user's, who took the gateway; the made header's TypeScript type is prototyped first; RFC 8693 waits for one opt-in for both schemes, a decision of its own           |
 | A simpler design was passed over: the bytes are needed only in the turn the request arrives, so the call keeps them only when its request names a destination, and the sites that hand a request on stay as they are                                                      | Accepted: the reception is the one site, and the made header joins it. The C# `BeforeRequest` strips all the same, since a relay's `BeforeRoute` is handed its request by the relay's handler, which keeps the bytes on purpose                                                                                                                                                                                                                                         |
 | The change moves the public surface on both sides with nothing to hold it, where 0006 wants every rule to name what fails                                                                                                                                                 | Accepted: `@ts-expect-error` reads in the TypeScript twin, which `yarn type-check` runs; a C# twin by reflection over the five core types and the two members, the first piece of 0007's owed test over the built assemblies. A gate over each package's whole public surface is a round of its own                                                                                                                                                                     |
-| Moving `forwardsCredentials` to a destination's handler is right, but "a procedure forwards nothing" is false of a `JWT`: a procedure that sets the flag holds a token it never verified, minted perhaps for another audience; and the behaviour it removes goes unstated | Accepted: the move stands on 9.2 step 5 and 14.3, a relay alone holding a `JWT`'s `aud` to its destination's audience (RFC 7519 §4.1.3, RFC 8707), and the CHANGELOG says a procedure no longer takes a credential unverified to pass on. A resolver that still sets the flag is ignored in silence on both sides and refused on neither, since a TypeScript-only refusal would diverge and a C# one would need the public member the move removes: its cost, kept here |
+| Moving `forwardsCredentials` to a destination's handler is right, but "a procedure forwards nothing" is false of a `JWT`: a procedure that sets the flag holds a token it never verified, minted perhaps for another audience; and the behaviour it removes goes unstated | Accepted: the move stands on 9.2 step 6 and 14.3, a relay alone holding a `JWT`'s `aud` to its destination's audience (RFC 7519 §4.1.3, RFC 8707), and the CHANGELOG says a procedure no longer takes a credential unverified to pass on. A resolver that still sets the flag is ignored in silence on both sides and refused on neither, since a TypeScript-only refusal would diverge and a C# one would need the public member the move removes: its cost, kept here |
 | The moves of the public types and of the flag read as independent of the core's visibility, but on the C# side both require it: an internal return type on a public port is CS0050, and an internal `SessionRequest` member starves a hand-built port                     | Accepted: the core goes internal first, the others after it on the C# side                                                                                                                                                                                                                                                                                                                                                                                              |
 | A record's `Equals` and `with` carry an internal member, so the C# side's hand-off was observable; and an internal `SessionRequest.TransportCredential` written by a custom `PrintMembers` is the same broken promise                                                     | Accepted: no procedure's value carries the member, `PrintMembers` goes, and the session request's test asserts the member and its credential absent from its string, as `docs/support.md` says                                                                                                                                                                                                                                                                          |

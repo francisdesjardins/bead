@@ -44,6 +44,58 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
+    public async Task Fails_before_it_goes_a_call_past_the_calls_its_peer_answers_at_once_and_sends_one_once_a_call_is_answered()
+    {
+        var server = new Peer(RouterSide.Server, RouterLimits.Default with { MaximumAnsweringCalls = 2 });
+        var drawn = new List<uint>();
+
+        Task<RouterResult> Request(string connectionHandle)
+        {
+            return server.Core.Request(ReadOnlyMemory<byte>.Empty, CallOf(connectionHandle, (Echo, TimeSpan.FromSeconds(5))) with { OnCallId = drawn.Add });
+        }
+
+        var first = Request("a");
+        var second = Request("a");
+
+        // another connection's calls are its own
+        var other = Request("b");
+
+        await server.Settle();
+
+        // past them, it fails at once, drawing no call id and sending nothing
+        var failed = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return Request("a").WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.CapacityExceeded, "the calls waiting on a are 2 at most", FailureOrigin.Local, RouterSide.Server),
+            (failed.Code, failed.Detail, failed.Origin, failed.Side));
+        Assert.Equal([2u, 4u, 6u], drawn);
+        Assert.Equal(3, server.Sent.Count);
+
+        // answered, a call gives its place back in the turn its answer came
+        await server.Deliver(ResultOf(2), "a");
+
+        var third = Request("a");
+
+        await first.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await server.Settle();
+        Assert.Equal([2u, 4u, 6u, 8u], drawn);
+        Assert.Equal(
+            [2u, 4u, 6u, 8u],
+            server.Sent.Select((envelope) =>
+            {
+                return envelope.Header.CallId;
+            }));
+        server.Core.RejectPending("all gone");
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return Task.WhenAll(second, other, third).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+    }
+
+    [Fact]
     public async Task Writes_the_destination_a_request_names_and_none_left_out()
     {
         var client = new Peer(RouterSide.Client);

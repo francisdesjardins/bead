@@ -189,26 +189,35 @@ export const readFailure = (
 /**
  * An envelope, as `failures`' router reads it from `bytes`: `undefined` for an advisory kind. Its
  * payload is a copy, so the transport's buffer is not held. Throws a {@link FailureError} for bytes
- * that are not an envelope, one larger than `maximumEnvelopeBytes`, or one it does not read.
+ * that are not an envelope, one larger than its bound, or one it does not read. Its bound is
+ * `maximumEnvelopeBytes`, and `chunkBytes`, when given, for a request, whole or a transfer's
+ * opening, as its requester sends one (spec 12.2).
  */
 export const readEnvelope = (
   bytes: Uint8Array,
   {
+    chunkBytes,
     failures,
     maximumDetailBytes,
     maximumEnvelopeBytes,
   }: Pick<IRouterLimits, 'maximumEnvelopeBytes'> & {
+    chunkBytes?: number | undefined;
     failures: ReadFailures;
     maximumDetailBytes?: number | undefined;
   }
 ): Envelope | undefined => {
-  // the first byte says whether these are an envelope's at all, whatever their length
-  readPrefix(bytes, failures);
+  // the first byte says whether these are an envelope's at all, whatever their length, and its
+  // kind which bound holds it
+  const { kind } = readPrefix(bytes, failures);
+  const bound =
+    kind === EnvelopeKind.REQUEST && chunkBytes !== undefined ? chunkBytes : maximumEnvelopeBytes;
 
-  if (bytes.length > maximumEnvelopeBytes) {
+  if (bytes.length > bound) {
+    const what = bound === maximumEnvelopeBytes ? 'an envelope' : 'a request';
+
     throw new FailureError({
       ...failures.envelopeTooLarge,
-      detail: `an envelope is ${String(maximumEnvelopeBytes)} bytes at most, not ${String(bytes.length)}`,
+      detail: `${what} is ${String(bound)} bytes at most, not ${String(bytes.length)}`,
     });
   }
 

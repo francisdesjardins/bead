@@ -162,11 +162,12 @@ test.describe('the wire values', () => {
     }
   });
 
-  // spec 12.2.2, 12.2.3, 12.2.4, 12.2.5, 12.2.7 and 12.2.9
+  // spec 12.2.2, 12.2.3, 12.2.4, 12.2.5, 12.2.7, 12.2.9 and 12.2.10
   test('leave room for a full header between an envelope and its payload', () => {
     expect(LIMIT_DEFAULTS).toEqual({
       bufferedBytesBudget: 268_435_456,
       chunkBytes: 1_048_576,
+      maximumAnsweringCalls: 64,
       maximumChunkRuns: 1_024,
       maximumDetailBytes: 1_024,
       maximumEnvelopeBytes: 16_778_240,

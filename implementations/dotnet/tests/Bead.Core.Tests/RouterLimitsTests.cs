@@ -49,6 +49,24 @@ public sealed class RouterLimitsTests
     }
 
     [Fact]
+    public void Refuses_a_MaximumAnsweringCalls_that_is_not_a_whole_number_above_0()
+    {
+        foreach (var maximumAnsweringCalls in new[] { 0, -1, int.MinValue })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return (RouterLimits.Default with { MaximumAnsweringCalls = maximumAnsweringCalls }).Validate();
+            });
+        }
+
+        // a call at once holds, and the default is 64
+        var one = RouterLimits.Default with { MaximumAnsweringCalls = 1 };
+
+        Assert.Same(one, one.Validate());
+        Assert.Equal((64, 64), (RouterLimits.Default.MaximumAnsweringCalls, LimitDefaults.MaximumAnsweringCalls));
+    }
+
+    [Fact]
     public void Takes_the_edges_of_each_rule_and_0_where_0_means_none()
     {
         var edges = RouterLimits.Default with

@@ -1233,6 +1233,37 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
+    public async Task Answers_CAPACITY_EXCEEDED_a_command_past_the_calls_its_server_has_it_answer()
+    {
+        using var scripted = new ScriptedRouter(RouterLimits.Default with { MaximumAnsweringCalls = 2 });
+        var (router, transport) = (scripted.Router, scripted.Transport);
+        var held = new List<RequestResolverProps>();
+
+        router.RegisterResolver(new ScriptedResolver(Service, (props) =>
+        {
+            held.Add(props);
+
+            return Task.CompletedTask;
+        }));
+
+        foreach (var callId in new uint[] { 30, 32, 34 })
+        {
+            transport.Deliver(new Envelope { Header = RequestHeaderOf(callId) });
+        }
+
+        await scripted.Settle();
+        Assert.Equal(2, held.Count);
+        Assert.Equal([(34u, ProtocolCode.CapacityExceeded)], transport.Failures);
+
+        // one answered, the next is taken
+        await router.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(held[0].ConnectionHandle, held[0].Header));
+        transport.Deliver(new Envelope { Header = RequestHeaderOf(36) });
+        await scripted.Settle();
+        Assert.Equal(3, held.Count);
+        Assert.Empty(scripted.Errors);
+    }
+
+    [Fact]
     public async Task The_server_s_requests_of_the_client_s_own_parity_are_reported_and_never_answered()
     {
         using var scripted = new ScriptedRouter();
