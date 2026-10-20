@@ -923,6 +923,8 @@ public sealed partial class RouterCoreTests
 
         public int BeforeAnswers { get; private set; }
 
+        public Func<AnswerInfo, Action?>? OnBeforeAnswer { get; set; }
+
         // what an answer that did not go out undid
         public int Undone { get; private set; }
 
@@ -981,10 +983,12 @@ public sealed partial class RouterCoreTests
         public Action? BeforeAnswer(AnswerInfo answer)
         {
             BeforeAnswers += 1;
+            var undo = OnBeforeAnswer?.Invoke(answer);
 
             return () =>
             {
                 Undone += 1;
+                undo?.Invoke();
             };
         }
 

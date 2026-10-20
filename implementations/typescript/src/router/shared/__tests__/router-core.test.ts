@@ -16,6 +16,8 @@ import {
 } from '../constants';
 import { CapacityError, DisconnectError, FailureError } from '../errors';
 import { createMetricsRegistry } from '../metrics-registry';
+import { toSessionToken } from '../identifiers';
+import { connectionSessionOf } from '../call-session';
 import * as routerClient from '../../client/router-client';
 import * as routerServer from '../../server/router-server';
 import { createRouterCore } from '../router-core';
@@ -725,12 +727,19 @@ test.describe('createRouterCore', () => {
       using core = createRouterCore(port);
       const seen: number[] = [];
       const failing = Promise.withResolvers<void>();
+      const cancelled = Promise.withResolvers<void>();
+      const requests: IRequestResolverProps<Handle>[] = [];
 
       core.registerResolver(
         Object.assign((props: IRequestResolverProps<Handle>) => {
           seen.push(props.header.callId);
+          requests.push(props);
 
-          return seen.length === 1 ? failing.promise : Promise.resolve();
+          return seen.length === 1
+            ? failing.promise
+            : seen.length === 2
+              ? cancelled.promise
+              : Promise.resolve();
         }, echo)
       );
       core.receive(requestOf(5), 'a');
@@ -741,8 +750,19 @@ test.describe('createRouterCore', () => {
 
       expect(seen).toEqual([5, 5]);
       expect(codesOf(reported)).toEqual([['rejected', 'a']]);
-      // the first answered PROCEDURE_FAILED; the second resolves without answering
+      // the first answers PROCEDURE_FAILED; the second waits without answering
       expect(answersOf(sent)).toEqual([['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED]]);
+      core.receive(cancelOf(5), 'a');
+      core.receive(requestOf(5), 'a');
+      cancelled.reject(new Error('rejected'));
+      await sleep(0);
+      expect(seen).toEqual([5, 5, 5]);
+      expect(codesOf(reported)).toEqual([['rejected', 'a']]);
+      await core.respond({ payload: Uint8Array.of(3) }, requests[2]!);
+      expect(answersOf(sent)).toEqual([
+        ['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'result', 5, [3]],
+      ]);
     });
 
     test('send nothing for an answer whose call its connection took away, though the peer opens its call id again', async () => {
@@ -873,12 +893,19 @@ test.describe('createRouterCore', () => {
         'a'
       );
       core.receive(fromHexadecimal(`A1 10 04 05  00 00 00 05  00 02 00 01  ${transfer}  01`), 'a');
+      core.receive(
+        requestOf(7, { procedure: { ...echo, serviceId: 9 }, total: 300, payload: patternOf(44) }),
+        'a'
+      );
+      core.receive(requestOf(9, { destinationId: 7, total: 300, payload: patternOf(40) }), 'a');
       await sleep(0);
 
       expect(answersOf(sent)).toEqual([
         ['a', 'failure', 1, ProtocolCode.SERVICE_UNKNOWN],
         ['a', 'failure', 3, ProtocolCode.DESTINATION_UNKNOWN],
         ['a', 'failure', 5, ProtocolCode.PAYLOAD_TOO_LARGE],
+        ['a', 'failure', 7, ProtocolCode.SERVICE_UNKNOWN],
+        ['a', 'failure', 9, ProtocolCode.DESTINATION_UNKNOWN],
       ]);
       expect(seen).toEqual([]);
     });
@@ -1009,6 +1036,9 @@ test.describe('createRouterCore', () => {
 
       // its identity before any reason of the router's: a payload limit of 0, at service 0
       expect(() => {
+        core.registerResolver(resolverOf({ ...echo, procedureId: 9, maximumPayloadBytes: 0 }));
+      }).toThrow(ProgrammerError);
+      expect(() => {
         core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 0, serviceId: 0 }));
       }).toThrow(/: out of its range$/);
 
@@ -1077,20 +1107,35 @@ test.describe('createRouterCore', () => {
         'a'
       );
       second.receive(requestOf(1, { credential: { bytes: new Uint8Array(0), scheme: 4 } }), 'a');
+      first.receive(requestOf(11, { credential: { bytes: Uint8Array.of(1, 2), scheme: 7 } }), 'a');
+      second.receive(
+        requestOf(3, { credential: { bytes: new Uint8Array(0), scheme: 0xffff } }),
+        'a'
+      );
+      first.receive(
+        requestOf(9, {
+          credential: { bytes: new Uint8Array(0), scheme: 7 },
+          procedure: { ...echo, serviceId: 9 },
+        }),
+        'a'
+      );
 
       expect(failuresOf(opaqueOnly.sent)).toEqual([
         [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
         [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
         [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
         [7, ProtocolCode.PROCEDURE_UNKNOWN, 'no procedure 99 in service 2'],
+        [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE'],
+        [9, ProtocolCode.SERVICE_UNKNOWN, 'no service 9'],
       ]);
       expect(failuresOf(every.sent)).toEqual([
         [1, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+        [3, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
       ]);
       expect(asked).toEqual([]);
     });
 
-    test('of none or OPAQUE resolves in the turn it came, the call’s session handed to its admission, then to its resolver', () => {
+    test('of none or OPAQUE resolves in the turn it came, the call’s session handed to its admission, then to its resolver', async () => {
       const asked: unknown[] = [];
       const seen: IRequestResolverProps<Handle>[] = [];
       const { port, reported } = createPort({
@@ -1130,6 +1175,43 @@ test.describe('createRouterCore', () => {
         [3, SESSION],
       ]);
       expect(reported).toEqual([]);
+
+      const resolved: { header: IRequestHeader; connectionHandle: Handle; signal: AbortSignal }[] =
+        [];
+      const admitted: unknown[] = [];
+      const dispatched: IRequestResolverProps<Handle>[] = [];
+      const other = createPort({
+        sessionOf: ({ header, connectionHandle }, signal) => {
+          resolved.push({ header, connectionHandle, signal });
+          return { data: header.credential === undefined ? 'none' : 'OPAQUE' };
+        },
+      });
+      using otherCore = createRouterCore(other.port);
+      otherCore.registerResolver(
+        Object.assign(resolverOf(echo, dispatched), {
+          admit: ({ session }: IAdmissionRequest<Handle>) => {
+            admitted.push(session?.data);
+            return undefined;
+          },
+        })
+      );
+      otherCore.receive(requestOf(1), 'a');
+      otherCore.receive(requestOf(3, { credential: OPAQUE }), 'a');
+      otherCore.receive(requestOf(1), 'a');
+      otherCore.receive(requestOf(5, { procedure: { ...echo, serviceId: 9 } }), 'a');
+      await sleep(0);
+      expect(admitted).toEqual(['none', 'OPAQUE']);
+      expect(
+        dispatched.map(({ session }) => {
+          return session?.data;
+        })
+      ).toEqual(['none', 'OPAQUE']);
+      expect(resolved).toHaveLength(2);
+      for (const [index, resolution] of resolved.entries()) {
+        expect(resolution.header).toBe(dispatched[index]?.header);
+        expect(resolution.connectionHandle).toBe('a');
+        expect(resolution.signal).toBe(dispatched[index]?.signal);
+      }
     });
 
     test('that does not resolve is refused SESSION_REQUIRED, whatever its procedure requires, never admitted, an ELSEWHERE as one that came without; none resolving to none runs in none', async () => {
@@ -1177,6 +1259,71 @@ test.describe('createRouterCore', () => {
       expect(admitted).toEqual([
         [3, undefined],
         [3, undefined],
+      ]);
+
+      let heldToken: typeof TOKEN | undefined = TOKEN;
+      const fallback = createPort({
+        credentialSchemes: [CredentialScheme.ELSEWHERE],
+        sessionOf: ({ header }) => {
+          return connectionSessionOf(header.credential, { token: heldToken });
+        },
+      });
+      const fallbackSeen: IRequestResolverProps<Handle>[] = [];
+      using fallbackCore = createRouterCore(fallback.port);
+      fallbackCore.registerResolver(resolverOf(echo, fallbackSeen));
+      fallback.control.sessionTokenOf = () => {
+        return TOKEN;
+      };
+      fallbackCore.receive(
+        requestOf(1, {
+          credential: {
+            scheme: CredentialScheme.OPAQUE,
+            token: toSessionToken(
+              Uint8Array.from({ length: 16 }, (_, index) => {
+                return index;
+              })
+            ),
+          },
+        }),
+        'a'
+      );
+      fallbackCore.receive(requestOf(3, { credential: ELSEWHERE }), 'a');
+      await sleep(0);
+      heldToken = undefined;
+      fallback.control.sessionTokenOf = () => {
+        return undefined;
+      };
+      fallbackCore.receive(requestOf(5, { credential: OPAQUE }), 'a');
+      fallbackCore.receive(
+        { credential: 'Interop sub=ada', data: requestOf(13, { credential: ELSEWHERE }) },
+        'a'
+      );
+      await sleep(0);
+      heldToken = TOKEN;
+      fallback.control.sessionTokenOf = () => {
+        return TOKEN;
+      };
+      fallbackCore.receive(requestOf(7, { credential: OPAQUE }), 'a');
+      fallbackCore.receive(requestOf(9), 'a');
+      heldToken = undefined;
+      fallback.control.sessionTokenOf = () => {
+        return undefined;
+      };
+      fallbackCore.receive(requestOf(11), 'a');
+      expect(failuresOf(fallback.sent)).toEqual([
+        [1, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+        [3, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+        [5, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+        [13, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      ]);
+      expect(
+        fallbackSeen.map(({ header, session }) => {
+          return [header.callId, session !== undefined];
+        })
+      ).toEqual([
+        [7, true],
+        [9, true],
+        [11, false],
       ]);
     });
 
@@ -1347,25 +1494,29 @@ test.describe('createRouterCore', () => {
       const credentials = [undefined, OPAQUE, JWT, ELSEWHERE] as const;
 
       // a core on each side, its own table, its peer's call ids
-      for (const [failures, firstCallId] of [
-        [SERVER_FAILURES, 1],
-        [CLIENT_FAILURES, 2],
+      for (const [failures, firstCallId, noneSession] of [
+        [SERVER_FAILURES, 1, undefined],
+        [SERVER_FAILURES, 1, SESSION],
+        [CLIENT_FAILURES, 2, undefined],
+        [CLIENT_FAILURES, 2, SESSION],
       ] as const) {
         const { port, reported, sent } = createPort({
           credentialSchemes: [CredentialScheme.ELSEWHERE, CredentialScheme.JWT],
           failures,
           sessionOf: ({ header }) => {
-            return header.credential === undefined ? undefined : SESSION;
+            return header.credential === undefined ? noneSession : SESSION;
           },
         });
         const refusing = (procedure: IProcedure, refusal: IFailure) => {
           return Object.assign(resolverOf(procedure), {
             admit: () => {
+              admissions += 1;
               return refusal;
             },
           });
         };
         using core = createRouterCore(port);
+        let admissions = 0;
         const expected: unknown[] = [];
         let callId = firstCallId;
 
@@ -1406,6 +1557,36 @@ test.describe('createRouterCore', () => {
 
         core.receive(requestOf(callId, { credential: JWT, procedure: own }), 'a');
         expected.push([callId, 32, FailureScope.APPLICATION, 'its own']);
+        const short = { ...echo, procedureId: 6, procedureName: 'short' };
+        const empty = { ...echo, procedureId: 7, procedureName: 'empty' };
+        core.registerResolver(
+          refusing(short, { ...failures.sessionRequired, detail: 'short of its scope' })
+        );
+        core.registerResolver(
+          refusing(empty, { code: 32, detail: '', scope: FailureScope.APPLICATION })
+        );
+        for (const credential of credentials) {
+          callId += 2;
+          core.receive(
+            {
+              data: requestOf(callId, {
+                ...(credential === undefined ? {} : { credential }),
+                procedure: short,
+              }),
+              ...(credential === ELSEWHERE ? { credential: 'carried' } : {}),
+            },
+            'a'
+          );
+          expected.push([
+            callId,
+            credential === undefined ? ProtocolCode.SESSION_REQUIRED : ProtocolCode.ACCESS_DENIED,
+            FailureScope.PROTOCOL,
+            'short of its scope',
+          ]);
+        }
+        callId += 2;
+        core.receive(requestOf(callId, { credential: JWT, procedure: empty }), 'a');
+        expected.push([callId, 32, FailureScope.APPLICATION, '']);
         await sleep(0);
 
         expect(
@@ -1424,6 +1605,7 @@ test.describe('createRouterCore', () => {
               return Number((a as number[])[0]) - Number((b as number[])[0]);
             })
         ).toEqual(expected);
+        expect(admissions).toBe(14);
         expect(reported).toEqual([]);
       }
     });
@@ -1753,6 +1935,53 @@ test.describe('createRouterCore', () => {
       expect(sent).toEqual([]);
       expect(reported).toEqual([]);
       expect(admitted).toEqual([1]);
+
+      const waiting: PromiseWithResolvers<ICallSession | undefined>[] = [];
+      const resolvingSignals: AbortSignal[] = [];
+      const continued: IRequestResolverProps<Handle>[] = [];
+      const other = createPort({
+        credentialSchemes: [CredentialScheme.JWT],
+        sessionOf: ({ header }, signal) => {
+          resolvingSignals.push(signal);
+          if (header.credential === undefined) {
+            return SESSION;
+          }
+          const resolution = Promise.withResolvers<ICallSession | undefined>();
+          waiting.push(resolution);
+          return resolution.promise;
+        },
+      });
+      using otherCore = createRouterCore(other.port);
+      otherCore.registerResolver(resolverOf(echo, continued));
+      otherCore.receive(requestOf(1, { credential: JWT }), 'a');
+      expect(resolvingSignals[0]?.aborted).toBe(false);
+      otherCore.receive(cancelOf(1), 'a');
+      expect(resolvingSignals[0]?.aborted).toBe(true);
+      otherCore.receive(requestOf(1), 'a');
+      waiting[0]?.resolve(SESSION);
+      await sleep(0);
+      expect(
+        continued.map(({ header }) => {
+          return header.callId;
+        })
+      ).toEqual([1]);
+      otherCore.receive(requestOf(3, { credential: JWT }), 'b');
+      otherCore.receive(requestOf(5, { credential: JWT }), 'a');
+      otherCore.rejectPending('the connection closed', 'b');
+      expect(resolvingSignals[2]?.aborted).toBe(true);
+      expect(resolvingSignals[3]?.aborted).toBe(false);
+      waiting[1]?.reject(new CancelError());
+      await sleep(0);
+      expect(other.sent).toEqual([]);
+      expect(other.reported).toEqual([]);
+      expect(continued).toHaveLength(1);
+      waiting[2]?.resolve(SESSION);
+      await sleep(0);
+      expect(
+        continued.map(({ header }) => {
+          return header.callId;
+        })
+      ).toEqual([1, 5]);
     });
 
     test('resolving, a transfer’s opening gets no credit until its resolution and its admission settle', async () => {
@@ -1916,6 +2145,30 @@ test.describe('createRouterCore', () => {
         'result b echo after 2 sent',
         'undo b',
       ]);
+
+      const boundedTold: string[] = [];
+      const bounded = createPort({
+        beforeAnswer: () => {
+          boundedTold.push('before');
+          return () => {
+            boundedTold.push('undo');
+          };
+        },
+      });
+      using boundedCore = createRouterCore(bounded.port);
+      const boundedSeen: IRequestResolverProps<Handle>[] = [];
+      boundedCore.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 10 }, boundedSeen));
+      bounded.control.sendErrors.set('a', new Error('the transport refused the result'));
+      boundedCore.receive(requestOf(1, { payload: Uint8Array.of(1) }), 'a');
+      await expect(
+        boundedCore.respond({ payload: Uint8Array.of(1) }, boundedSeen[0]!)
+      ).rejects.toThrow('the transport refused the result');
+      expect(boundedTold).toEqual(['before', 'undo']);
+      boundedCore.receive(requestOf(3, { payload: Uint8Array.of(1) }), 'a');
+      await expect(
+        boundedCore.respond({ payload: new Uint8Array(11) }, boundedSeen[1]!)
+      ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE });
+      expect(boundedTold).toEqual(['before', 'undo']);
     });
 
     test('keep a call open when its answer cannot go out, so a fallback answers it', async () => {
