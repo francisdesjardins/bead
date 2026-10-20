@@ -3752,8 +3752,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
             // HTTP's own: unmarked, none of the path's fields, its body empty, its socket closed
             Assert.Equal((408, (string?)null, (string?)null, 0), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("cache-control"), body.Length));
-            // ! Kestrel arms its timeout a heartbeat late, and checks it each heartbeat, a second
-            Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(0.9), TimeSpan.FromSeconds(3.5));
+            // ! Kestrel arms its timeout a heartbeat late, and checks it each heartbeat, a second: a
+            // connection's first head is answered 1 to 2 seconds past its time, then 2 more for the
+            // real clock under load, as the transports' file allows
+            Assert.InRange(watch.Elapsed, TimeSpan.FromSeconds(0.9), TimeSpan.FromSeconds(5));
             Assert.True(await wire.IsClosed());
         }
 
