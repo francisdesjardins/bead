@@ -1085,6 +1085,11 @@ test.describe('the panel', () => {
     await page.click('[data-mode="envelopes"]');
 
     const rows = page.locator('#envelopes tr[data-key]');
+
+    // ! the rows drawn, all in one pass, before their keys are read: read at once, a slower runner
+    // finds none, and every step lands on the first row
+    await expect(rows.nth(1)).toBeVisible();
+
     const keys = await rows.evaluateAll((elements) => {
       return elements.map((element) => {
         return (element as HTMLElement).dataset['key'];
