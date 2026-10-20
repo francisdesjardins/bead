@@ -426,6 +426,48 @@ test.describe('the panel', () => {
     await expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
+  test('stands every control and group of its bars at one height, and centres the icons of record and clear', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    const measured = await page.evaluate(() => {
+      const boxOf = (selector: string) => {
+        return document.querySelector(selector)!.getBoundingClientRect();
+      };
+      const heights = Object.fromEntries(
+        [
+          '#record',
+          '#clear',
+          '#source',
+          '#filter',
+          'header .group',
+          '.list-bar .group',
+          '#layout',
+        ].map((selector) => {
+          return [selector, boxOf(selector).height];
+        })
+      );
+      const offsets = ['#record', '#clear'].map((selector) => {
+        const button = boxOf(selector);
+        const icon = boxOf(`${selector} svg`);
+
+        return {
+          x: icon.left + icon.width / 2 - (button.left + button.width / 2),
+          y: icon.top + icon.height / 2 - (button.top + button.height / 2),
+        };
+      });
+
+      return { heights, offsets };
+    });
+
+    expect(new Set(Object.values(measured.heights)).size, JSON.stringify(measured.heights)).toBe(1);
+    for (const offset of measured.offsets) {
+      expect(Math.abs(offset.x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(offset.y)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
   test('gives each control edge at least 3:1 contrast against its surfaces in both themes', async ({
     page,
   }) => {
