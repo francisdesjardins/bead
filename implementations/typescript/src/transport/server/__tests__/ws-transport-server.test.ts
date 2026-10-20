@@ -1228,7 +1228,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     server.on('close', (...params) => {
       closes.push(params);
     });
-    fake.connect(silent, { remotePort: 40_000, server });
+    const silentHandle = fake.connect(silent, { remotePort: 40_000, server });
 
     const stopping = server.stop();
 
@@ -1245,9 +1245,39 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await stopping;
 
     expect(late.closeCodes).toEqual([1001]);
+    expect(closes).toContainEqual([false, silentHandle]);
     expect(closes).toContainEqual([false, lateHandle]);
+    expect(closes).toHaveLength(2);
     expect(server.clients).toEqual([]);
     expect(server.isClosed()).toBe(true);
+
+    // a stop inside the accept, before its connection enters the registry
+    const crossing = createFakeWebSocketServer();
+    const crossed = createWSTransportServer({ WebSocketServer: crossing.FakeWebSocketServer });
+    const opening = crossed.start(SCRIPTED);
+
+    crossing.instances[0]?.emit('listening');
+    await opening;
+
+    const ended: ServerEvents['close'][] = [];
+    let ending = Promise.resolve();
+
+    crossed.on('close', (...params) => {
+      ended.push(params);
+    });
+    crossing.instances[0]?.prependListener('connection', () => {
+      ending = crossed.stop();
+    });
+
+    const arriving = createFakeSocket();
+    const arrivingHandle = crossing.connect(arriving, { server: crossed });
+
+    await ending;
+
+    expect(arriving.closeCodes).toEqual([1001]);
+    expect(ended).toEqual([[false, arrivingHandle]]);
+    expect(crossed.clients).toEqual([]);
+    expect(crossed.isClosed()).toBe(true);
   });
 
   test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {
@@ -2123,6 +2153,11 @@ test.describe('WSTransportServer, the address it listens on', () => {
       })
     ).toEqual([1, 1, 0, 0]);
     await server.stop();
+    expect(
+      fake.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual([1, 1, 1, 1]);
 
     // eight draws at most, then the last error
     const held = createFakeWebSocketServer();
@@ -2136,6 +2171,15 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
     await expect(refusing).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect([refused.isClosed(), held.instances.length]).toEqual([true, 16]);
+    expect(
+      held.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual(
+      Array.from({ length: 16 }, () => {
+        return 1;
+      })
+    );
 
     // a port it was given is never drawn again
     const given = createFakeWebSocketServer();
@@ -2147,6 +2191,11 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
     await expect(fixing).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect([fixed.isClosed(), given.instances.length]).toEqual([true, 2]);
+    expect(
+      given.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual([1, 1]);
   });
 
   test('listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1', async () => {

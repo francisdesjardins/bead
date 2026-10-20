@@ -750,6 +750,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         using var other = HeldOnIPv6(0);
         var held = ((IPEndPoint)other.LocalEndPoint!).Port;
         var drawn = new List<int>();
+        var built = new List<WebApplication>();
         await using var server = new WebSocketTransportServer()
         {
             // the first port drawn free on IPv4, held on IPv6: drawn again
@@ -763,10 +764,82 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
                 },
             },
         };
+
+        server.Built += built.Add;
+
         var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
 
         Assert.Equal(("localhost", 2), (bound.Address, drawn.Count));
         Assert.Equal((held, drawn[1]), (drawn[0], bound.Port));
+        Assert.Equal(2, built.Count);
+        Assert.Throws<ObjectDisposedException>(() =>
+        {
+            return built[0].Services.GetService(typeof(IServer));
+        });
+        Assert.NotNull(built[1].Services.GetService(typeof(IServer)));
+
+        // the abandoned listener releases IPv4 while the other process holds IPv6
+        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, held));
+        }
+        await server.Stop().WaitAsync(Patience, Cancelled);
+        Assert.All(built, (application) =>
+        {
+            Assert.Throws<ObjectDisposedException>(() =>
+            {
+                return application.Services.GetService(typeof(IServer));
+            });
+        });
+        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, bound.Port));
+        }
+        using (var free = HeldOnIPv6(bound.Port))
+        {
+            Assert.Equal(bound.Port, ((IPEndPoint)free.LocalEndPoint!).Port);
+        }
+
+        // eight draws at most, then the last error; a supplied port is never drawn again
+        foreach (var findOpenPort in new[] { true, false })
+        {
+            var draws = 0;
+            var abandoned = new List<WebApplication>();
+            await using var refused = new WebSocketTransportServer
+            {
+                Loopback = new LoopbackBinding
+                {
+                    DrawPort = () =>
+                    {
+                        draws += 1;
+
+                        return held;
+                    },
+                },
+            };
+
+            refused.Built += abandoned.Add;
+
+            var failure = await Assert.ThrowsAnyAsync<IOException>(() =>
+            {
+                return refused.Start(new WebSocketTransportStartOptions { FindOpenPort = findOpenPort, Port = held }, Cancelled);
+            });
+
+            Assert.True(Loopbacks.IsInUse(failure));
+            Assert.Equal(ReadyState.Closed, refused.ReadyState);
+            Assert.Equal(findOpenPort ? 8 : 0, draws);
+            Assert.Equal(findOpenPort ? 8 : 1, abandoned.Count);
+            Assert.All(abandoned, (application) =>
+            {
+                Assert.Throws<ObjectDisposedException>(() =>
+                {
+                    return application.Services.GetService(typeof(IServer));
+                });
+            });
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, held));
+        }
     }
 
     [Fact]
@@ -1576,6 +1649,80 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal((false, connectionHandle), await Next(_closes));
         await server.Stop().WaitAsync(Patience, Cancelled);
         Assert.Empty(_server.ConnectionHandles);
+        Assert.Empty(_server.Clients);
+        Assert.True(_closes.Reader.Count == 0);
+        Assert.Equal(ReadyState.Closed, _server.ReadyState);
+
+        // a second accept registers after the stop's snapshot, while a silent peer's close holds it
+        using var releaseAccept = new ManualResetEventSlim();
+        using var releaseStop = new ManualResetEventSlim();
+        var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshotClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var arrivals = 0;
+        var crossing = new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromMilliseconds(50) })
+        {
+            Accepted = (socket, peerHandle) =>
+            {
+                if (Interlocked.Increment(ref arrivals) == 2)
+                {
+                    accepted.TrySetResult();
+                    Assert.True(releaseAccept.Wait(Patience, Cancelled));
+                }
+
+                return (socket, peerHandle);
+            },
+        };
+
+        await Start(crossing);
+
+        var (silent, silentHandle) = await Connect();
+
+        using (silent)
+        using (var late = new ClientWebSocket())
+        {
+            crossing.Close += (_, connection) =>
+            {
+                if (connection == silentHandle)
+                {
+                    snapshotClosed.TrySetResult();
+                    Assert.True(releaseStop.Wait(Patience, Cancelled));
+                }
+            };
+
+            var connecting = late.ConnectAsync(UriOf(_port), Cancelled);
+
+            try
+            {
+                await accepted.Task.WaitAsync(Patience, Cancelled);
+
+                var stopping = crossing.Stop();
+                var (close, _) = await ReceiveOf(silent);
+
+                Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.EndpointUnavailable), (close.MessageType, close.CloseStatus));
+                await snapshotClosed.Task.WaitAsync(Patience, Cancelled);
+                Assert.Equal((false, silentHandle), await Next(_closes));
+                Assert.False(stopping.IsCompleted);
+                Assert.Equal(ReadyState.Closing, crossing.ReadyState);
+                releaseAccept.Set();
+                await connecting.WaitAsync(Patience, Cancelled);
+
+                var lateHandle = await Next(_connections);
+
+                Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await AnswerClose(late));
+                Assert.Equal((false, lateHandle), await Next(_closes));
+                releaseStop.Set();
+                await stopping.WaitAsync(Patience, Cancelled);
+                Assert.Empty(crossing.ConnectionHandles);
+                Assert.Empty(crossing.Clients);
+                Assert.True(_closes.Reader.Count == 0);
+                Assert.Equal(ReadyState.Closed, crossing.ReadyState);
+            }
+            finally
+            {
+                releaseAccept.Set();
+                releaseStop.Set();
+            }
+        }
     }
 
     [Fact]
