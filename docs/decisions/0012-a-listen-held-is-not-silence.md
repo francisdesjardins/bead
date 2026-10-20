@@ -64,11 +64,14 @@ by default, and the session manager's documentation names ASVS's values.
 **Every server counts the listens a connection holds**, `listening` among its gauges on both sides,
 which a health check reads as it reads the others; both session managers reset either timeout alone.
 
-**One order differs, and the count absorbs it.** The TypeScript transport tells a listen that takes
-another's place before the end of the one it replaces; the C# transport tells them on their
-requests' threads, in no order. The server counts both alike; the support matrix has the row.
+**A listen that takes another's place is told before the end of the one it replaces**, on both
+sides: the TypeScript transport tells the new listen before it ends the one it replaces, and the C#
+transport's replaced listen tells its end once its replacer is told held, so a count of the listens
+held never falls to 0 as one takes over. Each side's HTTP transport server's twin of a listen told,
+in `http-transport-server.test.ts` and `HttpTransportServerTests`, holds the order: held, held,
+ended.
 
-**One more order differs, and the cases wait it out.** The C# transport arms a listen's wait before
+**One order differs, and the cases wait it out.** The C# transport arms a listen's wait before
 it tells the listen, the TypeScript one after; in the transports' file, an `until timer` waits for
 the earliest timer armed to be the one it names, and alone so due, so a timer the listen is about to
 clear never fires first.

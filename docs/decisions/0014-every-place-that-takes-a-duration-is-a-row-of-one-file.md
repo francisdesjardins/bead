@@ -13,7 +13,7 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Twenty-one places take such a duration, from a call's timeout to a WebSocket server's close timeout.
+Twenty-six places take such a duration, from a call's timeout to a WebSocket server's close timeout.
 Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
 destination's, every transport's connect. Few inputs tell two readings of 1.4 apart — a half up from
 a half to the even, a value as given from as rounded at the ceiling, −1 ms, NaN — and a table of
@@ -78,9 +78,10 @@ and the key stays. A place carries besides:
   none, reserves for that call's own timeout; a session under a manager given none of its defaults;
   the server layer over a transport that gives it none;
 - `observed`: `held`, what the place holds is read, at every place on the clock a side is given;
-  `refusal`, whether it refuses alone, at the two on the real clock (0011), the heartbeat and the
-  close timeout, whose timers no test clock reaches. A place observed by its refusal has no default
-  in the file, since nothing would read it;
+  `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
+  reaches: the heartbeat, a WebSocket server's close timeout, and each server's `sendGracePeriod`
+  and `headersTimeout` ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). A place observed by
+  its refusal has no default in the file, since nothing would read it;
 - `clauses`, the units of the spec it checks, each for what it observes of it, and nothing else:
   1.4, which holds and refuses its durations; its `neverClause`; and its default's clause.
 
@@ -144,7 +145,7 @@ the language the row excuses, as in every file of entries
   and a reconnection's delay given as a number, which crosses "A reconnection's delay given as a
   number", an open row;
 - on an outcome the language reaches otherwise: −1 ms crosses "A duration of -1 ms" at every place,
-  the five that refuse never among them, where the C# side refuses it as never rather than under the
+  the ten that refuse never among them, where the C# side refuses it as never rather than under the
   floor; the two inputs finer than a tick cross "A duration finer than a tick" at every place.
 
 The row names `spec/durations.json` and what crosses it, between backticks: the input's name, or the
@@ -204,8 +205,8 @@ duration it is given is the durations file's.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
 three rounds, two on the rule and one on the file, where the user chose what it asked: the defaults
-no clause states left out of the file, and the HTTP transports' six places observed `held`. Its
-objections, each with the answer that holds:
+no clause states left out of the file, and the HTTP transports' places on the clock a side is given
+observed `held`. Its objections, each with the answer that holds:
 
 ### On durations
 
@@ -240,7 +241,7 @@ objections, each with the answer that holds:
 | Objection                                                                                                                                                                                                        | Answer                                                                                                                                                                                                                                                                                  |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | A duration finer than a tick reaches another outcome on the C# side, and neither the file nor the matrix says so                                                                                                 | Accepted: two inputs finer than a tick cross a platform row, "A duration finer than a tick"; the generator plays both conversions, and fails on an outcome either reaches otherwise that crosses no row, and on an input in seconds within a tick of a half.                            |
-| The reason the file pins is read by no harness, and is false of the C# side at −1 ms where never is refused                                                                                                      | Accepted: the reason is derived, held by the regeneration alone, with no surface change; −1 ms crosses its row at every place, the five that refuse never among them; the twins hold one sentence over every input.                                                                     |
+| The reason the file pins is read by no harness, and is false of the C# side at −1 ms where never is refused                                                                                                      | Accepted: the reason is derived, held by the regeneration alone, with no surface change; −1 ms crosses its row at every place, the ten that refuse never among them; the twins hold one sentence over every input.                                                                      |
 | `spec/check.py`'s new lines pass for the wrong reason: the twins meet the read gate, `differs` matches inside words, names are unique where ids are the key, and `uncited.txt` stops telling what no file checks | Accepted: one helper a side alone reads the file, the twins through it, and the harness names every place; a row names the file and what crosses it between backticks; ids are unique; a place cites only what it observes; 15.10, which no place cites, the ledger holds by its twins. |
 | The ways a place is reached are in no file, so nothing holds them alike, and three differences have no row                                                                                                       | Accepted: each place lists its ways by a stable id, each harness keys its table by place and way, and a way one language lacks crosses its row: the Web Worker's connect, and a reconnection's delay given as a number, an open row.                                                    |
 | The file pins outcomes no clause states: the refusal of what is no number, and which places are delays                                                                                                           | Accepted: 1.4 states both, a value that is no number refused, and a delay a wait before an act — a pause, a reconnection's wait, the `wait` a client's listens ask.                                                                                                                     |

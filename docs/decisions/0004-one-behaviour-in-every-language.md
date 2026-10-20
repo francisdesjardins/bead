@@ -137,7 +137,7 @@ take it:
 ```json
 {
   "name": "a request on a call id already waiting is refused 409, marked",
-  "clauses": ["15.5.3", "15.6.8"],
+  "clauses": ["15.5.3", "15.6.9"],
   "transport": "http",
   "steps": [
     {
@@ -282,7 +282,9 @@ case, and any language that can carry the protocol whole mirrors the surface alm
 each language's own mapping of terms is its implementation's record, as
 [0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's. A router's core,
 which both routers build on, is internal on every side: an application builds on the routers, and
-stands behind a destination by a router target of its own
+stands behind a destination by a target it registers with a relay, a client router or a connection
+of the relay's own (`RelayTarget` on the TypeScript side; `IRouterTarget`, which `RouterClient`
+implements, or `ConnectionTarget` on the C# side)
 ([0010](0010-a-request-presents-a-credential-of-a-scheme.md), On what a procedure is handed of its
 call's credentials). A test missing on one side is added to the other, and a term renamed on one
 side is renamed on every side where it applies. What couples transports stays outside the

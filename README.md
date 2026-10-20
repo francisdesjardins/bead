@@ -31,8 +31,8 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, from
-0.6.0, a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, ahead,
+a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -65,15 +65,18 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
 own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: each side's parsers fuzzed, guided by coverage, Jazzer.js on the TypeScript side and
-  SharpFuzz on the C# side, both held to read one corpus alike, a short run in CI.
-- **0.6.0**: a topic-based publish/subscribe broker as one more transport, one core and one
-  adapter a broker, Bead's envelope, routers and sessions the same at each end
+- **Next**: one corpus read alike by both sides' parsers, held as a gate as
+  `tools/protobuf-conformance.mjs differential` holds a `proto` payload, a target for a
+  WebSocket's handshake beside the four of [Fuzzing](#fuzzing), and a short run of them in CI; and a
+  guard in CI against a gross regression of the benches, where their spread on CI's runners lets
+  one hold ([Measurement](#measurement)).
+- **Then**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
+  a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
-  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
-  latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
+  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a counted
+  call's cost measured against an uncounted one, and a constrained C side, each bound by the records
+  that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -98,7 +101,8 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, the release and the coverage report, Node without dependencies
+tools/                        repository checks, the release, the coverage report, bench-compare.mjs and fuzz.mjs, Node without dependencies
+  fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows

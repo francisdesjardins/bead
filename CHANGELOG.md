@@ -63,6 +63,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The spec moves to 0.7.0 (`spec-v0.7.0`), and its companion, `spec/debugging.md`, to 0.3.0
   (`debugging-v0.3.0`).
+- The documents are brought to 0.6.0: the records, the spec and its companion in form alone, the
+  READMEs and the matrix; no record moves, and the broker and what remains of the fuzzing and the
+  measurement stay ahead.
 - The DevTools panel uses penumbra's spacing grid and a shared radius scale, with comments for
   measured glyphs, strokes and native slider alignment.
 
