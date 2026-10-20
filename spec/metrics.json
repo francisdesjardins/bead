@@ -12,7 +12,7 @@
     "A duration is timed on the clock the server is given, which only an advance moves: a call that starts and ends between two advances takes 0 microseconds.",
     "clauses are the units of spec/debugging.md an entry checks: a clause, 7.3; a row of its table, counted from 1, 9.4.2."
   ],
-  "debuggingVersion": "0.2.1",
+  "debuggingVersion": "0.3.0",
   "mediaType": "text/plain; version=0.0.4; charset=utf-8",
   "wallClock": "2026-01-01T00:00:00Z",
   "expositions": [
