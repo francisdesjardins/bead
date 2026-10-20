@@ -187,9 +187,11 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * A transport server over WebSocket connections.
  *
  * A text message is delivered as a `string` and a binary one per `binaryType`. A protocol error on a
- * connection emits `error` with its handle, then that connection's `close`. Each connection is
- * pinged every `heartbeat`, and dropped when it left a ping unanswered: a peer gone without a word
- * — a network cut, a machine asleep — ends in a `close` rather than never.
+ * connection emits `error` with its handle, then that connection's `close`; a peer that drops
+ * without its closing handshake, its TCP connection ended or reset, emits no `error`: its unclean
+ * `close` tells it. Each connection is pinged every `heartbeat`, and dropped when it left a ping
+ * unanswered: a peer gone without a word — a network cut, a machine asleep — ends in a `close`
+ * rather than never.
  *
  * An upgrade that carries no `Origin` carries one credential, its `Authorization`, as it came,
  * whole, its surrounding whitespace removed, none when empty or absent: every message of its

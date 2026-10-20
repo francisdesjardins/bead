@@ -305,11 +305,13 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     public event Action<TransportServerRefusal>? Refusal;
 
     /// <summary>
-    /// What went wrong on a connection, with its handle: its socket's failure, or what a listener of
-    /// its events threw, the transport going on as if it returned (spec 15.1). With an empty handle
-    /// for a throw of a <see cref="Refusal"/> listener alone, which names no connection; never the
-    /// server's own failure, as the TypeScript side's can be: Kestrel tells a failure after it
-    /// listens only to its logs.
+    /// What went wrong on a connection, with its handle: a protocol error on it, before its
+    /// <see cref="Close"/>; a bound it is dropped behind; or what a listener of its events threw, the
+    /// transport going on as if it returned (spec 15.1). Never a peer that drops without its closing
+    /// handshake, its TCP connection ended or reset, which its unclean <see cref="Close"/> tells. With
+    /// an empty handle for a throw of a <see cref="Refusal"/> listener alone, which names no
+    /// connection; never the server's own failure, as the TypeScript side's can be: Kestrel tells a
+    /// failure after it listens only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
 
@@ -877,7 +879,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)
         {
             // a socket dropped behind a bound was reported as it was: its abort says nothing more
-            if (!connection.IsDropped)
+            if (!connection.IsDropped && !IsPeerGone(reason))
             {
                 Error?.Invoke(reason, connectionHandle);
             }
@@ -901,6 +903,16 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 closed.TrySetResult();
             }
         }
+    }
+
+    // ! a peer gone without its closing handshake, its TCP connection ended or reset, is no error on
+    // its connection: its unclean close tells it, as the TypeScript side's does. .NET raises both
+    // ConnectionClosedPrematurely, on Windows as on Linux: Kestrel reads a reset as its stream's end,
+    // and the managed socket wraps any failure of its stream in that code; a protocol error is
+    // Faulted, and told
+    private static bool IsPeerGone(Exception reason)
+    {
+        return reason is WebSocketException { WebSocketErrorCode: WebSocketError.ConnectionClosedPrematurely };
     }
 
     // a connection as the server holds it: its socket's, its end as the server tells it, the rank it

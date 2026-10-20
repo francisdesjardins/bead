@@ -18,6 +18,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The C# WebSocket server refuses an upgrade whose `Content-Length` is not zeros alone, a line it
   cannot read or two lines among them, 400 `malformed`, as the TypeScript side does.
+- The C# WebSocket server tells a peer that drops without its closing handshake, its TCP
+  connection ended or reset, by its unclean `Close` alone, no `Error`, as the TypeScript side does.
 
 ## [0.6.0] - 2026-10-20
 

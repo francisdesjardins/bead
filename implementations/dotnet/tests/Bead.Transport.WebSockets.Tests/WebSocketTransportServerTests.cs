@@ -2499,7 +2499,70 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await closed.Task.WaitAsync(Patience, Cancelled);
 
             Assert.Equal([("error", connectionHandle), ("close", connectionHandle)], events);
-            Assert.IsType<WebSocketException>(error);
+            Assert.Equal(WebSocketError.Faulted, Assert.IsType<WebSocketException>(error).WebSocketErrorCode);
+        }
+    }
+
+    [Fact]
+    public async Task Tells_a_peer_that_drops_without_its_closing_handshake_by_its_unclean_close_alone_no_error()
+    {
+        var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+
+        _server.Error += (reason, connectionHandle) =>
+        {
+            errors.Enqueue((reason, connectionHandle));
+        };
+
+        // its socket ended with no close frame, then reset
+        var drops = new Func<Task<string>>[]
+        {
+            async () =>
+            {
+                var (client, connectionHandle) = await Connect();
+
+                using (client)
+                {
+                    client.Abort();
+                }
+
+                return connectionHandle;
+            },
+            async () =>
+            {
+                var (tcp, status) = await Upgraded(UpgradeRequest());
+                var connectionHandle = await Next(_connections);
+
+                using (tcp)
+                {
+                    Assert.Equal(101, status);
+                    // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+                    tcp.Client.LingerState = new LingerOption(true, 0);
+                }
+
+                return connectionHandle;
+            },
+        };
+
+        foreach (var drop in drops)
+        {
+            var connectionHandle = await drop();
+
+            // ! an error, were one told, comes before its close: the read's catch runs before its finally
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+        }
+
+        // and it keeps serving
+        var (next, nextHandle) = await Connect();
+
+        using (next)
+        {
+            await next.SendAsync("ping"u8.ToArray(), WebSocketMessageType.Text, true, Cancelled);
+
+            var (message, messageHandle) = await Next(_messages);
+
+            Assert.Equal(("ping", nextHandle), (Encoding.UTF8.GetString(message.Bytes.Span), messageHandle));
+            Assert.True(_closes.Reader.Count == 0);
+            Assert.Empty(errors);
         }
     }
 
