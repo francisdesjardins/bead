@@ -626,6 +626,77 @@ test.describe('WSTransportServer, on the wire', () => {
     ]);
   });
 
+  test('tells a peer that drops without its closing handshake by its unclean close alone, no error', async () => {
+    const errors: unknown[][] = [];
+    const closes: unknown[][] = [];
+    const handles: string[] = [];
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+
+    server.on('error', (err, connectionHandle) => {
+      errors.push([err, connectionHandle]);
+    });
+    server.on('close', (clean, connectionHandle) => {
+      closes.push([clean, connectionHandle]);
+    });
+
+    // its socket ended with no close frame, then reset
+    const drops = [
+      async () => {
+        const connection = nextServerEvent(server, 'connection');
+        const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
+
+        socket.addEventListener('error', () => {});
+
+        const [[, , connectionHandle]] = await Promise.all([connection, once(socket, 'open')]);
+
+        socket.terminate();
+
+        return connectionHandle;
+      },
+      async () => {
+        const connection = nextServerEvent(server, 'connection');
+        const socket = await openTcp(port);
+
+        socket.write(upgradeRequest());
+
+        const [, , connectionHandle] = await connection;
+
+        // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+        socket.resetAndDestroy();
+
+        return connectionHandle;
+      },
+    ];
+
+    for (const drop of drops) {
+      const closed = nextServerEvent(server, 'close');
+
+      handles.push(await drop());
+      await closed;
+    }
+
+    // and it keeps serving
+    const next = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
+
+    await once(next, 'open');
+
+    const message = nextServerEvent(server, 'message');
+
+    next.send('ping');
+
+    const [{ data }, connectionHandle] = await message;
+
+    expect([data, connectionHandle, closes, errors]).toEqual([
+      'ping',
+      server.clients[0]?.connectionHandle,
+      handles.map((handle) => {
+        return [false, handle];
+      }),
+      [],
+    ]);
+    next.close();
+  });
+
   test('closes with 1009 a message past an envelope’s limit, 16,778,240 bytes, when told no bound', async () => {
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
     const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
