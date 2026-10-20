@@ -42,8 +42,10 @@ session's timers count what the peer says, not that it answers. Bead has no ping
 a connection is alive is its transport's to know.
 
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
-its `maxPayload` says otherwise, and closes a larger one with 1009; over the global `WebSocket`, its
-platform's bound applies. A WebSocket server judges a request at its address in the order of spec
+its `maxPayload` says otherwise, and fails a connection that sends a larger one with 1009; over the
+global `WebSocket`, its platform's bound applies. A server drains it until the peer's close or its
+`closeTimeout`, which `ws` is given, its close unclean whatever the peer answers, and reports it on
+`error`, naming `maximumMessageBytes` and its value (spec 15.3). A WebSocket server judges a request at its address in the order of spec
 15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
 ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
 403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
@@ -67,9 +69,9 @@ connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`,
 each second on the real clock, is dropped. An envelope that would take what waits past
 `maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once,
 184,551,424 bytes under the limits by default, which `createWSServer` derives from its router's.
-Each drop is reported on `error`, naming its bound, and its close is not clean; the heartbeat drops
-a reader that stops behind a large backlog besides. A paced subscription queues on the server what a
-client that falls behind has not credited.
+Each drop is reported on `error` as its connection closes, naming its bound and its value, and its
+close is not clean; the heartbeat drops a reader that stops behind a large backlog besides. A paced
+subscription queues on the server what a client that falls behind has not credited.
 
 A server listens on `localhost` unless `start` is given an `address`: both loopbacks, `127.0.0.1`
 and `::1`, on one port, as Kestrel's `ListenLocalhost` does, so no other process can answer a client

@@ -1138,11 +1138,17 @@ what one throws is reported, as section 9.0 reports an error, by its transport w
 it was told of; the listeners after it are called all the same, and the transport goes on as if it
 returned. A side awaits nothing a listener returns: what it settles to later is its platform's, as
 is what a listener of the transport's own `error` throws. A listener's throw refuses no connection,
-fails no exchange and closes nothing. A server's transport tells each refusal it judges of its own:
-a request it refuses as it arrives, in section 15.6's order, or whose body it refuses as it comes,
-marked in `bead-refusal`. It never tells the 404 that ends an exchange or a listen it had taken as
-their connection closes (section 15.7), which its close tells, nor what HTTP refuses of its own,
-unmarked. A refusal told carries its status, its reason, the request's authority and its `Origin`,
+fails no exchange and closes nothing. What a server's transport reports on its `error` is a protocol
+error on a connection, a connection it drops behind a bound or fails with 1009, each naming the
+bound and its value (sections 15.3, 15.12), and what a listener throws, as it throws: a
+connection's own once, as it ends, its close or its drop begun, so that no listener's throw keeps
+it open, and before its close, which is then unclean. It reports no peer that drops without its
+closing handshake, its TCP connection ended or reset, nor one its heartbeat drops, nor its own drop
+of a peer that never answered a close within its close timeout: each one's unclean close tells it.
+A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
+in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
+tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
+15.7), which its close tells, nor what HTTP refuses of its own, unmarked. A refusal told carries its status, its reason, the request's authority and its `Origin`,
 each as it came, the field's lines joined by ", "
 ([RFC 9110 §5.3](https://www.rfc-editor.org/rfc/rfc9110#section-5.3)), or none, and the client's
 address and port (section 15.12); nothing else of the request, so neither its target, nor its
@@ -1241,13 +1247,20 @@ Each of these refusals but HTTP's own is marked as section 15.6 says, and told (
 connection; a 426 names `upgrade` in its `Connection`.
 
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
-`maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
-side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
-connection that left a ping unanswered, so a peer gone without a word ends in a close; a ping waits
-behind what was sent before it, so a peer that stops reading leaves it unanswered too. What waits
-for a server's socket is held besides as section 15.12 says. A side that closes says 1000; a server
-that stops, 1001, to each connection it holds, one whose opening handshake completes as its stop
-begins among them. A close with 1000 is the clean one.
+`maximumMessageBytes` — `maximumEnvelopeBytes` by default — it fails the connection with 1009
+([RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7),
+[§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
+[§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
+still comes until the peer's close or its close timeout, then ends the connection, its close
+unclean whatever code the peer answers with; a server reports it, naming the bound and its value
+(section 15.1). A server's close timeout, 5 seconds by default, bounds each closing handshake it
+begins: a peer that has not answered by then is dropped, its close unclean. A side SHOULD ping its
+peer every `heartbeat` — 30 seconds by default, or never — and close a connection that left a ping
+unanswered, so a peer gone without a word ends in a close; a ping waits behind what was sent
+before it, so a peer that stops reading leaves it unanswered too. What waits for a server's socket
+is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
+each connection it holds, one whose opening handshake completes as its stop begins among them. A
+close with 1000 is the clean one.
 
 ### HTTP
 

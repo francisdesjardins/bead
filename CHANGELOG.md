@@ -14,12 +14,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   upgrades; `blueprint`, beadc's blueprint reader and its form, from `builder/tools/fuzz/`, seeded
   from the repository's blueprints.
 
+### Changed
+
+- Spec 15.3 states that a side fails a connection with 1009 past its `maximumMessageBytes` (RFC
+  6455 §7.1.7): it drains until the peer's close or its close timeout, 5 seconds by default on a
+  server, its close unclean whatever code the peer answers with, and a server reports it naming the
+  bound and its value. Spec 15.1 states what a server transport's `error` reports: a protocol
+  error, a drop or a 1009, each a connection's own once, as it ends, before its close, and a
+  listener's throw; never a peer gone without its closing handshake, one its heartbeat drops, or
+  the server's own abort past its close timeout.
+- Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
+  `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
+  where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name
+  alone.
+
 ### Fixed
 
 - The C# WebSocket server refuses an upgrade whose `Content-Length` is not zeros alone, a line it
   cannot read or two lines among them, 400 `malformed`, as the TypeScript side does.
 - The C# WebSocket server tells a peer that drops without its closing handshake, its TCP
   connection ended or reset, by its unclean `Close` alone, no `Error`, as the TypeScript side does.
+- Both WebSocket servers tell a message past `maximumMessageBytes` by one `error` of their own,
+  `<handle> is closed with 1009: a message past its maximumMessageBytes, N bytes`, a `GenericError`
+  keeping `ws`'s error as its `cause` on the TypeScript side, an `InvalidDataException` on the C#
+  side, which told none; then an unclean close, which the C# side told clean when the peer's answer
+  was a 1000.
+- Both WebSocket servers report a connection's error once its close or its drop began, and tell its
+  close all the same, so a listener of `error` that throws keeps no connection open, a drop's among
+  them. The C# server tells at most one `Error` a connection: none past its own 1009, its drop, its
+  abort after `CloseTimeout`, or its heartbeat's drop.
+- The TypeScript WebSocket server gives `ws` its `closeTimeout`, so a peer that never answers its
+  1009 is dropped after it rather than after `ws`'s own 30 seconds.
 
 ## [0.6.0] - 2026-10-20
 

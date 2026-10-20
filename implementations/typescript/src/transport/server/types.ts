@@ -404,19 +404,26 @@ export interface IWebSocketServerLike {
 export interface IWebSocketServerConstructor {
   /**
    * `server` is the transport's own HTTP server, which `ws` upgrades on and leaves open when it
-   * closes.
+   * closes; `closeTimeout`, the transport's, which `ws` waits on a close within, its own 1009's
+   * among them, from ws 8.22.
    */
-  new (options: { maxPayload?: number | undefined; server: Server }): IWebSocketServerLike;
+  new (options: {
+    closeTimeout?: number | undefined;
+    maxPayload?: number | undefined;
+    server: Server;
+  }): IWebSocketServerLike;
 }
 
 export interface IWSTransportServerOptions extends ITransportServerOptions {
   /** Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}, for every connection. */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
   /**
-   * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close` and
-   * `stop`, on the real clock whatever `clock` is: it bounds the platform's own close handshake.
-   * From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end; any
-   * other, 0 among them, is a {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
+   * Milliseconds a connection gets to answer a close before it is dropped, which bounds `close`,
+   * `stop` and the 1009 a message past `maxPayload` fails it with, on the real clock whatever
+   * `clock` is: it bounds the platform's own close handshake, and is given to `ws` as its own. From
+   * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end, which the
+   * timer `ws` arms on every close holds to 2³¹ − 1; any other, 0 among them, is a
+   * {@link ProgrammerError}. Defaults to {@link CLOSE_TIMEOUT}.
    */
   closeTimeout?: number | undefined;
   /**
@@ -452,9 +459,11 @@ export interface IWSTransportServerOptions extends ITransportServerOptions {
    */
   hosts?: readonly string[] | undefined;
   /**
-   * The largest message a connection may send, in bytes; `ws` closes a connection that sends a
-   * larger one with 1009. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's limit: a
-   * router whose `maximumEnvelopeBytes` is raised needs it raised alike, as `createWSServer` does.
+   * The largest message a connection may send, in bytes, the spec's `maximumMessageBytes`; `ws`
+   * fails a connection that sends a larger one with 1009, reported on `error` naming the bound, its
+   * close unclean whatever the peer answers (spec 15.3). Defaults to {@link MAXIMUM_MESSAGE_BYTES},
+   * the default envelope's limit: a router whose `maximumEnvelopeBytes` is raised needs it raised
+   * alike, as `createWSServer` does.
    */
   maxPayload?: number | undefined;
   /**

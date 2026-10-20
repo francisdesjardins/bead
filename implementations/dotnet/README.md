@@ -176,7 +176,10 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   `MaximumConnectionsPerAddress`, gauged `largestAddressConnections`, before the first 503; and
   holds what waits for a client's socket to `MinimumSendBytesPerSecond` past `SendGracePeriod` and
   to `MaximumUnsentBytes`, the facade's drawn from its router's limits, a client behind either
-  dropped, its close unclean, and reported through `Error`, naming the bound.
+  dropped, its close unclean, and reported through `Error` as its connection ends, naming the bound
+  and its value. A message past `MaximumMessageBytes` fails its connection with 1009, drained until
+  the peer's close or `CloseTimeout`, its close unclean whatever the peer answers, and reported
+  through `Error` the same way (spec 15.3).
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Net.WebSockets;
 using System.Threading.Channels;
 
@@ -18,11 +19,16 @@ internal sealed class WebSocketConnection
         Channel.CreateUnbounded<(ReadOnlyMemory<byte>, WebSocketCloseStatus?, TaskCompletionSource)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    // what waits for the socket — handed it, in the channel or under SendAsync — and whether the
-    // connection was dropped behind a bound; under the lock
+    // what waits for the socket — handed it, in the channel or under SendAsync — and how this side
+    // ended the connection of its own, when it did: dropped behind a bound, and why; failed with
+    // 1009; aborted past its close timeout; and whether it ended, past which nothing drops it; under
+    // the lock
     private readonly Lock _gate = new();
     private long _unsent;
-    private bool _isDropped;
+    private string? _dropped;
+    private bool _isTooBig;
+    private bool _isAbandoned;
+    private bool _isEnded;
 
     public WebSocketConnection(WebSocket socket, (int MaximumMessageBytes, TimeSpan CloseTimeout) bounds)
         : this(socket, new Bounds { MaximumMessageBytes = bounds.MaximumMessageBytes, CloseTimeout = bounds.CloseTimeout })
@@ -43,14 +49,45 @@ internal sealed class WebSocketConnection
 
     public WebSocket Socket { get; }
 
-    /// <summary>Whether it was dropped behind a bound of its pace, which was reported as it was.</summary>
-    public bool IsDropped
+    /// <summary>
+    /// Why it was dropped behind a bound of its pace, naming the bound in the spec's spelling and its
+    /// value, which its server reports; none while it was not.
+    /// </summary>
+    public string? Dropped
     {
         get
         {
             lock (_gate)
             {
-                return _isDropped;
+                return _dropped;
+            }
+        }
+    }
+
+    /// <summary>Whether it was failed with 1009, a message past its bound, which its server reports.</summary>
+    public bool IsTooBig
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _isTooBig;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether this side ended it of its own: dropped behind a bound, failed with 1009, or aborted
+    /// past its close timeout. What its socket meets after says nothing more, and its close is
+    /// unclean, whatever the peer answers.
+    /// </summary>
+    public bool IsEndedHere
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _dropped is not null || _isTooBig || _isAbandoned;
             }
         }
     }
@@ -113,7 +150,7 @@ internal sealed class WebSocketConnection
     }
 
     // * what waits for the socket, held (spec 15.12): an envelope that would take it past its bound
-    // drops the connection; any other is handed to its pace. False once dropped
+    // drops the connection; any other is handed to its pace. False once dropped, or ended
     private bool Hold((int Bytes, Pacing Pace) handed)
     {
         var (bytes, pace) = handed;
@@ -121,7 +158,7 @@ internal sealed class WebSocketConnection
 
         lock (_gate)
         {
-            if (_isDropped)
+            if (_dropped is not null || _isEnded)
             {
                 return false;
             }
@@ -130,7 +167,7 @@ internal sealed class WebSocketConnection
 
             if (isPast)
             {
-                _isDropped = true;
+                _dropped = string.Create(CultureInfo.InvariantCulture, $"what waits for its socket would pass maximumUnsentBytes, {pace.MaximumUnsentBytes} bytes");
             }
             else
             {
@@ -140,7 +177,7 @@ internal sealed class WebSocketConnection
 
         if (isPast)
         {
-            Drop(nameof(pace.MaximumUnsentBytes));
+            Drop();
 
             return false;
         }
@@ -170,29 +207,32 @@ internal sealed class WebSocketConnection
         }
     }
 
-    // what waits past its deadline drops the connection, but one dropped or gone already
+    // what waits past its deadline drops the connection, but one dropped, ended or gone already
     private void Late()
     {
         lock (_gate)
         {
-            if (_isDropped || _unsent == 0)
+            if (_dropped is not null || _isEnded || _unsent == 0)
             {
                 return;
             }
 
-            _isDropped = true;
+            var pace = _pace!;
+
+            _dropped = string.Create(
+                CultureInfo.InvariantCulture,
+                $"what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond {pace.MinimumSendBytesPerSecond} past sendGracePeriod {(long)pace.SendGracePeriod.TotalMilliseconds} ms");
         }
 
-        Drop(nameof(Pacing.MinimumSendBytesPerSecond));
+        Drop();
     }
 
     // ! dropped with no closing handshake, its close unclean: a peer that does not read would read
-    // no close frame waiting behind what it does not read (RFC 6455 §7.1.7); reported first,
-    // naming its bound, so its close comes after
-    private void Drop(string bound)
+    // no close frame waiting behind what it does not read (RFC 6455 §7.1.7); its server reports it
+    // once its read ends, before its close, so nothing a listener throws keeps it open
+    private void Drop()
     {
         _sendPace?.Stop();
-        _pace!.Dropped(bound);
         Socket.Abort();
     }
 
@@ -210,6 +250,12 @@ internal sealed class WebSocketConnection
 
         if (await Task.WhenAny(_ended.Task, waiting) == waiting)
         {
+            // marked before the abort the pending read meets: this side's own, no error
+            lock (_gate)
+            {
+                _isAbandoned = true;
+            }
+
             Socket.Abort();
         }
         else
@@ -245,8 +291,9 @@ internal sealed class WebSocketConnection
     /// <summary>
     /// Reads each message whole, bounded, and hands it to <paramref name="deliver"/>, until the
     /// socket closes: a close from the peer is answered, and once this side closes, what still comes
-    /// is read to its close and dropped. A message past the bound closes with 1009. What breaks the
-    /// socket throws; either way, the connection ends.
+    /// is read to its close and dropped. A message past the bound fails the connection with 1009
+    /// (RFC 6455 §7.1.7): what comes after is read to the peer's close, or to the close timeout, and
+    /// dropped. What breaks the socket throws; either way, the connection ends.
     /// </summary>
     public async Task Read(Action<TransportMessage> deliver)
     {
@@ -279,6 +326,12 @@ internal sealed class WebSocketConnection
                 {
                     isClosing = true;
                     message.ResetWrittenCount();
+
+                    lock (_gate)
+                    {
+                        _isTooBig = true;
+                    }
+
                     _ = CloseQuietly(WebSocketCloseStatus.MessageTooBig);
 
                     continue;
@@ -307,6 +360,11 @@ internal sealed class WebSocketConnection
     // pump ends, and a close waiting on the peer's answer waits no timeout
     public void End()
     {
+        lock (_gate)
+        {
+            _isEnded = true;
+        }
+
         _outgoing.Writer.TryComplete();
         _ended.TrySetResult();
         _sendPace?.Stop();
@@ -366,7 +424,7 @@ internal sealed class WebSocketConnection
 
     /// <summary>
     /// What holds what waits for a server's socket (spec 15.12): its pace past its grace, 0 holding
-    /// none, its bound, and what hears the bound a drop is behind, before the socket is aborted.
+    /// none, and its bound.
     /// </summary>
     internal sealed record Pacing
     {
@@ -375,7 +433,5 @@ internal sealed class WebSocketConnection
         public required TimeSpan SendGracePeriod { get; init; }
 
         public required long MaximumUnsentBytes { get; init; }
-
-        public required Action<string> Dropped { get; init; }
     }
 }
