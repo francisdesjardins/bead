@@ -266,8 +266,9 @@ test.describe('createReceivingTransfers', () => {
 
   test('stops a transfer’s timer once its payload is whole, and once it is closed', () => {
     const { clock, receiving } = createReceiving({ transferInactivityTimeout: 250 });
+    let stalled = 0;
     const onStall = () => {
-      return undefined;
+      stalled += 1;
     };
     const whole = openedOf(
       receiving.open(Uint8Array.of(1), {
@@ -298,6 +299,8 @@ test.describe('createReceivingTransfers', () => {
       })
     ).toBe(true);
     expect(clock.countTimers()).toBe(0);
+    clock.tick(1_000);
+    expect(stalled).toBe(0);
   });
 
   test('keeps no process alive for a transfer’s timer', () => {

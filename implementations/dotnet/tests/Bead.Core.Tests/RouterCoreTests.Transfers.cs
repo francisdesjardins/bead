@@ -1019,6 +1019,8 @@ public sealed partial class RouterCoreTests
 
         public List<string> SentOn { get; } = [];
 
+        public List<(uint CallId, string ConnectionHandle)> AnswersReceived { get; } = [];
+
         public List<Exception> Reports { get; } = [];
 
         // the connection each report came with, in order
@@ -1117,6 +1119,11 @@ public sealed partial class RouterCoreTests
         public bool OnUnpairedFailure(Envelope envelope, string connectionHandle)
         {
             return Unpaired?.Invoke(envelope) ?? false;
+        }
+
+        public void OnAnswerReceived(IEnvelopeHeader header, string connectionHandle)
+        {
+            AnswersReceived.Add((header.CallId, connectionHandle));
         }
 
         public SessionToken? SessionTokenOf(string connectionHandle)

@@ -88,7 +88,9 @@ test.describe('createPendingCalls', () => {
     ]);
 
     // the timer replaced frees nothing
-    clock.tick(39);
+    clock.tick(10);
+    expect([calls.isReserved(1, 'a'), calls.isReserved(3, 'a')]).toEqual([true, true]);
+    clock.tick(29);
 
     expect([calls.isReserved(1, 'a'), calls.isReserved(3, 'a')]).toEqual([true, true]);
 

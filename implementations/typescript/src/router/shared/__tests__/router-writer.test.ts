@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import {
+  CLIENT_FAILURES,
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
@@ -294,6 +295,23 @@ test.describe('createRouterCore', () => {
       );
 
       await expect(asking).rejects.toMatchObject({ detail: 'abcd' });
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port, { limits: { maximumDetailBytes: 10 } });
+      const asked = clientCore.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: echo,
+      });
+      clientCore.receive(
+        envelopeOf({
+          kind: EnvelopeKind.FAILURE,
+          header: { kind: EnvelopeKind.FAILURE, callId: 1 },
+          failure: { code: 7, detail, scope: FailureScope.APPLICATION },
+        }),
+        'a'
+      );
+      await expect(asked).rejects.toMatchObject({ detail: 'x'.repeat(10) });
     });
   });
 
