@@ -1572,6 +1572,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
                 if (connection.Listen is { } replaced)
                 {
+                    replaced.Replacer = listening;
                     Answer(replaced, Nothing);
                 }
 
@@ -1607,6 +1608,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         try
         {
             _listeners.Tell(Listen, (true, connection.ConnectionHandle));
+            listening.Told.TrySetResult();
 
             var ending = await listening.Ended.Task.WaitAsync(context.RequestAborted);
 
@@ -1661,6 +1663,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 {
                     Rest(connection);
                 }
+            }
+
+            // ! a listen another replaced tells its end once its replacer told it is held, as one
+            // thread tells them: so a count of the listens held never falls to 0 as one takes over
+            if (listening.Replacer is { } replacer)
+            {
+                await replacer.Told.Task;
             }
 
             if (isDrawn)
@@ -1832,6 +1841,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         public ITimer? Timer { get; set; }
 
         public TaskCompletionSource<Ending> Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // the listen that took its place, set under the lock as it does
+        public Listening? Replacer { get; set; }
+
+        // done once its own start is told
+        public TaskCompletionSource Told { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     // a connection's own state, which nothing outside the transport reaches; touched under the lock

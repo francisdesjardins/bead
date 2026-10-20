@@ -128,6 +128,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# HTTP server tells a listen that replaces another as held before it tells the end of the
+  one it replaced, as the TypeScript side does, so a count of the listens held never falls to 0
+  as one takes over.
 - The DevTools panel's control borders reach at least 3:1 contrast against their surfaces in both
   themes.
 
