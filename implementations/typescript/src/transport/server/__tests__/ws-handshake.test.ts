@@ -402,6 +402,11 @@ test.describe('refusalOfHandshake', () => {
         requestOf([['Sec-WebSocket-Protocol', '']]),
         requestOf([['Sec-WebSocket-Protocol', 'bead/1']]),
         requestOf([['Content-Length', '5']]),
+        requestOf([['Content-Length', 'abc']]),
+        requestOf([
+          ['Content-Length', '0'],
+          ['Content-Length', '5'],
+        ]),
         requestOf([['Transfer-Encoding', 'chunked']]),
         requestOf(
           [
@@ -412,7 +417,7 @@ test.describe('refusalOfHandshake', () => {
         ),
       ].map(answerOf)
     ).toEqual(
-      Array.from({ length: 19 }, () => {
+      Array.from({ length: 21 }, () => {
         return MALFORMED;
       })
     );

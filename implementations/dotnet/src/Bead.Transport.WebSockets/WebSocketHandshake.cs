@@ -156,6 +156,24 @@ internal static class WebSocketHandshake
             && elements.Distinct(StringComparer.Ordinal).Count() == elements.Count;
     }
 
+    // no content: each Content-Length line is zeros alone, as written, never a length the platform
+    // read from it, which a line it cannot read leaves absent
+    private static bool IsNoContent(StringValues lines)
+    {
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrEmpty(line) || line.Any((digit) =>
+            {
+                return digit != '0';
+            }))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // whether a Sec-WebSocket-Key is one field line of 16 bytes in base64 (RFC 6455 §4.2.1 item 5,
     // §11.3.1): 22 characters of the alphabet, then two pads
     private static bool IsKey(StringValues lines)
@@ -202,7 +220,7 @@ internal static class WebSocketHandshake
         return IsKey(headers.SecWebSocketKey)
             && (headers.SecWebSocketProtocol.Count == 0 || IsSubprotocolList(headers.SecWebSocketProtocol))
             && headers.Authorization.Count <= 1
-            && headers.ContentLength is null or 0
+            && IsNoContent(headers["Content-Length"])
             && headers.TransferEncoding.Count == 0;
     }
 
