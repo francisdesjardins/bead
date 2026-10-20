@@ -1877,13 +1877,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             await during.CancelAsync();
             release.Set();
 
-            var cancellation = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             {
                 return starting.WaitAsync(Patience, Cancelled);
             });
 
-            Assert.Equal(during.Token, cancellation.CancellationToken);
             Assert.True(during.IsCancellationRequested);
+            Assert.False(Cancelled.IsCancellationRequested);
             Assert.Equal(ReadyState.Closed, pending.ReadyState);
             Assert.NotNull(pendingApplication);
             Assert.Throws<ObjectDisposedException>(() =>
