@@ -2339,6 +2339,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         using var other = HeldOnIPv6(0);
         var held = ((IPEndPoint)other.LocalEndPoint!).Port;
         var drawn = new List<int>();
+        var built = new List<Microsoft.AspNetCore.Builder.WebApplication>();
         await using var server = new HttpTransportServer()
         {
             // the first port drawn free on IPv4, held on IPv6: drawn again
@@ -2352,10 +2353,82 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 },
             },
         };
+
+        server.Built += built.Add;
+
         var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
 
         Assert.Equal(("localhost", 2), (bound.Address, drawn.Count));
         Assert.Equal((held, drawn[1]), (drawn[0], bound.Port));
+        Assert.Equal(2, built.Count);
+        Assert.Throws<ObjectDisposedException>(() =>
+        {
+            return built[0].Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+        });
+        Assert.NotNull(built[1].Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer)));
+
+        // the abandoned listener releases IPv4 while the other process holds IPv6
+        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, held));
+        }
+        await server.Stop().WaitAsync(Patience, Cancelled);
+        Assert.All(built, (application) =>
+        {
+            Assert.Throws<ObjectDisposedException>(() =>
+            {
+                return application.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+            });
+        });
+        using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, bound.Port));
+        }
+        using (var free = HeldOnIPv6(bound.Port))
+        {
+            Assert.Equal(bound.Port, ((IPEndPoint)free.LocalEndPoint!).Port);
+        }
+
+        // eight draws at most, then the last error; a supplied port is never drawn again
+        foreach (var findOpenPort in new[] { true, false })
+        {
+            var draws = 0;
+            var abandoned = new List<Microsoft.AspNetCore.Builder.WebApplication>();
+            await using var refused = new HttpTransportServer
+            {
+                Loopback = new LoopbackBinding
+                {
+                    DrawPort = () =>
+                    {
+                        draws += 1;
+
+                        return held;
+                    },
+                },
+            };
+
+            refused.Built += abandoned.Add;
+
+            var failure = await Assert.ThrowsAnyAsync<IOException>(() =>
+            {
+                return refused.Start(new HttpTransportStartOptions { FindOpenPort = findOpenPort, Port = held }, Cancelled);
+            });
+
+            Assert.True(Loopbacks.IsInUse(failure));
+            Assert.Equal(ReadyState.Closed, refused.ReadyState);
+            Assert.Equal(findOpenPort ? 8 : 0, draws);
+            Assert.Equal(findOpenPort ? 8 : 1, abandoned.Count);
+            Assert.All(abandoned, (application) =>
+            {
+                Assert.Throws<ObjectDisposedException>(() =>
+                {
+                    return application.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+                });
+            });
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, held));
+        }
     }
 
     [Fact]
@@ -3157,8 +3230,6 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([null, _time.GetUtcNow()], StampsOf());
     }
 
-    // the TypeScript side tells the second before the first ends; here each ends on its own request's
-    // thread, so the two come in either order, which a server's count of listens takes alike
     [Fact]
     public async Task Tells_a_listen_held_once_past_its_refusals_and_its_end_while_its_connection_stands_one_refused_tells_nothing_and_restarts_nothing_and_a_second_and_the_first_it_replaces_each_tell_theirs()
     {
@@ -3210,8 +3281,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return told.Count == 3;
         });
         Assert.Equal(
-            [(false, connectionHandle), (true, connectionHandle), (true, connectionHandle)],
-            told.Order());
+            [(true, connectionHandle), (true, connectionHandle), (false, connectionHandle)],
+            told);
 
         // its connection closed: the listen it held ends untold
         Assert.True(await _server.CloseConnection(connectionHandle));
