@@ -156,15 +156,15 @@ public sealed partial class HttpTransportServer
             response.Headers.Vary = "Origin";
         }
 
-        // what HTTP refuses of its own, as Kestrel answers it: 400, unmarked, none of the path's fields,
-        // its socket closed behind it, nothing told (spec 15.12)
-        internal static async Task RefuseMalformed(HttpContext context)
+        // what HTTP refuses of its own, as Kestrel answers it: its status, 400 for a request it cannot
+        // read, unmarked, none of the path's fields, its socket closed behind it, nothing told (spec 15.12)
+        internal static async Task RefuseAsHttp(HttpContext context, int status)
         {
             var response = context.Response;
 
             if (!response.HasStarted)
             {
-                response.StatusCode = StatusCodes.Status400BadRequest;
+                response.StatusCode = status;
                 response.Headers.Connection = "close";
             }
 

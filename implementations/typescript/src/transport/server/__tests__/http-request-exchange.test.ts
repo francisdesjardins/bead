@@ -14,8 +14,11 @@ import {
   BEARER,
   connect,
   envelopeOf,
+  host,
   namesOf,
+  portOf,
   post,
+  rawSocketOn,
   refusalOf,
   requestLikeOf,
   startScripted,
@@ -231,5 +234,58 @@ test.describe('createHTTPRequestExchange', () => {
       { reason: REFUSALS.BUSY, status: 429 },
     ]);
     expect(asked).toEqual(['finish', 'finish', 'admitExchange', 'finish']);
+  });
+});
+
+/** The status line of what `read` holds, once its head came. */
+const statusOf = async (read: { text: string }) => {
+  await expect
+    .poll(() => {
+      return read.text.includes('\r\n\r\n');
+    })
+    .toBe(true);
+
+  return read.text.split('\r\n')[0];
+};
+
+test.describe('createHTTPTransportServer, a body as it comes', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('answers a body whose read fails, a malformed chunked one, the status of its failure, unmarked, its connection closed, never 200 and empty', async () => {
+    await using started = await startTransport();
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const { read, socket } = await rawSocketOn(portOf(url));
+    const prefix = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 });
+
+    socket.write(
+      `POST /bead HTTP/1.1\r\nHost: ${host}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\n` +
+        `${CONNECTION_TOKEN_HEADER}: ${connectionToken}\r\nTransfer-Encoding: chunked\r\n\r\n8\r\n`
+    );
+    socket.write(prefix);
+    await expect
+      .poll(() => {
+        return server.gauges().counts['bodyBytes'];
+      })
+      .toBe(prefix.length);
+    // a chunk size that is none
+    socket.write('\r\nzz\r\n');
+
+    expect(await statusOf(read)).toBe('HTTP/1.1 400 Bad Request');
+    expect(read.text).not.toMatch(/bead-refusal/iu);
+    await expect
+      .poll(() => {
+        return read.isClosed;
+      })
+      .toBe(true);
+    // the exchange lost, as a dropped socket's, which closes its connection; nothing handed on
+    await expect
+      .poll(() => {
+        return namesOf(events, 'close');
+      })
+      .toEqual([['close', false, connectionHandle]]);
+    expect([namesOf(events, 'message'), server.gauges().counts['bodyBytes']]).toEqual([[], 0]);
   });
 });

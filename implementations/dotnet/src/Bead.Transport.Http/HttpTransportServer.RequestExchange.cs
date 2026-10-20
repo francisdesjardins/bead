@@ -119,7 +119,16 @@ public sealed partial class HttpTransportServer
                     await (end == Unknown ? HttpServerFields.EndWith(context, end) : _port.Finish(context, end));
                 }
             }
-            catch (Exception reason) when (reason is IOException or OperationCanceledException or Microsoft.AspNetCore.Http.BadHttpRequestException)
+            catch (Microsoft.AspNetCore.Http.BadHttpRequestException reason)
+            {
+                // ! Kestrel failed its body's read, a framing it cannot read: answered the failure's
+                // status as HTTP answers it, never the 200 Kestrel writes of an exchange left
+                // unanswered, which would say the server had the envelope (spec 15.7); lost, its
+                // connection with it
+                _port.Lose((connection, waiting));
+                await RefuseAsHttp(context, reason.StatusCode);
+            }
+            catch (Exception reason) when (reason is IOException or OperationCanceledException)
             {
                 // the client went: lost, as its abort says — which may have resumed this exchange, and
                 // ended its registration, before that one ran
@@ -130,6 +139,19 @@ public sealed partial class HttpTransportServer
                 waiting.Written.TrySetException(new IOException("the exchange closed before its answer went out"));
 
                 _port.EndExchange(connection);
+            }
+        }
+
+        // HTTP's own refusal of a request it could not read, written while its client may still read it
+        private static async Task RefuseAsHttp(HttpContext context, int status)
+        {
+            try
+            {
+                await HttpServerFields.RefuseAsHttp(context, status);
+            }
+            catch (Exception reason) when (reason is IOException or OperationCanceledException)
+            {
+                // the client went first: nothing to write it to
             }
         }
 

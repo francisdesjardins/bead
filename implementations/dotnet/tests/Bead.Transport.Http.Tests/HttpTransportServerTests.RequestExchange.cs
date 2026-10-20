@@ -183,6 +183,40 @@ public sealed partial class HttpTransportServerTests
     }
 
     [Fact]
+    public async Task Answers_a_body_whose_read_fails_a_malformed_chunked_one_the_status_of_its_failure_unmarked_its_connection_closed_never_200_and_empty()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var request = EnvelopeOf(EnvelopeKind.Request, (1, 8));
+        using var malformed = await Wire.Open(_port);
+
+        // its prefix first, in a chunk of its own, so the exchange waits under its call id; then a
+        // chunk whose size is no hexadecimal number
+        await malformed.Write(PostHead(connectionToken, "Transfer-Encoding: chunked"));
+        await malformed.Write(ChunkOf(request[..12]));
+        await Until(() =>
+        {
+            return Count("waitingExchanges") == 1;
+        });
+        await malformed.Write("zz\r\n");
+
+        var (head, body) = await malformed.Read();
+
+        Assert.Equal((400, (string?)null, "close", 0), (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), head.Headers.GetValueOrDefault("connection"), body.Length));
+        Assert.True(await malformed.IsClosed());
+        await Until(() =>
+        {
+            return _closes.Any((close) =>
+            {
+                return close.ConnectionHandle == connectionHandle;
+            });
+        });
+        Assert.Empty(_messages);
+        Assert.Empty(_refusals);
+    }
+
+    [Fact]
     public async Task Answers_a_request_an_answer_comes_for_as_its_body_still_comes_at_once_never_handing_it_on()
     {
         await Start();

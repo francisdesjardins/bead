@@ -862,7 +862,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 return;
             }
 
-            await HttpServerFields.RefuseMalformed(context);
+            await HttpServerFields.RefuseAsHttp(context, StatusCodes.Status400BadRequest);
 
             return;
         }
@@ -876,7 +876,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
         {
-            await HttpServerFields.RefuseMalformed(context);
+            await HttpServerFields.RefuseAsHttp(context, StatusCodes.Status400BadRequest);
 
             return;
         }

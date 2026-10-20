@@ -107,6 +107,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection not open, as there.
 - On the C# side, a request whose sending fails as its router is disposed is rejected as disposed,
   as the TypeScript side rejects it, not with the transport's refusal, which raced the disposal.
+- On the C# side, an HTTP body whose read Kestrel fails — slower than its rate, a malformed chunked
+  one — is answered the status of its failure, unmarked, its connection closed, never 200 and empty,
+  which said the server had the envelope (spec 15.7).
 
 ### Security
 
