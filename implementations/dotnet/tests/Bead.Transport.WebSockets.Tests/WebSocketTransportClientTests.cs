@@ -802,8 +802,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     public async Task Writes_the_credential_it_is_given_on_its_upgrade_and_carries_those_bytes_alone()
     {
         using var listener = new Listener(IPAddress.Loopback);
+        Assert.False(_client.Carries(Bearer));
+        var upgrades = new List<string[]>();
         var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Credential = Bearer }, Cancelled);
         var (peer, head) = await listener.Next();
+        upgrades.Add([.. AuthorizationsOf(head)]);
 
         using (peer)
         using (var server = await Listener.Answer(peer, head))
@@ -834,11 +837,25 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         // none once its connection is gone, and none on an upgrade given none, an empty one among them
         Assert.False(_client.Carries(Bearer));
 
+        var reconnecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (reopened, reopenedHead) = await listener.Next();
+        using (reopened)
+        using (await Listener.Answer(reopened, reopenedHead))
+        {
+            await reconnecting.WaitAsync(Patience, Cancelled);
+            upgrades.Add([.. AuthorizationsOf(reopenedHead)]);
+            Assert.Empty(AuthorizationsOf(reopenedHead));
+            Assert.False(_client.Carries(""));
+            Assert.False(_client.Carries(Bearer));
+            await _client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+        }
+
         foreach (var given in new[] { null, "" })
         {
             await using var client = new WebSocketTransportClient();
             var bare = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port, Credential = given }, Cancelled);
             var (other, otherHead) = await listener.Next();
+            upgrades.Add([.. AuthorizationsOf(otherHead)]);
 
             using (other)
             using (await Listener.Answer(other, otherHead))
@@ -849,6 +866,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
                 Assert.False(client.Carries(Bearer));
             }
         }
+        Assert.Equal(new string[][] { [Bearer], [], [], [] }, upgrades);
     }
 
     [Fact]

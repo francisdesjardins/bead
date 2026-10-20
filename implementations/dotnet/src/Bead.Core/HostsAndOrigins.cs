@@ -221,7 +221,41 @@ internal static class HostsAndOrigins
             return IsWellFormedHost(lines, request.IsRequired);
         }
 
-        return (lines.Count == 1 || (lines.Count == 0 && !request.IsRequired)) && IsAuthority(authority);
+        // ! an absolute-form target names an authority, never an empty one (RFC 9112 §3.2.2)
+        return (lines.Count == 1 || (lines.Count == 0 && !request.IsRequired)) && authority.Length > 0 && IsAuthority(authority);
+    }
+
+    /// <summary>
+    /// Whether HTTP takes an HTTP/1 request's target (RFC 9112 §3.2, §3.2.2): one in origin-form, or
+    /// in absolute-form under <c>http://</c> or <c>https://</c>, in lower case as HTTP servers read
+    /// them, naming an authority; never another scheme's absolute-form, one in upper case among
+    /// them, which no HTTP server serves, nor one that names no authority.
+    /// </summary>
+    public static bool IsTakenTarget(string? target)
+    {
+        if (TargetAuthorityOf(target) is { } authority)
+        {
+            return authority.Length > 0 && IsAuthority(authority);
+        }
+
+        return target is null || !NamesScheme(target);
+    }
+
+    // whether a target opens with a scheme and its "//" (RFC 3986 §3.1): a letter, then letters,
+    // digits, "+", "-" or "."
+    private static bool NamesScheme(string target)
+    {
+        var colon = target.IndexOf("://", StringComparison.Ordinal);
+
+        if (colon < 1 || !char.IsAsciiLetter(target[0]))
+        {
+            return false;
+        }
+
+        return target[..colon].All((character) =>
+        {
+            return char.IsAsciiLetterOrDigit(character) || character is '+' or '-' or '.';
+        });
     }
 
     /// <summary>

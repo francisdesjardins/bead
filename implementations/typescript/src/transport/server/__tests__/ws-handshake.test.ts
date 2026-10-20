@@ -501,6 +501,31 @@ test.describe('refusalOfHandshake', () => {
           return HOST;
         }),
       ]);
+      expect(
+        [
+          naming('localhost:8080'),
+          naming('A.LocalHost'),
+          naming('localhost:8080', [['Origin', 'http://localhost:8080']]),
+          naming('localhost:8080', [['Origin', 'https://bead.example']]),
+          naming('elsewhere.test', [['Origin', 'http://elsewhere.test']]),
+          naming('elsewhere.test', [], { method: 'POST', without: ['upgrade', 'connection'] }),
+          naming(':8080'),
+          requestOf([], { httpVersion: '2.0', method: 'POST', without: ['host'] }),
+          requestOf([], { without: ['host'] }),
+          naming('[::1'),
+        ].map(answerGiven(hosts))
+      ).toEqual([
+        'taken',
+        'taken',
+        'taken',
+        ORIGIN,
+        HOST_REFUSED,
+        HOST_REFUSED,
+        HOST_REFUSED,
+        HOST_REFUSED,
+        HOST,
+        HOST,
+      ]);
     }
 
     // no Host beside a target in absolute-form, as an HTTP/1.0 request may send it, its target
@@ -524,6 +549,15 @@ test.describe('refusalOfHandshake', () => {
         naming('[::1', [], { method: 'POST' }),
       ].map(answerGiven(['*']))
     ).toEqual(['taken', 'taken', ORIGIN, 'taken', UPGRADE, HOST]);
+    expect(
+      [
+        naming('xn---bad-cpa.test', [['Origin', 'http://xn---bad-cpa.test']]),
+        naming(':8080'),
+        naming('elsewhere.test', [['Origin', 'https://bead.example']]),
+        requestOf([], { httpVersion: '2.0', method: 'POST', without: ['host'] }),
+        requestOf([], { without: ['host'] }),
+      ].map(answerGiven(['*']))
+    ).toEqual([ORIGIN, 'taken', ORIGIN, METHOD, HOST]);
   });
 });
 

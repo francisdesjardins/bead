@@ -1081,7 +1081,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // so it is read from the target as it came, and judged as HTTP judges a Host
         var targetAuthority = HttpServerFields.TargetAuthorityOf(context);
 
-        if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
+        if (!HttpServerFields.IsTakenTarget(context))
         {
             await HttpServerFields.RefuseAsHttp(context, StatusCodes.Status400BadRequest);
 

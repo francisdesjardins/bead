@@ -286,7 +286,7 @@ internal static class WebSocketHandshake
         var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
         var targetAuthority = TargetAuthorityOf(request);
 
-        if (isHttp1 && !HostsAndOrigins.IsWellFormedHost(headers.Host, (HttpProtocol.IsHttp11(request.Protocol), targetAuthority)))
+        if (isHttp1 && (!HostsAndOrigins.IsTakenTarget(request.HttpContext.Features.Get<IHttpRequestFeature>()?.RawTarget) || !HostsAndOrigins.IsWellFormedHost(headers.Host, (HttpProtocol.IsHttp11(request.Protocol), targetAuthority))))
         {
             return BadRequest;
         }

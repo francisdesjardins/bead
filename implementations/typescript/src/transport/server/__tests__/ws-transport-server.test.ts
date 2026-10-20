@@ -26,6 +26,7 @@ import {
   type TransportServerEventMap,
 } from '../transport-server';
 import {
+  CLOSE_TIMEOUT,
   createWSTransportServer,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
@@ -38,13 +39,19 @@ import {
 } from '../ws-transport-server';
 import {
   bindError,
+  hasIPv6Loopback,
   holdIPv6Loopback,
   isFreeOn,
   LISTENING_ADDRESSES,
   LISTENING_NAMES,
   NO_LISTENING_ADDRESSES,
 } from './addresses';
-import { createFakeSocket, createFakeWebSocketServer } from './fake-websocket-server';
+import {
+  createFakeSocket,
+  createFakeWebSocketServer,
+  createRefusingWebSocketServer,
+  type IFakeSocket,
+} from './fake-websocket-server';
 
 type ServerEvents = TransportServerEventMap<IServerSocketLike, IDrawingRequest>;
 
@@ -451,16 +458,27 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
 
     test.describe('WSTransportServer #close', () => {
       test('closes one connection, which is gone once it resolves', async () => {
-        await connectClient(client);
+        const [socket] = await connectClient(client);
         const connectionHandle = server.clients[0]!.connectionHandle;
         const serverClosed = nextServerEvent(server, 'close');
         const clientClosed = nextClientEvent(client, 'close');
+        const emitted: [boolean, string][] = [];
+        const codes: number[] = [];
+        server.on('close', (clean, handle) => {
+          emitted.push([clean, handle]);
+        });
+        socket.on('close', (code) => {
+          codes.push(code);
+        });
 
         await expect(server.close(connectionHandle)).resolves.toBe(true);
 
+        expect(emitted).toEqual([[true, connectionHandle]]);
         expect(server.clients).toHaveLength(0);
         expect(await serverClosed).toEqual([true, connectionHandle]);
         expect(await clientClosed).toEqual([false, false]);
+        // its 1000, answered by its peer
+        expect(codes).toEqual([1000]);
       });
 
       test('resolves false for a handle nobody holds', async () => {
@@ -468,18 +486,39 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('"closeAll" closes every connection', async () => {
+        await expect(server.closeAll()).resolves.toEqual([]);
         const second = createWSTransportClient({ WebSocket: Tracked });
         const connectionHandles: string[] = [];
-        server.on('close', (_, connectionHandle) => {
+        const closed: [boolean, string][] = [];
+        const codes: number[] = [];
+        server.on('connection', (socket) => {
+          socket.on('close', (code) => {
+            codes.push(code);
+          });
+        });
+        server.on('close', (clean, connectionHandle) => {
           connectionHandles.push(connectionHandle);
+          closed.push([clean, connectionHandle]);
         });
 
         await connectClient(client);
         await connectClient(second);
+        const handles = server.clients.map(({ connectionHandle }) => {
+          return connectionHandle;
+        });
 
         await expect(server.closeAll()).resolves.toEqual([true, true]);
         expect(connectionHandles).toHaveLength(2);
         expect(server.clients).toHaveLength(0);
+        expect(closed).toEqual(
+          expect.arrayContaining(
+            handles.map((handle) => {
+              return [true, handle];
+            })
+          )
+        );
+        expect(server.isOpen()).toBe(true);
+        expect(codes).toEqual([1000, 1000]);
       });
     });
 
@@ -491,8 +530,14 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
           closeEvents.push([clean, connectionHandle]);
         });
 
-        await connectClient(client);
-        await connectClient(second);
+        const codes: number[] = [];
+
+        for (const [socket] of [await connectClient(client), await connectClient(second)]) {
+          socket.on('close', (code) => {
+            codes.push(code);
+          });
+        }
+
         const connectionHandles = server.clients.map((entry) => {
           return entry.connectionHandle;
         });
@@ -512,6 +557,9 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(await clientClosed).toEqual([false, false]);
         expect(await secondClosed).toEqual([false, false]);
         expect(server.isClosed()).toBe(true);
+        expect(server.clients).toHaveLength(0);
+        // its 1001, going away, answered by each peer
+        expect(codes).toEqual([1001, 1001]);
 
         const late = createWSTransportClient({ WebSocket: Tracked });
         await expect(late.connect({ host, port })).rejects.toBeInstanceOf(ConnectError);
@@ -720,6 +768,14 @@ test.describe('WSTransportServer, the credential its upgrade carries', () => {
     // nothing toward its client, whatever a send is given
     await server.send({ credential: BEARER, data: 'down' }, server.clients[0]!.connectionHandle);
     expect(await received).toEqual([{ credential: undefined, data: 'down' }]);
+    const binary = nextClientEvent(client, 'message');
+    await server.send(
+      { credential: BEARER, data: new TextEncoder().encode('down') },
+      server.clients[0]!.connectionHandle
+    );
+    const [packet] = await binary;
+    expect(packet.credential).toBeUndefined();
+    expect(new TextDecoder().decode(packet.data as ArrayBuffer)).toBe('down');
 
     const padded = await openWith(port, { authorization: ' \tInterop sub=bob\t ' });
 
@@ -750,6 +806,35 @@ test.describe('WSTransportServer, the credential its upgrade carries', () => {
     for (const socket of [padded, bare, empty]) {
       socket.close();
     }
+
+    const fake = createFakeWebSocketServer();
+    const snapshot = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+    const starting = snapshot.start(SCRIPTED);
+    fake.instances[0]?.emit('listening');
+    await starting;
+    const remembered: unknown[] = [];
+    snapshot.on('message', ({ credential, data }) => {
+      remembered.push([credential, data]);
+    });
+    const socket = createFakeSocket();
+    const request = {
+      headers: { authorization: BEARER },
+      rawHeaders: ['Authorization', BEARER],
+      httpVersion: '1.1',
+      socket: { remoteAddress: host, remotePort: 40_000 },
+    };
+    fake.instances[0]?.emit('connection', socket, request);
+    socket.hear('message', Buffer.from('first'), false);
+    socket.hear('message', Buffer.from('second'), false);
+    request.headers.authorization = 'Bearer another';
+    request.rawHeaders[1] = 'Bearer another';
+    socket.hear('message', Buffer.from('after'), false);
+    expect(remembered).toEqual([
+      [BEARER, 'first'],
+      [BEARER, 'second'],
+      [BEARER, 'after'],
+    ]);
+    await snapshot.stop();
   });
 
   // spec 15.2, Fetch's credentials mode include
@@ -930,8 +1015,11 @@ test.describe('WSTransportServer, its hosts and origins', () => {
     };
 
     expect(built({ hosts: ['bead.test:8080'] })).toThrow(ProgrammerError);
+    expect(built({ hosts: ['bead.test', 'bead.test:8080'] })).toThrow('bead.test:8080');
     expect(built({ hosts: ['bead.test', '*'] })).toThrow(ProgrammerError);
     expect(built({ origins: ['*'] })).toThrow(ProgrammerError);
+    expect(built({ origins: ['*'] })).toThrow('no wildcard');
+    expect(built({ origins: ['null'] })).toThrow('a sandboxed frame of any site');
     expect(built({ origins: ['https://bead.test/'] })).toThrow(ProgrammerError);
     expect(built({ hosts: ['*'], origins: ['https://bead.test', 'null'] })).toThrow(
       ProgrammerError
@@ -1020,6 +1108,7 @@ test.describe('WSTransportServer, its handshake', () => {
   test('refuses a malformed upgrade 400, marked malformed, before its origin is judged, its body empty', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
+    const bearer = 'Bearer mF_9.B5f-4.1JqM';
 
     // a key missing, not base64, of 4 or 17 bytes, twice, empty, or with a space inside; two
     // versions; subprotocols that are no list of tokens, or none; content, by its length or in
@@ -1041,6 +1130,12 @@ test.describe('WSTransportServer, its handshake', () => {
         `${requestOf('GET / HTTP/1.1', ['Transfer-Encoding: chunked'])}5\r\nhello\r\n0\r\n\r\n`,
         requestOf('GET / HTTP/1.1', [
           'Sec-WebSocket-Key: dGVzdA==',
+          'Origin: https://elsewhere.test',
+        ]),
+        requestOf('GET / HTTP/1.1', [`Authorization: ${bearer}`, `Authorization: ${bearer}`]),
+        requestOf('GET / HTTP/1.1', [
+          `Authorization: ${bearer}`,
+          `Authorization: ${bearer}`,
           'Origin: https://elsewhere.test',
         ]),
       ],
@@ -1406,40 +1501,73 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
   });
 
   test('closes each of two sockets from one address and port on its own, each its own close told', async () => {
-    const fake = createFakeWebSocketServer();
-    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
-    const closes: unknown[] = [];
-    const starting = server.start(SCRIPTED);
+    // each ending in turn: its peer's close, clean, and its socket gone, unclean
+    const endings = [
+      {
+        end: (socket: IFakeSocket) => {
+          socket.hear('close', 1000);
+        },
+        wasClean: true,
+      },
+      {
+        end: (socket: IFakeSocket) => {
+          socket.terminate();
+        },
+        wasClean: false,
+      },
+    ];
 
-    fake.instances[0]?.emit('listening');
-    await starting;
-    server.on('close', (...params) => {
-      closes.push(params);
-    });
+    for (const { end, wasClean } of endings) {
+      const fake = createFakeWebSocketServer();
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const closes: unknown[] = [];
+      const starting = server.start(SCRIPTED);
 
-    const older = createFakeSocket();
-    const newer = createFakeSocket();
-    // the same port given again: another connection, another handle
-    const olderHandle = fake.connect(older, { server });
-    const newerHandle = fake.connect(newer, { server });
+      fake.instances[0]?.emit('listening');
+      await starting;
+      server.on('close', (...params) => {
+        closes.push(params);
+      });
 
-    older.terminate();
+      const older = createFakeSocket();
+      const newer = createFakeSocket();
+      // the same port given again: another connection, another handle
+      const olderHandle = fake.connect(older, { server });
+      const newerHandle = fake.connect(newer, { server });
 
-    expect([closes, server.gauges().counts]).toEqual([
-      [[false, olderHandle]],
-      { connections: 1, largestAddressConnections: 0, largestUnsentBytes: 0, unsentBytes: 0 },
-    ]);
+      expect(olderHandle).not.toBe(newerHandle);
 
-    newer.terminate();
+      end(older);
 
-    expect([closes, server.gauges().counts]).toEqual([
-      [
-        [false, olderHandle],
-        [false, newerHandle],
-      ],
-      { connections: 0, largestAddressConnections: 0, largestUnsentBytes: 0, unsentBytes: 0 },
-    ]);
-    await server.stop();
+      expect([wasClean, closes, server.gauges().counts]).toEqual([
+        wasClean,
+        [[wasClean, olderHandle]],
+        { connections: 1, largestAddressConnections: 0, largestUnsentBytes: 0, unsentBytes: 0 },
+      ]);
+
+      // the newer stands, and is sent to
+      await server.send({ data: new Uint8Array([1]) }, newerHandle);
+
+      expect([
+        older.sent,
+        newer.sent,
+        server.clients.map(({ connectionHandle }) => {
+          return connectionHandle;
+        }),
+      ]).toEqual([[], [new Uint8Array([1])], [newerHandle]]);
+
+      end(newer);
+
+      expect([wasClean, closes, server.gauges().counts]).toEqual([
+        wasClean,
+        [
+          [wasClean, olderHandle],
+          [wasClean, newerHandle],
+        ],
+        { connections: 0, largestAddressConnections: 0, largestUnsentBytes: 0, unsentBytes: 0 },
+      ]);
+      await server.stop();
+    }
   });
 
   test('takes no connection whose socket is gone already, and ends it', async () => {
@@ -1511,10 +1639,15 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     const silent = createFakeSocket({ onClose: 'ignore' });
     const closing = server.close(fake.connect(silent, { server }));
+    let isCompleted = false;
+    void closing.then(() => {
+      isCompleted = true;
+    });
 
     await sleep(50);
 
     expect(silent.wasTerminated).toBe(false);
+    expect(isCompleted).toBe(false);
 
     silent.hear('close', 1000);
 
@@ -1647,23 +1780,49 @@ test.describe('WSTransportServer, heartbeat', () => {
   });
 
   test('beats nothing with a heartbeat of Infinity', async () => {
-    using timers = spyIntervals();
-    const fake = createFakeWebSocketServer();
-    const server = createWSTransportServer({
-      heartbeat: Infinity,
-      WebSocketServer: fake.FakeWebSocketServer,
-    });
-    const socket = createFakeSocket();
+    // a heartbeat of 200 ms first, which beats, then Infinity, which arms nothing
+    for (const [heartbeat, delays] of [
+      [200, [200]],
+      [Infinity, []],
+    ] as const) {
+      using timers = spyIntervals();
+      const fake = createFakeWebSocketServer();
+      const server = createWSTransportServer({
+        heartbeat,
+        WebSocketServer: fake.FakeWebSocketServer,
+      });
+      const socket = createFakeSocket();
 
-    const starting = server.start(SCRIPTED);
-    fake.instances[0]?.emit('listening');
-    await starting;
-    fake.connect(socket, { server });
+      const starting = server.start(SCRIPTED);
+      fake.instances[0]?.emit('listening');
+      await starting;
 
-    // no interval at all: Node would beat one of Infinity every millisecond
-    expect([timers.armed, socket.pings, socket.wasTerminated]).toEqual([[], 0, false]);
+      const connectionHandle = fake.connect(socket, { server });
 
-    await server.stop();
+      // no interval at all for Infinity: Node would beat one of Infinity every millisecond
+      expect([
+        heartbeat,
+        timers.armed.map(({ delay }) => {
+          return delay;
+        }),
+      ]).toEqual([heartbeat, delays]);
+
+      // each beat it armed, played once: a ping, its peer kept
+      for (const { beat } of timers.armed) {
+        beat();
+      }
+
+      expect([
+        heartbeat,
+        socket.pings,
+        socket.wasTerminated,
+        server.clients.map(({ connectionHandle: held }) => {
+          return held;
+        }),
+      ]).toEqual([heartbeat, delays.length, false, [connectionHandle]]);
+
+      await server.stop();
+    }
   });
 
   test('keeps the clients that answer its pings — a browser’s as `ws`’s — and drops one that does not, on the wire', async () => {
@@ -2062,6 +2221,7 @@ test.describe('WSTransportServer, the address it listens on', () => {
       80,
       { address: 'localhost', findOpenPort: false, port: 80 },
     ]);
+    expect([HEARTBEAT, CLOSE_TIMEOUT, MAXIMUM_MESSAGE_BYTES]).toEqual([30_000, 5_000, 16_778_240]);
 
     const starting = server.start({ findOpenPort: true });
 
@@ -2227,6 +2387,35 @@ test.describe('WSTransportServer, the address it listens on', () => {
         server.isSecure(fake.connect(createFakeSocket(), { server })),
       ]).toEqual([0, 1, true]);
       await server.stop();
+    }
+
+    // on real sockets: its IPv4 loopback reached, the IPv6 loopback's port left alone where it is
+    const isIPv6 = await hasIPv6Loopback();
+
+    for (const code of ['EADDRNOTAVAIL', 'EAFNOSUPPORT']) {
+      const server = createWSTransportServer({
+        WebSocketServer: createRefusingWebSocketServer('::1', bindError(code)),
+      });
+      const client = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+      try {
+        const { address, port } = await server.start({ findOpenPort: true });
+
+        await client.connect({ host, port });
+
+        expect([
+          code,
+          address,
+          server.address,
+          client.isOpen(),
+          server.isSecure(server.clients[0]!.connectionHandle),
+          await isFreeOn('::1', port),
+        ]).toEqual([code, '127.0.0.1', '127.0.0.1', true, true, isIPv6]);
+      } finally {
+        await client.disconnect().catch(() => {});
+        await server.stop();
+        await allClosed();
+      }
     }
   });
 
