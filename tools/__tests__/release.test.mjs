@@ -762,6 +762,20 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     assert.deepEqual(owing(releasing()), []);
   });
 
+  test("it owes both benches' reports where the tree keeps their comparison, compared with the last release's, and none where it does not", () => {
+    const kept = releasing();
+    write(kept, { 'tools/bench-compare.mjs': '// compares two reports\n' });
+    const owing = (root) => {
+      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+        return line.includes('benches');
+      });
+    };
+    assert.deepEqual(owing(kept), [
+      `owed by hand: both benches run, their reports kept as .bench/v0.2.0-typescript.json and -csharp.json, each compared with v0.1.0's on the machine that made them (README.md, "Measurement")`,
+    ]);
+    assert.deepEqual(owing(releasing()), []);
+  });
+
   test('--dry-run prints the plan and writes nothing', () => {
     const root = releasing();
     const { plan, ran, logged } = prepared(root, { moves: { spec: 'minor' }, dryRun: true });

@@ -433,6 +433,18 @@ exits 1. Without thresholds the tool prints a comparison and exits 0; invalid re
 measurement sets and selectors that match nothing exit 2. These commands run by hand; CI has no
 performance guard.
 
+Each release keeps both reports, `.bench/v<version>-typescript.json` and
+`.bench/v<version>-csharp.json`, which git ignores, and compares each with the last release's on
+the machine that made them:
+
+```sh
+node tools/bench-compare.mjs .bench/v0.5.0-typescript.json .bench/v0.6.0-typescript.json --threshold 25%
+node tools/bench-compare.mjs .bench/v0.5.0-csharp.json .bench/v0.6.0-csharp.json --threshold 25%
+```
+
+A regression past its threshold is read before the finish: explained in the release's notes, or
+fixed.
+
 ## Support
 
 [`docs/support.md`](docs/support.md) shows, feature by feature, what each implementation supports
@@ -515,8 +527,9 @@ image in `ci.yml`, each to its tag's current digest; CI then builds and tests th
 `prepare` lists what else the release owes by hand: the CHANGELOG's line, under the release, that
 tells a document's new version and its tag, the spec's or its companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
-moves to that record's table; and the documents brought to the release by the
-`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)).
+moves to that record's table; the documents brought to the release by the
+`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)); and both
+benches' reports, kept and compared with the last release's, as [Measurement](#measurement) says.
 
 A waiver of CI's `beadc breaking` step, an `--except`, holds until the release that carries its
 change is the one the step compares against: the release's own commit is still compared with the
