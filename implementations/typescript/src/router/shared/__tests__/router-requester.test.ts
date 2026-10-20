@@ -17,6 +17,7 @@ import {
   SERVER_FAILURES,
 } from '../constants';
 import { readEnvelope } from '../envelope';
+import { presentedCredentialOf } from '../call-session';
 import { DisconnectError, FailureError } from '../errors';
 import { createMetricsRegistry } from '../metrics-registry';
 import { createPayloadPlacement } from '../payload-placement';
@@ -26,11 +27,18 @@ import { limitsOf } from '../router-limits';
 import { createRouterRequester } from '../router-requester';
 import { createRouterWriter } from '../router-writer';
 import { createSendingTransfers } from '../sending-transfers';
-import type { IFailure, IRequestResolverProps, IRouterCore } from '../types';
+import type {
+  IFailure,
+  IRequestResolverProps,
+  IRouterCore,
+  RequestCredential,
+  SessionToken,
+} from '../types';
 import { countedOf, envelopeOf, patternOf } from './fixtures';
 import {
   type Handle,
   OPAQUE,
+  TOKEN,
   answerOf,
   answersOf,
   cancelOf,
@@ -109,6 +117,71 @@ test.describe('createRouterCore', () => {
 
       core.rejectPending('done', 'a');
       await Promise.allSettled([answering, whole]);
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port, { limits });
+      let known: SessionToken | undefined = undefined;
+      const ask = (payload: Uint8Array, requested?: RequestCredential) => {
+        try {
+          const presented = presentedCredentialOf(requested, {
+            failures: CLIENT_FAILURES,
+            token: known,
+          });
+          return clientCore.request(payload, {
+            connectionHandle: 'a',
+            options: { timeout: 5_000 },
+            procedure: echo,
+            credential: presented.credential,
+            transportCredential: presented.carried,
+          });
+        } catch (reason) {
+          return clientCore.request(payload, {
+            connectionHandle: 'a',
+            options: { timeout: 5_000 },
+            procedure: echo,
+            refusal: reason as Error,
+          });
+        }
+      };
+      await expect(
+        ask(Uint8Array.of(1), { scheme: CredentialScheme.OPAQUE })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        origin: 'local',
+        side: 'client',
+      });
+      expect(client.sent).toEqual([]);
+      known = TOKEN;
+      const calls = [
+        settledOf(ask(Uint8Array.of(1), { scheme: CredentialScheme.OPAQUE })),
+        settledOf(ask(Uint8Array.of(1), { scheme: CredentialScheme.NONE })),
+        settledOf(ask(Uint8Array.of(1))),
+        settledOf(ask(Uint8Array.of(1), { scheme: CredentialScheme.JWT, token: 'a.b.c' })),
+        settledOf(ask(patternOf(8), { scheme: CredentialScheme.JWT, token: 'a'.repeat(40) })),
+      ];
+      await expect(
+        ask(patternOf(9), { scheme: CredentialScheme.JWT, token: 'a'.repeat(40) })
+      ).rejects.toMatchObject({
+        code: ProtocolCode.PAYLOAD_TOO_LARGE,
+        detail:
+          "a payload of 9 bytes goes as a transfer, whose opening's header of 64 bytes leaves it no byte within 64",
+        origin: 'local',
+        side: 'client',
+        header: { credentialScheme: CredentialScheme.JWT },
+      });
+      expect(
+        client.sent.map(({ envelope }) => {
+          return envelope?.header;
+        })
+      ).toEqual([
+        { ...headerOf(1), credential: OPAQUE },
+        headerOf(3),
+        headerOf(5),
+        { ...headerOf(7), credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } },
+        { ...headerOf(9), credential: { scheme: CredentialScheme.JWT, token: 'a'.repeat(40) } },
+      ]);
+      clientCore.rejectPending('done', 'a');
+      await Promise.all(calls);
     });
 
     test('a JWT its header holds whole fails its call before it goes, PAYLOAD_TOO_LARGE, once a transfer’s header would pass 1,020 bytes, and goes as a transfer a word shorter', async () => {
@@ -225,6 +298,39 @@ test.describe('createRouterCore', () => {
         payload: Uint8Array.of(9),
       });
       expect(activities).toEqual(['request a', 'response a']);
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port);
+      client.control.sessionTokenOf = () => {
+        throw new Error('a request asks no session');
+      };
+      const heard: string[] = [];
+      const asked = clientCore.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: echo,
+        onCallId: (callId) => {
+          heard.push(`call id ${String(callId)}`);
+          expect(client.sent).toEqual([]);
+        },
+      });
+      expect(heard).toEqual(['call id 1']);
+      expect(client.sent).toEqual([
+        {
+          connectionHandle: 'a',
+          envelope: { kind: EnvelopeKind.REQUEST, header: headerOf(1), payload: Uint8Array.of(1) },
+        },
+      ]);
+      expect(client.traced).toEqual(['tx 10 1 a']);
+      await sleep(0);
+      expect(client.activities).toEqual(['request a']);
+      clientCore.receive(resultOf(1, Uint8Array.of(1)), 'a');
+      expect(await asked).toEqual({
+        header: { callId: 1, kind: EnvelopeKind.RESULT },
+        payload: Uint8Array.of(1),
+      });
+      expect(client.activities).toEqual(['request a', 'response a']);
+      expect(client.reported).toEqual([]);
     });
 
     test('write the destination they name', async () => {
@@ -313,6 +419,12 @@ test.describe('createRouterCore', () => {
 
       await sleep(0);
       core.receive(resultOf(2), 'b');
+      let isSettled = false;
+      void answering.then(() => {
+        isSettled = true;
+      });
+      await sleep(0);
+      expect(isSettled).toBe(false);
       core.receive(resultOf(2, Uint8Array.of(9)), 'a');
       // the same response again, in the same read, before anything waiting on the first has run
       core.receive(resultOf(2), 'a');
@@ -363,6 +475,28 @@ test.describe('createRouterCore', () => {
         [ProtocolCode.CALL_UNKNOWN, 'a'],
         [ProtocolCode.CALL_UNKNOWN, 'a'],
       ]);
+
+      const clientOffered: number[] = [];
+      const client = createPort({
+        failures: CLIENT_FAILURES,
+        onUnpairedFailure: ({ failure, header }) => {
+          clientOffered.push(header.callId, failure.code);
+          return true;
+        },
+      });
+      using clientCore = createRouterCore(client.port);
+      clientCore.receive(
+        envelopeOf({
+          kind: EnvelopeKind.FAILURE,
+          header: { kind: EnvelopeKind.FAILURE, callId: 7 },
+          failure: { code: 9, scope: FailureScope.APPLICATION },
+        }),
+        'a'
+      );
+      expect(client.reported).toEqual([]);
+      clientCore.receive(resultOf(7, Uint8Array.of(1)), 'a');
+      expect(clientOffered).toEqual([7, 9]);
+      expect(codesOf(client.reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
     });
 
     test('reject with the failure the peer answers, as its side, or through a relay, of no side, where the call went', async () => {
@@ -428,6 +562,25 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 2],
         ['a', EnvelopeKind.CANCEL, 2],
+      ]);
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port);
+      const asked = clientCore.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: { ...echo, maximumPayloadBytes: 100 },
+      });
+      clientCore.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      await expect(asked).rejects.toMatchObject({
+        code: ProtocolCode.PAYLOAD_TOO_LARGE,
+        detail: 'a payload is 100 bytes at most, not 300',
+        origin: 'local',
+        side: 'client',
+      });
+      expect(answersOf(client.sent)).toEqual([
+        ['a', EnvelopeKind.REQUEST, 1],
+        ['a', EnvelopeKind.CANCEL, 1],
       ]);
     });
 
@@ -1043,83 +1196,115 @@ test.describe('createRouterCore', () => {
 
   test.describe('the transfers it receives', () => {
     test('receive a result in a transfer, credited as it comes, and settle its call once whole', async () => {
-      const { activities, port, reported, sent } = createPort();
-      using core = createRouterCore(port, { limits });
-      const payload = patternOf(300);
-      const answering = core.request(new Uint8Array(0), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
-      const chunk = (start: number, end?: number) => {
-        return chunkOf(2, { offset: start, payload: payload.subarray(start, end), total: 300 });
-      };
+      for (const failures of [CLIENT_FAILURES, SERVER_FAILURES]) {
+        const callId = failures === CLIENT_FAILURES ? 1 : 2;
+        const { activities, port, reported, sent } = createPort({ failures });
+        using core = createRouterCore(port, { limits });
+        const payload = patternOf(300);
+        const answering = core.request(
+          failures === CLIENT_FAILURES ? Uint8Array.of(1) : new Uint8Array(0),
+          {
+            connectionHandle: 'a',
+            options,
+            procedure: echo,
+          }
+        );
+        const chunk = (start: number, end?: number) => {
+          return chunkOf(callId, {
+            offset: start,
+            payload: payload.subarray(start, end),
+            total: 300,
+          });
+        };
 
-      await sleep(0);
-      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 32), total: 300 }), 'a');
-      core.receive(chunk(80, 128), 'a');
-      // again: nothing new, dropped in silence
-      core.receive(chunk(80, 128), 'a');
-      core.receive(chunk(32, 80), 'a');
-      core.receive(chunk(128, 176), 'a');
-      core.receive(chunk(176, 224), 'a');
-      core.receive(chunk(224, 272), 'a');
+        await sleep(0);
+        core.receive(
+          resultOpeningOf(callId, { payload: payload.subarray(0, 32), total: 300 }),
+          'a'
+        );
+        core.receive(chunk(80, 128), 'a');
+        // again: nothing new, dropped in silence
+        core.receive(chunk(80, 128), 'a');
+        core.receive(chunk(32, 80), 'a');
+        core.receive(chunk(128, 176), 'a');
+        core.receive(chunk(176, 224), 'a');
+        core.receive(chunk(224, 272), 'a');
 
-      expect(activities).toEqual(['request a']);
+        expect(activities).toEqual(['request a']);
 
-      core.receive(chunk(272), 'a');
-      // late, its call id reserved
-      core.receive(chunk(272), 'a');
+        core.receive(chunk(272), 'a');
+        // late, its call id reserved
+        core.receive(chunk(272), 'a');
 
-      await expect(answering).resolves.toEqual({
-        header: { callId: 2, kind: EnvelopeKind.RESULT, total: 300 },
-        payload,
-      });
-      expect(activities).toEqual(['request a', 'response a']);
-      // a window past the opening, then more as the chunks come: 128 received, then 176
-      expect(answersOf(sent)).toEqual([
-        ['a', EnvelopeKind.REQUEST, 2],
-        ['a', 'credit', 2, 160],
-        ['a', 'credit', 2, 256],
-        ['a', 'credit', 2, 300],
-      ]);
-      expect(reported).toEqual([]);
-      expect(core.isReserved(2, 'a')).toBe(true);
+        core.receive(chunk(224, 272), 'a');
+        await expect(answering).resolves.toEqual({
+          header: { callId, kind: EnvelopeKind.RESULT, total: 300 },
+          payload,
+        });
+        expect(activities).toEqual(['request a', 'response a']);
+        // a window past the opening, then more as the chunks come: 128 received, then 176
+        expect(answersOf(sent)).toEqual([
+          ['a', EnvelopeKind.REQUEST, callId],
+          ['a', 'credit', callId, 160],
+          ['a', 'credit', callId, 256],
+          ['a', 'credit', callId, 300],
+        ]);
+        expect(reported).toEqual([]);
+        expect(core.isReserved(callId, 'a')).toBe(true);
+      }
     });
 
     test('reject a result whose chunk breaks its transfer, cancel its call, and drop what comes after', async () => {
-      const { port, reported, sent } = createPort();
-      using core = createRouterCore(port, { limits });
-      const answering = core.request(new Uint8Array(0), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
+      for (const total of [150, 300]) {
+        const failures = total === 150 ? SERVER_FAILURES : CLIENT_FAILURES;
+        const callId = total === 150 ? 2 : 1;
+        const { port, reported, sent } = createPort({ failures });
+        using core = createRouterCore(port, { limits });
+        const answering = core.request(total === 150 ? new Uint8Array(0) : Uint8Array.of(1), {
+          connectionHandle: 'a',
+          options: { timeout: total === 150 ? 1_000 : 5_000 },
+          procedure: echo,
+        });
 
-      await sleep(0);
-      core.receive(resultOpeningOf(2, { payload: new Uint8Array(32), total: 150 }), 'a');
-      // the last, it says, yet it ends before the total
-      core.receive(
-        envelopeOf({
-          header: { callId: 2, isLast: true, kind: EnvelopeKind.CHUNK, offset: 32 },
-          kind: EnvelopeKind.CHUNK,
-          payload: new Uint8Array(48),
-        }),
-        'a'
-      );
-      core.receive(chunkOf(2, { offset: 80, payload: new Uint8Array(48), total: 150 }), 'a');
+        await sleep(0);
+        core.receive(
+          resultOpeningOf(callId, {
+            payload: total === 150 ? new Uint8Array(32) : patternOf(32),
+            total,
+          }),
+          'a'
+        );
+        // the last, it says, yet it ends before the total
+        core.receive(
+          envelopeOf({
+            header: { callId, isLast: total === 150, kind: EnvelopeKind.CHUNK, offset: 32 },
+            kind: EnvelopeKind.CHUNK,
+            payload: total === 150 ? new Uint8Array(48) : patternOf(300).subarray(32, 52),
+          }),
+          'a'
+        );
+        core.receive(
+          chunkOf(callId, {
+            offset: total === 150 ? 80 : 32,
+            payload: total === 150 ? new Uint8Array(48) : patternOf(300).subarray(32, 80),
+            total,
+          }),
+          'a'
+        );
 
-      await expect(answering).rejects.toMatchObject({
-        code: ProtocolCode.CHUNK_INVALID,
-        procedureAddress: { procedureId: 1, serviceId: 2 },
-        side: 'server',
-      });
-      expect(answersOf(sent)).toEqual([
-        ['a', EnvelopeKind.REQUEST, 2],
-        ['a', 'credit', 2, 150],
-        ['a', EnvelopeKind.CANCEL, 2],
-      ]);
-      expect(reported).toEqual([]);
+        await expect(answering).rejects.toMatchObject({
+          code: ProtocolCode.CHUNK_INVALID,
+          procedureAddress: { procedureId: 1, serviceId: 2 },
+          side: total === 150 ? 'server' : 'client',
+          origin: 'local',
+        });
+        expect(answersOf(sent)).toEqual([
+          ['a', EnvelopeKind.REQUEST, callId],
+          ['a', 'credit', callId, total === 150 ? 150 : 160],
+          ['a', EnvelopeKind.CANCEL, callId],
+        ]);
+        expect(reported).toEqual([]);
+      }
     });
 
     test('end a result’s transfer the peer fails, giving the budget back, and drop what comes after', async () => {
@@ -1317,40 +1502,67 @@ test.describe('createRouterCore', () => {
     };
 
     test('send a request as a transfer: its opening, the chunks each credit lets go, then wait on its answer', async () => {
-      const { activities, port, reported, sent, sizes } = createPort();
-      using core = createRouterCore(port, { limits });
-      const payload = patternOf(200);
-      const answering = core.request(payload, { connectionHandle: 'a', options, procedure: echo });
+      for (const total of [200, 300]) {
+        const callId = total === 200 ? 2 : 1;
+        const { activities, port, reported, sent, sizes } = createPort({
+          failures: total === 200 ? SERVER_FAILURES : CLIENT_FAILURES,
+        });
+        using core = createRouterCore(port, { limits });
+        const payload = patternOf(total);
+        const answering = core.request(payload, {
+          connectionHandle: 'a',
+          options,
+          procedure: echo,
+        });
 
-      await sleep(0);
+        await sleep(0);
 
-      expect(piecesOf(sent)).toEqual([[EnvelopeKind.REQUEST, 2, 200, 44]]);
+        expect(piecesOf(sent)).toEqual([[EnvelopeKind.REQUEST, callId, total, 44]]);
 
-      core.receive(creditOf(2, 140), 'a');
-      await sleep(0);
+        core.receive(creditOf(callId, total === 200 ? 140 : 172), 'a');
+        await sleep(0);
 
-      // full chunks alone, the next waiting for its credit
-      expect(piecesOf(sent).slice(1)).toEqual([
-        [EnvelopeKind.CHUNK, 2, 44, 48],
-        [EnvelopeKind.CHUNK, 2, 92, 48],
-      ]);
-      expect(activities).toEqual([]);
+        // full chunks alone, the next waiting for its credit
+        expect(piecesOf(sent).slice(1)).toEqual([
+          [EnvelopeKind.CHUNK, callId, 44, 48],
+          [EnvelopeKind.CHUNK, callId, 92, 48],
+        ]);
+        expect(activities).toEqual([]);
 
-      core.receive(creditOf(2, 200), 'a');
-      await sleep(0);
+        core.receive(creditOf(callId, total), 'a');
+        await sleep(0);
 
-      expect(activities).toEqual(['request a']);
+        expect(activities).toEqual(['request a']);
 
-      core.receive(resultOf(2, Uint8Array.of(9)), 'a');
+        core.receive(resultOf(callId, Uint8Array.of(total === 200 ? 9 : 1)), 'a');
 
-      await expect(answering).resolves.toMatchObject({ payload: Uint8Array.of(9) });
-      expect(piecesOf(sent).slice(3)).toEqual([
-        [EnvelopeKind.CHUNK, 2, 140, 48],
-        [EnvelopeKind.CHUNK, 2, 188, 12],
-      ]);
-      expect(payloadOf(sent, 2)).toEqual(payload);
-      expect(Math.max(...sizes)).toBeLessThanOrEqual(64);
-      expect(reported).toEqual([]);
+        await expect(answering).resolves.toMatchObject({
+          payload: Uint8Array.of(total === 200 ? 9 : 1),
+        });
+        expect(piecesOf(sent).slice(3)).toEqual(
+          total === 200
+            ? [
+                [EnvelopeKind.CHUNK, callId, 140, 48],
+                [EnvelopeKind.CHUNK, callId, 188, 12],
+              ]
+            : [
+                [EnvelopeKind.CHUNK, callId, 140, 48],
+                [EnvelopeKind.CHUNK, callId, 188, 48],
+                [EnvelopeKind.CHUNK, callId, 236, 48],
+                [EnvelopeKind.CHUNK, callId, 284, 16],
+              ]
+        );
+        expect(payloadOf(sent, callId)).toEqual(payload);
+        expect(Math.max(...sizes)).toBeLessThanOrEqual(64);
+        expect(reported).toEqual([]);
+        expect(
+          sent.flatMap(({ envelope }) => {
+            return envelope?.kind === EnvelopeKind.CHUNK ? [envelope.header.isLast] : [];
+          })
+        ).toEqual(
+          total === 200 ? [false, false, false, true] : [false, false, false, false, false, true]
+        );
+      }
     });
 
     test('stop a request the peer answers, or its caller gives up, and send nothing more of it', async () => {

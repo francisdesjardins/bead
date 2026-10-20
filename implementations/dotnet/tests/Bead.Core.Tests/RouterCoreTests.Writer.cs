@@ -111,6 +111,12 @@ public sealed partial class RouterCoreTests
         {
             return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
         })).Detail.Length);
+
+        var server = new Peer(RouterSide.Server, RouterLimits.Default with { MaximumDetailBytes = 4 });
+        using var serverCore = server.Core;
+        var answering = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
+        await server.Deliver(new Envelope { Header = new FailureHeader { CallId = 2 }, Failure = Failure.OfApplication(1, "abcdefgh") });
+        Assert.Equal("abcd", (await Assert.ThrowsAsync<FailureException>(() => { return answering.WaitAsync(Patience, TestContext.Current.CancellationToken); })).Detail);
     }
 
     [Fact]

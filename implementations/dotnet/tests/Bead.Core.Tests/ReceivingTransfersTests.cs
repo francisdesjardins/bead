@@ -12,10 +12,10 @@ public sealed class ReceivingTransfersTests
 
     // receiving transfers under limits, their chunks before the last of a byte, exactly, which record
     // each credit they send
-    private static (List<string> Credits, ReceivingTransfers Receiving, FakeTimeProvider Time) ReceivingOf(RouterLimits limits)
+    private static (List<string> Credits, ReceivingTransfers Receiving, FakeTimeProvider Time) ReceivingOf(RouterLimits limits, FakeTimeProvider? clock = null)
     {
         var credits = new List<string>();
-        var time = new FakeTimeProvider();
+        var time = clock ?? new FakeTimeProvider();
         var receiving = new ReceivingTransfers(new ReceivingTransfersOptions
         {
             Limits = limits,
@@ -233,7 +233,8 @@ public sealed class ReceivingTransfersTests
     [Fact]
     public void Stops_a_transfer_s_timer_once_its_payload_is_whole_and_once_it_is_closed()
     {
-        var (_, receiving, time) = ReceivingOf(LimitsOf() with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
+        var time = new RouterCoreTests.RequesterClock();
+        var (_, receiving, _) = ReceivingOf(LimitsOf() with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) }, time);
         var stalled = 0;
 
         void OnStall()
@@ -247,6 +248,9 @@ public sealed class ReceivingTransfersTests
         receiving.Place(whole, new Chunk(new byte[] { 2 }, true, 1));
         receiving.Complete(whole);
         receiving.Close(OpenedOf(receiving.Open(new byte[] { 1 }, (CallOf(3, "a"), OnStall, 2))));
+        Assert.Equal(3, time.Armed.Count);
+        Assert.All(time.Armed, (timer) => { Assert.True(timer.IsCleared); });
+        Assert.DoesNotContain(time.Armed, (timer) => { return !timer.IsCleared; });
         time.Advance(TimeSpan.FromSeconds(1));
         Assert.Equal(0, stalled);
     }
