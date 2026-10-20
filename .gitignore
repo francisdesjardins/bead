@@ -37,6 +37,9 @@ tools/protobuf-conformance/.work/
 implementations/typescript/tools/protobuf-conformance/generated/
 implementations/dotnet/tools/Bead.ProtobufConformance/Generated/
 
+# The benches' reports a release keeps, each its machine's, compared with the next release's there
+/.bench/
+
 # What this clone keeps for itself and never commits: the working notes and plans of its sessions
 .claude/local/
 
