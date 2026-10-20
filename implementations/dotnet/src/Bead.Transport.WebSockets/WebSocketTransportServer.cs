@@ -906,10 +906,9 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     // ! a peer gone without its closing handshake, its TCP connection ended or reset, is no error on
-    // its connection: its unclean close tells it, as the TypeScript side's does. .NET raises both
-    // ConnectionClosedPrematurely, on Windows as on Linux: Kestrel reads a reset as its stream's end,
-    // and the managed socket wraps any failure of its stream in that code; a protocol error is
-    // Faulted, and told
+    // its connection: its unclean close tells it, as the TypeScript side's does. .NET 10 raises each
+    // as ConnectionClosedPrematurely, nothing inside it, on Windows as on Linux; a protocol error as
+    // Faulted, which is told
     private static bool IsPeerGone(Exception reason)
     {
         return reason is WebSocketException { WebSocketErrorCode: WebSocketError.ConnectionClosedPrematurely };
