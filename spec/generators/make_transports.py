@@ -922,7 +922,7 @@ websocket = [
     ('a text message is no envelope: it is reported ENVELOPE_MALFORMED, and answered nothing', ['15.2'], {}, [
         *upgrade(), message('socket', text='x'), {'report': 1, 'on': 'socket'},
         message('socket', binary=request(3, 'echo', '"y"')), heard('socket', envelope=result(3, '"y"'))]),
-    ('a message past the side\'s own limit closes its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
+    ('a message past the side\'s own limit fails its connection with 1009', ['15.3', '12.2.1'], {'limits': SMALL}, [
         *upgrade(), message('socket', binary=request(1, 'echo', '"' + 'x' * 51 + '"')), heard('socket', close=TOO_BIG)]),
     # 15.1 and 15.2: the Authorization of an upgrade from no page, carried beside every envelope of its
     # connection; the verifier holds a value of its grammar alone, so whoami answers only if its

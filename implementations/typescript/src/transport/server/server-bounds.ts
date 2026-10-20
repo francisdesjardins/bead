@@ -3,7 +3,7 @@
 // dependencies
 
 import { PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
-import { ProgrammerError } from '../shared/errors';
+import { GenericError, ProgrammerError } from '../shared/errors';
 
 // interfaces
 
@@ -92,6 +92,25 @@ export const assertCount = (
   }
 
   return value as number;
+};
+
+/**
+ * A connection dropped behind a bound, as its server reports it on `error` (spec 15.1, 15.12): its
+ * handle, then `why`, which names the bound in the spec's spelling and its value.
+ */
+export const droppedOf = (connectionHandle: string, why: string): GenericError => {
+  return new GenericError(`${connectionHandle} is dropped: ${why}`);
+};
+
+/**
+ * Why a connection whose socket held what waits for it past its deadline is dropped, naming the
+ * pace's bounds in the spec's spelling and their values (spec 15.12).
+ */
+export const lateOf = ({
+  minimumSendBytesPerSecond,
+  sendGracePeriod,
+}: ISendPaceOptions): string => {
+  return `what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond ${String(minimumSendBytesPerSecond)} past sendGracePeriod ${String(sendGracePeriod)} ms`;
 };
 
 /**

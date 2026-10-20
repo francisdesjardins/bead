@@ -45,8 +45,10 @@ import {
   assertCount,
   boundHeadOf,
   createSendPace,
+  droppedOf,
   HEADERS_TIMEOUT,
   type ISendPaceOptions,
+  lateOf,
   MAXIMUM_CONNECTIONS,
   MAXIMUM_CONNECTIONS_PER_ADDRESS,
   MINIMUM_SEND_BYTES_PER_SECOND,
@@ -296,8 +298,16 @@ const unref = (timer: TimeoutId): void => {
  * left out, no longer than `maximumWait`, for something to bring back; a second takes the first's
  * place. Each listen held, once past its refusals, emits `listen` with `true`, and its end, while
  * its connection stands, `listen` with `false`: the layers above count no silence meanwhile (spec
- * 13.7). An outbox past `maximumOutboxBytes` closes its connection. A connection whose client does
+ * 13.7). An outbox past `maximumOutboxBytes` drops its connection. A connection whose client does
  * not listen carries answers alone: anything else rejects its `send`.
+ *
+ * `error` tells, with a connection's handle (spec 15.1): a bound it is dropped behind, its outbox
+ * past `maximumOutboxBytes` or an answer its socket held past its deadline at
+ * `minimumSendBytesPerSecond` past `sendGracePeriod`, a {@link GenericError} naming the bound in the
+ * spec's spelling and its value, told once, as its connection ends, its end begun, before its
+ * unclean `close`, so a listener that throws keeps nothing open; and what a listener of its events
+ * threw, as it threw. A client gone, an exchange lost, or a connection closed past
+ * `exchangeTimeout` or `inactivityTimeout` emits no `error`: its unclean `close` tells it.
  *
  * @example
  * const server = createHTTPTransportServer({ createServer: (listener) => createServer(listener) });
@@ -436,14 +446,14 @@ export const createHTTPTransportServer = (
         unref(connection.idle);
       };
 
-      // out of the registry before its close is told; each exchange still waiting learns its
-      // connection is gone — by the marked 404 until its request is handed on, then by its socket cut
-      // after its head, as a lost exchange's: a request handed on ran, which no refusal may deny
-      const closeDrawn = (connection: IDrawn, isClean: boolean): void => {
+      // a connection's end begun, false once begun already: out of the registry, each exchange still
+      // waiting told by the marked 404 until its request is handed on, then by its socket cut after
+      // its head, as a lost exchange's: a request handed on ran, which no refusal may deny
+      const takeDrawn = (connection: IDrawn): boolean => {
         const { address, connectionHandle, connectionToken } = connection;
 
         if (drawn.get(connectionHandle) !== connection) {
-          return;
+          return false;
         }
 
         drawn.delete(connectionHandle);
@@ -488,17 +498,30 @@ export const createHTTPTransportServer = (
           answer(connection.listen, UNKNOWN_CONNECTION);
         }
 
-        tell(CLOSE_EVENT, [isClean, connectionHandle]);
+        return true;
       };
 
-      // a connection behind its bounds, reported as it is dropped, naming the bound, so an operator
-      // tells it from a network that failed
-      const report = ({ connectionHandle }: IDrawn, why: string): void => {
-        server.emit(
-          ERROR_EVENT,
-          new GenericError(`the client fell behind: ${why}`),
-          connectionHandle
-        );
+      const closeDrawn = (connection: IDrawn, isClean: boolean): void => {
+        if (takeDrawn(connection)) {
+          tell(CLOSE_EVENT, [isClean, connection.connectionHandle]);
+        }
+      };
+
+      // ! a connection behind its bounds is dropped, its close unclean, then reported, naming the
+      // bound, so an operator tells it from a network that failed; once, as it ends, and its close
+      // told even when a listener of `error` throws, which is Node's (spec 15.1)
+      const drop = (connection: IDrawn, why: string): void => {
+        const { connectionHandle } = connection;
+
+        if (!takeDrawn(connection)) {
+          return;
+        }
+
+        try {
+          server.emit(ERROR_EVENT, droppedOf(connectionHandle, why), connectionHandle);
+        } finally {
+          tell(CLOSE_EVENT, [false, connectionHandle]);
+        }
       };
 
       // an answer's bytes, held to the pace its socket takes them at; `late` hears, naming the
@@ -514,9 +537,7 @@ export const createHTTPTransportServer = (
         const paced = createSendPace(
           {
             late: () => {
-              late(
-                `its answer was not taken by its deadline, at minimumSendBytesPerSecond ${String(pace.minimumSendBytesPerSecond)} past sendGracePeriod ${String(pace.sendGracePeriod)} ms`
-              );
+              late(lateOf(pace));
             },
             unsent: () => {
               return response.writableFinished ? 0 : Math.max(1, response.writableLength ?? 1);
@@ -565,27 +586,28 @@ export const createHTTPTransportServer = (
 
         response.end();
         // ! held to its pace: one past its deadline is an answer that could not be written, its
-        // exchange lost, which closes its connection at both ends (spec 15.7, 15.12)
+        // exchange lost, which drops its connection at both ends (spec 15.7, 15.12)
         paceAnswer(response, {
           bytes: length,
           late: (why) => {
-            report(connection, why);
             response.destroy();
-            closeDrawn(connection, false);
+            drop(connection, why);
           },
         });
       };
 
       // an envelope of the server's own waits in its connection's outbox, numbered, for a listen to
-      // bring it back; past the outbox's bound the connection closes, as one whose client fell behind
+      // bring it back; past the outbox's bound the connection is dropped, its client behind (spec
+      // 15.9)
       const enqueue = (connection: IDrawn, bytes: Uint8Array): void => {
         if (connection.outboxBytes + bytes.length > maximumOutboxBytes) {
-          report(
-            connection,
-            `its outbox would pass maximumOutboxBytes, ${String(maximumOutboxBytes)} bytes`
+          return (
+            drop(
+              connection,
+              `its outbox would pass maximumOutboxBytes, ${String(maximumOutboxBytes)} bytes`
+            ),
+            undefined
           );
-
-          return (closeDrawn(connection, false), undefined);
         }
 
         connection.sequence += 1;
@@ -1290,13 +1312,12 @@ export const createHTTPTransportServer = (
 
             response.end(bytes);
             // ! held to its pace: one past its deadline is an answer that could not be written,
-            // its exchange lost, which closes its connection at both ends (spec 15.7, 15.12)
+            // its exchange lost, which drops its connection at both ends (spec 15.7, 15.12)
             paceAnswer(response, {
               bytes: bytes.length,
               late: (why) => {
-                report(connection, why);
                 response.destroy();
-                closeDrawn(connection, false);
+                drop(connection, why);
               },
             });
           });

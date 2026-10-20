@@ -163,8 +163,9 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   place (spec 15.12): a body that comes slower than `MinimumBodyBytesPerSecond`, 240, once
   `BodyGracePeriod`, 5 s, passed is refused 408 `too-slow`, marked and told, its connection kept;
   an answer, or a listen's batch, its socket still holds past the longer of `SendGracePeriod` and
-  its bytes at `MinimumSendBytesPerSecond` is lost, its connection closed at both ends and reported
-  through `Error`, naming the bound, as an outbox past `MaximumOutboxBytes` is. A head is Kestrel's
+  its bytes at `MinimumSendBytesPerSecond` is lost, its connection dropped at both ends and
+  reported through `Error` as its connection ends, naming the bound and its value, as an outbox past
+  `MaximumOutboxBytes` is. A head is Kestrel's
   `RequestHeadersTimeout`, the transport's `HeadersTimeout`, 30 s, on both transports, answered 408
   as HTTP answers it. Every answer written before its body is whole closes its socket in stages
   (RFC 9112 §9.6): its end flushed, what still comes read and dropped until its client closes or 2

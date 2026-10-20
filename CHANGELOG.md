@@ -27,6 +27,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
   where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name
   alone.
+- Both HTTP servers report a drop in that shape, `<handle> is dropped: …`, naming
+  `maximumOutboxBytes`, or `minimumSendBytesPerSecond` and `sendGracePeriod`, with their values,
+  the pace's sentence the WebSocket's own, where the TypeScript side wrote `the client fell
+  behind: …` and the C# side `<handle> is dropped behind its <Option>`, no value.
 
 ### Fixed
 
@@ -45,6 +49,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   abort after `CloseTimeout`, or its heartbeat's drop.
 - The TypeScript WebSocket server gives `ws` its `closeTimeout`, so a peer that never answers its
   1009 is dropped after it rather than after `ws`'s own 30 seconds.
+- Both HTTP servers report a drop once its connection's end began, its exchanges cut, then tell
+  its close all the same, so a listener of `error` that throws keeps no connection open; a
+  connection two late answers drop is reported once.
 
 ## [0.6.0] - 2026-10-20
 

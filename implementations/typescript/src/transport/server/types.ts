@@ -730,8 +730,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumConnectionsPerAddress?: number | undefined;
   /**
    * The bytes one connection's outbox holds — what the server sent of its own and no listen
-   * acknowledged yet; past them, the connection closes, as one whose client fell behind, reported on
-   * `error`. Defaults to {@link MAXIMUM_OUTBOX_BYTES}.
+   * acknowledged yet; past them, the connection is dropped, its client behind, reported on `error`
+   * naming `maximumOutboxBytes` and its value, its close unclean (spec 15.9). Defaults to
+   * {@link MAXIMUM_OUTBOX_BYTES}.
    */
   maximumOutboxBytes?: number | undefined;
   /**
@@ -756,9 +757,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The slowest, in bytes a second, a socket may take an answer, or a listen's batch, once
    * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`, judged each
-   * second on the real clock: an answer or a batch past its deadline is lost, its connection closed
-   * at both ends and reported on `error` naming it (spec 15.7, 15.12). A whole number; 0 holds
-   * none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   * second on the real clock: an answer or a batch past its deadline is lost, its connection dropped
+   * at both ends and reported on `error` naming it and `sendGracePeriod` with their values (spec
+   * 15.7, 15.12). A whole number; 0 holds none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
    */
   minimumSendBytesPerSecond?: number | undefined;
   /**

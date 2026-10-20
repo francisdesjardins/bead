@@ -78,7 +78,7 @@ public sealed partial class HttpTransportServer
 
             internal required Func<HttpContext, string?> AddressOf { get; init; }
 
-            internal required Action<(TConnection Connection, string Bound)> Drop { get; init; }
+            internal required Action<(TConnection Connection, string Why)> Drop { get; init; }
 
             internal required Func<Func<CancellationToken, Task>?> Answering { get; init; }
         }
@@ -430,7 +430,7 @@ public sealed partial class HttpTransportServer
                 if (await WritePaced(context, (ending.Bytes, (_bounds.MinimumSendBytesPerSecond, _bounds.SendGracePeriod))))
                 {
                     waiting.Written.TrySetException(new IOException("the exchange's socket held its answer past its deadline"));
-                    _port.Drop((connection, nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)));
+                    _port.Drop((connection, ServerBounds.LateOf((_bounds.MinimumSendBytesPerSecond, _bounds.SendGracePeriod))));
 
                     return null;
                 }

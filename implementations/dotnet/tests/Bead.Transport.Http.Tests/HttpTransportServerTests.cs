@@ -3713,8 +3713,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         // lost, its connection closed and reported naming its bound; refused 404 from then on
         Assert.Equal([(false, connectionHandle)], _closes);
-        Assert.Contains(nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
-        Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
+        Assert.IsType<IOException>(Assert.Single(reported).Reason);
+        Assert.Equal(
+            ($"{connectionHandle} is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 240 past sendGracePeriod 200 ms", connectionHandle),
+            (Assert.Single(reported).Reason.Message, Assert.Single(reported).ConnectionHandle));
         Volatile.Write(ref isStalled, false);
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 3))));
     }
@@ -3778,8 +3780,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // lost, its connection closed and reported naming its bound; refused 404 from then on
         // (spec 15.7)
         Assert.Equal([(false, connectionHandle)], _closes);
-        Assert.Contains(nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
-        Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
+        Assert.IsType<IOException>(Assert.Single(reported).Reason);
+        Assert.Equal(
+            ($"{connectionHandle} is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 240 past sendGracePeriod 200 ms", connectionHandle),
+            (Assert.Single(reported).Reason.Message, Assert.Single(reported).ConnectionHandle));
         Volatile.Write(ref isStalled, false);
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 3))));
     }
@@ -3875,14 +3879,52 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         }
 
         Assert.Equal(
-            [(nameof(HttpTransportServerOptions.MaximumOutboxBytes), connectionHandle), ("closed", connectionHandle)],
+            [($"{connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 20 bytes", connectionHandle), ("closed", connectionHandle)],
             reported.Select((report) =>
             {
-                return (report.Reason.Message.Contains(nameof(HttpTransportServerOptions.MaximumOutboxBytes), StringComparison.Ordinal)
-                    ? nameof(HttpTransportServerOptions.MaximumOutboxBytes)
-                    : report.Reason.Message, report.ConnectionHandle);
+                return (report.Reason.Message, report.ConnectionHandle);
             }));
         Assert.Equal([(false, connectionHandle)], _closes);
+    }
+
+    // spec 15.1
+    [Fact]
+    public async Task Drops_behind_maximumOutboxBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+    {
+        await Start(new HttpTransportServerOptions { MaximumOutboxBytes = 20 });
+
+        var reported = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
+        var (connectionToken, connectionHandle) = await Connect(true);
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 2));
+
+        _server.Error += (reason, handle) =>
+        {
+            reported.Enqueue((reason, handle));
+
+            throw new InvalidOperationException("an error listener that throws");
+        };
+
+        // 10 bytes, 20, then 30: past it
+        foreach (var _ in Enumerable.Range(0, 2))
+        {
+            await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
+        }
+
+        // what the listener threw is .NET's: it reaches the send under way, the connection dropped
+        // first
+        Assert.Equal("an error listener that throws", (await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
+        })).Message);
+        Assert.Equal(
+            [($"{connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 20 bytes", connectionHandle)],
+            reported.Select((report) =>
+            {
+                return (report.Reason.Message, report.ConnectionHandle);
+            }));
+        Assert.Equal([(false, connectionHandle)], _closes);
+        Assert.Empty(_server.Clients);
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 3))));
     }
 
     [Fact]

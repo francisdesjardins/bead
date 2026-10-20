@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Bead;
 
 /// <summary>
@@ -59,6 +61,27 @@ internal static class ServerBounds
         }
 
         return count.Value;
+    }
+
+    /// <summary>
+    /// A connection dropped behind a bound, as its server reports it through its <c>Error</c> (spec
+    /// 15.1, 15.12): its handle, then <paramref name="why"/>, which names the bound in the spec's
+    /// spelling and its value; its I/O cut short.
+    /// </summary>
+    public static IOException DroppedOf(string connectionHandle, string why)
+    {
+        return new IOException($"{connectionHandle} is dropped: {why}");
+    }
+
+    /// <summary>
+    /// Why a connection whose socket held what waits for it past its deadline is dropped, naming the
+    /// pace's bounds in the spec's spelling and their values (spec 15.12).
+    /// </summary>
+    public static string LateOf((int MinimumSendBytesPerSecond, TimeSpan SendGracePeriod) pace)
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond {pace.MinimumSendBytesPerSecond} past sendGracePeriod {(long)pace.SendGracePeriod.TotalMilliseconds} ms");
     }
 }
 

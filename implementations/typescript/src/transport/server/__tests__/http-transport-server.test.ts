@@ -3188,7 +3188,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     expect(namesOf(events, 'error')).toEqual([
       [
         'error',
-        'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+        `${connectionHandle} is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms`,
         connectionHandle,
       ],
     ]);
@@ -3227,7 +3227,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     expect(namesOf(events, 'error')).toEqual([
       [
         'error',
-        'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+        `${connectionHandle} is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms`,
         connectionHandle,
       ],
     ]);
@@ -3295,10 +3295,55 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     ).toEqual([
       [
         'error',
-        'the client fell behind: its outbox would pass maximumOutboxBytes, 64 bytes',
+        `${connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 64 bytes`,
         connectionHandle,
       ],
       ['close', false, connectionHandle],
+    ]);
+    await server.stop();
+  });
+
+  // spec 15.1
+  test('drops behind maximumOutboxBytes a connection whose error listener throws, telling its close all the same', async () => {
+    const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
+      maximumOutboxBytes: 64,
+    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
+
+    server.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+
+    await server.send(
+      { data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) },
+      connectionHandle
+    );
+
+    // what the listener threw is Node's: it reaches the send under way, the connection dropped first
+    await expect(
+      server.send({ data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) }, connectionHandle)
+    ).rejects.toThrow('an error listener that throws');
+    expect(
+      events.filter(([name]) => {
+        return name === 'error' || name === 'close';
+      })
+    ).toEqual([
+      [
+        'error',
+        `${connectionHandle} is dropped: its outbox would pass maximumOutboxBytes, 64 bytes`,
+        connectionHandle,
+      ],
+      ['close', false, connectionHandle],
+    ]);
+    expect(server.clients).toEqual([]);
+
+    const after = exchangeOf(connectionToken);
+
+    fake.feed(after.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 })]);
+
+    expect([after.response.status, after.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
   });

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Buffers.Text;
+using System.Globalization;
 using System.IO.Pipelines;
 using System.Net;
 using System.Security.Cryptography;
@@ -66,7 +67,8 @@ public sealed record HttpTransportServerOptions
 
     /// <summary>
     /// The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the
-    /// connection closes, reported through <see cref="HttpTransportServer.Error"/> (spec 15.9).
+    /// connection is dropped, reported through <see cref="HttpTransportServer.Error"/> naming
+    /// <c>maximumOutboxBytes</c> and its value (spec 15.9).
     /// </summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
 
@@ -74,11 +76,11 @@ public sealed record HttpTransportServerOptions
     /// The slowest a client may take an answer, or a listen's batch, in bytes a second, once
     /// <see cref="SendGracePeriod"/> passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>,
     /// which this replaces (spec 15.12). Each answer of <i>S</i> bytes is given the longer of the grace
-    /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection closed
-    /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound
-    /// (spec 15.7). 0 holds none, on a network the application trusts; below 0 is an
-    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real clock, as what
-    /// it bounds is the platform's socket.
+    /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection dropped
+    /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound and
+    /// its grace with their values (spec 15.7). 0 holds none, on a network the application trusts;
+    /// below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real
+    /// clock, as what it bounds is the platform's socket.
     /// </summary>
     public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
 
@@ -425,8 +427,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     public event Action<TransportServerRefusal>? Refusal;
 
     /// <summary>
-    /// What a listener of its events threw, with the handle of the connection it was told of: the
-    /// transport went on as if it returned (spec 15.1). With an empty handle for a throw of a
+    /// What went wrong on a connection, with its handle (spec 15.1): a bound it is dropped behind,
+    /// <see cref="HttpTransportServerOptions.MaximumOutboxBytes"/> or
+    /// <see cref="HttpTransportServerOptions.MinimumSendBytesPerSecond"/> past
+    /// <see cref="HttpTransportServerOptions.SendGracePeriod"/>, an <see cref="IOException"/> naming
+    /// the bound in the spec's spelling and its value, told once, as its connection ends, its end
+    /// begun, before its unclean <see cref="Close"/>, so a listener that throws keeps nothing open; or
+    /// what a listener of its events threw, as it threw, the transport going on as if it returned.
+    /// Never a client gone, an exchange lost, or a connection closed past its exchange or inactivity
+    /// timeout, which its unclean <see cref="Close"/> tells. With an empty handle for a throw of a
     /// <see cref="Refusal"/> listener alone, which names no connection; never the server's own
     /// failure, as the TypeScript side's can be: Kestrel tells a failure of its own only to its logs.
     /// </summary>
@@ -802,10 +811,10 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             }
         }
 
-        // * reported, naming its bound, as it closes: its client fell behind (spec 15.9)
+        // * dropped, its client behind, then reported naming its bound and its value (spec 15.9)
         if (overflowing is not null)
         {
-            Drop((overflowing, nameof(HttpTransportServerOptions.MaximumOutboxBytes)));
+            Drop((overflowing, string.Create(CultureInfo.InvariantCulture, $"its outbox would pass maximumOutboxBytes, {_options.MaximumOutboxBytes} bytes")));
         }
 
         // its body still coming: its answer goes now, and it is never handed on
@@ -1045,12 +1054,27 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return Volatile.Read(ref isLate);
     }
 
-    // a connection dropped behind a bound of its own, reported naming it before its close (spec
-    // 15.9, 15.12): its exchange lost, as an answer that could not be written is (spec 15.7)
-    private void Drop((Drawn Connection, string Bound) dropped)
+    // ! a connection dropped behind a bound of its own (spec 15.9, 15.12), its exchange lost, as an
+    // answer that could not be written is (spec 15.7): its end begun, then reported, why naming the
+    // bound in the spec's spelling and its value; once, as it ends, before its unclean close, which
+    // is told even when a listener of Error throws, what it threw going on to its caller (spec 15.1)
+    private void Drop((Drawn Connection, string Why) dropped)
     {
-        Error?.Invoke(new IOException($"{dropped.Connection.ConnectionHandle} is dropped behind its {dropped.Bound}"), dropped.Connection.ConnectionHandle);
-        CloseDrawn(dropped.Connection, false);
+        var (connection, why) = dropped;
+
+        if (!Take(connection))
+        {
+            return;
+        }
+
+        try
+        {
+            Error?.Invoke(ServerBounds.DroppedOf(connection.ConnectionHandle, why), connection.ConnectionHandle);
+        }
+        finally
+        {
+            _listeners.Tell(Close, (false, connection.ConnectionHandle));
+        }
     }
 
     private async Task Exchange(HttpContext context)
@@ -1622,13 +1646,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 HttpServerFields.StampOf(response);
                 response.ContentType = HttpTransport.BatchMediaType;
                 response.ContentLength = ending.Bytes.Length;
-                response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(CultureInfo.InvariantCulture);
 
                 // ! at its pace: past it, an answer that could not be written, its exchange lost, its
                 // connection dropped at both ends, reported (spec 15.7, 15.12)
                 if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))))
                 {
-                    Drop((connection, nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)));
+                    Drop((connection, ServerBounds.LateOf((_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))));
 
                     return;
                 }
@@ -1764,10 +1788,18 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         connection.Idle = null;
     }
 
-    // out of the registry before its close is told; each exchange still waiting learns its connection
-    // is gone — by the marked 404 until its request is handed on, then by its exchange cut after its
-    // head, as a lost one is: a request handed on ran, which no refusal may deny
     private void CloseDrawn(Drawn connection, bool isClean)
+    {
+        if (Take(connection))
+        {
+            _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
+        }
+    }
+
+    // a connection's end begun, false once begun already: out of the registry, each exchange still
+    // waiting told by the marked 404 until its request is handed on, then by its exchange cut after
+    // its head, as a lost one is: a request handed on ran, which no refusal may deny
+    private bool Take(Drawn connection)
     {
         // the bodies still coming of the requests waiting, whose reads are ended, so each is answered
         // the marked 404 now, its head not out
@@ -1777,7 +1809,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         {
             if (_drawn.GetValueOrDefault(connection.ConnectionHandle) != connection)
             {
-                return;
+                return false;
             }
 
             _drawn.Remove(connection.ConnectionHandle);
@@ -1832,7 +1864,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             reading.CancelPendingRead();
         }
 
-        _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
+        return true;
     }
 
     // a listen held until something comes for it, or its wait is over; touched under the lock

@@ -914,7 +914,7 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     {
         if (connection.Dropped is { } why)
         {
-            return new IOException($"{connectionHandle} is dropped: {why}");
+            return ServerBounds.DroppedOf(connectionHandle, why);
         }
 
         return connection.IsTooBig

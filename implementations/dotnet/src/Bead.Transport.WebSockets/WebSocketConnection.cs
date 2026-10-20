@@ -219,9 +219,7 @@ internal sealed class WebSocketConnection
 
             var pace = _pace!;
 
-            _dropped = string.Create(
-                CultureInfo.InvariantCulture,
-                $"what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond {pace.MinimumSendBytesPerSecond} past sendGracePeriod {(long)pace.SendGracePeriod.TotalMilliseconds} ms");
+            _dropped = ServerBounds.LateOf((pace.MinimumSendBytesPerSecond, pace.SendGracePeriod));
         }
 
         Drop();

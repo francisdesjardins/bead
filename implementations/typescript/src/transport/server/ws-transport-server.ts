@@ -34,8 +34,10 @@ import {
 import {
   assertCount,
   createSendPace,
+  droppedOf,
   HEADERS_TIMEOUT,
   type ISendPace,
+  lateOf,
   MAXIMUM_CONNECTIONS,
   MAXIMUM_CONNECTIONS_PER_ADDRESS,
   MINIMUM_SEND_BYTES_PER_SECOND,
@@ -333,7 +335,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         why: string
       ): void => {
         paces.get(socket)?.stop();
-        fail(socket, new GenericError(`${connectionHandle} is dropped: ${why}`));
+        fail(socket, droppedOf(connectionHandle, why));
         socket.terminate();
       };
 
@@ -538,10 +540,7 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           createSendPace(
             {
               late: () => {
-                drop(
-                  connection,
-                  `what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond ${String(minimumSendBytesPerSecond)} past sendGracePeriod ${String(pace.sendGracePeriod)} ms`
-                );
+                drop(connection, lateOf(pace));
               },
               unsent: () => {
                 return socket.bufferedAmount ?? 0;
