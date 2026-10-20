@@ -214,8 +214,14 @@ def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{ho
 
 # a bearer credential, RFC 6750's own example, its auth-scheme included
 BEARER = 'Bearer mF_9.B5f-4.1JqM'
+# a head's 408, played on the real clock: its headersTimeout, then the latest a platform answers it.
+# ! Kestrel sets a head's deadline a heartbeat past its time (TimeoutControl.AssignTimeout) and fires
+# on the first heartbeat after it (CheckForTimeout), a heartbeat each second, so a connection's first
+# head is answered 1 to 2 seconds past its time; 2 seconds more for the real clock under load
+HEAD_TIMEOUT = 1000
+HEAD_408_WITHIN = HEAD_TIMEOUT + 2000 + 2000
 # what a 503 busy carries besides its mark
-BUSY = {'retry-after': {'shape': 'delay-seconds'}}
+BUSY ={'retry-after': {'shape': 'delay-seconds'}}
 # what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 6),
 # and of one its verifier does not hold, or whose end the wall clock has reached (13.11)
 NO_CREDENTIAL = 'no credential came'
@@ -593,11 +599,11 @@ cases = [
          {'expect': {'end': True}, 'on': 'slow'},
          post('again', request(3, 'echo', '"y"')), answered('again', result(3, '"y"'))]),
     # played on the real clock: the platform's parser holds a head, which no Bead code sees until it is
-    # whole, and answers it within a second of its time
+    # whole, and answers it past its time, as its platform checks it (HEAD_408_WITHIN)
     ('a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
-     ['15.12', '15.12.14'], {'headersTimeout': 1000}, [
+     ['15.12', '15.12.14'], {'headersTimeout': HEAD_TIMEOUT}, [
          {'send': {'head': 'POST /bead HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
-         {**unmarked_as('slow', 408), 'within': 3000}]),
+         {**unmarked_as('slow', 408), 'within': HEAD_408_WITHIN}]),
     ('a DELETE ends its connection, and an exchange after it is refused 404', ['15.4', '15.6.3', '15.6.6'], None, [
         *drawn(), send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body=''),
         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
@@ -1171,9 +1177,9 @@ websocket = [
          handshake('second'), refused('second', 503, 'busy', {**UPGRADE_REFUSED, **BUSY})]),
     # played on the real clock: the platform's parser holds a head, as over HTTP
     ('a request at a WebSocket\'s address whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
-     ['15.2.1', '15.12', '15.12.14'], {'options': {'headersTimeout': 1000}, 'realTime': True}, [
+     ['15.2.1', '15.12', '15.12.14'], {'options': {'headersTimeout': HEAD_TIMEOUT}, 'realTime': True}, [
          {'send': {'head': 'GET / HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
-         {**unmarked_as('slow', 408), 'within': 3000}]),
+         {**unmarked_as('slow', 408), 'within': HEAD_408_WITHIN}]),
     # played on the real clock: no clock given reaches the ping the C# side's platform times
     ('a side pings its peer every heartbeat', ['15.3'], {'options': {'heartbeat': 200}, 'realTime': True}, [
         *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=1000, ping=True)]),
