@@ -59,6 +59,8 @@ tests/
   Shared/                       what several test projects link: the test clock, the durations'
                                 helper, the JSON payloads, the addresses a server listens on
 tools/
+  Bead.Fuzz/                    the fuzz targets, the TypeScript side's one for one, which
+                                tools/fuzz.mjs runs under libFuzzer (README, Fuzzing)
   Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
                                 Generated/ is what tools/protobuf-conformance.mjs generates at run
                                 time; failing.txt, its failure list (decision 0028)

@@ -87,7 +87,7 @@ spec/                         spec.md, debugging.md, the conformance files both 
   schemas/                    their JSON Schemas
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
-  dotnet/                     Bead.slnx: src/, interop/, tests/; and tools/, outside it
+  dotnet/                     Bead.slnx: src/, interop/, tests/, tools/Bead.Fuzz; and the other tools/, outside it
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
   Dockerfile                  beadc's image, built from the root, its tests run on the image itself
   wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
@@ -440,6 +440,59 @@ node tools/bench-compare.mjs .bench/v0.5.0-csharp.json .bench/v0.6.0-csharp.json
 
 A regression past its threshold is read before the finish: explained in the release's notes, or
 fixed.
+
+## Fuzzing
+
+Both sides fuzz the same four parsers, guided by coverage, each fed raw bytes: `envelope`, the
+envelope reader, header and body, and a failure's record; `payload-codecs`, the `json` and `text`
+codecs' readers, what they read written back; `http-fields`, the HTTP transport's field parsers,
+an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the target and its
+`Host`, and `Origin`, the first byte picking the field; `debug-filter`, the `debug` filter's
+parser and the patterns of the filter it returns. A target lets its parser's documented refusal
+pass; any other exception, an input past 1 s, or memory past 256 MiB of its own is a finding. The
+TypeScript side runs [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) over
+`implementations/typescript/tools/fuzz/`, a Yarn project of its own, installed by hand, which
+neither the package's install nor CI fetches. The C# side runs
+[SharpFuzz](https://github.com/Metalnem/sharpfuzz) and libFuzzer for Windows,
+[libfuzzer-dotnet](https://github.com/Metalnem/libfuzzer-dotnet), over
+`implementations/dotnet/tools/Bead.Fuzz`, whose fuzzer `tools/fuzz/fuzzer.json` pins by its release
+and its SHA-256. `tools/fuzz.mjs` drives both, by hand; CI only builds and checks the targets.
+
+From the root, once, then after every change to what a target reads:
+
+```sh
+(cd implementations/typescript/tools/fuzz && yarn install)
+node tools/fuzz.mjs fetch
+node tools/fuzz.mjs seed
+node tools/fuzz.mjs build typescript
+node tools/fuzz.mjs build csharp
+```
+
+`fetch` writes the fuzzer and SharpFuzz's instrumenter into `Bead.Fuzz/.fuzzer/`; `seed` writes the
+bytes of `spec/vectors.json`, `conversations.json`, `transports.json`, `codecs.json` and
+`debug-filters.json` into each side's `corpus/<target>/`; `build csharp` publishes `Bead.Fuzz` and
+instruments its copy of `Bead.Core`. Then, for ten minutes:
+
+```sh
+node tools/fuzz.mjs run typescript envelope -- -max_total_time=600
+node tools/fuzz.mjs run csharp envelope -- -max_total_time=600
+```
+
+A run grows its side's `corpus/<target>/` and writes a finding to `findings/<target>/`, as
+`crash-`, `timeout-` or `oom-` and the input's SHA-1; git ignores both folders. The run prints the
+finding's exception and its stack. Given files in place of the corpus, a run reads each once, on
+either side, so a finding replays on its own side and on the other:
+
+```sh
+node tools/fuzz.mjs run csharp http-fields implementations/dotnet/tools/Bead.Fuzz/findings/http-fields/crash-<sha1>
+node tools/fuzz.mjs run typescript http-fields implementations/dotnet/tools/Bead.Fuzz/findings/http-fields/crash-<sha1>
+node tools/fuzz.mjs run csharp http-fields <finding> -- -minimize_crash=1 -runs=10000
+```
+
+On the C# side, libFuzzer's `cov` counts its own driver's edges; Bead.Core's coverage is its `ft`.
+Node and Jazzer.js hold about 220 MiB before the first input, so the TypeScript side's process limit
+is 512 MiB; the C# side's runtime holds its managed heap to 256 MiB. A finding becomes a case of the
+side's envelope fuzz test, or of its parser's own test file, its input in hexadecimal.
 
 ## Support
 

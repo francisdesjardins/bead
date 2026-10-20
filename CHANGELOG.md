@@ -23,6 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's envelope readers are fuzzed in its suite: seeded mutations of `spec/vectors.json`'s
   bytes, each read returning or refusing with a failure within a second; `BEAD_FUZZ_INPUTS` draws
   more for a longer run.
+- `tools/fuzz.mjs`: coverage-guided fuzzing of both sides' parsers by hand, Jazzer.js on the
+  TypeScript side and SharpFuzz with libFuzzer on the C# side, the envelope reader, the `json` and
+  `text` codecs, the HTTP fields and the debug filter, seeded from the conformance files (README,
+  Fuzzing).
 - The DevTools panel places its detail right of the list, under it, or by the panel's width as
   DevTools' Elements panel does, and a splitter between them sizes both; the panel keeps both
   choices.
