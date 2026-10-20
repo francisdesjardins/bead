@@ -206,6 +206,7 @@ test('CLI exits 0 for a comparison, 1 for a regression and 2 for input errors', 
     writeFileSync(next, 'broken JSON');
     assert.equal(run([base, next]).status, 2);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    // Windows holds a folder a process just let go a moment longer: its removal is retried
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10 });
   }
 });

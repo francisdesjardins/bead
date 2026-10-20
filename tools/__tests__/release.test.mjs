@@ -277,7 +277,8 @@ describe('moves', () => {
 const roots = [];
 after(() => {
   for (const root of roots) {
-    rmSync(root, { recursive: true, force: true });
+    // Windows holds a folder a process just let go a moment longer: its removal is retried
+    rmSync(root, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
