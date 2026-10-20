@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import type { Server } from 'node:http';
+import { WebSocketServer } from 'ws';
 import type { TransportServerConnectionHandle, TransportServerEventMap } from '../transport-server';
 import type {
   IIncomingMessageLike,
@@ -21,6 +22,8 @@ export interface IFakeSocket extends IServerSocketLike {
   hear(event: string, ...params: unknown[]): void;
   /** The pings the socket was asked to send. */
   pings: number;
+  /** What the socket was asked to send, in order. */
+  sent: unknown[];
   wasTerminated: boolean;
 }
 
@@ -60,7 +63,10 @@ export const createFakeSocket = (behaviour?: {
       }
     },
     pings: 0,
-    send: () => {},
+    send: (data) => {
+      socket.sent.push(data);
+    },
+    sent: [],
     terminate: () => {
       socket.wasTerminated = true;
       emitter.emit('close', 1006);
@@ -175,4 +181,32 @@ export const createFakeWebSocketServer = (options?: {
   };
 
   return { builtAt, connect, connectGone, FakeWebSocketServer, instances, listenEach };
+};
+
+/**
+ * `ws`'s own `WebSocketServer`, its HTTP server binding as it would on every address but `refused`,
+ * where its listen fails with `error` instead, as a bind fails for want of an address: what a
+ * scripted server cannot give, a real port that a real client reaches.
+ */
+export const createRefusingWebSocketServer = (refused: string, error: Error) => {
+  // a function rather than an arrow, since the transport calls it with `new`
+  return function (serverOptions: { maxPayload?: number | undefined; server: Server }) {
+    const { server: http } = serverOptions;
+    const listen = http.listen.bind(http) as (port: number, host: string) => Server;
+
+    http.listen = ((port: number, host: string) => {
+      if (host !== refused) {
+        return listen(port, host);
+      }
+
+      // as Node tells a bind refused: after the listen returned
+      process.nextTick(() => {
+        http.emit('error', error);
+      });
+
+      return http;
+    }) as Server['listen'];
+
+    return new WebSocketServer(serverOptions);
+  } as unknown as IWebSocketServerConstructor;
 };

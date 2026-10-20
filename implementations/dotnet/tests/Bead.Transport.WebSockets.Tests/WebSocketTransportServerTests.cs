@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Channels;
@@ -499,6 +500,52 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             throw;
         }
+    }
+
+    // ! the keep-alive the platform armed on a socket it accepted, read by the private names of
+    // .NET 10's ManagedWebSocket, which shows it nowhere else: the delay of its ping and how long its
+    // pong is waited, in milliseconds, or none when it armed no timer
+    private static (int DelayMs, int TimeoutMs)? KeepAliveOf(WebSocket socket)
+    {
+        const BindingFlags Fields = BindingFlags.NonPublic | BindingFlags.Instance;
+        const BindingFlags Properties = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        var type = socket.GetType();
+
+        if (type.GetField("_keepAliveTimer", Fields)!.GetValue(socket) is null)
+        {
+            return null;
+        }
+
+        var state = type.GetField("_keepAlivePingState", Fields)!.GetValue(socket)!;
+        var stateType = state.GetType();
+
+        return ((int)stateType.GetProperty("DelayMs", Properties)!.GetValue(state)!, (int)stateType.GetProperty("TimeoutMs", Properties)!.GetValue(state)!);
+    }
+
+    // a server whose every socket accepted is written to the channel given, as it was accepted
+    private static WebSocketTransportServer Keeping(Channel<WebSocket> accepted, WebSocketTransportServerOptions? options = null)
+    {
+        return new WebSocketTransportServer(options)
+        {
+            Accepted = (socket, connectionHandle) =>
+            {
+                accepted.Writer.TryWrite(socket);
+
+                return (socket, connectionHandle);
+            },
+        };
+    }
+
+    // the counts of a server's gauges, each by its name, in order
+    private static string CountsOf(WebSocketTransportServer server)
+    {
+        return string.Join("; ", server.Gauges().Counts.OrderBy((count) =>
+        {
+            return count.Key;
+        }, StringComparer.Ordinal).Select((count) =>
+        {
+            return $"{count.Key}={count.Value}";
+        }));
     }
 
     // definition
@@ -1851,7 +1898,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing()
+    public async Task Listens_on_localhost_port_80_and_beats_every_30_seconds_when_told_nothing()
     {
         var start = new WebSocketTransportStartOptions();
         var options = new WebSocketTransportServerOptions();
@@ -1861,6 +1908,19 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal(TimeSpan.FromSeconds(5), options.CloseTimeout);
         Assert.Null(options.MaximumMessageBytes);
         Assert.Equal(EnvelopeLimit, _server.MaximumMessageBytes);
+
+        // started told nothing, on localhost, a connection it takes is pinged every 30 seconds, its
+        // pong waited as long
+        var accepted = Channel.CreateUnbounded<WebSocket>();
+        await using var server = Keeping(accepted);
+        var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        await using var client = new WebSocketTransportClient();
+
+        await client.Connect(new WebSocketConnectOptions { Host = "127.0.0.1", Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+
+        // where the IPv6 loopback is absent, the IPv4 one alone, reported as it is
+        Assert.Equal(Addresses.HasIPv6Loopback() ? "localhost" : "127.0.0.1", bound.Address);
+        Assert.Equal((30_000, 30_000), KeepAliveOf(await Next(accepted)));
     }
 
     [Fact]
@@ -2297,17 +2357,25 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Pings_nothing_with_a_heartbeat_of_infinity()
     {
-        foreach (var (heartbeat, isPinging) in new[] { (TimeSpan.FromMilliseconds(200), true), (Timeout.InfiniteTimeSpan, false) })
+        foreach (var (heartbeat, keepAlive) in new (TimeSpan, (int, int)?)[] { (TimeSpan.FromMilliseconds(200), (200, 200)), (Timeout.InfiniteTimeSpan, null) })
         {
-            await Start(new WebSocketTransportServerOptions { Heartbeat = heartbeat });
+            var isPinging = keepAlive is not null;
+            var accepted = Channel.CreateUnbounded<WebSocket>();
+
+            await Start(Keeping(accepted, new WebSocketTransportServerOptions { Heartbeat = heartbeat }));
 
             // a peer of the tests' own, read raw, so every frame the server sends shows
             using var tcp = await OpenTcp();
             var stream = tcp.GetStream();
 
             await stream.WriteAsync(UpgradeRequest(), Cancelled);
-            await Next(_connections);
+
+            var connectionHandle = await Next(_connections);
+
             await ReadHead(stream);
+
+            // the platform's own timer, armed at the heartbeat; none at all for an infinite one
+            Assert.Equal((heartbeat, keepAlive), (heartbeat, KeepAliveOf(await Next(accepted))));
 
             var first = new byte[1];
             var reading = stream.ReadAsync(first, Cancelled).AsTask();
@@ -2323,7 +2391,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             }
             else
             {
-                Assert.Single(_server.ConnectionHandles);
+                Assert.Equal([connectionHandle], _server.ConnectionHandles);
             }
         }
     }
@@ -2528,34 +2596,67 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact(Skip = SamePort.Reason, SkipUnless = nameof(OpensTwoSocketsFromOnePort))]
     public async Task Closes_each_of_two_sockets_from_one_address_and_port_on_its_own_each_its_own_close_told()
     {
+        // its peer's close, clean, or its socket gone, unclean
+        static async Task End(ClientWebSocket peer, bool wasClean)
+        {
+            if (wasClean)
+            {
+                await peer.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
+            }
+            else
+            {
+                peer.Abort();
+            }
+        }
+
+        // what its gauges count once the address's place a connection held is given back, as its
+        // request ends, after its close is told
+        async Task<string> CountsOnceHeldBy(int connections)
+        {
+            await Until(() =>
+            {
+                return _server.Gauges().Counts["largestAddressConnections"] == connections;
+            });
+
+            return CountsOf(_server);
+        }
+
         await ListenEverywhere();
 
-        var (older, port) = await SamePort.Connect(new IPEndPoint(IPAddress.Loopback, _port), 0);
-        var olderHandle = await Next(_connections);
-        var (newer, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.2"), _port), port);
-        var newerHandle = await Next(_connections);
-
-        using (older)
-        using (newer)
+        // each ending in turn
+        foreach (var wasClean in new[] { true, false })
         {
-            Assert.NotEqual(olderHandle, newerHandle);
-            await older.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
+            var (older, port) = await SamePort.Connect(new IPEndPoint(IPAddress.Loopback, _port), 0);
+            var olderHandle = await Next(_connections);
+            var (newer, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.2"), _port), port);
+            var newerHandle = await Next(_connections);
 
-            Assert.Equal((true, olderHandle), await Next(_closes));
+            using (older)
+            using (newer)
+            {
+                Assert.NotEqual(olderHandle, newerHandle);
+                await End(older, wasClean);
 
-            // the newer stands, and is sent to
-            await _server.Send(new TransportMessage(new byte[] { 1 }, false), newerHandle).WaitAsync(Patience, Cancelled);
+                Assert.Equal((wasClean, olderHandle), await Next(_closes));
+                Assert.Equal(
+                    (wasClean, "connections=1; largestAddressConnections=1; largestUnsentBytes=0; unsentBytes=0"),
+                    (wasClean, await CountsOnceHeldBy(1)));
 
-            Assert.Equal(new byte[] { 1 }, (await ReceiveOf(newer)).Bytes);
-            Assert.Equal([newerHandle], _server.ConnectionHandles);
-            Assert.Equal(1, _server.Gauges().Counts["connections"]);
+                // the newer stands, and is sent to
+                await _server.Send(new TransportMessage(new byte[] { 1 }, false), newerHandle).WaitAsync(Patience, Cancelled);
 
-            await newer.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
+                Assert.Equal(new byte[] { 1 }, (await ReceiveOf(newer)).Bytes);
+                Assert.Equal([newerHandle], _server.ConnectionHandles);
 
-            Assert.Equal((true, newerHandle), await Next(_closes));
-            Assert.Empty(_server.ConnectionHandles);
-            Assert.Equal(0, _server.Gauges().Counts["connections"]);
-            Assert.True(_closes.Reader.Count == 0);
+                await End(newer, wasClean);
+
+                Assert.Equal((wasClean, newerHandle), await Next(_closes));
+                Assert.Empty(_server.ConnectionHandles);
+                Assert.Equal(
+                    (wasClean, "connections=0; largestAddressConnections=0; largestUnsentBytes=0; unsentBytes=0"),
+                    (wasClean, await CountsOnceHeldBy(0)));
+                Assert.True(_closes.Reader.Count == 0);
+            }
         }
     }
 

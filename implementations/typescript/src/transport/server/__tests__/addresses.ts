@@ -71,6 +71,14 @@ export const isFreeOn = async (host: string, port: number): Promise<boolean> => 
   return true;
 };
 
+/**
+ * Whether this machine has the IPv6 loopback, as the C# side's `Addresses` reads it: a socket binds
+ * `::1`, where a container with IPv6 off refuses it.
+ */
+export const hasIPv6Loopback = (): Promise<boolean> => {
+  return isFreeOn('::1', 0);
+};
+
 /** An error a bind fails with, its `code` as Node gives it. */
 export const bindError = (code: string): Error => {
   return Object.assign(new Error(`listen ${code}`), { code });
