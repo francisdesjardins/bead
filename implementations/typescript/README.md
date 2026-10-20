@@ -954,7 +954,8 @@ written before its body is whole carries `connection: close`, and its socket clo
 write side first, reading on and dropping what still comes until its client closes or 2 seconds
 pass, so a client that goes on sending reads it (RFC 9112 §9.6). An answer, and a listen's batch,
 are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: one
-past its deadline is an exchange lost, its connection closed at both ends, reported on `error`.
+past its deadline is an exchange lost, its connection dropped at both ends, reported on `error` as
+its connection closes, naming its bounds and their values.
 
 A request names its authority by its target when the target is in absolute-form, `http://` or
 `https://` in lower case, read as it came, its `Host` judged as one field line alone, which an
@@ -1095,10 +1096,11 @@ ignored; a listen without `bead-after`, or with a count that does not read so, i
 comes whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard
-twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, closes its connection, reported on
-`error`, its client having fallen behind; a paced subscription queues on the server what its client
-has not credited, so that never reaches the outbox. The client listens from its connect on, asking a
-`wait` of 25 seconds; a listen lost is listened again from where it was, as EventSource reconnects:
+twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, drops its connection, reported on
+`error` as it closes, naming the bound and its value; a paced subscription queues on the server
+what its client has not credited, so that never reaches the outbox. The client listens from its
+connect on, asking a `wait` of 25 seconds; a listen lost is listened again from where it was, as
+EventSource reconnects:
 at once, then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and all of
 it, so the clients one restart dropped come back apart. A listen that reaches the server ends the
 losses; a short outage costs nothing — the same connection, its session, its subscriptions, and

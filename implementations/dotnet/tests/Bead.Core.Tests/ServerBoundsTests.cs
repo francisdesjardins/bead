@@ -137,4 +137,16 @@ public sealed class ServerBoundsTests
             Assert.Equal(("n", refusal), (refused.ParamName, refused.Message[..refusal.Length]));
         }
     }
+
+    // spec 15.1, 15.12
+    [Fact]
+    public void Reports_a_connection_dropped_behind_its_pace_by_its_handle_naming_minimumSendBytesPerSecond_and_sendGracePeriod_with_their_values()
+    {
+        var dropped = ServerBounds.DroppedOf("type=HTTP;ip=192.0.2.9;ordinal=1", ServerBounds.LateOf((240, TimeSpan.FromSeconds(5))));
+
+        Assert.IsType<IOException>(dropped);
+        Assert.Equal(
+            "type=HTTP;ip=192.0.2.9;ordinal=1 is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 240 past sendGracePeriod 5000 ms",
+            dropped.Message);
+    }
 }

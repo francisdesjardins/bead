@@ -1,13 +1,15 @@
 import { EventEmitter } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { ProgrammerError } from '../../shared/errors';
+import { GenericError, ProgrammerError } from '../../shared/errors';
 import { spyIntervals } from '../../shared/__tests__/fixtures';
 import {
   assertCount,
   boundHeadOf,
   createSendPace,
+  droppedOf,
   HEADERS_TIMEOUT,
+  lateOf,
   lingerOn,
   MINIMUM_SEND_BYTES_PER_SECOND,
   SEND_GRACE_PERIOD,
@@ -140,6 +142,21 @@ test.describe('createSendPace', () => {
     expect(intervals.armed).toEqual([]);
     expect([MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, HEADERS_TIMEOUT]).toEqual([
       240, 5_000, 30_000,
+    ]);
+  });
+});
+
+test.describe('droppedOf', () => {
+  // spec 15.1, 15.12
+  test('reports a connection dropped behind its pace by its handle, naming minimumSendBytesPerSecond and sendGracePeriod with their values', () => {
+    const dropped = droppedOf(
+      'type=HTTP;ip=192.0.2.9;ordinal=1',
+      lateOf({ minimumSendBytesPerSecond: 240, sendGracePeriod: 5_000 })
+    );
+
+    expect([dropped instanceof GenericError, dropped.message]).toEqual([
+      true,
+      'type=HTTP;ip=192.0.2.9;ordinal=1 is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 240 past sendGracePeriod 5000 ms',
     ]);
   });
 });

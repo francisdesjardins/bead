@@ -730,8 +730,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   maximumConnectionsPerAddress?: number | undefined;
   /**
    * The bytes one connection's outbox holds — what the server sent of its own and no listen
-   * acknowledged yet; past them, the connection closes, as one whose client fell behind, reported on
-   * `error`. Defaults to {@link MAXIMUM_OUTBOX_BYTES}.
+   * acknowledged yet; past them, the connection is dropped, its client behind, reported on `error`
+   * naming `maximumOutboxBytes` and its value, its close unclean (spec 15.9). Defaults to
+   * {@link MAXIMUM_OUTBOX_BYTES}.
    */
   maximumOutboxBytes?: number | undefined;
   /**
