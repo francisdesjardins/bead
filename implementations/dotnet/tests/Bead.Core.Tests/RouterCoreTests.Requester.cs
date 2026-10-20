@@ -1024,11 +1024,29 @@ public sealed partial class RouterCoreTests
         await peer.Advance(TimeSpan.FromSeconds(0.9));
         Assert.False(asked.IsCompleted);
         await peer.Advance(TimeSpan.FromSeconds(0.1));
-        await Assert.ThrowsAsync<TimeoutException>(() =>
+        Assert.True(asked.IsCompleted);
+        var timed = await Assert.ThrowsAsync<TimeoutException>(() =>
         {
             return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
+        Assert.Equal("no answer came in 1000 milliseconds", timed.Message);
         Assert.IsType<CancelHeader>(peer.Sent[^1].Header);
+
+        var recorded = new RequesterPeer(Chunked with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
+        using var recordedCore = recorded.Core;
+        var small = recorded.Request([], new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) });
+        var transfer = recorded.Request(new byte[200], new ResolvedRequestOptions { Timeout = TimeSpan.FromSeconds(1) });
+        await recorded.Deliver(CreditOf(4, 140));
+        await recorded.Deliver(CreditOf(4, 200));
+        Assert.Equal("1000,250,250,250,250,250,250,1000", string.Join(",", recorded.Clock.Armed.Select((timer) => { return timer.Delay.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture); })));
+        await recorded.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(small.IsCompleted);
+        Assert.True(transfer.IsCompleted);
+        foreach (var pending in new[] { small, transfer })
+        {
+            Assert.Equal("no answer came in 1000 milliseconds", (await Assert.ThrowsAsync<TimeoutException>(() => { return pending.WaitAsync(Patience, TestContext.Current.CancellationToken); })).Message);
+        }
+        Assert.Equal(new IEnvelopeHeader[] { new CancelHeader { CallId = 2 }, new CancelHeader { CallId = 4 } }, recorded.Sent.TakeLast(2).Select((envelope) => { return envelope.Header; }));
     }
 
     [Fact]

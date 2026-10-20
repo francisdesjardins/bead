@@ -1502,6 +1502,33 @@ test.describe('createRouterCore', () => {
         ['a', EnvelopeKind.CANCEL, 2],
         ['a', EnvelopeKind.CANCEL, 4],
       ]);
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      const otherClock = createTestClock();
+      using clientCore = createRouterCore(client.port, {
+        clock: otherClock,
+        limits: { ...limits, transferInactivityTimeout: 2_000 },
+      });
+      const asking = settledOf(
+        clientCore.request(patternOf(300), { connectionHandle: 'a', options, procedure: echo })
+      );
+      let isCompleted = false;
+      void asking.then(() => {
+        isCompleted = true;
+      });
+      await otherClock.tickAsync(1_500);
+      clientCore.receive(creditOf(1, 80), 'a');
+      await sleep(0);
+      expect(piecesOf(client.sent)).toEqual([[EnvelopeKind.REQUEST, 1, 300, 44]]);
+      await otherClock.tickAsync(1_500);
+      expect(isCompleted).toBe(false);
+      clientCore.receive(creditOf(1, 300), 'a');
+      await sleep(0);
+      await otherClock.tickAsync(900);
+      expect(isCompleted).toBe(false);
+      await otherClock.tickAsync(100);
+      expect(await asking).toMatchObject({ timeout: 1_000 });
+      expect(answersOf(client.sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 1]);
     });
 
     test('set a call’s timer going again as the bytes of its result come, and not for bytes it has', async () => {
