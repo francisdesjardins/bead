@@ -377,7 +377,8 @@ public sealed partial class HttpTransportServer
                 ((body.Received * 1_000) + _bounds.MinimumBodyBytesPerSecond - 1) / _bounds.MinimumBodyBytesPerSecond);
             var left = TimeSpan.FromMilliseconds(allowed) - _bounds.Clock.GetElapsedTime(body.HeadAt);
 
-            return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+            // ! a millisecond at least, counted whole: Bead arms no timer for less (decision 0011)
+            return TimeSpan.FromMilliseconds(Math.Max(1, Math.Ceiling(left.TotalMilliseconds)));
         }
 
         // a request's answer, once it comes: written, or how its exchange ends instead — its connection
