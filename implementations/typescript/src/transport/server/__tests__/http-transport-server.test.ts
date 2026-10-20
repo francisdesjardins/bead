@@ -1631,6 +1631,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await expect(starting).rejects.toBe(refused);
     expect([failing.servers[0]?.closes, server.isClosed()]).toEqual([1, true]);
 
+    const restarted = server.start({ findOpenPort: true });
+
+    await failing.listenEach(2);
+    expect((await restarted).port).not.toBe(4_321);
+    await server.stop();
+
     const aborting = createFakeHTTPServer();
     const aborted = createHTTPTransportServer({ createServer: aborting.createServer });
     const controller = new AbortController();
@@ -1639,7 +1645,27 @@ test.describe('createHTTPTransportServer, its edges', () => {
     controller.abort();
 
     await expect(abortedStart).rejects.toBeInstanceOf(CancelError);
-    expect(aborting.servers[0]?.closes).toBe(1);
+    expect([aborting.servers[0]?.closes, aborted.isClosed()]).toEqual([1, true]);
+
+    const resumed = aborted.start({ findOpenPort: true });
+
+    await aborting.listenEach(2);
+    expect((await resumed).port).not.toBe(0);
+    await aborted.stop();
+
+    // a signal cancelled before the start opens nothing
+    const cancelled = createFakeHTTPServer();
+    const before = createHTTPTransportServer({ createServer: cancelled.createServer });
+    const signal = AbortSignal.abort();
+
+    await expect(before.start({ port: 4_321, signal })).rejects.toBeInstanceOf(CancelError);
+    expect([cancelled.servers.length, before.isClosed()]).toEqual([0, true]);
+
+    const retrying = before.start({ findOpenPort: true });
+
+    await cancelled.listenEach(2);
+    expect((await retrying).port).not.toBe(0);
+    await before.stop();
   });
 
   // spec 15.12

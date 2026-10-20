@@ -1805,17 +1805,34 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start();
 
         await using var failing = new HttpTransportServer();
+        Microsoft.AspNetCore.Builder.WebApplication? failedApplication = null;
+
+        failing.Built += (application) =>
+        {
+            failedApplication = application;
+        };
 
         await Assert.ThrowsAnyAsync<IOException>(() =>
         {
             return failing.Start(new HttpTransportStartOptions { Address = Host, Port = _port }, Cancelled);
         });
         Assert.Equal(ReadyState.Closed, failing.ReadyState);
+        Assert.NotNull(failedApplication);
+        Assert.Throws<ObjectDisposedException>(() =>
+        {
+            return failedApplication.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+        });
         // what it opened is closed: it starts again
         Assert.NotEqual(_port, (await failing.Start(Loopback, Cancelled)).Port);
 
         await using var aborted = new HttpTransportServer();
         using var source = new CancellationTokenSource();
+        Microsoft.AspNetCore.Builder.WebApplication? cancelledApplication = null;
+
+        aborted.Built += (application) =>
+        {
+            cancelledApplication = application;
+        };
 
         await source.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
@@ -1823,7 +1840,62 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return aborted.Start(Loopback, source.Token);
         });
         Assert.Equal(ReadyState.Closed, aborted.ReadyState);
+        Assert.NotNull(cancelledApplication);
+        Assert.Throws<ObjectDisposedException>(() =>
+        {
+            return cancelledApplication.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+        });
         Assert.NotEqual(0, (await aborted.Start(Loopback, Cancelled)).Port);
+
+        // a live start, held once its application is built, is cancelled before it listens
+        await using var pending = new HttpTransportServer();
+        using var during = new CancellationTokenSource();
+        using var release = new ManualResetEventSlim();
+        var building = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Microsoft.AspNetCore.Builder.WebApplication? pendingApplication = null;
+
+        pending.Built += (application) =>
+        {
+            if (pendingApplication is null)
+            {
+                pendingApplication = application;
+                building.TrySetResult();
+                Assert.True(release.Wait(Patience, Cancelled));
+            }
+        };
+
+        var starting = Task.Run(() =>
+        {
+            return pending.Start(Loopback, during.Token);
+        }, Cancelled);
+
+        try
+        {
+            await building.Task.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Connecting, pending.ReadyState);
+            Assert.False(during.IsCancellationRequested);
+            await during.CancelAsync();
+            release.Set();
+
+            var cancellation = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return starting.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal(during.Token, cancellation.CancellationToken);
+            Assert.True(during.IsCancellationRequested);
+            Assert.Equal(ReadyState.Closed, pending.ReadyState);
+            Assert.NotNull(pendingApplication);
+            Assert.Throws<ObjectDisposedException>(() =>
+            {
+                return pendingApplication.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+            });
+            Assert.NotEqual(0, (await pending.Start(Loopback, Cancelled)).Port);
+        }
+        finally
+        {
+            release.Set();
+        }
     }
 
     [Fact]
