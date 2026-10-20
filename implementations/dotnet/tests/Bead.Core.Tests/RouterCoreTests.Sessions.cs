@@ -72,21 +72,27 @@ public sealed partial class RouterCoreTests
         await server.Deliver(PresentingOf(1, Credential.Jwt("a.b.c")));
         await server.Deliver(PresentingOf(3, Credential.Elsewhere()));
         await server.Deliver(PresentingOf(5, Credential.Of((CredentialScheme)7, [1, 2])));
+        await server.Deliver(PresentingOf(15, Credential.Of((CredentialScheme)0xffff, [1, 2])));
 
         // one that takes them all names them, in the order of their numbers
         server.Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere];
         await server.Deliver(PresentingOf(7, Credential.Of((CredentialScheme)0xffff, [])));
+        await server.Deliver(PresentingOf(13, Credential.Of((CredentialScheme)4, [])));
 
         // one that nothing routes is refused as such first
         await server.Deliver(new Envelope { Header = RequestOf(9) with { ServiceId = 9, Credential = Credential.Of((CredentialScheme)7, []) }, Payload = new byte[] { 1 } });
+        await server.Deliver(new Envelope { Header = RequestOf(11) with { ProcedureId = 99, Credential = Credential.Of((CredentialScheme)7, []) }, Payload = new byte[] { 1 } });
 
         Assert.Equal(
             [
                 (1u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
                 (3u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
                 (5u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
+                (15u, ProtocolCode.CredentialUnsupported, "OPAQUE"),
                 (7u, ProtocolCode.CredentialUnsupported, "OPAQUE, JWT, ELSEWHERE"),
+                (13u, ProtocolCode.CredentialUnsupported, "OPAQUE, JWT, ELSEWHERE"),
                 (9u, ProtocolCode.ServiceUnknown, "no service 9"),
+                (11u, ProtocolCode.ProcedureUnknown, "no procedure 99 in service 1"),
             ],
             RefusalsOf(server.Sent));
         Assert.Equal(0, resolver.Admitted);
@@ -134,6 +140,34 @@ public sealed partial class RouterCoreTests
             Assert.Equal(Handle, asked.First.Request.ConnectionHandle);
             Assert.Equal(asked.Second.Signal, asked.First.Signal);
         });
+
+        var immediate = new Peer(RouterSide.Server);
+        using var immediateCore = immediate.Core;
+        var immediateResolver = immediate.Resolve();
+        var order = new List<string>();
+        var session = new CallSession { Data = "ada" };
+
+        immediate.Resolution = (request, signal) =>
+        {
+            order.Add($"resolve {request.ConnectionHandle} {request.Header.CallId} {signal.IsCancellationRequested}");
+            immediate.Loop.Post(() => { order.Add($"checkpoint {request.Header.CallId}"); });
+            return ValueTask.FromResult(request.Header.Credential is null ? null : session);
+        };
+        immediateResolver.Admission = (request) =>
+        {
+            order.Add($"admit {request.Header.CallId} {request.Session?.Data}");
+            return null;
+        };
+        immediate.Loop.Post(() =>
+        {
+            immediateCore.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, null)), "a");
+            immediateCore.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(3, token)), "b");
+        });
+        await immediate.Settle();
+        Assert.Equal(["resolve a 1 False", "admit 1 ", "resolve b 3 False", "admit 3 ada", "checkpoint 1", "checkpoint 3"], order);
+        Assert.Null(immediateResolver.Requests[0].Session);
+        Assert.Same(session, immediateResolver.Requests[1].Session);
+        Assert.Empty(immediate.Reports);
     }
 
     [Fact]
@@ -181,6 +215,31 @@ public sealed partial class RouterCoreTests
             {
                 return (request.Header.CallId, request.Session is not null);
             }));
+
+        foreach (var explicitResolution in new[] { true, false })
+        {
+            var other = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Elsewhere] };
+            using var otherCore = other.Core;
+            var otherResolver = other.Resolve();
+            if (explicitResolution)
+            {
+                other.Resolution = (_, _) => { return ValueTask.FromResult<CallSession?>(null); };
+            }
+            await other.Deliver(PresentingOf(1, token));
+            await other.Deliver(PresentingOf(3, null));
+            if (explicitResolution)
+            {
+                await other.Deliver(PresentingOf(5, Credential.Elsewhere()));
+                otherCore.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(7, Credential.Elsewhere())), false) { Credential = "Interop sub=Ada" }, Handle);
+                await other.Settle();
+            }
+            Assert.Equal(explicitResolution
+                ? [(1u, ProtocolCode.SessionRequired, "the credential does not hold"), (5u, ProtocolCode.SessionRequired, "no credential came"), (7u, ProtocolCode.SessionRequired, "the credential does not hold")]
+                : new List<(uint, ProtocolCode, string)> { (1u, ProtocolCode.SessionRequired, "the credential does not hold") }, RefusalsOf(other.Sent));
+            Assert.Null(Assert.Single(otherResolver.Requests).Session);
+            Assert.Equal(3u, otherResolver.Requests[0].Header.CallId);
+            Assert.Equal(1, otherResolver.Admitted);
+        }
     }
 
     [Fact]
@@ -634,6 +693,31 @@ public sealed partial class RouterCoreTests
             {
                 return request.Header.CallId;
             }));
+
+        var ended = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
+        using var endedCore = ended.Core;
+        var endedResolver = ended.Resolve();
+        var (endedResolution, endedPending) = Waiting();
+
+        ended.Resolution = endedResolution;
+        await ended.Deliver(PresentingOf(1, Credential.Jwt("a.b.c")));
+        await ended.Deliver(PresentingOf(3, Credential.Jwt("a.b.c")));
+        await ended.Deliver(PresentingOf(5, Credential.Jwt("a.b.c")));
+        await ended.Deliver(new Envelope { Header = new CancelHeader { CallId = 1 } });
+        endedCore.RejectPending("a closed", Handle);
+        await ended.Settle();
+        Assert.All(ended.Resolved, (request) => { Assert.True(request.Signal.IsCancellationRequested); });
+        endedPending[0].SetResult(new CallSession { Data = "ada" });
+        endedPending[1].SetException(new InvalidOperationException("stopped"));
+        endedPending[2].SetResult(null);
+        await ended.Settle();
+        await ended.Deliver(PresentingOf(1, Credential.Jwt("a.b.c")));
+        endedPending[3].SetResult(new CallSession { Data = "ada" });
+        await ended.Settle();
+        Assert.Empty(ended.Sent);
+        Assert.Empty(ended.Reports);
+        Assert.Equal(1, endedResolver.Admitted);
+        Assert.Equal(1u, Assert.Single(endedResolver.Requests).Header.CallId);
     }
 
     [Fact]
@@ -661,62 +745,85 @@ public sealed partial class RouterCoreTests
     {
         var token = SessionToken.FromBytes(PatternOf(16));
 
-        foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
+        foreach (var noneHasSession in new[] { false, true })
         {
-            var peer = new Peer(side) { Session = token, Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
-            var resolver = peer.Resolve();
-
-            // the peer's call ids: odd to a server, even to a client
-            var first = side == RouterSide.Server ? 1u : 2u;
-
-            // ! no service manager between: a handler's own admission, which refuses every call
-            Failure refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "short of its scope");
-
-            resolver.Admission = (_) =>
+            foreach (var side in new[] { RouterSide.Server, RouterSide.Client })
             {
-                return refusal;
-            };
+                var peer = new Peer(side) { Session = token, Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
+                var resolver = peer.Resolve();
 
-            // each credential holds, and its call runs in a session
-            peer.Resolution = (request, _) =>
-            {
-                return ValueTask.FromResult<CallSession?>(new CallSession { Data = request.Header.Credential?.Scheme.ToString() ?? "none" });
-            };
+                // the peer's call ids: odd to a server, even to a client
+                var first = side == RouterSide.Server ? 1u : 2u;
 
-            await peer.Deliver(PresentingOf(first, null));
-            await peer.Deliver(PresentingOf(first + 2, token));
-            await peer.Deliver(PresentingOf(first + 4, Credential.Jwt("a.b.c")));
-            peer.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(first + 6, Credential.Elsewhere())), false) { Credential = "Interop sub=ada" }, Handle);
-            await peer.Settle();
+                // ! no service manager between: a handler's own admission, which refuses every call
+                Failure refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "short of its scope");
 
-            // one with no detail goes out with none
-            refusal = Failure.OfProtocol(ProtocolCode.SessionRequired);
-            await peer.Deliver(PresentingOf(first + 8, null));
-            await peer.Deliver(PresentingOf(first + 10, Credential.Jwt("a.b.c")));
-            await peer.Settle();
+                resolver.Admission = (_) =>
+                {
+                    return refusal;
+                };
 
-            // the application's failure of that code is its own, and goes out as it is
-            refusal = Failure.OfApplication(32);
-            await peer.Deliver(PresentingOf(first + 12, Credential.Jwt("a.b.c")));
-            await peer.Settle();
-            Assert.Equal(Failure.OfApplication(32), peer.Sent[^1].Failure);
-            peer.Sent.RemoveAt(peer.Sent.Count - 1);
+                // each credential holds, and its call runs in a session
+                peer.Resolution = (request, _) =>
+                {
+                    return ValueTask.FromResult(request.Header.Credential is null && !noneHasSession ? null : new CallSession { Data = request.Header.Credential?.Scheme.ToString() ?? "none" });
+                };
 
-            Assert.Equal(
-                [
-                    (first, ProtocolCode.SessionRequired, "short of its scope"),
+                await peer.Deliver(PresentingOf(first, null));
+                await peer.Deliver(PresentingOf(first + 2, token));
+                await peer.Deliver(PresentingOf(first + 4, Credential.Jwt("a.b.c")));
+                peer.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(first + 6, Credential.Elsewhere())), false) { Credential = "Interop sub=ada" }, Handle);
+                await peer.Settle();
+
+                // one with no detail goes out with none
+                refusal = Failure.OfProtocol(ProtocolCode.SessionRequired);
+                await peer.Deliver(PresentingOf(first + 8, null));
+                await peer.Deliver(PresentingOf(first + 10, token));
+                await peer.Deliver(PresentingOf(first + 12, Credential.Jwt("a.b.c")));
+                peer.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(first + 14, Credential.Elsewhere())), false) { Credential = "carried" }, Handle);
+                await peer.Settle();
+
+                // the application's failure of that code is its own, and goes out as it is
+                refusal = Failure.OfApplication(32);
+                await peer.Deliver(PresentingOf(first + 16, Credential.Jwt("a.b.c")));
+                await peer.Settle();
+                Assert.Equal(Failure.OfApplication(32), peer.Sent[^1].Failure);
+                peer.Sent.RemoveAt(peer.Sent.Count - 1);
+
+                refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "sign in first");
+                foreach (var (offset, credential) in new (uint, Credential?)[] { (18, null), (20, token), (22, Credential.Jwt("a.b.c")), (24, Credential.Elsewhere()) })
+                {
+                    peer.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(first + offset, credential)), false) { Credential = "carried" }, Handle);
+                    await peer.Settle();
+                }
+                refusal = Failure.OfApplication(32, "its own");
+                await peer.Deliver(PresentingOf(first + 26, Credential.Jwt("a.b.c")));
+                Assert.Equal(Failure.OfApplication(32, "its own"), peer.Sent[^1].Failure);
+                peer.Sent.RemoveAt(peer.Sent.Count - 1);
+
+                Assert.Equal(
+                    [
+                        (first, ProtocolCode.SessionRequired, "short of its scope"),
                     (first + 2, ProtocolCode.AccessDenied, "short of its scope"),
                     (first + 4, ProtocolCode.AccessDenied, "short of its scope"),
                     (first + 6, ProtocolCode.AccessDenied, "short of its scope"),
                     (first + 8, ProtocolCode.SessionRequired, ""),
                     (first + 10, ProtocolCode.AccessDenied, ""),
+                    (first + 12, ProtocolCode.AccessDenied, ""),
+                    (first + 14, ProtocolCode.AccessDenied, ""),
+                    (first + 18, ProtocolCode.SessionRequired, "sign in first"),
+                    (first + 20, ProtocolCode.AccessDenied, "sign in first"),
+                    (first + 22, ProtocolCode.AccessDenied, "sign in first"),
+                    (first + 24, ProtocolCode.AccessDenied, "sign in first"),
                 ],
-                RefusalsOf(peer.Sent).OrderBy((refused) =>
-                {
-                    return refused.CallId;
-                }));
-            Assert.Equal(7, resolver.Admitted);
-            Assert.Empty(peer.Reports);
+                    RefusalsOf(peer.Sent).OrderBy((refused) =>
+                    {
+                        return refused.CallId;
+                    }));
+                Assert.Equal(14, resolver.Admitted);
+                Assert.All(peer.Sent, (envelope) => { Assert.Equal(FailureScope.Protocol, envelope.Failure!.Scope); });
+                Assert.Empty(peer.Reports);
+            }
         }
     }
 }
