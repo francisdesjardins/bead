@@ -3,6 +3,10 @@
 [![CI](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
+a specification with its conformance files, two implementations at parity, and the tools around
+them. It is a personal project, kept at its author's pace.
+
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
 relays, and transfers of large payloads under credit. Each envelope is written at fixed big-endian
@@ -24,6 +28,49 @@ This repository holds the protocol and its implementations, side by side:
 registry, so that the wire, the names and the API can change freely until then, with no deprecation
 cycle. Build on a commit, pinned.
 
+## At a glance
+
+A service is declared once, in a `.proto` with Bead's options, and `beadc` generates its server and
+its client in TypeScript and in C#. What is left to write is the resolvers and the calls, here
+abridged from [`examples/hello`](examples/hello), whose C# half writes the same:
+
+```ts
+// the server: its admission hooks, by the names the .proto gives them, and a resolver that asks
+// its caller back before it answers
+const hello = new HelloServer({ admissions: { greeted } });
+
+hello.on('sayHello', async ({ connectionHandle, payload }, response) => {
+  const name =
+    payload.name === ''
+      ? (await hello.command.askName({ question: 'What is your name?' })({ connectionHandle })).name
+      : payload.name;
+
+  return response({ greeting: `Hello, ${name}!` });
+});
+hello.offer(server);
+
+// the client: answers the server's command, calls, and follows a subscription at its own pace
+await using client = createWSClient();
+const greeter = new HelloClient(client, { windows: { countDown: 1 } });
+
+greeter.on('askName', (_request, response) => {
+  return response({ name: 'Ada' });
+});
+await client.connect({ host: '127.0.0.1', port });
+
+const { greeting } = await greeter.sayHello({ name: '' })(); // 'Hello, Ada!'
+
+await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
+  // a window of 1: the next tick waits until this callback settles
+})();
+```
+
+## Next to the alternatives
+
+gRPC-Web and Connect carry unary calls and server streaming to a browser, neither a client's stream
+nor the server's own calls to the client; Bead carries both, and subscriptions the client paces,
+over a WebSocket or plain HTTP.
+
 ## Why Bead
 
 A client and its server talk in more ways than requests and answers. The server pushes changes the
@@ -31,8 +78,8 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, from
-0.6.0, a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, ahead,
+a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -65,15 +112,18 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
 own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: each side's parsers fuzzed, guided by coverage, Jazzer.js on the TypeScript side and
-  SharpFuzz on the C# side, both held to read one corpus alike, a short run in CI.
-- **0.6.0**: a topic-based publish/subscribe broker as one more transport, one core and one
-  adapter a broker, Bead's envelope, routers and sessions the same at each end
+- **Next**: one corpus read alike by both sides' parsers, held as a gate as
+  `tools/protobuf-conformance.mjs differential` holds a `proto` payload, a target for a
+  WebSocket's handshake beside the four of [Fuzzing](#fuzzing), and a short run of them in CI; and a
+  guard in CI against a gross regression of the benches, where their spread on CI's runners lets
+  one hold ([Measurement](#measurement)).
+- **Then**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
+  a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
-  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
-  latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
+  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a counted
+  call's cost measured against an uncounted one, and a constrained C side, each bound by the records
+  that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -98,7 +148,8 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, the release and the coverage report, Node without dependencies
+tools/                        repository checks, the release, the coverage report, bench-compare.mjs and fuzz.mjs, Node without dependencies
+  fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows

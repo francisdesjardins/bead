@@ -7,8 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-20
+
 ### Added
 
+- `SECURITY.md` says how to report a vulnerability, privately, and what to expect of a personal
+  project; the README opens on what Bead explores, shows it at a glance, and where it stands next
+  to the alternatives.
 - The benches measure HTTP and WebSocket, cross-language calls, notifications and allocation over
   repeated runs; `tools/bench-compare.mjs` compares their reports.
 - `implementations/typescript/tools/bench.mjs` and `implementations/dotnet/tools/Bead.Benchmarks`: the
@@ -63,6 +68,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The spec moves to 0.7.0 (`spec-v0.7.0`), and its companion, `spec/debugging.md`, to 0.3.0
+  (`debugging-v0.3.0`).
+- The documents are brought to 0.6.0: the records, the spec and its companion in form alone, the
+  READMEs and the matrix; no record moves, and the broker and what remains of the fuzzing and the
+  measurement stay ahead.
 - The DevTools panel uses penumbra's spacing grid and a shared radius scale, with comments for
   measured glyphs, strokes and native slider alignment.
 
@@ -1523,7 +1533,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.5.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.6.0...develop
+[0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0

@@ -65,7 +65,7 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0034](../docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md): an
   access a server refuses, told, section 13.12.
 
-**Version: 0.6.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.7.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
@@ -586,11 +586,10 @@ section 5.1's second step holds an envelope to, by the kind its prefix names, so
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
 budget; a number of calls of 1 at least; a timeout section 1.4 allows, never without end, so a
-transfer's call id comes free. A side
-that takes or presents a `JWT` — given its keys, or one to present by default — sets `chunkBytes`
-and `maximumEnvelopeBytes` to 1,024 bytes at least besides, which a header of 1,020 bytes
-(section 4.3) and the byte of payload an opening carries (section 12.3) need: its limits hold
-together only so.
+transfer's call id comes free. A side that takes or presents a `JWT` — given its keys, or one to
+present by default — sets `chunkBytes` and `maximumEnvelopeBytes` to 1,024 bytes at least besides,
+which a header of 1,020 bytes (section 4.3) and the byte of payload an opening carries (section
+12.3) need: its limits hold together only so.
 
 12.3. The opening is the request or the result itself, with the TRANSFER block: the payload's total
 on 8 bytes, and its first bytes, one at least, as many as fill the envelope to `chunkBytes`, sent
@@ -1246,9 +1245,9 @@ connection; a 426 names `upgrade` in its `Connection`.
 side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
 connection that left a ping unanswered, so a peer gone without a word ends in a close; a ping waits
 behind what was sent before it, so a peer that stops reading leaves it unanswered too. What waits
-for a server's socket is held besides as section 15.12 says. A side that
-closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
-handshake completes as its stop begins among them. A close with 1000 is the clean one.
+for a server's socket is held besides as section 15.12 says. A side that closes says 1000; a server
+that stops, 1001, to each connection it holds, one whose opening handshake completes as its stop
+begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1608,11 +1607,11 @@ bare, or as [RFC 7239 §6](https://www.rfc-editor.org/rfc/rfc7239#section-6) wri
 — an IPv4 address followed by `:` and a port, an IPv6 address in brackets, followed or not by `:`
 and a port — its port dropped. Any other entry, a zone, a name or `unknown` among them, or the
 field's end, ends the walk. Every address so read is held in one form, for its bound per address,
-its handle and its refusals: an IPv4-mapped address as that IPv4 address, an IPv6
-address in the text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#section-4) recommends,
-hexadecimal throughout. Its port is the socket's, the nearest proxy's connection's behind one. A
-server reads no `Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy
-that writes `X-Forwarded-For` would pass on as its client wrote it
+its handle and its refusals: an IPv4-mapped address as that IPv4 address, an IPv6 address in the
+text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#section-4) recommends, hexadecimal
+throughout. Its port is the socket's, the nearest proxy's connection's behind one. A server reads no
+`Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy that writes
+`X-Forwarded-For` would pass on as its client wrote it
 ([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it neither names nor counts
 is a client as any other: its clients are its address, which its bound per address counts and its
 refusals tell. A bound by address counts as one the users behind one NAT, and as many the addresses

@@ -189,12 +189,12 @@ where the proxy's would be.
 One option of each on both transports, as `hosts` and `origins` are, so a deployment that puts both
 behind one proxy tells each alike.
 
-**No event; a gauge.** Each side's HTTP transport gauges `largestAddressConnections`, the
-connections its busiest address holds, under its ceiling `maximumConnectionsPerAddress`, as
-`largestOutboxBytes` sits under `maximumOutboxBytes`. One count, no set a peer grows. The health
-check warns at 80% of any ceiling, so a proxy left off the list or uncounted shows `warn` on
-`/health` at 52 connections from one address, before any 503. A gauge is no part of the spec: twins
-by the same sentence hold it.
+**No event; a gauge.** Each server transport of each side, HTTP and WebSocket, gauges
+`largestAddressConnections`, the connections its busiest address holds, under its ceiling
+`maximumConnectionsPerAddress`, as `largestOutboxBytes` sits under `maximumOutboxBytes`. One count,
+no set a peer grows. The health check warns at 80% of any ceiling, so a proxy left off the list or
+uncounted shows `warn` on `/health` at 52 connections from one address, before any 503. A gauge is
+no part of the spec: twins by the same sentence hold it.
 
 ## Consequences
 
@@ -215,7 +215,8 @@ says; an IPv6 host holds a /64 or more ([RFC 6177](https://www.rfc-editor.org/rf
 15.12 names both.
 
 **Ahead, each by a decision of its own**: `Forwarded`, once a proxy that writes it alone is met;
-IPv6 keyed by a prefix; a per-address value fit for a NAT.
+IPv6 keyed by a prefix; a per-address value fit for a NAT; each for an HTTP server and a WebSocket
+server at once.
 
 **The gate.** `spec/transports.json`, played by both sides. Over HTTP: the bound behind a proxy
 named; a field from a socket no entry holds, not read; the walk past two networks, what a client

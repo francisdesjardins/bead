@@ -52,9 +52,8 @@ import {
   successorsOf,
 } from './check-versions.mjs';
 
-// the root's formatter, from the TypeScript side's install, and the files `prepare` writes by hand
+// the root's formatter, from the TypeScript side's install, which the root's format check runs
 const OXFMT = 'implementations/typescript/node_modules/oxfmt/bin/oxfmt';
-const FORMATTED = [CHANGELOG, 'spec/spec.md', 'spec/debugging.md', 'spec/interop-service.json'];
 
 // ── Texts ─────────────────────────────────────────────────────────────────────
 
@@ -602,14 +601,10 @@ export const prepare = (root, options = {}) => {
   } else {
     log(`skipped: spec/check.py (no jsonschema for ${python}); CI's spec job holds it`);
   }
+  // ! the root's own check, which holds the CHANGELOG up to its first released section alone: a
+  // released section stays as its tag shipped it, whatever a newer formatter would lay out
   if (existsSync(join(root, OXFMT))) {
-    run(process.execPath, [
-      OXFMT,
-      '-c',
-      'implementations/typescript/.oxfmtrc.json',
-      '--check',
-      ...FORMATTED,
-    ]);
+    run(process.execPath, ['tools/check-format.mjs']);
   } else {
     log(`skipped: the root's format check (no ${OXFMT}); CI's typescript job holds it`);
   }

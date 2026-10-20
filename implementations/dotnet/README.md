@@ -254,6 +254,14 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   });
   ```
 
+  No procedure is handed a bearer credential its call came with (spec 13.1). The `RequestHeader` a
+  resolver, its callback and a `BeforeRequest` are handed, a relay's `BeforeRoute` among them,
+  carries a `Credential` whose `Token` is none for a `JWT`, its scheme alone; what the transport
+  carried beside an `ELSEWHERE`, and a `JWT`'s token, reach the side's verifier, its `Credentials`,
+  and a relay, which moves them to leg B, alone. A server's `SessionOf`, asked for a call presenting
+  none or `OPAQUE`, is handed a `SessionRequest` of its connection and its header, which carries no
+  transport credential.
+
 - **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
   `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
   own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a

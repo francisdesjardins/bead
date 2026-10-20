@@ -65,11 +65,11 @@ held to a pace, as Kestrel holds a response to its `MinResponseDataRate`: each e
 connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`, 240, its grace
 `sendGracePeriod`, 5 seconds, at least, and a socket that still holds something past it, judged
 each second on the real clock, is dropped. An envelope that would take what waits past
-`maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once, 184,551,424
-bytes under the limits by default, which `createWSServer` derives from its router's. Each drop is
-reported on `error`, naming its bound, and its close is not clean; the heartbeat drops a reader that
-stops behind a large backlog besides. A paced subscription queues on the server what a client that
-falls behind has not credited.
+`maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once,
+184,551,424 bytes under the limits by default, which `createWSServer` derives from its router's.
+Each drop is reported on `error`, naming its bound, and its close is not clean; the heartbeat drops
+a reader that stops behind a large backlog besides. A paced subscription queues on the server what a
+client that falls behind has not credited.
 
 A server listens on `localhost` unless `start` is given an `address`: both loopbacks, `127.0.0.1`
 and `::1`, on one port, as Kestrel's `ListenLocalhost` does, so no other process can answer a client
@@ -410,14 +410,19 @@ resolver fails first. A resolver answers the procedure's own failure, `response(
 with a code from 1 to 65,535, or a refusal of admission from its router's table. The types refuse
 the protocol's other failures; a code out of that range, or a refusal from the other side's table,
 fails the resolver, and the request is answered as `PROCEDURE_FAILED`, with no detail: the error is
-reported, never the peer's to read (spec 9.0). A `beforeRequest` admits a
-request only by returning `true`: anything else refuses it, with the `refusal` the function carries,
-or with `ACCESS_DENIED`. It is synchronous, and sees the request's header, its connection and the
-call's session, `session`, never its payload: its router asks it through the resolver's `admit`
-once the request's credential resolved and before the payload is read — or comes, for a transfer —
-so a request refused is never decoded, and a resolver called by a router that asked nothing asks it
-itself, first. An admission of the application's own reads the session's data — a token's claims,
-say — and a callback receives the same session, as `request.session`. A callback's
+reported, never the peer's to read (spec 9.0). A `beforeRequest` admits a request only by returning
+`true`: anything else refuses it, with the `refusal` the function carries, or with `ACCESS_DENIED`.
+It is synchronous, and sees the request's header, its connection and the call's session, `session`,
+never its payload: its router asks it through the resolver's `admit` once the request's credential
+resolved and before the payload is read — or comes, for a transfer — so a request refused is never
+decoded, and a resolver called by a router that asked nothing asks it itself, first. An admission of
+the application's own reads the session's data — a token's claims, say — and a callback receives
+the same session, as `request.session`. The header a resolver, its `admit`, its callback and a
+`beforeRequest` are handed, a relay's `beforeRoute` among them, is an `IHandedRequestHeader`: the
+header as it came, but for its credential, a `HandedCredential`, which says of a `JWT` its scheme
+alone. No procedure is handed a bearer credential its call came with: a `JWT`'s token, and what a
+transport carried beside an `ELSEWHERE`, reach the side's verifier, its `credentials`, and a relay,
+which forwards them to leg B, alone (spec 13.1). A callback's
 `request.signal` is aborted when its call ends before its answer — a `CancelError` when its
 requester cancels it, a `DisconnectError` when its connection closes — so it may stop: its answer
 would go nowhere, and what it throws then is not reported. A listener of that signal that throws is
@@ -488,12 +493,14 @@ identifier moves that end to the later of the two: a credential renewed keeps it
 Each request runs in its call's session, which its admission reads and its callback receives as
 `session`: its connection's, its data a copy the call keeps, when it presents none or that session's
 token as `OPAQUE`, compared in constant time; a credential's, with its own credential's data — a
-`JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its connection's. A
-credential that does not hold — another token, an expired `JWT` — is refused `SESSION_REQUIRED`,
-whatever its procedure requires, and a verifier that fails `PROCEDURE_FAILED`, reported. A server's
-router resolves it once per request, its call id held, before `beforeRequest`: none and `OPAQUE` by
-its `sessionOf(request, signal)` — the server's gives the connection's session from its sessions —
-in the turn the request came; a `JWT` or an `ELSEWHERE` by its `credentials`, in a later turn,
+`JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its connection's, and
+never the bearer bytes the call came with, which its verifier alone reads (spec 13.1). A credential
+that does not hold — another token, an expired `JWT` — is refused `SESSION_REQUIRED`, whatever its
+procedure requires, and a verifier that fails `PROCEDURE_FAILED`, reported. A server's router
+resolves it once per request, its call id held, before `beforeRequest`: none and `OPAQUE` by its
+`sessionOf(request, signal)`, handed the connection and the header alone, nothing its transport
+carried — the server's gives the connection's session from its sessions — in the turn the request
+came; a `JWT` or an `ELSEWHERE` by its `credentials`, in a later turn,
 whether its verifier waits or not. A cancel, or its connection's close, meanwhile aborts the signal
 its verifier holds, and what it settles to then is dropped. `requireSession` is the `beforeRequest`
 of every other procedure: it tests the call's session, never the connection's, and refuses a call in
@@ -736,12 +743,12 @@ The limits are options of each router and each facade — `createClient(layers, 
 `createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
 from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a call at once at
-least, a timeout a timer holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
-least, since its header holds 1,020. Nothing announces them: both ends of a connection are set
-alike. A transport that carries transfers delimits its messages, knows the envelope's size at both
-ends, delivers every chunk and credit — in any order, a copy tolerated — and carries both ways.
-WebSocket does all four. The router copies every payload it reads, so a transport may use its
-buffers again once `receive` returns.
+least, a timeout a timer holds; and, on a side that takes or presents a `JWT`, a chunk and an
+envelope of 1,024 bytes at least, since its header holds 1,020. Nothing announces them: both ends of
+a connection are set alike. A transport that carries transfers delimits its messages, knows the
+envelope's size at both ends, delivers every chunk and credit — in any order, a copy tolerated — and
+carries both ways. WebSocket does all four. The router copies every payload it reads, so a
+transport may use its buffers again once `receive` returns.
 
 What comes late is dropped in silence where it is known for late, and reported elsewhere:
 
@@ -1087,14 +1094,14 @@ comes whole, bounded alone by its envelope limit, as a socket's frames are: no b
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard
 twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, closes its connection, reported on
-`error`, its client having fallen behind; a paced subscription queues on the server what its client has not credited,
-so that never reaches the outbox. The client listens from its connect on, asking a `wait` of 25 seconds; a
-listen lost is listened again from where it was, as EventSource reconnects: at once, then after 1,
-2, 4 seconds and on to 30, each wait drawn between half of it and all of it, so the clients one
-restart dropped come back apart. A listen that reaches the server ends the losses; a short outage
-costs nothing — the same connection, its session, its subscriptions, and what came meanwhile, in
-order. Past `inactivityTimeout` of losses — 5 minutes, the server's own — the client counts the
-connection lost; the server's marked 404 says it sooner.
+`error`, its client having fallen behind; a paced subscription queues on the server what its client
+has not credited, so that never reaches the outbox. The client listens from its connect on, asking a
+`wait` of 25 seconds; a listen lost is listened again from where it was, as EventSource reconnects:
+at once, then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and all of
+it, so the clients one restart dropped come back apart. A listen that reaches the server ends the
+losses; a short outage costs nothing — the same connection, its session, its subscriptions, and
+what came meanwhile, in order. Past `inactivityTimeout` of losses — 5 minutes, the server's own —
+the client counts the connection lost; the server's marked 404 says it sooner.
 A listen held is an exchange under way, so a client that listens is never idle; `pause` spaces the
 listens that bring nothing, and must stay under the server's idleness. Long polling, rather than a
 response held open for ever: no heartbeat, nothing an intermediary buffers, and a batch lost comes
@@ -1136,12 +1143,12 @@ no counterpart to mirror.
 `server.gauges()` counts what each layer holds right now: the server's connections, the transport's
 — and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read, over
 a WebSocket what waits for its sockets, `largestUnsentBytes` the most one holds, and on both the
-connections its busiest address holds, `largestAddressConnections` —
-the router's calls waited on and answered, the busiest connection's, `largestAnsweringCalls`, the call ids it reserved, its transfers and the bytes
-they hold, its subscriptions in flight, waiting or notified, those paced whose credit is spent and
-what they queue — all together, and the fullest queue, at its bounds — its destinations, and the
-credentials' sessions it keeps and those of them timed, `credentialSessions` and
-`timedCredentialSessions` — and the connections' sessions.
+connections its busiest address holds, `largestAddressConnections` — the router's calls waited on
+and answered, the busiest connection's, `largestAnsweringCalls`, the call ids it reserved, its
+transfers and the bytes they hold, its subscriptions in flight, waiting or notified, those paced
+whose credit is spent and what they queue — all together, and the fullest queue, at its bounds — its
+destinations, and the credentials' sessions it keeps and those of them timed, `credentialSessions`
+and `timedCredentialSessions` — and the connections' sessions.
 Nothing of it names a connection: no handle, token or address leaves the process. Each layer also
 says how many connections it keeps anything for that the transport no longer holds — an orphan,
 which is a leak — and what it found that should never be, such as timers kept through
@@ -1347,8 +1354,9 @@ The router's core, the service manager and the HTTP transport server are each bu
 a module of its own under `src/`, on the C# side a private nested type of its owner, in a partial
 file named after both under `src/`, the type named after the module. Each part has its twin; one
 row names no part: `router-limits.ts`, whose twin is the public `RouterLimits`, outside the owner.
-The C# side's README holds the same table. A part's tests sit in the file named after it: those that go through the owner, under the
-owner's describe, and those of the part's own factory or functions, under theirs.
+The C# side's README holds the same table. A part's tests sit in the file named after it: those
+that go through the owner, under the owner's describe, and those of the part's own factory or
+functions, under theirs.
 
 | TypeScript module                           | C# file                                                      | What it holds                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1377,11 +1385,11 @@ call there.
 
 **A request, from a client to a server, and back.**
 
-1. `services.getRequest(procedure, dependencies)(payload)(options)` — `router/shared/service-requester.ts`,
-   `callOf`, the body every requester shares: its declaration to the router, its value written — one
-   that does not write fails the call before anything goes, nothing traced —, the trace, the
-   `deprecated` event, `router.request` with the series the declaration gave, the close on timeout,
-   the decoding of the answer.
+1. `services.getRequest(procedure, dependencies)(payload)(options)` —
+   `router/shared/service-requester.ts`, `callOf`, the body every requester shares: its declaration
+   to the router, its value written — one that does not write fails the call before anything goes,
+   nothing traced —, the trace, the `deprecated` event, `router.request` with the series the
+   declaration gave, the close on timeout, the decoding of the answer.
 2. `request` — `router/client/router-client.ts`: refuses a programmer's error first, binds the
    notification a call subscribes, when it subscribes one, and hands the rest to the core.
 3. `request` — `router/shared/router-requester.ts`: refuses a programmer's error or an aborted
@@ -1658,9 +1666,9 @@ the filter opens its syntax, which `Escape` closes. Its status bar's Detail choi
 detail right of the list, under it, or, at Auto, as DevTools' Elements panel places its sidebar:
 beside a split wider than 680 px, under it otherwise. The splitter between them follows the
 pointer, or, focused, `←` and `→` (`↑` and `↓` when stacked), `Home` and `End` to its limits, and
-`Enter`, which collapses the list to its least and, pressed again, restores it. The list keeps its least
-first, eight rows when stacked, and the detail its whole tab bar where the panel holds both; the
-panel's page keeps both choices.
+`Enter`, which collapses the list to its least and, pressed again, restores it. The list keeps its
+least first, eight rows when stacked, and the detail its whole tab bar where the panel holds both;
+the panel's page keeps both choices.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
 nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —

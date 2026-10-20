@@ -18,7 +18,7 @@ hold what of them a test can. The why of each rule is in the decisions:
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3).
 
-**Version: 0.2.1**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.3.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -375,12 +375,13 @@ counted at its hand-off, and the refusal is reported (`spec.md` 9.0).
 
 9.3. A router takes a call it makes in this order: first what makes it a programmer's error, a
 timeout or a payload's limit that does not hold, a credential no call presents (`spec.md` 13.4)
-and one no header of its request holds (`spec.md` 4.4), a subscription its router does not hold, a command that names no connection, and
-a signal aborted already, each refused and not counted; then the call starts; then every check that
-can refuse it, each ending it in the turn it started. A request whose header does not read,
-answered at the gate (`spec.md` 9.6.2), starts and ends in one turn too, under `_OTHER`; so does a
-request past the calls its connection has its side answer at once (`spec.md` 9.2, step 3), under its
-procedure's series when its router declares it, `_OTHER`'s otherwise (7.3).
+and one no header of its request holds (`spec.md` 4.4), a subscription its router does not hold, a
+command that names no connection, and a signal aborted already, each refused and not counted; then
+the call starts; then every check that can refuse it, each ending it in the turn it started. A
+request whose header does not read, answered at the gate (`spec.md` 9.6.2), starts and ends in one
+turn too, under `_OTHER`; so does a request past the calls its connection has its side answer at
+once (`spec.md` 9.2, step 3), under its procedure's series when its router declares it, `_OTHER`'s
+otherwise (7.3).
 
 9.4. Each call a side answers ends as one of these, the sections `spec.md`'s:
 
@@ -429,9 +430,10 @@ subscription and is refused in its own answer, its queue past its bounds before 
 | anything else its router fails it with: a transport that refuses its request                                                                                                  | `error`     |                                   |
 
 9.7. A call to a connection that is not open fails with the type a connection that closes fails it
-with, `DisconnectError`, `DisconnectException`, and counts alike, `closed`: the two are one race with
-a close. A call made on a connection that closes fails and counts so too, even when the signal it
-was given is that of a call the close ends: never as a cancel, `CancelError`, `OperationCanceledException`.
+with, `DisconnectError`, `DisconnectException`, and counts alike, `closed`: the two are one race
+with a close. A call made on a connection that closes fails and counts so too, even when the signal
+it was given is that of a call the close ends: never as a cancel, `CancelError`,
+`OperationCanceledException`.
 
 9.8. The metrics count what the wire carried, and the trace tells what the side made of it. A result
 its requester cannot decode came as a result, and is counted so at both ends; the trace tells the

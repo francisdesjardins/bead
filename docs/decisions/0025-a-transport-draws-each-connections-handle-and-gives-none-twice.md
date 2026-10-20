@@ -93,7 +93,7 @@ on Windows cannot open the second socket, macOS has no `127.0.0.2`. The handle i
 the crossing of sessions a handle given twice brings is, and twin tests hold it, by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)), which `docs/support.md` names among what no entry
 plays: each WebSocket transport server's
-`names each connection by its peer's port and the rank it came at, two sockets from one address and port among them, and gives no handle twice`
+`names each connection by its peer’s port and the rank it came at, two sockets from one address and port among them, and gives no handle twice`
 and `closes each of two sockets from one address and port on its own, each its own close told`;
 each WebSocket server's
 `keeps two sockets from one address and port, to two of its addresses, as two connections, each in its own session, and closes both going away as it stops`,

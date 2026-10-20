@@ -51,7 +51,7 @@ holds; `@bufbuild/protoplugin`, which the target is written on, takes the versio
 depends on. Where a caret would resolve higher here, `yarn set resolution` locks it, as for oxlint:
 
 ```sh
-yarn set resolution oxlint@npm:^1.86.0 npm:1.86.0
+yarn set resolution oxlint@npm:^1.88.0 npm:1.88.0
 yarn install --immutable
 ```
 

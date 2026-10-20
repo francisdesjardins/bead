@@ -482,7 +482,7 @@ describe('prepare', () => {
       'py spec/generators/make_vectors.py',
       'py -c import jsonschema',
       'py spec/check.py',
-      'node implementations/typescript/node_modules/oxfmt/bin/oxfmt -c implementations/typescript/.oxfmtrc.json --check CHANGELOG.md spec/spec.md spec/debugging.md spec/interop-service.json',
+      'node tools/check-format.mjs',
     ]);
     assert.equal(
       read(root, 'implementations/dotnet/src/Http/packages.lock.json'),

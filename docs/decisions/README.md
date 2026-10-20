@@ -67,7 +67,8 @@ not hold:
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
 - **the DevTools extension on Firefox**, its own glue beside the core every browser shares
   ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
-- **a latency bench**, which measures a counted call against one not counted on each side
+- **a counted call's cost, measured**: a call counted against one not counted, on each side, a
+  measure beside those the benches take
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
 - **a constrained C side**, which builds debugging by its switches
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
@@ -82,16 +83,22 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
   answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
   connection; a requester's queue past it; and a budget of what waits for every socket together, as
   `bodyBytesBudget` is for bodies;
-- **each side's parsers fuzzed**, guided by coverage — the envelope, a `json` payload, RFC 9651's
-  Items, `X-Forwarded-For`, a WebSocket's handshake — and both sides held to read one corpus alike,
-  as `tools/protobuf-conformance.mjs differential` holds a `proto` payload
-  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+- **one corpus read alike by both sides' parsers**, held as a gate, as
+  `tools/protobuf-conformance.mjs differential` holds a `proto` payload
+  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
+  beside the four targets each side fuzzes by hand, guided by coverage
+  ([the root README](../../README.md#fuzzing)), with a target for a WebSocket's handshake and a
+  short run in CI;
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, once a proxy that writes it alone is met, an IPv6 client keyed by its prefix,
   and a per-address value fit for a NAT, for an HTTP server and a WebSocket server at once;
 - a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
   credential replaced in place on a live connection
-  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
+  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md));
+- **an opt-in that hands a procedure its call's bearer credential**, a `JWT`'s token or what its
+  transport carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone,
+  as RFC 8693's token exchange or a call on its user's behalf needs
+  ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
