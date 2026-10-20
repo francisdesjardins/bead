@@ -971,6 +971,12 @@ test.describe('WSTransportClient, what it carries', () => {
 
     // its Authorization, one line, as given
     expect(heard).toEqual([[BEARER]]);
+    const received = once([...hearing.upgrading.clients][0]!, 'message') as Promise<
+      [Buffer, boolean]
+    >;
+    await client.send({ credential: BEARER, data: new TextEncoder().encode('hello') });
+    const [data, isBinary] = await received;
+    expect([data.toString(), isBinary]).toEqual(['hello', true]);
     // those bytes alone, none a byte off, longer or shorter, nor trimmed of what a field cannot hold
     expect(client.carries(BEARER)).toBe(true);
     expect(
@@ -992,6 +998,9 @@ test.describe('WSTransportClient, what it carries', () => {
     expect(client.carries(BEARER)).toBe(false);
 
     // none on an upgrade given none, an empty one among them
+    await client.connect({ host, port: hearing.port });
+    expect([client.carries(''), client.carries(BEARER)]).toEqual([false, false]);
+    await client.disconnect();
     for (const given of [undefined, '']) {
       const bare = createWSTransportClient({ WebSocket: Ws });
 
@@ -1000,7 +1009,7 @@ test.describe('WSTransportClient, what it carries', () => {
       await bare.disconnect();
     }
 
-    expect(heard).toEqual([[BEARER], [], []]);
+    expect(heard).toEqual([[BEARER], [], [], []]);
   });
 
   // spec 15.2
