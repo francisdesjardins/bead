@@ -71,13 +71,14 @@ public sealed record HttpTransportServerOptions
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
 
     /// <summary>
-    /// The slowest a client may take an answer, in bytes a second, once <see cref="SendGracePeriod"/>
-    /// passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>, which this replaces (spec 15.12).
-    /// Each answer of <i>S</i> bytes is given the longer of the grace and <i>S</i> at this rate; one
-    /// its socket still holds past that is lost, its connection closed and reported through
-    /// <see cref="HttpTransportServer.Error"/>, naming the bound. 0 holds none, on a network the
-    /// application trusts; below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is
-    /// built. On the real clock, as what it bounds is the platform's socket.
+    /// The slowest a client may take an answer, or a listen's batch, in bytes a second, once
+    /// <see cref="SendGracePeriod"/> passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>,
+    /// which this replaces (spec 15.12). Each answer of <i>S</i> bytes is given the longer of the grace
+    /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection closed
+    /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound
+    /// (spec 15.7). 0 holds none, on a network the application trusts; below 0 is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real clock, as what
+    /// it bounds is the platform's socket.
     /// </summary>
     public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
 
@@ -1529,8 +1530,8 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     }
 
     // a listen: what it acknowledges goes, and it brings back what is left — at once, or once
-    // something comes within its wait. One listen at a time: a second ends the first, which brings
-    // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
+    // something comes within its wait. One listen at a time: a second ends the first, empty, and
+    // takes its place. A listen its client loses closes nothing: what it carried comes again.
     private async Task Hold(HttpContext context, Drawn connection)
     {
         Holding?.Invoke(connection.ConnectionHandle);
@@ -1619,11 +1620,11 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 response.ContentLength = ending.Bytes.Length;
                 response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-                // ! at its pace: past it, the listen is lost, reported, and what it carried comes again
-                // to the next, its connection kept (spec 15.10, 15.12)
+                // ! at its pace: past it, an answer that could not be written, its exchange lost, its
+                // connection dropped at both ends, reported (spec 15.7, 15.12)
                 if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))))
                 {
-                    Error?.Invoke(new IOException($"{connection.ConnectionHandle}'s listen is lost behind its {nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)}"), connection.ConnectionHandle);
+                    Drop((connection, nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)));
 
                     return;
                 }
@@ -1638,7 +1639,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
         catch (Exception reason) when (reason is IOException or OperationCanceledException)
         {
-            // a listen lost closes nothing: what it carried comes again to the next
+            // a listen its client loses closes nothing: what it carried comes again to the next
         }
         finally
         {

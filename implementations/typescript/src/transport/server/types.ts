@@ -747,9 +747,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
   /**
    * The slowest, in bytes a second, a socket may take an answer, or a listen's batch, once
    * `sendGracePeriod` passed, as Kestrel holds a response to its `MinResponseDataRate`, judged each
-   * second on the real clock: an answer past its deadline is lost, its connection closed, and a
-   * batch's listen with it, its connection kept; each reported on `error` naming it (spec 15.12). A
-   * whole number; 0 holds none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
+   * second on the real clock: an answer or a batch past its deadline is lost, its connection closed
+   * at both ends and reported on `error` naming it (spec 15.7, 15.12). A whole number; 0 holds
+   * none. Defaults to {@link MINIMUM_SEND_BYTES_PER_SECOND}.
    */
   minimumSendBytesPerSecond?: number | undefined;
   /**

@@ -944,9 +944,8 @@ its head, on the server's clock, or is refused 408 `too-slow`, its Bead connecti
 written before its body is whole carries `connection: close`, and its socket closes in stages, its
 write side first, reading on and dropping what still comes until its client closes or 2 seconds
 pass, so a client that goes on sending reads it (RFC 9112 §9.6). An answer, and a listen's batch,
-are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: an
-answer past its deadline is lost, its connection closed, a batch's listen with it, its connection
-kept, each reported on `error`.
+are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: one
+past its deadline is an exchange lost, its connection closed at both ends, reported on `error`.
 
 A request names its authority by its target when the target is in absolute-form, `http://` or
 `https://` in lower case, read as it came, its `Host` judged as one field line alone, which an

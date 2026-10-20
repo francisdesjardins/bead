@@ -564,13 +564,14 @@ export const createHTTPTransportServer = (
         }
 
         response.end();
-        // ! held to its pace: one past its deadline is lost, and what it carried comes again in
-        // the next listen, its connection kept (spec 15.10, 15.12)
+        // ! held to its pace: one past its deadline is an answer that could not be written, its
+        // exchange lost, which closes its connection at both ends (spec 15.7, 15.12)
         paceAnswer(response, {
           bytes: length,
           late: (why) => {
             report(connection, why);
             response.destroy();
+            closeDrawn(connection, false);
           },
         });
       };
@@ -597,8 +598,8 @@ export const createHTTPTransportServer = (
       };
 
       // a listen: what it acknowledges goes, and it brings back what is left — at once, or once
-      // something comes within its wait. One listen at a time: a second ends the first, which brings
-      // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
+      // something comes within its wait. One listen at a time: a second ends the first, empty, and
+      // takes its place. A listen its client loses closes nothing: what it carried comes again.
       const listen = (exchange: IExchangeIn, connection: IDrawn): void => {
         const { request, response } = exchange;
         const after = countOf(request, AFTER_HEADER, { isRequired: true });

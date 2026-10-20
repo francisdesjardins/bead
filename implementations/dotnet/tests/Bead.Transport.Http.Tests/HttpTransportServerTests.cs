@@ -3567,7 +3567,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Loses_a_listen_whose_client_reads_its_batch_slower_than_minimumSendBytesPerSecond_and_reports_it_its_connection_kept_and_the_batch_brought_again_to_the_next()
+    public async Task Drops_a_connection_whose_client_reads_its_listen_s_batch_slower_than_minimumSendBytesPerSecond_and_reports_it()
     {
         var isStalled = false;
 
@@ -3619,19 +3619,16 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
         await Until(() =>
         {
-            return !reported.IsEmpty;
+            return !_closes.IsEmpty;
         });
-        Volatile.Write(ref isStalled, false);
 
-        // lost and reported naming its bound, its connection kept: what it carried comes again to
-        // the next (spec 15.10)
+        // lost, its connection closed and reported naming its bound; refused 404 from then on
+        // (spec 15.7)
+        Assert.Equal([(false, connectionHandle)], _closes);
         Assert.Contains(nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
         Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
-
-        using var next = await ListenOf(connectionToken, new() { After = "0", Wait = "0" });
-
-        Assert.Equal((200, "1", Convert.ToHexString(BatchOf(envelope))), ((int)next.StatusCode, HeaderOf(next, HttpTransport.SequenceHeader), Convert.ToHexString(await BytesOf(next))));
-        Assert.Empty(_closes);
+        Volatile.Write(ref isStalled, false);
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Cancel, 3))));
     }
 
     /// <summary>A connection's pipes, either end replaced.</summary>

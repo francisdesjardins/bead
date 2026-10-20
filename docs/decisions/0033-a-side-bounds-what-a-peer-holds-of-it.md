@@ -134,8 +134,8 @@ WebSocket's every envelope, an HTTP exchange's answer, a listen's batch. Each en
 handed moves its connection's deadline to the later of now plus max(`sendGracePeriod`,
 _S_ / `minimumSendBytesPerSecond`) and the deadline before plus _S_ / `minimumSendBytesPerSecond`;
 checked each second while anything waits, a socket that holds something past its deadline drops its
-connection, over HTTP a `POST`'s exchange lost (spec 15.7) and a listen lost, listened again from
-where it was, its connection kept (spec 15.10). Kestrel's numbers, 240 bytes a second past 5 s,
+connection, over HTTP its exchange lost, a `POST`'s answer and a listen's batch alike, which closes
+the connection at both ends (spec 15.7). Kestrel's numbers, 240 bytes a second past 5 s,
 give a burst of 100 MiB days and a reader stopped behind a small backlog its grace. **At a
 WebSocket's address a bound besides**, `maximumUnsentBytes`, above what a peer that keeps every rule
 can be owed at once — the answers to the calls it has answered and the server's own commands to it,

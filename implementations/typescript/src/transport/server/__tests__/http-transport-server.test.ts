@@ -3168,7 +3168,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     await server.stop();
   });
 
-  test('loses a listen whose client reads its batch slower than minimumSendBytesPerSecond, and reports it, its connection kept and the batch brought again to the next', async () => {
+  test('drops a connection whose client reads its listen’s batch slower than minimumSendBytesPerSecond, and reports it', async () => {
     const { connectScripted, events, listenOf, server } = await startScripted({
       minimumSendBytesPerSecond: 1_000,
       sendGracePeriod: 200,
@@ -3183,25 +3183,25 @@ test.describe('createHTTPTransportServer, its bounds', () => {
 
     await expect
       .poll(() => {
-        return namesOf(events, 'error');
+        return namesOf(events, 'close');
       })
-      .toEqual([
-        [
-          'error',
-          'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
-          connectionHandle,
-        ],
-      ]);
-    expect([stalled.response.isDestroyed, namesOf(events, 'close')]).toEqual([true, []]);
+      .toEqual([['close', false, connectionHandle]]);
+    expect(namesOf(events, 'error')).toEqual([
+      [
+        'error',
+        'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+        connectionHandle,
+      ],
+    ]);
+    // its exchange lost at its client's end, its connection gone at the server's (spec 15.7)
+    expect(stalled.response.isDestroyed).toBe(true);
 
-    // what it carried comes again to the next (spec 15.10)
     const next = listenOf(connectionToken, { after: '0', wait: '0' });
 
-    expect([
-      next.response.status,
-      next.response.headers?.[SEQUENCE_HEADER],
-      [...(next.response.body ?? [])],
-    ]).toEqual([200, '1', batchOf(envelope)]);
+    expect([next.response.status, next.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
     await server.stop();
   });
 

@@ -37,8 +37,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection's, which its health warns on at 80%.
 - A server holds what waits for a client's socket to `minimumSendBytesPerSecond`, 240, past
   `sendGracePeriod`, 5 s, and a WebSocket server to `maximumUnsentBytes` besides, dropping and
-  reporting a client behind them, its close unclean; over HTTP, a listen's batch behind its pace is
-  lost and reported, and comes again to the next listen (spec 15.10, 15.12; decision 0033).
+  reporting a client behind them, its close unclean; over HTTP, an answer or a listen's batch behind
+  its pace is an exchange lost, its connection closed at both ends (spec 15.7, 15.12; decision
+  0033).
 - Both transports' servers bound a request's head, `headersTimeout`, 30 s, answered 408 as HTTP
   answers it, and an HTTP server a body, `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`,
   5 s, refused 408 `too-slow`, marked and told (spec 15.6, 15.12; decision 0033).
