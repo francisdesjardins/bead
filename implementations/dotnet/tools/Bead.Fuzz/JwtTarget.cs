@@ -17,8 +17,16 @@ namespace Bead.Fuzz;
 /// </summary>
 internal sealed class JwtTarget : IFuzzTarget
 {
+    // ! the published test keys are read from spec/vectors.json, copied beside this build: no file
+    // but spec/, the tests and the interop service writes one out
+    private static readonly JsonElement[] VectorKeys = VectorKeysOf(Path.Combine(AppContext.BaseDirectory, "vectors.json"));
+
+    private static readonly JsonElement Es256 = VectorKeyOf(("https://issuer.example", "ES256"));
+
+    private static readonly JsonElement Hs256 = VectorKeyOf(("https://trust.example", "HS256"));
+
     // the HS256 key's secret, in base64url, as its JWK writes it
-    private const string Secret = "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow";
+    private static readonly string Secret = Hs256.GetProperty("jwk").GetProperty("k").GetString()!;
 
     // the wall clock, 2026-10-03T12:01:00.000Z, in milliseconds since the epoch
     private const long Now = 1_791_028_860_000;
@@ -28,9 +36,9 @@ internal sealed class JwtTarget : IFuzzTarget
     {
         Keys =
         [
-            KeyOf(("https://issuer.example", JwtAlgorithm.Es256), """{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"}"""),
-            KeyOf(("https://trust.example", JwtAlgorithm.Hs256), $$"""{"kty":"oct","k":"{{Secret}}"}"""),
-            KeyOf(("https://trust.example", JwtAlgorithm.Hs256), $$"""{"kty":"oct","k":"{{Secret}}","kid":"k1"}"""),
+            KeyOf((Es256, JwtAlgorithm.Es256), Es256.GetProperty("jwk").GetRawText()),
+            KeyOf((Hs256, JwtAlgorithm.Hs256), Hs256.GetProperty("jwk").GetRawText()),
+            KeyOf((Hs256, JwtAlgorithm.Hs256), $$"""{"kty":"oct","k":"{{Secret}}","kid":"k1"}"""),
         ],
         Audiences = ["https://bead.example", "https://other.example"],
         Now = () =>
@@ -50,11 +58,39 @@ internal sealed class JwtTarget : IFuzzTarget
 
     // helpers
 
-    private static JwtKey KeyOf((string Issuer, JwtAlgorithm Algorithm) key, string jwk)
+    private static JwtKey KeyOf((JsonElement Vector, JwtAlgorithm Algorithm) key, string jwk)
     {
         using var document = JsonDocument.Parse(jwk);
 
-        return new JwtKey { Issuer = key.Issuer, Algorithm = key.Algorithm, Jwk = document.RootElement.Clone() };
+        return new JwtKey { Issuer = key.Vector.GetProperty("issuer").GetString()!, Algorithm = key.Algorithm, Jwk = document.RootElement.Clone() };
+    }
+
+    // every key spec/vectors.json's JWT verdicts write
+    private static JsonElement[] VectorKeysOf(string path)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+
+        return [.. document.RootElement.GetProperty("jwtVerdicts").EnumerateArray().SelectMany((verdict) =>
+        {
+            return verdict.GetProperty("keys").EnumerateArray().Select((key) =>
+            {
+                return key.Clone();
+            });
+        })];
+    }
+
+    // the first key of an issuer under an algorithm and no kid, as the verdicts write it
+    private static JsonElement VectorKeyOf((string Issuer, string Algorithm) wanted)
+    {
+        foreach (var key in VectorKeys)
+        {
+            if (key.GetProperty("issuer").GetString() == wanted.Issuer && key.GetProperty("algorithm").GetString() == wanted.Algorithm && !key.GetProperty("jwk").TryGetProperty("kid", out _))
+            {
+                return key;
+            }
+        }
+
+        throw new InvalidOperationException($"spec/vectors.json holds no {wanted.Algorithm} key of {wanted.Issuer}");
     }
 
     // .NET's crypto being synchronous, the verdict is settled as the call returns

@@ -21,4 +21,9 @@
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <PackageReference Include="SharpFuzz" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- the JWT target's keys, as the verdicts write them -->
+    <Content Include="../../../../spec/vectors.json" Link="vectors.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

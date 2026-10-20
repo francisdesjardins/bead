@@ -713,7 +713,13 @@ const runTypeScript = ({ target, inputs, flags }) => {
       '-rss_limit_mb=512',
       ...flags,
     ],
-    { cwd: folder, env: { NODE_OPTIONS: '--enable-source-maps' } }
+    {
+      cwd: folder,
+      env: {
+        BEAD_VECTORS: join(ROOT, 'spec', 'vectors.json'),
+        NODE_OPTIONS: '--enable-source-maps',
+      },
+    }
   );
 };
 
