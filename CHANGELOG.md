@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Three more fuzz targets: `jwt`, the JWT verifier, and `ws-handshake`, the WebSocket upgrade's
+  judgement, on both sides, seeded from `spec/vectors.json`'s verdicts and `spec/transports.json`'s
+  upgrades; `blueprint`, beadc's blueprint reader and its form, from `builder/tools/fuzz/`, seeded
+  from the repository's blueprints.
+
+### Fixed
+
+- The C# WebSocket server refuses an upgrade whose `Content-Length` is not zeros alone, a line it
+  cannot read or two lines among them, 400 `malformed`, as the TypeScript side does.
+
 ## [0.6.0] - 2026-10-20
 
 ### Added
@@ -32,10 +44,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side and SharpFuzz with libFuzzer on the C# side, the envelope reader, the `json` and
   `text` codecs, the HTTP fields and the debug filter, seeded from the conformance files (README,
   Fuzzing).
-- Three more fuzz targets: `jwt`, the JWT verifier, and `ws-handshake`, the WebSocket upgrade's
-  judgement, on both sides, seeded from `spec/vectors.json`'s verdicts and `spec/transports.json`'s
-  upgrades; `blueprint`, beadc's blueprint reader and its form, from `builder/tools/fuzz/`, seeded
-  from the repository's blueprints.
 - The DevTools panel places its detail right of the list, under it, or by the panel's width as
   DevTools' Elements panel does, and a splitter between them sizes both; the panel keeps both
   choices.
@@ -147,8 +155,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The C# WebSocket server refuses an upgrade whose `Content-Length` is not zeros alone, a line it
-  cannot read or two lines among them, 400 `malformed`, as the TypeScript side does.
 - The C# HTTP server tells a listen that replaces another as held before it tells the end of the
   one it replaced, as the TypeScript side does, so a count of the listens held never falls to 0
   as one takes over.
