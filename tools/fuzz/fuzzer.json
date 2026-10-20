@@ -1,0 +1,13 @@
+{
+  "libfuzzerDotnet": {
+    "repository": "Metalnem/libfuzzer-dotnet",
+    "release": "v2025.05.02.0904",
+    "asset": "libfuzzer-dotnet-windows.exe",
+    "url": "https://github.com/Metalnem/libfuzzer-dotnet/releases/download/v2025.05.02.0904/libfuzzer-dotnet-windows.exe",
+    "sha256": "17af5b3f6ff4d2c57b44b9a35c13051b570eb66f0557d00015df3832709050bf"
+  },
+  "sharpfuzz": {
+    "package": "SharpFuzz.CommandLine",
+    "version": "2.3.0"
+  }
+}

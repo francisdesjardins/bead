@@ -604,6 +604,70 @@ public sealed class ServerTests : IAsyncLifetime
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "a relay admits by default only a credential it forwards"), requireCredential.Refusal);
     }
 
+    [Fact]
+    public async Task Tells_the_admission_a_relay_or_a_procedure_refused_with_by_its_name_no_before_route_for_a_relay_with_none_never_its_detail()
+    {
+        const string device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
+        var lent = new Procedure { ServiceId = 9, ProcedureId = 1, ProcedureName = "lent", ServiceRevision = 1 };
+
+        Start(new ServerOptions());
+        _transport.Open(Handle);
+        _transport.Open(device);
+        Server.Router.RegisterDestination(new ConnectionTarget(device), new DestinationOptions { DestinationId = 7 });
+        Server.Services.GetRequestResolver(lent, new RequestResolverDependencies<JsonElement, JsonElement>
+        {
+            Serializer = new JsonPayloads(),
+            BeforeRequest = Server.ShareLegBSession,
+        })((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        var told = new List<AccessRefusal>();
+
+        Server.Router.AccessRefused += told.Add;
+
+        // whoami requires a session; denied admits nobody, by an admission of the application's
+        // own; the relay admits by requireCredential, its own; lent shares leg B's session
+        await Deliver(RequestOf(1, ("whoami", false)));
+        await Deliver(RequestOf(3, ("denied", false)));
+        await Deliver(RelayedOf(5));
+        await Deliver(new Envelope { Header = new RequestHeader { CallId = 7, ServiceId = lent.ServiceId, ProcedureId = lent.ProcedureId }, Payload = Encoding.UTF8.GetBytes("null") });
+
+        // a router whose relay is given no beforeRoute admits nobody
+        var bare = new ScriptedTransport { Clock = _time };
+
+        using (var router = new RouterServer(bare, new RouterServerOptions { ResolverScheduler = _scheduler, Scheduler = _scheduler }))
+        {
+            router.AccessRefused += told.Add;
+            bare.Open(Handle);
+            bare.Open(device);
+            router.RegisterDestination(new ConnectionTarget(device), new DestinationOptions { DestinationId = 7 });
+            bare.Deliver(EnvelopeCodec.WriteEnvelope(RelayedOf(9)));
+            await _scheduler.WhenIdle();
+        }
+
+        Assert.Equal(
+            [
+                (AccessRefusalStage.Admission, ProtocolCode.SessionRequired, (string?)"requireSession", (uint?)null),
+                (AccessRefusalStage.Admission, ProtocolCode.AccessDenied, null, null),
+                (AccessRefusalStage.Admission, ProtocolCode.AccessDenied, "requireCredential", 7),
+                (AccessRefusalStage.Admission, ProtocolCode.SessionRequired, "shareLegBSession", null),
+                (AccessRefusalStage.Admission, ProtocolCode.AccessDenied, "no-before-route", 7),
+            ],
+            told.Select((refusal) =>
+            {
+                return (refusal.Stage, refusal.Code, refusal.Reason, refusal.DestinationId);
+            }));
+
+        // never an admission's detail
+        Assert.All(told, (refusal) =>
+        {
+            Assert.DoesNotContain("credential it forwards", refusal.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("admits nobody", refusal.ToString(), StringComparison.Ordinal);
+        });
+    }
+
     // spec 14.3.1
     [Fact]
     public void ShareLegBSession_admits_a_call_in_a_session_or_presenting_a_JWT_or_an_ELSEWHERE_by_its_scheme_alone_and_refuses_any_other_in_none_SESSION_REQUIRED()

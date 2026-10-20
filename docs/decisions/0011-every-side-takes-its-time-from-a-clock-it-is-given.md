@@ -35,13 +35,21 @@ Three ways were weighed:
 
 ## Decision
 
-**What the spec times takes the clock; what bounds a platform's own close takes the real one.** The
-clock times everything the spec times — a call's timeout and a relay's leg B among it — the bounds
-of section 15.12, and a client's connect and its waits. The real clock times, alike on both sides,
-what bounds a platform's close or stop against a peer that does not answer — a close handshake, a
-stop's grace, a disconnect's `DELETE` — and a WebSocket's ping, which the C# side's platform times
-([0004](0004-one-behaviour-in-every-language.md) plays it in real time), with the platforms' own
-timers: `node:http`'s, `undici`'s, `ws`'s, Kestrel's, `SocketsHttpHandler`'s.
+**What the spec times takes the clock; what bounds a platform's own close, or its socket, takes the
+real one.** The clock times everything the spec times — a call's timeout and a relay's leg B among
+it — the bounds of section 15.12, a body's rate among them, but not those it holds a platform's
+socket and parser to, and a client's connect and its waits. The real clock times, alike on both
+sides, what bounds a platform's close or stop against a peer that does not answer — a close
+handshake, a stop's grace, a disconnect's `DELETE`, a lingering close's 2 seconds — and a
+WebSocket's ping, which the C# side's platform times
+([0004](0004-one-behaviour-in-every-language.md) plays it in real time). It times as well what 15.12
+holds a platform's socket and parser to: what waits for a socket, its pace and its bound, since each
+bounds what the platform's socket does; and a head's `headersTimeout`, since the platform's parser
+alone sees a head before it is whole, and its check, Kestrel's heartbeat or Node's
+`connectionsCheckingInterval`, is internal ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
+These run on the platforms' own timers, `node:http`'s, `undici`'s, `ws`'s, Kestrel's,
+`SocketsHttpHandler`'s, or on a side's own timer on the platform's clock, `globalThis` and
+`TimeProvider.System`.
 
 **Time has three uses.** A duration runs on a timer. A deadline of Bead's own, a call id's
 reservation, is compared on the monotonic reading. An instant from outside, a token's `exp` or
@@ -129,8 +137,10 @@ overrules an analyzer.
 own lockfile ([0005](0005-a-toolchain-per-language.md)), never installed on the globals;
 `spyIntervals` watches the ping, which is the platform's.
 
-**Advancing a clock is deterministic for Bead's timers alone.** A platform's timer still runs on the
-real clock, and a case that waits on one is marked, played in real time, and bounded generously.
+**Advancing a clock is deterministic for the timers on the clock a side is given alone.** A
+platform's timer, and a bound on the platform's clock, still run on the real clock, and a case that
+waits on one is marked, played in real time, and bounded generously: a head's 408, its `after` and
+its `within` around its time ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)).
 
 **The WebSocket's close stays where it is.** The TypeScript side's client waits the 30 seconds of
 `ws`, the C# side's 5, each on the real clock: a row of the support matrix, which the client part's

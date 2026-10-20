@@ -4,7 +4,7 @@ import { Server } from 'node:http';
 import { connect as connectTcp, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import type {
   TRANSPORT_CLIENT_EVENTS,
   TransportClientEventMap,
@@ -139,6 +139,10 @@ const answerOf = async (port: number, head: string) => {
 const ordinalOf = (connectionHandle: string): number => {
   return Number(/;ordinal=(?<ordinal>\d+)$/u.exec(connectionHandle)?.groups?.['ordinal']);
 };
+
+// what a server's transport hands beside each envelope of a client on the loopback: its
+// connection's address and port (spec 15.1)
+const FROM = { address: host, port: expect.any(Number) as unknown };
 
 // where a scripted server's HTTP server listens: for real, on a port the system picked
 const SCRIPTED = { address: host, findOpenPort: true };
@@ -343,7 +347,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         await client.send({ data: 'still here' });
 
         expect(await heard).toEqual([
-          { credential: undefined, data: 'still here' },
+          { ...FROM, credential: undefined, data: 'still here' },
           connectionHandle,
         ]);
         expect(server.clients).toHaveLength(1);
@@ -359,7 +363,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         const text = nextServerEvent(server, 'message');
         await client.send({ data: 'hello' });
         expect(await text).toEqual([
-          { credential: undefined, data: 'hello' },
+          { ...FROM, credential: undefined, data: 'hello' },
           before?.connectionHandle,
         ]);
 
@@ -385,14 +389,20 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
 
         await client.send({ data: 'first' });
 
-        expect(await first).toEqual([{ credential: undefined, data: 'first' }, connectionHandle]);
+        expect(await first).toEqual([
+          { ...FROM, credential: undefined, data: 'first' },
+          connectionHandle,
+        ]);
         expect(await reported).toEqual([thrown, connectionHandle]);
 
         const second = nextServerEvent(server, 'message');
 
         await client.send({ data: 'second' });
 
-        expect(await second).toEqual([{ credential: undefined, data: 'second' }, connectionHandle]);
+        expect(await second).toEqual([
+          { ...FROM, credential: undefined, data: 'second' },
+          connectionHandle,
+        ]);
         expect(server.clients).toHaveLength(1);
       });
     });
@@ -728,11 +738,11 @@ test.describe('WSTransportServer, the credential its upgrade carries', () => {
       })
       .toBe(5);
     expect(messages).toEqual([
-      { credential: BEARER, data: 'one' },
-      { credential: BEARER, data: 'two' },
-      { credential: 'Interop sub=bob', data: 'three' },
-      { credential: undefined, data: 'four' },
-      { credential: undefined, data: 'five' },
+      { ...FROM, credential: BEARER, data: 'one' },
+      { ...FROM, credential: BEARER, data: 'two' },
+      { ...FROM, credential: 'Interop sub=bob', data: 'three' },
+      { ...FROM, credential: undefined, data: 'four' },
+      { ...FROM, credential: undefined, data: 'five' },
     ]);
 
     await client.disconnect();
@@ -768,9 +778,9 @@ test.describe('WSTransportServer, the credential its upgrade carries', () => {
     }
 
     expect(messages).toEqual([
-      { credential: undefined, data: '0' },
-      { credential: undefined, data: '1' },
-      { credential: BEARER, data: '2' },
+      { ...FROM, credential: undefined, data: '0' },
+      { ...FROM, credential: undefined, data: '1' },
+      { ...FROM, credential: BEARER, data: '2' },
     ]);
 
     for (const socket of sockets) {
@@ -1178,14 +1188,23 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
       fake.instances[0]?.emit('listening');
       await starting;
 
-      const { server: given, ...options } = (fake.instances[0]?.options ?? {}) as Record<
-        string,
-        unknown
-      >;
+      const { server: given, ...options } = (fake.instances[0]?.options ?? {}) as {
+        maxPayload: number;
+        server: Server;
+      };
 
       // the transport's own HTTP server, which judges each request before ws reads it
       expect(options).toEqual({ maxPayload: expected });
       expect(given).toBeInstanceOf(Server);
+      // the scripted bind opens no TCP socket, even once Node can finish a real listen
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      expect([given.listening, given.address(), fake.instances[0]?.listened]).toEqual([
+        false,
+        null,
+        [0, host],
+      ]);
       await server.stop();
     }
 
@@ -1209,7 +1228,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     server.on('close', (...params) => {
       closes.push(params);
     });
-    fake.connect(silent, { remotePort: 40_000, server });
+    const silentHandle = fake.connect(silent, { remotePort: 40_000, server });
 
     const stopping = server.stop();
 
@@ -1226,9 +1245,39 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await stopping;
 
     expect(late.closeCodes).toEqual([1001]);
+    expect(closes).toContainEqual([false, silentHandle]);
     expect(closes).toContainEqual([false, lateHandle]);
+    expect(closes).toHaveLength(2);
     expect(server.clients).toEqual([]);
     expect(server.isClosed()).toBe(true);
+
+    // a stop inside the accept, before its connection enters the registry
+    const crossing = createFakeWebSocketServer();
+    const crossed = createWSTransportServer({ WebSocketServer: crossing.FakeWebSocketServer });
+    const opening = crossed.start(SCRIPTED);
+
+    crossing.instances[0]?.emit('listening');
+    await opening;
+
+    const ended: ServerEvents['close'][] = [];
+    let ending = Promise.resolve();
+
+    crossed.on('close', (...params) => {
+      ended.push(params);
+    });
+    crossing.instances[0]?.prependListener('connection', () => {
+      ending = crossed.stop();
+    });
+
+    const arriving = createFakeSocket();
+    const arrivingHandle = crossing.connect(arriving, { server: crossed });
+
+    await ending;
+
+    expect(arriving.closeCodes).toEqual([1001]);
+    expect(ended).toEqual([[false, arrivingHandle]]);
+    expect(crossed.clients).toEqual([]);
+    expect(crossed.isClosed()).toBe(true);
   });
 
   test('is secure as its application says what stands in front of it, whatever it listens on, and by what it listens on when it says nothing', async () => {
@@ -1376,7 +1425,10 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
     older.terminate();
 
-    expect([closes, server.gauges().counts]).toEqual([[[false, olderHandle]], { connections: 1 }]);
+    expect([closes, server.gauges().counts]).toEqual([
+      [[false, olderHandle]],
+      { connections: 1, largestAddressConnections: 0, largestUnsentBytes: 0, unsentBytes: 0 },
+    ]);
 
     newer.terminate();
 
@@ -1385,7 +1437,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
         [false, olderHandle],
         [false, newerHandle],
       ],
-      { connections: 0 },
+      { connections: 0, largestAddressConnections: 0, largestUnsentBytes: 0, unsentBytes: 0 },
     ]);
     await server.stop();
   });
@@ -2086,11 +2138,26 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
     expect(await starting).toEqual({ address: 'localhost', port: 50_000 });
     expect(
+      fake.instances.map(({ listened }) => {
+        return listened;
+      })
+    ).toEqual([
+      [0, host],
+      [50_000, '::1'],
+      [0, host],
+      [50_000, '::1'],
+    ]);
+    expect(
       fake.instances.map(({ closeCount }) => {
         return closeCount;
       })
     ).toEqual([1, 1, 0, 0]);
     await server.stop();
+    expect(
+      fake.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual([1, 1, 1, 1]);
 
     // eight draws at most, then the last error
     const held = createFakeWebSocketServer();
@@ -2104,6 +2171,15 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
     await expect(refusing).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect([refused.isClosed(), held.instances.length]).toEqual([true, 16]);
+    expect(
+      held.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual(
+      Array.from({ length: 16 }, () => {
+        return 1;
+      })
+    );
 
     // a port it was given is never drawn again
     const given = createFakeWebSocketServer();
@@ -2115,6 +2191,11 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
     await expect(fixing).rejects.toMatchObject({ code: 'EADDRINUSE' });
     expect([fixed.isClosed(), given.instances.length]).toEqual([true, 2]);
+    expect(
+      given.instances.map(({ closeCount }) => {
+        return closeCount;
+      })
+    ).toEqual([1, 1]);
   });
 
   test('listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1', async () => {
@@ -2130,6 +2211,14 @@ test.describe('WSTransportServer, the address it listens on', () => {
         code,
         { address: '127.0.0.1', port: 50_000 },
         '127.0.0.1',
+      ]);
+      expect(
+        fake.instances.map(({ listened }) => {
+          return listened;
+        })
+      ).toEqual([
+        [0, host],
+        [50_000, '::1'],
       ]);
       // the IPv6 one let go, the IPv4 one serving, secure there
       expect([
@@ -2216,5 +2305,293 @@ test.describe('WSTransportServer, the address it listens on', () => {
       ['0.0.0.0', false],
       ['::', false],
     ]);
+  });
+});
+
+/**
+ * An upgrade `head` on a socket of its own, kept open: its status once its head came, and the
+ * socket, which reads on in silence, or not at all once paused.
+ */
+const upgradeOn = async (port: number, head: string) => {
+  const socket = await openTcp(port);
+  let text = '';
+
+  socket.on('data', (chunk: Buffer) => {
+    if (!text.includes('\r\n\r\n')) {
+      text += chunk.toString('latin1');
+    }
+  });
+  socket.on('error', () => {});
+  socket.write(head);
+  await expect
+    .poll(() => {
+      return text.includes('\r\n\r\n') || socket.destroyed;
+    })
+    .toBe(true);
+
+  return { socket, status: text.split('\r\n')[0], text };
+};
+
+test.describe('WSTransportServer, its bounds', () => {
+  test('bounds its connections, and those of one address, refusing an upgrade past them 503 busy before its 101, with Retry-After, and takes one once a connection closes', async () => {
+    await using started = await startDated({
+      hosts: ['bead.test'],
+      maximumConnections: 2,
+      maximumConnectionsPerAddress: 1,
+      trustedProxies: ['127.0.0.1'],
+    });
+    const { port, server } = started;
+    const refusals: ITransportServerRefusal[] = [];
+    const from = (address: string) => {
+      return requestOf('GET / HTTP/1.1', [`X-Forwarded-For: ${address}`]);
+    };
+
+    server.on('refusal', (refusal) => {
+      refusals.push(refusal);
+    });
+
+    const first = await upgradeOn(port, from('192.0.2.1'));
+    // its address holds its one place, whatever its socket
+    const again = await upgradeOn(port, from('192.0.2.1'));
+    const other = await upgradeOn(port, from('192.0.2.2'));
+    // every place taken
+    const third = await upgradeOn(port, from('192.0.2.3'));
+
+    expect([first.status, again.status, other.status, third.status]).toEqual([
+      'HTTP/1.1 101 Switching Protocols',
+      'HTTP/1.1 503 Service Unavailable',
+      'HTTP/1.1 101 Switching Protocols',
+      'HTTP/1.1 503 Service Unavailable',
+    ]);
+    expect(again.text).toContain('\r\nretry-after: 1\r\n');
+    expect(again.text).toContain('\r\nbead-refusal: busy\r\n');
+    expect(
+      refusals.map(({ address, reason, status }) => {
+        return [status, reason, address];
+      })
+    ).toEqual([
+      [503, 'busy', '192.0.2.1'],
+      [503, 'busy', '192.0.2.3'],
+    ]);
+    expect(server.gauges()).toMatchObject({
+      ceilings: { connections: 2, largestAddressConnections: 1 },
+      counts: { connections: 2, largestAddressConnections: 1 },
+    });
+
+    // a connection gone gives its place back
+    first.socket.destroy();
+    await expect
+      .poll(() => {
+        return server.clients.length;
+      })
+      .toBe(1);
+
+    const back = await upgradeOn(port, from('192.0.2.1'));
+
+    expect(back.status).toBe('HTTP/1.1 101 Switching Protocols');
+
+    for (const { socket } of [again, other, third, back]) {
+      socket.destroy();
+    }
+  });
+
+  test('takes no more upgrades than its places when they cross', async () => {
+    await using started = await startDated({ hosts: ['bead.test'], maximumConnections: 4 });
+    const { port } = started;
+    const sockets = await Promise.all(
+      Array.from({ length: 16 }, () => {
+        return openTcp(port);
+      })
+    );
+    const answers = sockets.map(() => {
+      return { text: '' };
+    });
+
+    for (const [index, socket] of sockets.entries()) {
+      socket.on('data', (chunk: Buffer) => {
+        const answer = answers[index];
+
+        if (answer !== undefined && !answer.text.includes('\r\n\r\n')) {
+          answer.text += chunk.toString('latin1');
+        }
+      });
+      socket.on('error', () => {});
+    }
+
+    // every head written in one turn: they cross at the server
+    for (const socket of sockets) {
+      socket.write(requestOf('GET / HTTP/1.1'));
+    }
+
+    await expect
+      .poll(() => {
+        return answers.every(({ text }) => {
+          return text.includes('\r\n\r\n');
+        });
+      })
+      .toBe(true);
+
+    const statuses = answers.map(({ text }) => {
+      return text.split(' ')[1];
+    });
+
+    expect(
+      statuses.filter((status) => {
+        return status === '101';
+      })
+    ).toHaveLength(4);
+    expect(
+      statuses.filter((status) => {
+        return status === '503';
+      })
+    ).toHaveLength(12);
+
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+  });
+
+  test('refuses a maximumConnections or a maximumConnectionsPerAddress that is not a whole number above 0', () => {
+    for (const name of ['maximumConnections', 'maximumConnectionsPerAddress'] as const) {
+      for (const value of [0, -1, 1.5, Number.NaN, Infinity]) {
+        expect(
+          () => {
+            return createWSTransportServer({ [name]: value, WebSocketServer });
+          },
+          `${name} ${String(value)}`
+        ).toThrow(new ProgrammerError(`${name} is a whole number above 0, not ${String(value)}`));
+      }
+    }
+  });
+
+  test('keeps a client that reads through a burst of answers to the calls it has it answer, each of chunkBytes', async () => {
+    await using started = await startDated({ heartbeat: Infinity });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const client = new WsClient(`ws://${host}:${String(port)}`);
+    const errors: unknown[] = [];
+    let received = 0;
+    let largest = 0;
+
+    server.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('message', () => {
+      received += 1;
+    });
+
+    const [, , connectionHandle] = await connection;
+
+    // an answer of a chunk to each of the 64 calls its peer may have it answer, in one turn
+    for (let index = 0; index < 64; index += 1) {
+      void server.send({ data: new Uint8Array(1_048_576) }, connectionHandle);
+      largest = Math.max(largest, server.gauges().counts['largestUnsentBytes'] ?? 0);
+    }
+
+    await expect
+      .poll(
+        () => {
+          return received;
+        },
+        { timeout: 15_000 }
+      )
+      .toBe(64);
+
+    // far past what a bound judged at once would have let wait, and kept all the same
+    expect(largest).toBeGreaterThan(33_556_480);
+    expect([errors, server.clients.length]).toEqual([[], 1]);
+    client.close();
+  });
+
+  // spec 15.12.11 and 15.12.12
+  test('drops a client that stops reading once its socket holds what waits for it past its deadline, and reports it', async () => {
+    await using started = await startDated({
+      heartbeat: Infinity,
+      minimumSendBytesPerSecond: 100_000_000,
+      sendGracePeriod: 200,
+    });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const { socket } = await upgradeOn(port, upgradeRequest());
+    const [, , connectionHandle] = await connection;
+    const reported = nextServerEvent(server, 'error');
+    const closed = nextServerEvent(server, 'close');
+
+    // it reads nothing more: what the platform does not hold waits for its socket
+    socket.pause();
+
+    for (let index = 0; index < 32; index += 1) {
+      void server.send({ data: new Uint8Array(1_048_576) }, connectionHandle);
+    }
+
+    const [error, reportedHandle] = await reported;
+
+    expect([reportedHandle, error.message]).toEqual([
+      connectionHandle,
+      'the client fell behind: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 100000000 past sendGracePeriod 200 ms',
+    ]);
+    expect(await closed).toEqual([false, connectionHandle]);
+    socket.destroy();
+  });
+
+  // spec 15.12.13
+  test('drops a client once what waits for it would pass maximumUnsentBytes, the bytes it holds never past them, its close unclean, and reports it', async () => {
+    await using started = await startDated({
+      heartbeat: Infinity,
+      maximumUnsentBytes: 65_536,
+      minimumSendBytesPerSecond: 0,
+    });
+    const { port, server } = started;
+    const connection = nextServerEvent(server, 'connection');
+    const { socket } = await upgradeOn(port, upgradeRequest());
+    const [, , connectionHandle] = await connection;
+    const reported: unknown[] = [];
+    const closes: unknown[] = [];
+    let largest = 0;
+
+    server.on('error', (error, handle) => {
+      reported.push([handle, error.message]);
+    });
+    server.on('close', (wasClean, handle) => {
+      closes.push([wasClean, handle]);
+    });
+    socket.pause();
+
+    // until it is dropped, what waits sampled after each send; the platform's buffers fill first
+    for (let index = 0; index < 8_192 && closes.length === 0; index += 1) {
+      await server.send({ data: new Uint8Array(16_384) }, connectionHandle);
+      largest = Math.max(largest, server.gauges().counts['largestUnsentBytes'] ?? 0);
+      await sleep(0);
+    }
+
+    await expect
+      .poll(() => {
+        return closes;
+      })
+      .toEqual([[false, connectionHandle]]);
+    expect(largest).toBeGreaterThan(0);
+    expect(largest).toBeLessThanOrEqual(65_536);
+    expect(reported).toEqual([
+      [
+        connectionHandle,
+        'the client fell behind: what waits for its socket would pass maximumUnsentBytes, 65536 bytes',
+      ],
+    ]);
+    socket.destroy();
+  });
+
+  test('refuses a maximumUnsentBytes, a minimumSendBytesPerSecond or a sendGracePeriod it cannot hold, as it is built', () => {
+    for (const [options, refusal] of [
+      [{ maximumUnsentBytes: 0 }, 'maximumUnsentBytes is a whole number above 0, not 0'],
+      [{ minimumSendBytesPerSecond: -1 }, 'minimumSendBytesPerSecond is a whole number, not -1'],
+      [
+        { sendGracePeriod: Infinity },
+        'sendGracePeriod is a number of milliseconds from 1 to 2147483647, not Infinity',
+      ],
+    ] as const) {
+      expect(() => {
+        return createWSTransportServer({ ...options, WebSocketServer });
+      }).toThrow(new ProgrammerError(refusal));
+    }
   });
 });

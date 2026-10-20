@@ -96,6 +96,10 @@
         "maximumDetailBytes": {
           "type": "integer",
           "minimum": 0
+        },
+        "maximumAnsweringCalls": {
+          "type": "integer",
+          "minimum": 1
         }
       }
     },

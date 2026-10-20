@@ -137,7 +137,7 @@ take it:
 ```json
 {
   "name": "a request on a call id already waiting is refused 409, marked",
-  "clauses": ["15.5.3", "15.6.8"],
+  "clauses": ["15.5.3", "15.6.9"],
   "transport": "http",
   "steps": [
     {
@@ -280,11 +280,17 @@ and the metrics' [0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)
 **The surface is one too.** A name on one side is the same name on every other, in its language's
 case, and any language that can carry the protocol whole mirrors the surface almost name for name;
 each language's own mapping of terms is its implementation's record, as
-[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's. A test missing
-on one side is added to the other, and a term renamed on one side is renamed on every side where it
-applies. What couples transports stays outside the protocol: one public port for WebSocket and HTTP
-comes from a small local proxy in front, as the demo's `demo/relay.ts` is, never from a server the
-transports share, so no transport needs another's server in any language.
+[0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md) is the C# side's. A router's core,
+which both routers build on, is internal on every side: an application builds on the routers, and
+stands behind a destination by a target it registers with a relay, a client router or a connection
+of the relay's own (`RelayTarget` on the TypeScript side; `IRouterTarget`, which `RouterClient`
+implements, or `ConnectionTarget` on the C# side)
+([0010](0010-a-request-presents-a-credential-of-a-scheme.md), On what a procedure is handed of its
+call's credentials). A test missing on one side is added to the other, and a term renamed on one
+side is renamed on every side where it applies. What couples transports stays outside the
+protocol: one public port for WebSocket and HTTP comes from a small local proxy in front, as the
+demo's `demo/relay.ts` is, never from a server the transports share, so no transport needs
+another's server in any language.
 
 **A difference between languages is a row of the support matrix**, `docs/support.md`, with the test
 that shows it, and it stays a row until it closes. Normalising is always the aim: a difference that
@@ -415,11 +421,12 @@ in seven rounds. Its objections, each with its answer:
 
 ### On the text of 0.2.0
 
-The spec's preamble and its companion's, sections 8.3, 9.2, 11.6 and 14.3, and the text of a few
-clauses reworded to what both sides do. The user chose where it asked: the text binds, and the
-entries say what a side does; 11.6 takes 12.1's subject, played over a procedure that notifies
-nothing; and both sides read a loopback host by one parser, the WHATWG URL Standard's, as the round
-Security for 0.2.0, in [0010](0010-a-request-presents-a-credential-of-a-scheme.md), decides.
+The spec's preamble and its companion's, section 8's open point, sections 9.2, 11.6 and 14.3, and
+the text of a few clauses reworded to what both sides do. The user chose where it asked: the text
+binds, and the entries say what a side does; 11.6 takes 12.1's subject, played over a procedure that
+notifies nothing; and both sides read a loopback host by one parser, the WHATWG URL Standard's, as
+the round Security for 0.2.0, in [0010](0010-a-request-presents-a-credential-of-a-scheme.md),
+decides.
 
 | Objection                                                                                                                                                                                               | Answer                                                                                                                                                                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -427,10 +434,9 @@ Security for 0.2.0, in [0010](0010-a-request-presents-a-credential-of-a-scheme.m
 | The new MUST narrows the frame: the clock cases fall out, any row of the matrix excuses with no `differs`, and a MUST binds a demonstration rather than behaviour                                       | Accepted: the spec says that a side does what each entry says, the clock cases holding `advance` to one meaning, but an entry whose `differs` names a row and the side's language; that every side plays the files whole stays this record's to say.                                                                                                                                     |
 | "Binds it all the same, held by its twin tests" claims tests that do not exist: 16.8 holds by nothing, 9.0 is a definition, a third side has none, and the companion's 1.2, 1.3 and 3.5 hold by no test | Accepted: the sentence ends at "binds it all the same"; the companion says that the support matrix names the twin tests that hold what of its sections 1 to 5 a test can.                                                                                                                                                                                                                |
 | 9.2's new paragraph promises that a requester not admitted learns nothing of a relay's destinations, services or procedures, against 14.3, 0019 and the code                                            | Accepted: a request with no destination is answered `SERVICE_UNKNOWN` or `PROCEDURE_UNKNOWN` before its credential is asked; the paragraph says that such a requester learns of the destinations only what 14.3 says, and names no services or procedures.                                                                                                                               |
-| "In place of steps 3 to 8", placed before the resolution paragraph, frees a relay from the later turn while the C# side admits a forwarded credential in the same turn                                  | Accepted: the paragraph follows the resolution paragraph and says steps 3 to 7, the credential resolving as that paragraph says, and section 14.2 in place of step 8; 14.3's lead says the same, and both sides take the later turn ([0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges).                                                                           |
+| "In place of steps 3 to 8", placed before the resolution paragraph, frees a relay from the later turn while the C# side admits a forwarded credential in the same turn                                  | Accepted: the paragraph follows the resolution paragraph and says steps 4 to 8, the credential resolving as that paragraph says, and section 14.2 in place of step 9; 14.3's lead says the same, and both sides take the later turn ([0001](0001-the-envelope-sits-at-fixed-offsets.md), At the wire's edges).                                                                           |
 | The new `ELSEWHERE` conversation repeats what is played, and the path no entry plays, a relay that verifies presented an `ELSEWHERE`, stays unplayed                                                    | Accepted in part: the conversation of a relay that verifies an `ELSEWHERE` — a verifier that fails, one that does not hold, one that crosses — is added, played on both sides. Refused, the drop of the other: retitled, it is the one entry that reaches 14.3's second step after an `ELSEWHERE` admitted on its scheme.                                                                |
 | 11.6 keeps "a subscription's result", yet the conversation sends SUBSCRIPTION to a procedure that notifies nothing, and cannot observe "subscribes nothing"                                             | Accepted: 11.6 takes 12.1's subject, the result of a request that opens a subscription, its procedure notifying or not, and the conversation cites it so; the twin tests that hold "subscribes nothing" for a procedure that notifies are named in the matrix's list of what no entry plays.                                                                                             |
-| The open point, inside 8.2, rides on 8.2's citations, and "not tested" misreads the matrix's legend                                                                                                     | Accepted: the open point is a clause of its own, 8.3, which the ledger holds `open`; its cells over a WebSocket or a Web Worker read "not available: no bound".                                                                                                                                                                                                                          |
 | The changelog's sweep misses a line under Changed for a section 0.1.0 never had, and the new lines repeat the defect                                                                                    | Accepted: a line under Changed words a rule 0.1.0 released, every other goes into its Added entry; section 1.4's line moves to the durations' entry, and "in that order" goes until the registry's order is stated.                                                                                                                                                                      |
 | The change writes totals in five places that every later change must move again                                                                                                                         | Accepted: no total in the changelog, the README's prose or this record; one count stays in `docs/support.md`, moved by each change that adds entries, and `spec/check.py` holds each count of that table, and of the README's, to the files it counts, on every push ([0006](0006-a-rule-has-its-gate.md)).                                                                              |
 | 17.6's "half the smallest positive double, 5 × 10⁻³²⁴" makes half 2.5 × 10⁻³²⁴, and numbers between 2⁻¹⁰⁷⁵ and it read 0 by the text and the smallest double on both sides                              | Accepted: 17.6 says 2⁻¹⁰⁷⁵ or less, half of 2⁻¹⁰⁷⁴; two entries of `spec/codecs.json` pin both sides of it.                                                                                                                                                                                                                                                                              |

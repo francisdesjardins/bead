@@ -12,7 +12,7 @@
     "A duration is timed on the clock the server is given, which only an advance moves: a call that starts and ends between two advances takes 0 microseconds.",
     "clauses are the units of spec/debugging.md an entry checks: a clause, 7.3; a row of its table, counted from 1, 9.4.2."
   ],
-  "debuggingVersion": "0.2.1",
+  "debuggingVersion": "0.3.0",
   "mediaType": "text/plain; version=0.0.4; charset=utf-8",
   "wallClock": "2026-01-01T00:00:00Z",
   "expositions": [
@@ -8055,7 +8055,7 @@
     {
       "name": "a procedure's own failure counts application",
       "clauses": [
-        "9.4.13",
+        "9.4.14",
         "8.4"
       ],
       "steps": [
@@ -8129,7 +8129,7 @@
       "name": "a service unknown counts under _OTHER",
       "clauses": [
         "8.3",
-        "9.4.2"
+        "9.4.3"
       ],
       "steps": [
         {
@@ -8201,7 +8201,7 @@
       "name": "a procedure unknown counts under _OTHER",
       "clauses": [
         "8.3",
-        "9.4.2"
+        "9.4.3"
       ],
       "steps": [
         {
@@ -8273,7 +8273,7 @@
       "name": "a request that names a destination, to a server that relays nothing, counts under _OTHER",
       "clauses": [
         "8.3",
-        "9.4.2"
+        "9.4.3"
       ],
       "steps": [
         {
@@ -8342,10 +8342,201 @@
       ]
     },
     {
+      "name": "a request past the calls its connection has it answer at once counts CAPACITY_EXCEEDED under its procedure, started and ended in one turn",
+      "clauses": [
+        "9.4.2",
+        "9.1.1"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"CAPACITY_EXCEEDED\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"slow\",type=\"request\"} 2"
+          ]
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1e-05\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5e-05\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0001\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0003\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0006\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0008\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.001\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.002\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.003\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.004\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.005\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.006\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.008\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.01\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.013\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.016\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.02\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.025\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.03\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.04\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.05\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.065\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.08\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.1\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.13\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.16\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.2\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.25\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.3\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.4\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.5\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.65\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.8\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"2.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"10.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 2",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 2",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"slow\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"slow\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"slow\",type=\"request\",outcome=\"cancelled\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 2"
+          ]
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
       "name": "a credential scheme to come counts its procedure's CREDENTIAL_UNSUPPORTED, and a procedure unknown _OTHER's",
       "clauses": [
-        "9.4.3",
-        "9.4.2"
+        "9.4.4",
+        "9.4.3"
       ],
       "steps": [
         {
@@ -8544,7 +8735,7 @@
     {
       "name": "a credential that does not resolve counts SESSION_REQUIRED",
       "clauses": [
-        "9.4.3"
+        "9.4.4"
       ],
       "steps": [
         {
@@ -8616,7 +8807,7 @@
     {
       "name": "a verifier that fails counts PROCEDURE_FAILED",
       "clauses": [
-        "9.4.3"
+        "9.4.4"
       ],
       "steps": [
         {
@@ -8692,8 +8883,8 @@
       "name": "calls past those let wait for an issuer count CAPACITY_EXCEEDED, each timed from its arrival through its credential's wait",
       "clauses": [
         "9.1.1",
-        "9.4.3",
-        "9.4.17",
+        "9.4.4",
+        "9.4.18",
         "11.3"
       ],
       "steps": [
@@ -9116,7 +9307,7 @@
     {
       "name": "an admission that refuses counts its refusal",
       "clauses": [
-        "9.4.4"
+        "9.4.5"
       ],
       "steps": [
         {
@@ -9188,7 +9379,7 @@
     {
       "name": "an admission that refuses a call in no session counts SESSION_REQUIRED",
       "clauses": [
-        "9.4.4"
+        "9.4.5"
       ],
       "steps": [
         {
@@ -9259,7 +9450,7 @@
     {
       "name": "a transfer its side takes none of counts PAYLOAD_TOO_LARGE",
       "clauses": [
-        "9.4.6"
+        "9.4.7"
       ],
       "limits": {
         "maximumTransfers": 0
@@ -9333,7 +9524,7 @@
     {
       "name": "a transfer's opening that holds its whole total counts CHUNK_INVALID",
       "clauses": [
-        "9.4.7"
+        "9.4.8"
       ],
       "limits": {
         "chunkBytes": 64,
@@ -9408,7 +9599,7 @@
     {
       "name": "a transfer's opening past those its connection receives counts CAPACITY_EXCEEDED, and the transfer under way stays started",
       "clauses": [
-        "9.4.8",
+        "9.4.9",
         "8.5"
       ],
       "limits": {
@@ -9499,7 +9690,7 @@
     {
       "name": "a chunk refused ends its request's transfer, CHUNK_INVALID",
       "clauses": [
-        "9.4.9"
+        "9.4.10"
       ],
       "limits": {
         "chunkBytes": 64,
@@ -9585,7 +9776,7 @@
     {
       "name": "a chunk past its credit ends its request's transfer, CREDIT_EXCEEDED, and a late one counts nothing",
       "clauses": [
-        "9.4.9"
+        "9.4.10"
       ],
       "limits": {
         "chunkBytes": 64,
@@ -9684,7 +9875,7 @@
       "name": "a request's transfer gone silent counts TRANSFER_STALLED, timed from its arrival",
       "clauses": [
         "9.1.1",
-        "9.4.9",
+        "9.4.10",
         "11.3"
       ],
       "limits": {
@@ -9840,7 +10031,7 @@
     {
       "name": "a request whose header does not read, of a layout to come, is answered and counts under _OTHER",
       "clauses": [
-        "9.4.10",
+        "9.4.11",
         "8.3"
       ],
       "steps": [
@@ -9912,7 +10103,7 @@
     {
       "name": "a malformed request is answered and counts under _OTHER",
       "clauses": [
-        "9.4.10",
+        "9.4.11",
         "8.3"
       ],
       "steps": [
@@ -9984,7 +10175,7 @@
     {
       "name": "a request past the envelope's bound is answered and counts under _OTHER",
       "clauses": [
-        "9.4.10",
+        "9.4.11",
         "8.3"
       ],
       "limits": {
@@ -10222,7 +10413,7 @@
     {
       "name": "a payload its procedure cannot read counts PAYLOAD_UNDECODABLE",
       "clauses": [
-        "9.4.11"
+        "9.4.12"
       ],
       "steps": [
         {
@@ -10293,7 +10484,7 @@
     {
       "name": "a resolver that fails before it answers counts PROCEDURE_FAILED",
       "clauses": [
-        "9.4.12"
+        "9.4.13"
       ],
       "steps": [
         {
@@ -10368,7 +10559,7 @@
     {
       "name": "a result its side cannot send counts PROCEDURE_FAILED",
       "clauses": [
-        "9.4.12"
+        "9.4.13"
       ],
       "limits": {
         "maximumEnvelopeBytes": 64,
@@ -10449,7 +10640,7 @@
     {
       "name": "a subscription refused in its own answer is its call's failure, and drops no subscription",
       "clauses": [
-        "9.4.14",
+        "9.4.15",
         "9.5",
         "8.5",
         "10.1"
@@ -10784,7 +10975,7 @@
     {
       "name": "a result's transfer stalled before its last chunk counts TRANSFER_STALLED, timed to its failure",
       "clauses": [
-        "9.4.15",
+        "9.4.16",
         "9.5",
         "11.3"
       ],
@@ -10795,19 +10986,19 @@
       },
       "steps": [
         {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
             "total": 100
           }
         },
         {
           "counted": [
-            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 1"
+            "bead_server_call_started_total{service=\"1\",procedure=\"bytes\",type=\"request\"} 1"
           ]
         },
         {
@@ -10827,7 +11018,7 @@
             "callId": 1,
             "offset": 28,
             "isLast": false,
-            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+            "payload": "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78"
           }
         },
         {
@@ -10865,13 +11056,13 @@
         },
         {
           "counted": [
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 1",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 1",
-            "bead_server_call_duration_seconds_sum{service=\"1\",procedure=\"echo\",type=\"request\"} 20",
-            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
-            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"TRANSFER_STALLED\"} 1"
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_sum{service=\"1\",procedure=\"bytes\",type=\"request\"} 20",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"bytes\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"bytes\",type=\"request\",outcome=\"failure\",code=\"TRANSFER_STALLED\"} 1"
           ]
         },
         {
@@ -10882,7 +11073,7 @@
     {
       "name": "a result's transfer cancelled before its last chunk counts cancelled",
       "clauses": [
-        "9.4.17",
+        "9.4.18",
         "9.5"
       ],
       "limits": {
@@ -10891,19 +11082,19 @@
       },
       "steps": [
         {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
             "total": 100
           }
         },
         {
           "counted": [
-            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 1"
+            "bead_server_call_started_total{service=\"1\",procedure=\"bytes\",type=\"request\"} 1"
           ]
         },
         {
@@ -10921,88 +11112,6 @@
             "callId": 3,
             "payload": "22 79 22"
           }
-        },
-        {
-          "counted": [
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1e-05\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5e-05\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0001\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0003\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0006\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.0008\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.001\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.002\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.003\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.004\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.005\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.006\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.008\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.01\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.013\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.016\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.02\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.025\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.03\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.04\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.05\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.065\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.08\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.1\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.13\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.16\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.2\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.25\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.3\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.4\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.5\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.65\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"0.8\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"1.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"2.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"5.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"10.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"20.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"50.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 2",
-            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 2",
-            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 2",
-            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 1",
-            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"cancelled\"} 1",
-            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 2"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "a result's transfer closed before its last chunk counts closed",
-      "clauses": [
-        "9.4.18",
-        "9.5"
-      ],
-      "limits": {
-        "chunkBytes": 64,
-        "windowBytes": 128
-      },
-      "steps": [
-        {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
-            "total": 100
-          }
-        },
-        {
-          "counted": [
-            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 1"
-          ]
-        },
-        {
-          "close": true
         },
         {
           "counted": [
@@ -11049,7 +11158,132 @@
             "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"100.0\"} 1",
             "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"echo\",type=\"request\",le=\"+Inf\"} 1",
             "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"echo\",type=\"request\"} 1",
-            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"closed\"} 1"
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"bytes\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"echo\",type=\"request\",outcome=\"result\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"bytes\",type=\"request\",outcome=\"cancelled\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"echo\",type=\"request\"} 1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a result's transfer closed before its last chunk counts closed",
+      "clauses": [
+        "9.4.19",
+        "9.5"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
+            "total": 100
+          }
+        },
+        {
+          "counted": [
+            "bead_server_call_started_total{service=\"1\",procedure=\"bytes\",type=\"request\"} 1"
+          ]
+        },
+        {
+          "close": true
+        },
+        {
+          "counted": [
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"bytes\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"bytes\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"bytes\",type=\"request\",outcome=\"closed\"} 1"
           ]
         }
       ]
@@ -11057,7 +11291,7 @@
     {
       "name": "a call its requester cancels counts cancelled",
       "clauses": [
-        "9.4.17"
+        "9.4.18"
       ],
       "steps": [
         {
@@ -11175,7 +11409,7 @@
     {
       "name": "a call whose connection closes counts closed",
       "clauses": [
-        "9.4.18"
+        "9.4.19"
       ],
       "steps": [
         {
@@ -11231,6 +11465,129 @@
             "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"slow\",type=\"request\"} 1",
             "bead_server_call_handled_total{service=\"1\",procedure=\"slow\",type=\"request\",outcome=\"closed\"} 1",
             "bead_server_call_started_total{service=\"1\",procedure=\"slow\",type=\"request\"} 1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a call awaiting its command as their connection closes counts closed, and the command closed, each once",
+      "clauses": [
+        "9.4.19",
+        "9.6.10"
+      ],
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "counted": [
+            "bead_client_call_started_total{service=\"1\",procedure=\"clock\",type=\"command\"} 1",
+            "bead_server_call_started_total{service=\"1\",procedure=\"ask\",type=\"request\"} 1"
+          ]
+        },
+        {
+          "close": true
+        },
+        {
+          "counted": [
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"1e-05\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"5e-05\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0001\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0003\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0006\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.0008\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.001\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.002\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.003\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.004\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.005\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.006\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.008\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.01\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.013\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.016\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.02\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.025\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.03\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.04\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.05\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.065\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.08\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.1\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.13\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.16\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.2\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.25\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.3\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.4\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.5\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.65\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"0.8\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"1.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"2.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"5.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"10.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"20.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"50.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"100.0\"} 1",
+            "bead_client_call_duration_seconds_bucket{service=\"1\",procedure=\"clock\",type=\"command\",le=\"+Inf\"} 1",
+            "bead_client_call_duration_seconds_count{service=\"1\",procedure=\"clock\",type=\"command\"} 1",
+            "bead_client_call_handled_total{service=\"1\",procedure=\"clock\",type=\"command\",outcome=\"closed\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"1e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"5e-05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.0008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.001\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.002\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.003\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.004\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.005\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.006\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.008\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.01\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.013\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.016\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.02\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.025\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.03\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.04\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.05\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.065\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.08\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.1\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.13\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.16\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.2\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.25\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.3\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.4\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.5\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.65\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"0.8\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"1.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"2.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"5.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"10.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"20.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"50.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"100.0\"} 1",
+            "bead_server_call_duration_seconds_bucket{service=\"1\",procedure=\"ask\",type=\"request\",le=\"+Inf\"} 1",
+            "bead_server_call_duration_seconds_count{service=\"1\",procedure=\"ask\",type=\"request\"} 1",
+            "bead_server_call_handled_total{service=\"1\",procedure=\"ask\",type=\"request\",outcome=\"closed\"} 1"
           ]
         }
       ]
@@ -11866,7 +12223,7 @@
       "name": "a relayed call counts under _OTHER in the server families, and its leg B under _OTHER in the client families, type command",
       "clauses": [
         "8.3",
-        "9.4.16",
+        "9.4.17",
         "9.6.5"
       ],
       "relay": {
@@ -12132,7 +12489,7 @@
     {
       "name": "a destination's failure counts as answered at both of the relay's gates",
       "clauses": [
-        "9.4.16",
+        "9.4.17",
         "9.6.6"
       ],
       "relay": {
@@ -12398,7 +12755,7 @@
     {
       "name": "a relay's own failure counts under _OTHER, and no leg B",
       "clauses": [
-        "9.4.16"
+        "9.4.17"
       ],
       "steps": [
         {
@@ -12800,7 +13157,7 @@
     {
       "name": "a subscription through a relay counts the relay's SUBSCRIPTION_UNSUPPORTED under _OTHER",
       "clauses": [
-        "9.4.16",
+        "9.4.17",
         "8.3"
       ],
       "relay": {
@@ -13006,7 +13363,7 @@
     {
       "name": "a leg B past its destination's timeout counts timeout, and its leg A the relay's DESTINATION_LOST",
       "clauses": [
-        "9.4.16",
+        "9.4.17",
         "9.6.8"
       ],
       "relay": {
@@ -13215,7 +13572,7 @@
     {
       "name": "a leg B whose connection goes counts closed, and its leg A the relay's DESTINATION_LOST",
       "clauses": [
-        "9.4.16",
+        "9.4.17",
         "9.6.10"
       ],
       "relay": {
@@ -13481,8 +13838,8 @@
     {
       "name": "a cancel on leg A counts cancelled at both of the relay's gates",
       "clauses": [
-        "9.4.16",
         "9.4.17",
+        "9.4.18",
         "9.6.9"
       ],
       "relay": {

@@ -31,7 +31,9 @@ public sealed partial class RouterCoreTests
         var gauges = await GaugesOf(server);
 
         Assert.Empty(gauges.Anomalies);
-        Assert.Equal(new Dictionary<string, long> { ["bufferedBytes"] = RouterLimits.Default.BufferedBytesBudget }, gauges.Ceilings);
+        Assert.Equal(
+            new Dictionary<string, long> { ["bufferedBytes"] = RouterLimits.Default.BufferedBytesBudget, ["largestAnsweringCalls"] = 64 },
+            gauges.Ceilings);
         Assert.Equal(["a", "b"], gauges.ConnectionHandles.Order());
         Assert.Equal(
             new Dictionary<string, long>
@@ -40,6 +42,7 @@ public sealed partial class RouterCoreTests
                 ["announced"] = 0,
                 ["answeringCalls"] = 1,
                 ["bufferedBytes"] = 0,
+                ["largestAnsweringCalls"] = 1,
                 ["pendingCalls"] = 1,
                 ["receivingTransfers"] = 0,
                 ["reservedCallIds"] = 0,

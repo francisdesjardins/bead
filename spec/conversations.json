@@ -14,13 +14,13 @@
     "The server is given the interop service's credentials: credentials.jwt, its keys, its audience, and its key set with the issuers it answers for, which answers on the server's clock as its words say, and with maximumWaitingCalls, the most calls that wait for one issuer's deadline at once; and credentials.elsewhere, its verifier, which settles on the server's clock as its words say. A server whose limits hold chunkBytes or maximumEnvelopeBytes under 1,024 bytes is given no JWT key and no key set, which section 12.2 forbids beside them, and takes no JWT. A JWT a send presents is written as its characters' bytes, as any header byte is.",
     "clauses are the units of spec.md an entry checks: a clause, 9.2; an item of its numbered list, 9.2.5; a row of its table, counted from 1, 15.6.8."
   ],
-  "specVersion": "0.6.0",
+  "specVersion": "0.7.0",
   "wallClock": "2026-01-01T00:00:00Z",
   "conversations": [
     {
       "name": "echo answers with its request's payload",
       "clauses": [
-        "9.2.8",
+        "9.2.9",
         "9.3"
       ],
       "steps": [
@@ -62,7 +62,7 @@
     {
       "name": "a service unknown is answered SERVICE_UNKNOWN",
       "clauses": [
-        "9.2.4"
+        "9.2.5"
       ],
       "steps": [
         {
@@ -85,7 +85,7 @@
       "name": "a request to service 0 is read, and answered SERVICE_UNKNOWN by routing",
       "clauses": [
         "4.7",
-        "9.2.4"
+        "9.2.5"
       ],
       "steps": [
         {
@@ -107,7 +107,7 @@
     {
       "name": "a procedure unknown, in a service known, is answered PROCEDURE_UNKNOWN",
       "clauses": [
-        "9.2.4"
+        "9.2.5"
       ],
       "steps": [
         {
@@ -129,7 +129,7 @@
     {
       "name": "an admission that refuses is answered with its refusal",
       "clauses": [
-        "9.2.5"
+        "9.2.6"
       ],
       "steps": [
         {
@@ -152,7 +152,7 @@
     {
       "name": "a request with a destination, to a server that relays nothing, is answered DESTINATION_UNKNOWN",
       "clauses": [
-        "9.2.3",
+        "9.2.4",
         "14.1"
       ],
       "steps": [
@@ -175,7 +175,7 @@
     {
       "name": "a request that opens a transfer, to a server that takes none, is answered PAYLOAD_TOO_LARGE",
       "clauses": [
-        "9.2.7",
+        "9.2.8",
         "12.2.6"
       ],
       "limits": {
@@ -491,7 +491,7 @@
     {
       "name": "an admission is asked before the payload is read: one that is not JSON is refused by it, not undecodable",
       "clauses": [
-        "9.2.5"
+        "9.2.6"
       ],
       "steps": [
         {
@@ -1800,7 +1800,7 @@
     {
       "name": "a request presenting a JWT that verifies runs in its credential's session, never its connection's",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.1",
         "13.5",
         "13.8"
@@ -1852,7 +1852,7 @@
     {
       "name": "a JWT holds while the server's wall clock is before its exp plus 60 s, a millisecond either side",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.8.9",
         "13.10.1"
       ],
@@ -1903,7 +1903,7 @@
     {
       "name": "a JWT for another audience is refused SESSION_REQUIRED, whatever its procedure requires",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.8.11"
       ],
       "steps": [
@@ -1937,7 +1937,7 @@
     {
       "name": "logout, in a credential's session, is refused ACCESS_DENIED, and its connection's session stays",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.5"
       ],
       "steps": [
@@ -2911,7 +2911,7 @@
     {
       "name": "a key set is asked for the issuers it names alone: a token of another, whose kid no key names, is refused at once, asking nothing, the application's own issuers among them",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.8.4",
         "13.9",
         "13.9.1"
@@ -2962,7 +2962,7 @@
     {
       "name": "a key set's ask that never settles fails at its deadline, a minute after it went, for the calls that wait on it, and the next ask goes",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "10.2",
         "13.9",
         "13.9.2",
@@ -3278,7 +3278,7 @@
       "name": "a key set lets maximumWaitingCalls calls wait for an issuer's deadline at once, a call that waits on its ask never counted: however many wait on an ask, none is refused; one more for the deadline is refused CAPACITY_EXCEEDED at once, and one an answer moves onto a deadline that holds them as it moves, neither reported, while a call whose key serves and a call that comes once one left are not",
       "clauses": [
         "8.2",
-        "9.2.5",
+        "9.2.6",
         "13.9",
         "13.9.6"
       ],
@@ -3527,7 +3527,7 @@
     {
       "name": "a request presenting its connection's OPAQUE is taken, and runs in that session",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.1",
         "13.4"
       ],
@@ -3570,7 +3570,7 @@
     {
       "name": "a request presenting an OPAQUE no session holds is refused SESSION_REQUIRED, whatever its procedure requires, and its connection's session stays",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.5"
       ],
       "steps": [
@@ -3628,7 +3628,7 @@
     {
       "name": "a request presenting another connection's OPAQUE is refused SESSION_REQUIRED: a token holds on its own connection alone",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.2"
       ],
       "steps": [
@@ -3711,7 +3711,7 @@
     {
       "name": "a request presenting the OPAQUE of a session ended is refused SESSION_REQUIRED",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.4"
       ],
       "steps": [
@@ -3767,7 +3767,7 @@
     {
       "name": "a request presenting the OPAQUE of a session opened anew under a new token is refused SESSION_REQUIRED",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.2",
         "13.4"
       ],
@@ -3825,8 +3825,8 @@
     {
       "name": "a credential scheme to come is answered CREDENTIAL_UNSUPPORTED, its detail naming the schemes the server takes, before its admission",
       "clauses": [
-        "9.2.4",
-        "9.2.5"
+        "9.2.5",
+        "9.2.6"
       ],
       "steps": [
         {
@@ -3878,7 +3878,7 @@
     {
       "name": "a JWT that does not verify is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying one came and did not hold",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.8.1"
       ],
       "steps": [
@@ -3902,7 +3902,7 @@
     {
       "name": "an ELSEWHERE whose transport carried nothing is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying no credential came",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "15.1"
       ],
       "steps": [
@@ -3926,7 +3926,7 @@
     {
       "name": "an ELSEWHERE is resolved by the server's verifier from what its transport carried, and its call runs in that credential's session, never announced: whoami answers the sub it names",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.1",
         "13.11",
         "15.1"
@@ -3974,7 +3974,7 @@
     {
       "name": "an ELSEWHERE its verifier does not hold is refused SESSION_REQUIRED, whatever its procedure requires, its detail saying the credential does not hold",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.5",
         "13.11"
       ],
@@ -4016,7 +4016,7 @@
     {
       "name": "an ELSEWHERE whose verifier fails is answered PROCEDURE_FAILED, and reported, never SESSION_REQUIRED",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.11"
       ],
       "steps": [
@@ -4367,6 +4367,630 @@
             "kind": 17,
             "callId": 3,
             "payload": "31"
+          }
+        }
+      ]
+    },
+    {
+      "name": "past the calls its peer has it answer on a connection, a request is answered CAPACITY_EXCEEDED, the calls it answers untouched, and one is taken once a call ends",
+      "clauses": [
+        "8.2",
+        "9.2.3",
+        "12.2.10"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 31 30 30 30 7D"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 32 30 30 30 7D"
+        },
+        {
+          "until": {
+            "timer": 2000
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "31 30 30 30"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "32 30 30 30"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a cancel frees its call's place at once",
+      "clauses": [
+        "9.2.3",
+        "10.2"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "a call whose credential still resolves holds its place",
+      "clauses": [
+        "9.2.3",
+        "9.2.6",
+        "13.9"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 08 60  00 00 00 01  00 01 00 0E  00 02 01 70  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 49 73 49 6D 74 70 5A 43 49 36 49 6A 41 78 4F 47 4D 77 59 57 55 31 4C 54 52 6B 4F 57 49 74 4E 44 63 78 59 69 31 69 5A 6D 51 32 4C 57 56 6C 5A 6A 4D 78 4E 47 4A 6A 4E 7A 41 7A 4E 79 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 74 6C 65 58 4D 75 61 57 35 30 5A 58 4A 76 63 43 35 69 5A 57 46 6B 4C 6D 56 34 59 57 31 77 62 47 55 69 4C 43 4A 7A 64 57 49 69 4F 69 4A 6E 63 6D 46 6A 5A 53 49 73 49 6D 46 31 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 49 73 49 6D 56 34 63 43 49 36 4D 54 63 32 4E 7A 49 79 4F 54 49 77 4D 43 77 69 61 57 46 30 49 6A 6F 78 4E 7A 59 33 4D 6A 49 31 4E 6A 41 77 4C 43 4A 71 64 47 6B 69 4F 69 4A 68 64 43 31 72 5A 58 6C 7A 4C 54 41 77 4D 44 45 69 4C 43 4A 6A 62 47 6C 6C 62 6E 52 66 61 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 74 59 32 78 70 5A 57 35 30 49 6E 30 2E 38 51 55 50 58 38 48 4D 41 36 52 71 61 30 59 62 63 31 7A 35 42 45 45 35 73 56 74 43 38 70 78 55 46 6D 5F 61 61 4C 37 37 4C 32 30 | 6E 75 6C 6C"
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "until": {
+            "timer": 1000
+          }
+        },
+        {
+          "advance": 1000
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 67 72 61 63 65 22"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "a result that goes as a transfer holds its call's place until its last chunk",
+      "clauses": [
+        "9.2.3",
+        "12.1",
+        "12.5"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
+            "total": 100
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 4C"
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 28,
+            "isLast": false,
+            "payload": "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 7,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 64"
+        },
+        {
+          "expect": {
+            "kind": 20,
+            "callId": 1,
+            "offset": 76,
+            "isLast": true,
+            "payload": "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 09  00 01 00 01 | 22 7A 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 9,
+            "payload": "22 7A 22"
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "a subscription once answered holds no place",
+      "clauses": [
+        "9.2.3",
+        "11.3"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 10 03  00 00 00 01  00 01 00 0A | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 0B | 7B 22 76 61 6C 75 65 22 3A 31 7D"
+        },
+        {
+          "expect": {
+            "kind": 19,
+            "callId": 1,
+            "payload": "31"
+          }
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "6E 75 6C 6C"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 09  00 01 00 01 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 07"
+        }
+      ]
+    },
+    {
+      "name": "a request past the bound is refused before its route, its credential or its transfer",
+      "clauses": [
+        "9.2.3",
+        "12.3"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128,
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 09 00 01 | 7B 7D"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 05 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 7,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 08 04  00 00 00 09  00 01 00 01  00 04 00 00 | 22 78 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 9,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 0B  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 11,
+            "failure": {
+              "code": 35,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "a request on a call id open is reported, never answered for the bound",
+      "clauses": [
+        "9.2.2",
+        "9.2.3"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 03 | 7B 22 6D 69 6C 6C 69 73 65 63 6F 6E 64 73 22 3A 33 36 30 30 30 30 30 7D"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 67 61 69 6E 22"
+        },
+        {
+          "report": 1
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 03"
+        }
+      ]
+    },
+    {
+      "name": "the server's commands past the calls its client answers at once fail before they go, and go once one is answered",
+      "clauses": [
+        "9.1",
+        "12.2.10"
+      ],
+      "limits": {
+        "maximumAnsweringCalls": 2
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 2,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 03  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 4,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 16 00 02  00 00 00 01"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 5,
+            "failure": {
+              "code": 64,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "report": 35
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 02 | 22 6E 6F 6F 6E 22"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 07  00 01 00 08 | 6E 75 6C 6C"
+        },
+        {
+          "expect": {
+            "kind": 16,
+            "callId": 6,
+            "flags": 0,
+            "serviceId": 1,
+            "procedureId": 9,
+            "payload": "22 57 68 61 74 20 74 69 6D 65 20 69 73 20 69 74 20 77 68 65 72 65 20 79 6F 75 20 61 72 65 3F 22"
+          }
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 04 | 22 6E 6F 6F 6E 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 3,
+            "payload": "22 6E 6F 6F 6E 22"
+          }
+        },
+        {
+          "send": "A1 11 00 02  00 00 00 06 | 22 6E 6F 6F 6E 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 7,
+            "payload": "22 6E 6F 6F 6E 22"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a request that came whole past chunkBytes is answered ENVELOPE_TOO_LARGE, and nothing of it is held",
+      "clauses": [
+        "9.6.2",
+        "12.1",
+        "12.2"
+      ],
+      "limits": {
+        "chunkBytes": 64,
+        "windowBytes": 128
+      },
+      "steps": [
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 22"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 4,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 79 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 1,
+            "payload": "22 79 22"
+          }
+        },
+        {
+          "send": "A1 10 04 05  00 00 00 03  00 01 00 01  00 00 00 00 00 00 01 2C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 3,
+            "failure": {
+              "code": 4,
+              "scope": 0,
+              "relays": 0
+            }
+          }
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 05  00 01 00 04 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 22"
+        },
+        {
+          "expect": {
+            "kind": 17,
+            "callId": 5,
+            "payload": "30"
           }
         }
       ]
@@ -4895,13 +5519,13 @@
       },
       "steps": [
         {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
             "total": 100
           }
         },
@@ -4917,7 +5541,7 @@
             "callId": 1,
             "offset": 28,
             "isLast": false,
-            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+            "payload": "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78"
           }
         },
         {
@@ -4932,7 +5556,7 @@
             "callId": 1,
             "offset": 76,
             "isLast": true,
-            "payload": "78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+            "payload": "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 22"
           }
         }
       ]
@@ -5460,13 +6084,13 @@
       },
       "steps": [
         {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
             "total": 100
           }
         },
@@ -5685,13 +6309,13 @@
       },
       "steps": [
         {
-          "send": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 22"
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 07 | 7B 22 6C 65 6E 67 74 68 22 3A 39 38 7D"
         },
         {
           "expect": {
             "kind": 17,
             "callId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61",
+            "payload": "22 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78",
             "total": 100
           }
         },
@@ -5712,7 +6336,7 @@
             "callId": 1,
             "offset": 28,
             "isLast": false,
-            "payload": "62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77"
+            "payload": "78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78 78"
           }
         },
         {
@@ -7880,16 +8504,17 @@
       ]
     },
     {
-      "name": "leg B's header counts its credential, call by call, against the smaller of the two legs' limits, once its route holds",
+      "name": "a payload past the smaller of the two legs' limits is answered PAYLOAD_TOO_LARGE once its route holds, whatever it presents",
       "clauses": [
         "14.3.5",
         "14.3.6",
         "14.5.3"
       ],
       "limits": {
-        "maximumEnvelopeBytes": 2048,
+        "maximumEnvelopeBytes": 1024,
         "chunkBytes": 1024,
-        "maximumTransfers": 0
+        "maximumTransfers": 0,
+        "maximumPayloadBytes": 512
       },
       "relay": {
         "beforeRoute": "shareLegBSession"
@@ -7943,7 +8568,7 @@
           "on": "other"
         },
         {
-          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 22",
+          "send": "A1 10 0A 53  00 00 00 03  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 22",
           "on": "client"
         },
         {
@@ -7953,7 +8578,7 @@
             "flags": 8,
             "serviceId": 1,
             "procedureId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 22",
+            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 22",
             "credential": {
               "scheme": "JWT",
               "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2hzMjU2LmludGVyb3AuYmVhZC5leGFtcGxlIiwic3ViIjoiY2Fyb2wiLCJhdWQiOiJiZWFkLWludGVyb3AiLCJleHAiOjE3NjcyMjkyMDAsImlhdCI6MTc2NzIyNTYwMCwianRpIjoiYXQtcmVsYXktMDAwMSIsImNsaWVudF9pZCI6ImJlYWQtaW50ZXJvcC1jbGllbnQifQ.Z-uvZ4Vtq-rM3pGaFwIU2PxUOhgl5G09mUGqmr-LccE"
@@ -7974,7 +8599,7 @@
           "on": "client"
         },
         {
-          "send": "A1 10 0A 53  00 00 00 05  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22",
+          "send": "A1 10 0A 53  00 00 00 05  00 01 00 01  00 00 00 0C  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 22",
           "on": "client"
         },
         {
@@ -7990,34 +8615,23 @@
           "on": "client"
         },
         {
-          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22",
+          "send": "A1 10 02 04  00 00 00 07  00 01 00 01  00 00 00 0C | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 22",
           "on": "client"
         },
         {
           "expect": {
-            "kind": 16,
-            "callId": 4,
-            "flags": 0,
-            "serviceId": 1,
-            "procedureId": 1,
-            "payload": "22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22"
-          },
-          "on": "device"
-        },
-        {
-          "send": "A1 11 00 02  00 00 00 04 | 22 6F 6B 22",
-          "on": "device"
-        },
-        {
-          "expect": {
-            "kind": 17,
+            "kind": 18,
             "callId": 7,
-            "payload": "22 6F 6B 22"
+            "failure": {
+              "code": 34,
+              "scope": 0,
+              "relays": 0
+            }
           },
           "on": "client"
         },
         {
-          "send": "A1 10 0A 53  00 00 00 09  00 01 00 01  00 00 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 22",
+          "send": "A1 10 0A 53  00 00 00 09  00 01 00 01  00 00 00 0D  00 02 01 37  65 79 4A 68 62 47 63 69 4F 69 4A 49 55 7A 49 31 4E 69 49 73 49 6E 52 35 63 43 49 36 49 6D 46 30 4B 32 70 33 64 43 4A 39 2E 65 79 4A 70 63 33 4D 69 4F 69 4A 6F 64 48 52 77 63 7A 6F 76 4C 32 68 7A 4D 6A 55 32 4C 6D 6C 75 64 47 56 79 62 33 41 75 59 6D 56 68 5A 43 35 6C 65 47 46 74 63 47 78 6C 49 69 77 69 63 33 56 69 49 6A 6F 69 59 32 46 79 62 32 77 69 4C 43 4A 68 64 57 51 69 4F 69 4A 69 5A 57 46 6B 4C 57 6C 75 64 47 56 79 62 33 41 69 4C 43 4A 6C 65 48 41 69 4F 6A 45 33 4E 6A 63 79 4D 6A 6B 79 4D 44 41 73 49 6D 6C 68 64 43 49 36 4D 54 63 32 4E 7A 49 79 4E 54 59 77 4D 43 77 69 61 6E 52 70 49 6A 6F 69 59 58 51 74 63 6D 56 73 59 58 6B 74 4D 44 41 77 4D 53 49 73 49 6D 4E 73 61 57 56 75 64 46 39 70 5A 43 49 36 49 6D 4A 6C 59 57 51 74 61 57 35 30 5A 58 4A 76 63 43 31 6A 62 47 6C 6C 62 6E 51 69 66 51 2E 5A 2D 75 76 5A 34 56 74 71 2D 72 4D 33 70 47 61 46 77 49 55 32 50 78 55 4F 68 67 6C 35 47 30 39 6D 55 47 71 6D 72 2D 4C 63 63 45 00 | 22 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 72 73 74 75 76 77 78 79 7A 61 62 63 64 65 66 67 68 69 6A 6B 6C 6D 6E 6F 70 71 22",
           "on": "client"
         },
         {
@@ -8493,7 +9107,7 @@
     {
       "name": "a relay whose admission is requireSession refuses every credential it forwards without verifying with ACCESS_DENIED, whatever leg A's connection's session",
       "clauses": [
-        "9.2.5",
+        "9.2.6",
         "13.5",
         "14.3.1"
       ],

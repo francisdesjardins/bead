@@ -76,6 +76,12 @@ agree, one agent is bound to disagree, at **xhigh** effort. It argues that the c
 objections is answered, accepted or refused with its reason, before the user decides. Not ten
 opinions: as many as the change needs, plus the one that dissents.
 
+The round's size follows the change. One behaviour, a few files on each side, no new record: one
+dissenting agent at **xhigh** against the proposal as written, its objections answered in the
+record's table, then the change made directly. A change that adds a record, touches the wire's
+identity or spans many files: the `bead-tenth-man-round` workflow, then `bead-implement-both-sides`,
+its whole suites run locally or left to CI on the pushed feature branch (`suites: 'ci'`).
+
 ## Design
 
 Keep the architecture, the layering and the reason behind each mechanism, and change them by
@@ -97,12 +103,15 @@ comment that a reader must not miss opens with its tag, after its marker (`//`, 
 
 Every other comment stays plain, and doc comments (JSDoc, `///`) carry no tag.
 
+A document that cites a test copies its title to the byte, an apostrophe included: the TypeScript
+titles that hold one write it `’`, and the citation does the same.
+
 **C#** (`implementations/dotnet`, decision 0007):
 
 - every body is a block: methods, constructors, operators, local functions, properties, accessors,
   indexers and lambdas, never an expression body; a block for every branch;
 - at most two parameters to a function, then at most one options record, always last (`TOptions?
-options = null` when every member is optional, a `CancellationToken` inside it); a third
+  options = null` when every member is optional, a `CancellationToken` inside it); a third
   essential thing is a design to revisit, never a third parameter;
 - `TreatWarningsAsErrors`, the analyzers at `latest-recommended`, the code style enforced in the
   build, a doc comment on every public member;

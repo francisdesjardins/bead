@@ -53,6 +53,14 @@ bound to disagree, in this repository's workflows an agent at xhigh effort: it a
 consensus is wrong. Each of its objections is answered, accepted or refused with its reason, before
 the user decides. Not ten opinions: as many as the change needs, plus the one that dissents.
 
+**The round's size follows the change**, so that a round costs what its change needs and each suite
+runs once. One behaviour, a few files on each side and no new record: one dissenting agent at
+xhigh against the proposal as written, its objections answered in the record's table, then the
+change made directly. A change that adds a record, touches the wire's identity or spans many files:
+the `bead-tenth-man-round` workflow, then `bead-implement-both-sides`
+([the workflows](../../.claude/workflows/README.md)), its whole suites run locally or left to CI on
+the pushed feature branch (`suites: 'ci'`).
+
 **The objections and their answers are kept in the repository, in a record**, under its
 `## The Tenth Man`: the record the change writes; or the one whose decision it changes, which gains
 the round; or, for a change of the spec, its files or their gates that changes no decision, the

@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text;
-
 namespace Bead;
 
 /// <summary>
@@ -58,13 +55,28 @@ public sealed record CallSession
     public long? End { get; init; }
 
     /// <summary>
-    /// What CREDENTIAL_UNSUPPORTED's detail says (spec 9.2, step 5): the names of the credential
+    /// What CREDENTIAL_UNSUPPORTED's detail says (spec 9.2, step 6): the names of the credential
     /// schemes a side takes, in the order of their numbers, a comma and a space between —
     /// <c>OPAQUE, JWT, ELSEWHERE</c> from a side that takes them all.
     /// </summary>
     internal static string CredentialSchemesDetailOf(IEnumerable<CredentialScheme> schemes)
     {
         return string.Join(", ", schemes.Distinct().Order().Select(EnvelopeCodec.SchemeNameOf));
+    }
+
+    /// <summary>
+    /// A request's header as its side hands it to a procedure and its admission (spec 13.1): a copy
+    /// whose <see cref="CredentialScheme.Jwt"/> says its scheme alone, its token the verifier's and a
+    /// relay's; any other header itself, one made already among them.
+    /// </summary>
+    internal static RequestHeader HandedHeaderOf(RequestHeader header)
+    {
+        if (header.Credential is { Scheme: CredentialScheme.Jwt, Token: not null })
+        {
+            return header with { Credential = Credential.SchemeOf(CredentialScheme.Jwt) };
+        }
+
+        return header;
     }
 
     /// <summary>
@@ -111,6 +123,36 @@ public sealed record CallSession
     }
 
     /// <summary>
+    /// Throws an <see cref="ArgumentException"/> for a credential no call presents, its
+    /// application's error, before the call starts and is counted (spec 13.4; spec/debugging.md
+    /// 9.3): a <see cref="CredentialScheme.Jwt"/> with no token; an
+    /// <see cref="CredentialScheme.Elsewhere"/> that gives nothing for its transport to carry, as a
+    /// header's <see cref="Credential.Elsewhere()"/> holds nothing to present; and a scheme to come.
+    /// A call presents none, <see cref="CredentialScheme.None"/>, <see cref="CredentialScheme.Opaque"/>,
+    /// a JWT with its token, or an ELSEWHERE with its bytes.
+    /// </summary>
+    internal static void AssertPresentable(Credential? asked)
+    {
+        switch (asked)
+        {
+            case null or { Scheme: CredentialScheme.None or CredentialScheme.Opaque }:
+                break;
+            case { Scheme: CredentialScheme.Jwt, Token: null or "" }:
+                throw new ArgumentException("a call that presents a JWT gives its token", nameof(asked));
+            case { Scheme: CredentialScheme.Jwt }:
+                break;
+            case { Scheme: CredentialScheme.Elsewhere, Carried: null }:
+                throw new ArgumentException(
+                    "a call that presents ELSEWHERE gives what its transport carries: a header's ELSEWHERE holds nothing to present",
+                    nameof(asked));
+            case { Scheme: CredentialScheme.Elsewhere }:
+                break;
+            case { } toCome:
+                throw new ArgumentException($"a call presents NONE, OPAQUE, JWT or ELSEWHERE, not scheme {(ushort)toCome.Scheme}", nameof(asked));
+        }
+    }
+
+    /// <summary>
     /// The failure of a call presenting <paramref name="presented"/> that its transport cannot carry
     /// (spec 13.4): DESTINATION_UNREACHABLE, nothing tried, for an
     /// <see cref="CredentialScheme.Elsewhere"/> over a transport that does not carry the credential
@@ -136,8 +178,8 @@ public sealed record CallSession
 }
 
 /// <summary>
-/// A request as the router asks its session of it: where it came from, its header — the credential
-/// it presents among it — and the credential its transport carried beside it.
+/// A request as the router asks its session of it: where it came from, and its header — the
+/// credential it presents among it.
 /// </summary>
 public sealed record SessionRequest
 {
@@ -150,25 +192,16 @@ public sealed record SessionRequest
     /// <summary>
     /// The credential its transport carried beside it, which an <see cref="CredentialScheme.Elsewhere"/>
     /// stands for: over HTTP, its <c>Authorization</c> field; over a WebSocket, that of its
-    /// connection's upgrade from no page; none when nothing was carried.
+    /// connection's upgrade from no page; none when nothing was carried. The side's own verifier
+    /// reads it (spec 13.11); the application's session is asked for none and
+    /// <see cref="CredentialScheme.Opaque"/> alone, so it is never set where an application reads
+    /// it (spec 13.1).
     /// </summary>
-    public string? TransportCredential { get; init; }
+    internal string? TransportCredential { get; init; }
 
     /// <summary>
     /// The audiences a <see cref="CredentialScheme.Jwt"/> is held to in place of the side's own: a
     /// relay's that verifies, those its destinations were registered with as the call came.
     /// </summary>
     internal IReadOnlyCollection<string>? Audiences { get; init; }
-
-    // every public member as the compiler writes it, its header's credential its scheme alone, but
-    // the transport's credential, of which whether one was carried
-    private bool PrintMembers(StringBuilder builder)
-    {
-        // ! a credential's own string reaches no log, no exception's message and no debugger (spec
-        // 15.1): whether there is one, alone
-        builder.Append(CultureInfo.CurrentCulture, $"ConnectionHandle = {ConnectionHandle}, Header = {Header}, TransportCredential = ");
-        builder.Append(TransportCredential is null ? "none" : "carried");
-
-        return true;
-    }
 }

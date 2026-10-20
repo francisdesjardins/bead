@@ -18,4 +18,7 @@
     <Project Path="tests/Bead.Transport.Http.Tests/Bead.Transport.Http.Tests.csproj" />
     <Project Path="tests/Bead.Transport.WebSockets.Tests/Bead.Transport.WebSockets.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Bead.Fuzz/Bead.Fuzz.csproj" />
+  </Folder>
 </Solution>

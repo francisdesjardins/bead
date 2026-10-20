@@ -517,19 +517,6 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             }
         }
 
-        // ! fails closed: a default withdrawn never falls to the connection's session, or to none,
-        // in silence; it fails before it goes, withdrawing nothing, until one is given again
-        if (isWithdrawn)
-        {
-            return Task.FromException<RouterResult>(new FailureException(
-                Failure.OfProtocol(ProtocolCode.SessionRequired, "the default credential was withdrawn"),
-                new FailureException.Raised(FailureOrigin.Local, RouterSide.Client))
-            {
-                DestinationId = request.Options.DestinationId,
-                ProcedureAddress = request.Procedure.Address,
-            });
-        }
-
         var options = byDefault is null ? request.Options : request.Options with { Credential = byDefault };
         var core = new CoreRequest
         {
@@ -539,6 +526,11 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
             Options = options,
             Procedure = request.Procedure,
             Series = request.Series,
+
+            // ! fails closed: a default withdrawn never falls to the connection's session, or to
+            // none, in silence; the call fails before it goes, counted once it starts, withdrawing
+            // nothing, until one is given again (spec/debugging.md 9.3)
+            Refusal = isWithdrawn ? Failure.OfProtocol(ProtocolCode.SessionRequired, "the default credential was withdrawn") : null,
         };
 
         if (request.Subscribes is not { } subscribes)

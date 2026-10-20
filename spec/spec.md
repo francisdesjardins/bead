@@ -58,13 +58,18 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0031](../docs/decisions/0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md):
   the `proto` encoding, section 17.9;
 - [0032](../docs/decisions/0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md):
-  a WebSocket upgrade's credential, and a client that follows no redirect, section 15.
+  a WebSocket upgrade's credential, and a client that follows no redirect, section 15;
+- [0033](../docs/decisions/0033-a-side-bounds-what-a-peer-holds-of-it.md): what a side holds of a
+  peer — the calls it answers on a connection, a request's bytes, a WebSocket server's connections,
+  what waits for a socket, a request that trickles — sections 9, 12 and 15;
+- [0034](../docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md): an
+  access a server refuses, told, section 13.12.
 
-**Version: 0.6.0**, of layout `0xA1`. Each of its conformance files repeats it as its
+**Version: 0.7.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
 [`interop-blueprint.json`](interop-blueprint.json), and what its service does,
 [`interop-service.json`](interop-service.json), are files of this version, which the conversations
-play. **Status: every section is written; one point is open, section 8.3.**
+play. **Status: every section is written.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
@@ -296,21 +301,12 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 | 22   | `SUBSCRIPTION_UNSUPPORTED` | 65   | `DESTINATION_LOST`       |
 
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
-takes no more: a notification past its subscription's queue (section 11.10), a transfer past those
-its connection receives at once or past the budget left (section 12.3), a call past those that wait
-for an issuer's deadline (section 13.9). A requester gives it, too, to a call of its own it has no
-call id free for (section 9.1). It says nothing against the call's credential, and withdraws none
-(section 13.4).
-
-8.3. Open in this version: nothing bounds the calls a peer holds open to its receiver over a
-transport that keeps its connection, a WebSocket or a Web Worker. The receiver holds each request it
-took until it is answered, cancelled, or its connection closes (section 9.10), each with its payload
-whole, a request whose credential still resolves among them (section 13.9), and refuses none of them
-for their number. Over HTTP, `maximumWaitingExchanges` bounds them, a refusal of the transport's own
-(section 15.12), not this code. A bound of the protocol's, refused with `CAPACITY_EXCEEDED` as a
-receiver takes the request (section 9.2), as HTTP/2 bounds the streams a peer opens
-([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2)), comes by a decision of
-its own.
+takes no more: a request past the calls it answers on its connection at once (section 9.2,
+step 3), a notification past its subscription's queue (section 11.10), a transfer past those its
+connection receives at once or past the budget left (section 12.3), a call past those that wait for
+an issuer's deadline (section 13.9). A requester gives it, too, to a call of its own it has no call
+id free for, or that would pass the calls its peer answers at once (section 9.1). It says nothing
+against the call's credential, and withdraws none (section 13.4).
 
 ## 9. Calls and answers
 
@@ -331,8 +327,13 @@ OWASP's Application Security Verification Standard
 calls: a client its requests, a server its commands to a client. A requester draws its call ids in
 its own parity (section 3.5), from the first again once past the last, and skips those it waits on,
 those it reserved (section 10) and those it holds otherwise, a subscription's. A requester with no
-call id free in its parity fails its call before it goes, with `CAPACITY_EXCEEDED`. What this
-section says of a side receiving a request holds for a client receiving a command alike.
+call id free in its parity fails its call before it goes, with `CAPACITY_EXCEEDED`. So does a
+requester whose calls waiting on the connection number `maximumAnsweringCalls` (section 12.2),
+drawing no call id, as an HTTP/2 endpoint never passes the streams its peer lets it open
+([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2)): a call that waits counts
+from the turn it goes until its answer is wholly received, it is cancelled, or its connection
+closes, a subscription once answered not among them. What this section says of a side receiving a
+request holds for a client receiving a command alike.
 
 9.2. A side receiving a request of this layout MUST take these steps in this order, and stop at the
 first that applies:
@@ -340,11 +341,22 @@ first that applies:
 1. A call id of the receiver's own parity: the request would answer another call. It MUST NOT be
    answered, and is reported as `ENVELOPE_MALFORMED`.
 2. A call id open already — a call still to be answered, or one held as a subscription: the same.
-3. A destination, named to a receiver that relays nothing (section 14.1): answered with
+3. A request past the calls the receiver answers on its connection at once,
+   `maximumAnsweringCalls` (section 12.2), is answered with `CAPACITY_EXCEEDED`, before anything
+   else of it is read, as an HTTP/2 endpoint refuses a stream past those it lets its peer open
+   ([RFC 9113 §5.1.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.1.2),
+   [§8.7](https://www.rfc-editor.org/rfc/rfc9113#section-8.7)). A call is answered from the turn
+   its request opens it until its answer is wholly sent — a whole answer handed to its transport,
+   or the last chunk of its result's transfer — its cancel comes (section 10.2) or its connection
+   closes (section 9.10), its credential resolving and its transfer coming among it; a
+   subscription once answered, a call id reserved and a call abandoned (section 12.9) take no
+   place, which sections 11.3, 11.10 and 12.9 bound.
+4. A destination, named to a receiver that relays nothing (section 14.1): answered with
    `DESTINATION_UNKNOWN`.
-4. No resolver for its service: `SERVICE_UNKNOWN`; for its procedure in a service known:
+5. No resolver for its service: `SERVICE_UNKNOWN`; for its procedure in a service known:
    `PROCEDURE_UNKNOWN`.
-5. Its credential, then its admission, in this order, which read its header, never its payload:
+6. Its credential, then its admission, in this order, which read its header, never its payload,
+   each refusal told as section 13.12 says:
    1. a credential scheme the receiver takes none of — one to come, or one it has no verifier for:
       answered with `CREDENTIAL_UNSUPPORTED`, whose detail SHOULD name the schemes it takes, as a
       401 names its own in `WWW-Authenticate`
@@ -374,10 +386,10 @@ first that applies:
       `SESSION_REQUIRED` stays for a credential that does not resolve, at the second step, and for
       a call that presented none, as an invalid token is answered 401 and a token short of its
       scope 403 ([RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)).
-6. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
-7. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
+7. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
+8. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
    `PAYLOAD_TOO_LARGE`. A transfer the receiver takes none of: the same.
-8. Otherwise the request is dispatched to its resolver once its payload is whole, with its call's
+9. Otherwise the request is dispatched to its resolver once its payload is whole, with its call's
    session.
 
 A credential's resolution MAY wait — a `JWT` verified by Web Crypto, a key set asked for a key, a
@@ -390,9 +402,9 @@ it resolved to, whatever befell its connection's meanwhile. A resolution that se
 ended opens no session, moves no session's end, and is dropped.
 
 A receiver that relays takes, on a request that names a destination, section 14.3's steps in their
-order in place of steps 3 to 7, its credential resolving as the paragraph above says, and goes on as
-section 14.2 says in place of step 8. Steps 1 and 2 hold for it as for any request, and it asks
-nothing of steps 3 to 7 first: a requester it does not admit learns of its destinations only what
+order in place of steps 4 to 8, its credential resolving as the paragraph above says, and goes on as
+section 14.2 says in place of step 9. Steps 1 to 3 hold for it as for any request, and it asks
+nothing of steps 4 to 8 first: a requester it does not admit learns of its destinations only what
 section 14.3 says.
 
 9.3. An answer — a result or a failure — names its call by its call id alone: never its procedure,
@@ -553,8 +565,10 @@ one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a resul
 `PROCEDURE_FAILED`, reporting `PAYLOAD_TOO_LARGE`.
 
 12.2. Both ends of a connection set their limits alike: nothing announces them. A receiver holds
-`chunkBytes` to a CHUNK (section 12.6); an opening, and a payload that came whole, it holds to
-`maximumEnvelopeBytes`.
+`chunkBytes` to a CHUNK (section 12.6) and to a request, whole or an opening, as section 12.1 has
+its requester send it; any other envelope it holds to `maximumEnvelopeBytes`. Each is the bound
+section 5.1's second step holds an envelope to, by the kind its prefix names, so a request past
+`chunkBytes` is answered as one too large (section 9.6, item 2), and nothing of it is held.
 
 | Limit                       | By default  | Bounds                                                                                                                 |
 | --------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -567,14 +581,15 @@ one with `PAYLOAD_TOO_LARGE`, before anything goes out, and answers such a resul
 | `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                   |
 | `transferInactivityTimeout` | 30 s        | how long a transfer waits for its next chunk or credit                                                                 |
 | `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                     |
+| `maximumAnsweringCalls`     | 64          | the requests a connection's peer has it answer at once, and the calls a requester has wait on it (sections 9.1, 9.2)   |
 
 They MUST hold together: an envelope of 64 bytes at least; a chunk from 64 bytes to an envelope; a
 window of two chunks at least, so a sender never waits for a credit it is owed; a payload within the
-budget; a timeout section 1.4 allows, never without end, so a transfer's call id comes free. A side
-that takes or presents a `JWT` — given its keys, or one to present by default — sets `chunkBytes`
-and `maximumEnvelopeBytes` to 1,024 bytes at least besides, which a header of 1,020 bytes
-(section 4.3) and the byte of payload an opening carries (section 12.3) need: its limits hold
-together only so.
+budget; a number of calls of 1 at least; a timeout section 1.4 allows, never without end, so a
+transfer's call id comes free. A side that takes or presents a `JWT` — given its keys, or one to
+present by default — sets `chunkBytes` and `maximumEnvelopeBytes` to 1,024 bytes at least besides,
+which a header of 1,020 bytes (section 4.3) and the byte of payload an opening carries (section
+12.3) need: its limits hold together only so.
 
 12.3. The opening is the request or the result itself, with the TRANSFER block: the payload's total
 on 8 bytes, and its first bytes, one at least, as many as fill the envelope to `chunkBytes`, sent
@@ -673,11 +688,13 @@ a server's connection: a request opens one — a procedure that checks credentia
 server keeps it with what it needs: its token, its data, and its timeouts, and announces it
 (section 13.3). A _credential's session_ is what a verifier makes of a credential a request
 presents, `JWT` or `ELSEWHERE`: its identifier, its data and its end, never announced. A call runs
-in the session its credential resolves to (section 9.2, step 5), its _call's session_: a call
+in the session its credential resolves to (section 9.2, step 6), its _call's session_: a call
 presenting none, in its connection's session, in none when the connection has none; one presenting
 `OPAQUE`, in its connection's session, whose token it carries; one presenting `JWT` or `ELSEWHERE`,
 in a credential's, with its own credential's data. Its admission reads that session, and its
-resolver receives it.
+resolver receives it, never a bearer credential it came with — what its transport carried, or a
+`JWT`'s token, of which its header says the scheme alone — which its side verifies (sections 13.8,
+13.11) and a relay forwards to leg B (section 14.2).
 
 13.2. A connection's session's token is 16 bytes, drawn from a cryptographic source, never all
 zero, and held by no other connection.
@@ -705,8 +722,13 @@ credential its call presented, the same scheme and the same bytes: a default giv
 is kept, and one set again to the same bytes is withdrawn with it; and a failure that ends a
 subscription its server had answered (section 13.6) withdraws nothing, even one that comes before
 that answer (section 15.9), since a session the application ended leaves a credential that may still
-hold. A client receiving a command resolves its credential as a server does (section 9.2, step 5),
+hold. A client receiving a command resolves its credential as a server does (section 9.2, step 6),
 the session it learned standing for its connection's.
+
+A call presents none, `NONE`, `OPAQUE`, a `JWT` with its token, or an `ELSEWHERE` with what its
+transport is to carry beside it. Any other — an `ELSEWHERE` that gives nothing to carry, a `JWT`
+with no token, a scheme to come — is the application's fault, refused before the call starts and
+not counted (`debugging.md` 9.3), and no failure: nothing was asked of its transport.
 
 A client fails a call before it goes, and a server a command alike, with `DESTINATION_UNREACHABLE`,
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
@@ -736,12 +758,12 @@ whatever the server listens on — TLS terminated before it, which makes it secu
 serves the network in the clear, which leaves it in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
-requires (section 9.2, step 5): a call never runs outside the session it presented. A procedure
+requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
 that requires a session tests the call's session, never the connection's: it refuses a call in none
 that presented no credential with `SESSION_REQUIRED`, and one that presented a credential it does
 not run in — a `JWT` or an `ELSEWHERE` a relay forwards without verifying (section 14.3) — with
 `ACCESS_DENIED`, since `SESSION_REQUIRED` would have its requester withdraw a credential that may
-hold (section 9.2, step 5). A call that presented a `JWT` is not in its connection's session,
+hold (section 9.2, step 6). A call that presented a `JWT` is not in its connection's session,
 whatever that session holds. `ACCESS_DENIED` says that the call is not allowed as it came: a
 session holds and is not allowed, a credential came that the admission does not take, or the
 admission takes the call only with a credential — a server's relay by default (section 14.3, step
@@ -846,7 +868,7 @@ It asks the key set, holds the keys an answer gives, and has a call wait for the
    when nothing else reads it.
 3. An ask that fails — the key set throws or rejects, answers what is not keys shaped for their
    algorithms, or is unsettled as its deadline is reached, what it settles to at or past that
-   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step 5),
+   deadline being dropped — fails the verifier of every call that waits on it (section 9.2, step 6),
    as a key set that cannot be reached does.
 4. The keys an answer gave are held for its issuer, beside the application's, in place of those its
    last answer gave, ten minutes from that answer on the monotonic reading: they serve while that
@@ -878,7 +900,7 @@ It asks the key set, holds the keys an answer gives, and has a call wait for the
    call is counted as it starts to wait for the deadline, and as an answer moves it there from an
    ask that went before its token came, the calls that answer moves taken in the order they came to
    that ask: one that would wait past _M_ is refused `CAPACITY_EXCEEDED` then, in the turn it would
-   have waited, and not reported (section 9.2, step 5). A call holds its place while it waits for
+   have waited, and not reported (section 9.2, step 6). A call holds its place while it waits for
    the deadline: at the deadline, the calls that waited for it wait on the ask that goes then, and
    hold none there, and a call that leaves frees its own. A peer that sends tokens whose `kid` no
    key names holds no more than _M_ calls, and what they carry, for an issuer's deadline, and any
@@ -926,7 +948,7 @@ connection — ends the subscriptions it bounds (section 13.6). A token under a 
 2,147,483,647 ms, then 444,576,353.
 
 13.11. A side resolves an `ELSEWHERE` by its verifier, the application's: a side given none takes
-no `ELSEWHERE` (section 9.2, step 5). It asks the verifier once per request that presents one and
+no `ELSEWHERE` (section 9.2, step 6). It asks the verifier once per request that presents one and
 whose transport carried a credential, in a later turn, with what that transport carried, whole
 (section 15.1), and the call's signal, aborted once the call ends while it resolves (sections 9.10,
 10.2). The verifier makes of the credential what the application trusts — a session service asked
@@ -940,6 +962,24 @@ end _W_ has reached, _W_ ≥ _E_, does not hold, `SESSION_REQUIRED`. A verifier 
 rejects fails, `PROCEDURE_FAILED`, reported, as does one that settles with a session whose `id` is
 no string, or whose end is not a number from −(2⁵³ − 1) to 2⁵³ − 1 (section 1.2): the application's
 fault, never the credential's.
+
+13.12. A server tells its application each call it refuses as its credential resolves or as it is
+admitted (section 9.2, step 6; section 14.3, step 1) — a scheme it takes none of, a credential that
+does not resolve, and an admission's refusal — as it answers the refusal: its stage, the code
+answered, why, the credential's scheme, what was called, the connection, and the address and port
+of the request as its transport handed them (section 15.1), none where it names none. Why is one
+word: for a `JWT`, the step of section 13.8 that refused it; for an `OPAQUE`, `session`; for an
+`ELSEWHERE`, `nothing-carried`, `verifier` or `end`; for a scheme it takes none of, `scheme`; for an
+admission, the name of the admission this specification gives that refused it (section 14.3),
+`no-before-route` for a relay that has none, and nothing for the application's own. It never tells
+the credential, any part of it, a claim of a token, or an admission's detail, as OWASP's ASVS has
+authentication and authorization failures logged without their secrets
+([ASVS 5.0 §16.3.1, §16.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x25-V16-Security-Logging-and-Error-Handling.md)).
+A verifier or an admission that fails is reported (section 9.0); a call refused as it would wait
+for its issuer's deadline is neither told nor reported; a call that resolves and is admitted is
+its application's to log. A client's router tells none.
+
+_Vectors: `credentialRefusals`._
 
 ## 14. Relays
 
@@ -972,11 +1012,12 @@ A call that presents a credential never runs in leg B's session in place of its 
 transport carried beside a call that presents anything but `ELSEWHERE` stays at the relay.
 
 14.3. A relay takes these steps on a request that names a destination, in this order, on its
-opening, before any of its payload crosses, in place of section 9.2's steps 3 to 7, its credential
+opening, before any of its payload crosses, in place of section 9.2's steps 4 to 8, its credential
 resolving as section 9.2 says:
 
 1. its credential, then its admission, `beforeRoute`, asked on its header, its destination
-   included, before the destination is looked up, in this order:
+   included, before the destination is looked up, in this order, each refusal told as section
+   13.12 says:
    1. a credential scheme the relay neither resolves nor forwards — one to come, or, when it
       verifies, one its side has no verifier for: `CREDENTIAL_UNSUPPORTED`, whose detail names the
       schemes it takes as section 9.2's does — `OPAQUE, JWT, ELSEWHERE` from a relay that takes
@@ -1009,7 +1050,7 @@ resolving as section 9.2 says:
       refusal of a call that presented a credential: the credential may hold, and this relay does
       not take it unverified.
 
-   A requester not admitted learns only whether the relay has any destination (section 9.2, step 3),
+   A requester not admitted learns only whether the relay has any destination (section 9.2, step 4),
    when it presents none or `OPAQUE`, or presents anything to a relay that verifies: a `JWT`, and an
    `ELSEWHERE` its transport carried, pass the default admission of a relay that does not verify on
    their scheme alone, and learn which destinations exist;
@@ -1107,20 +1148,23 @@ each as it came, the field's lines joined by ", "
 address and port (section 15.12); nothing else of the request, so neither its target, nor its
 connection's token, nor a credential. It names no connection: a refusal is a request's, and a
 listener's throw is reported with none. A connection that closes ends what was under way on it
-(sections 9.4, 9.10, 12.10, 13.7). A transport may carry a credential beside an envelope, both ways:
-it hands the router what it carried with an envelope it took, and carries what the router gives it
-with one it sends. That credential is what a request presenting `ELSEWHERE` stands for (section 9.2,
-step 5), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves as its header
-says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a request's
-`POST` (section 15.5), each request's own; over a WebSocket, the `Authorization` field of an upgrade
-that carries no `Origin`, one for every envelope of the connection, toward its server alone (section
-15.2). A transport says whether it carries the credential a call presents beside an envelope it
-sends — a client's over HTTP any field value, over a WebSocket the one its upgrade carried,
-compared in constant time; a Web Worker's none, nor a server's toward its client (sections 15.2,
-15.9) — and whether it is secure — under TLS, on the loopback, or never leaving the machine — so
-that a side fails before it goes a call whose credential it cannot carry (section 13.4). No
-failure's detail, event, trace or log carries that credential, nor a header's: only its credential
-scheme.
+(sections 9.4, 9.10, 12.10, 13.7). A server's transport hands the router each envelope it took with
+the address and port of what brought it — over HTTP its exchange's, read as section 15.12 reads it,
+whichever socket or proxy brought its connect; over a WebSocket its connection's; none over a Web
+Worker — which an access refused names (section 13.12). A transport may carry a credential beside
+an envelope, both ways: it hands the router what it carried with an envelope it took, and carries
+what the router gives it with one it sends. That credential is what a request presenting
+`ELSEWHERE` stands for (section 9.2, step 6), and nothing else: a request that presents none,
+`OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried. Over HTTP, it is
+the `Authorization` field of a request's `POST` (section 15.5), each request's own; over a
+WebSocket, the `Authorization` field of an upgrade that carries no `Origin`, one for every envelope
+of the connection, toward its server alone (section 15.2). A transport says whether it carries the
+credential a call presents beside an envelope it sends — a client's over HTTP any field value, over
+a WebSocket the one its upgrade carried, compared in constant time; a Web Worker's none, nor a
+server's toward its client (sections 15.2, 15.9) — and whether it is secure — under TLS, on the
+loopback, or never leaving the machine — so that a side fails before it goes a call whose credential
+it cannot carry (section 13.4). No failure's detail, event, trace or log carries that credential,
+nor a header's: only its credential scheme.
 
 ### WebSocket
 
@@ -1184,9 +1228,13 @@ judges a request at its WebSocket's address in this order, and answers the first
    `origin-refused`, so that the `Origin` it judges an upgrade by is the field it judges an exchange
    by; no same-origin policy guards an upgrade, and a page of any origin may ask for one
    ([RFC 6455 §10.2](https://www.rfc-editor.org/rfc/rfc6455#section-10.2)).
-8. Once its stop began, a server takes no upgrade: one it would take is refused 503, `busy`, its
-   `Retry-After` 1 ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
-   [§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)).
+8. Past `maximumConnections` or `maximumConnectionsPerAddress` (section 15.12), the client's
+   address read as section 15.12 reads it, or once its stop began, a server takes no upgrade: one
+   it would take is refused 503, `busy`, its `Retry-After` 1
+   ([RFC 9110 §15.6.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.4),
+   [§10.2.3](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.3)). An upgrade takes its place
+   as it is judged, before its handshake completes, and holds it until its connection closes, so
+   upgrades that cross take no more places than are left.
 
 Each of these refusals but HTTP's own is marked as section 15.6 says, and told (section 15.1), with
 `cache-control: no-store` and `x-content-type-options: nosniff`, its body empty, and closes its
@@ -1195,9 +1243,11 @@ connection; a 426 names `upgrade` in its `Connection`.
 15.3. A side MUST take a message of `maximumEnvelopeBytes` at least; past its own message limit,
 `maximumMessageBytes` — `maximumEnvelopeBytes` by default — it closes the connection with 1009. A
 side SHOULD ping its peer every `heartbeat` — 30 seconds by default, or never — and close a
-connection that left a ping unanswered, so a peer gone without a word ends in a close. A side that
-closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
-handshake completes as its stop begins among them. A close with 1000 is the clean one.
+connection that left a ping unanswered, so a peer gone without a word ends in a close; a ping waits
+behind what was sent before it, so a peer that stops reading leaves it unanswered too. What waits
+for a server's socket is held besides as section 15.12 says. A side that closes says 1000; a server
+that stops, 1001, to each connection it holds, one whose opening handshake completes as its stop
+begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1249,11 +1299,17 @@ fails with, its connect's and its upgrade's among them, where its platform lets 
 ([RFC 6455 §4.1](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)); a page's WebSocket reads
 none, the [WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/) failing its connection
 with no detail, and its server's tell (section 15.1) is then what says why. A client follows no
-redirect: a 3xx answered to its connect, to a send or to its upgrade fails it, its status named, as
-a page's `fetch` under redirect mode `error` and a page's WebSocket fail
-([WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/)); a redirect would carry the
-request where its credential and its security were not judged. Any other status that is not 2xx — a
-gateway's 502, a proxy's 404 — may come after the request ran: the client counts the exchange lost.
+redirect, which [RFC 9110 §15.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.4) leaves to it:
+a redirect — 301, 302, 303, 307 or 308, [Fetch](https://fetch.spec.whatwg.org/#redirect-status)'s
+redirect statuses — is judged as any status that is not 2xx, its `bead-refusal` left unread, since
+no refusal of the transport's own is one. Following it would carry the request, the connection's
+token in its header and a send's envelope in its body, where its credential and its security were
+not judged. A page reads no status of a redirect: its `fetch`, under Fetch's redirect mode
+`manual`, gets an opaque redirect, of status 0, or a network error from another origin, whose
+preflight a redirect fails; its WebSocket fails one with no detail
+([WHATWG WebSockets Standard](https://websockets.spec.whatwg.org/)). A status that is not 2xx and
+that nothing marks — a gateway's 502, a proxy's 404 — or a redirect, its mark unread, may come after
+the request ran: the client counts the exchange lost.
 
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                         |
 | ------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1264,12 +1320,13 @@ gateway's 502, a proxy's 404 — may come after the request ran: the client coun
 | 403    | `host-refused`, `origin-refused`      | a host not among those the server takes, whatever the request at a WebSocket's address; an exchange, or a WebSocket's upgrade, from an origin neither the server's nor among those it takes                                                                                  |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone — closed, or its server stopping                                                                                                                                                                                                        |
 | 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                             |
+| 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed (section 15.12)                                                                                                                                                                       |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                              |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                             |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                       |
 | 426    | `upgrade-required`, `version-refused` | at a WebSocket's address, a request that asks no WebSocket, `Upgrade: websocket`; an upgrade of a version but 13, or of none, `Sec-WebSocket-Version: 13` beside it                                                                                                          |
 | 429    | `busy`                                | too many requests waiting on one connection, or exchanges under way                                                                                                                                                                                                          |
-| 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                   |
+| 503    | `busy`                                | too many connections — all, or one address's —, over HTTP or at a WebSocket's address; bytes of body being read; or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                           |
 
 Every response on the path carries `cache-control: no-store`, `x-content-type-options: nosniff`
 and `vary: Origin`, since which one a request gets turns on its `Origin`
@@ -1289,16 +1346,18 @@ looked up; a token it does not hold, the same 404. A `DELETE` then ends its conn
 refused 409 when its client did not say it listens, then 400 for a body or its counts (section
 15.9). A `POST` is refused 415 for its type or its encoding, then 400 for two `Authorization`
 fields, 413 for a length it declares past `maximumBodyBytes`, and 429 past what its connection has
-under way, each before its body is read; what its body brings is judged as it comes (section 15.5).
+under way, each before its body is read; what its body brings is judged as it comes (section 15.5):
+past `maximumBodyBytes` 413, past the budget 503, slower than its rate 408 (section 15.12).
 
 15.7. A client's send settles on the head of its answer: a 2xx says the server had the envelope. An
 exchange lost — a network that failed, an answer that could not be written, a request unanswered
 past the exchange timeout, 5 minutes by default — closes the connection at both ends, as a socket
 that drops does; the exchanges it handed on are cut, never answered. So does the 404 marked
-`connection-unknown`. A request handed on is never refused: when its connection closes, its exchange
-gets its 200 head and is cut, and a cut that overtakes the head on its way leaves the exchange
-lost, which its client counts so. A connection with no exchange under way for its inactivity
-timeout, 5 minutes by default, closes.
+`connection-unknown`. An answer whose socket still holds it past its deadline (section 15.12) is an
+answer that could not be written. A request handed on is never refused: when its connection closes,
+its exchange gets its 200 head and is cut, and a cut that overtakes the head on its way leaves the
+exchange lost, which its client counts so. A connection with no exchange under way for its
+inactivity timeout, 5 minutes by default, closes.
 
 A server that stops closes every connection it holds, as lost: what was under way on each learns it
 is gone as this section says. Once its stop began it draws no connection and holds none: a connect
@@ -1344,12 +1403,12 @@ with the call still waiting, which fails with it (section 9.7), and reports the 
 as `CALL_UNKNOWN`. It withdraws no default (section 13.4): a request's own answer comes in its
 `POST`'s body alone (section 15.5), so a failure a batch brings for a call still waiting ends a
 subscription its server had answered. An outbox past its bound — two envelopes' worth by default —
-closes its connection, its client having fallen behind. An envelope that would take its outbox past
-that bound is one its transport had all the same, as a notification handed to it counts as sent
-(`debugging.md` section 10.1): it is lost with the connection, and a relay whose request is so lost
-answers leg A `DESTINATION_LOST` (section 14.5). A batch carries no credential beside its envelopes,
-nor does an answer: a command of the server's that presents `ELSEWHERE` over HTTP fails before it
-goes, `DESTINATION_UNREACHABLE`.
+closes its connection, reported, its client having fallen behind. An envelope that would take its
+outbox past that bound is one its transport had all the same, as a notification handed to it counts
+as sent (`debugging.md` section 10.1): it is lost with the connection, and a relay whose request is
+so lost answers leg A `DESTINATION_LOST` (section 14.5). A batch carries no credential beside its
+envelopes, nor does an answer: a command of the server's that presents `ELSEWHERE` over HTTP fails
+before it goes, `DESTINATION_UNREACHABLE`.
 
 15.10. A client SHOULD listen from its connect on, asking a `wait` under the server's bound, and
 listen again at once once a listen ends. A listen lost is listened again from where it was: at once,
@@ -1367,23 +1426,57 @@ envelope holds.
 times its own inactivity by `inactivityTimeout`, its default and whether it may be without end
 alike (section 15.10):
 
-| Bound                          | By default                   | Bounds                                                                            |
-| ------------------------------ | ---------------------------- | --------------------------------------------------------------------------------- |
-| `maximumConnections`           | 10,000                       | the connections a server holds, all of them                                       |
-| `maximumConnectionsPerAddress` | 64                           | the connections one address holds                                                 |
-| `maximumWaitingExchanges`      | 64                           | the requests waiting on one connection; the exchanges under way on it, twice that |
-| `bodyBytesBudget`              | 268,435,456                  | the bytes of body a server reads at once, across its exchanges                    |
-| `maximumBodyBytes`             | `maximumEnvelopeBytes`       | a body                                                                            |
-| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes` | what one connection's outbox holds                                                |
-| `maximumWait`                  | 30 s                         | the longest a server holds a listen                                               |
-| `exchangeTimeout`              | 5 min                        | how long an exchange handed on waits for its answer, at both ends                 |
-| `inactivityTimeout`            | 5 min                        | how long a connection with no exchange under way stays                            |
-| `connectionInactivityTimeout`  | 30 s                         | the server's own connection timeout (section 13.7)                                |
+| Bound                          | By default                                                                                                     | Bounds                                                                               | Transports      |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------- |
+| `maximumConnections`           | 10,000                                                                                                         | the connections a server holds, all of them                                          | HTTP, WebSocket |
+| `maximumConnectionsPerAddress` | 64                                                                                                             | the connections one address holds                                                    | HTTP, WebSocket |
+| `maximumWaitingExchanges`      | `maximumAnsweringCalls`                                                                                        | the requests waiting on one connection; the exchanges under way on it, twice that    | HTTP            |
+| `bodyBytesBudget`              | 268,435,456                                                                                                    | the bytes of body a server reads at once, across its exchanges                       | HTTP            |
+| `maximumBodyBytes`             | `maximumEnvelopeBytes`                                                                                         | a body                                                                               | HTTP            |
+| `maximumOutboxBytes`           | twice `maximumEnvelopeBytes`                                                                                   | what one connection's outbox holds                                                   | HTTP            |
+| `maximumWait`                  | 30 s                                                                                                           | the longest a server holds a listen                                                  | HTTP            |
+| `exchangeTimeout`              | 5 min                                                                                                          | how long an exchange handed on waits for its answer, at both ends                    | HTTP            |
+| `inactivityTimeout`            | 5 min                                                                                                          | how long a connection with no exchange under way stays                               | HTTP            |
+| `connectionInactivityTimeout`  | 30 s                                                                                                           | the server's own connection timeout (section 13.7)                                   | HTTP            |
+| `minimumSendBytesPerSecond`    | 240                                                                                                            | the slowest a socket may take what waits for it, once its grace passed; 0 holds none | HTTP, WebSocket |
+| `sendGracePeriod`              | 5 s                                                                                                            | the least time an envelope is given to be taken                                      | HTTP, WebSocket |
+| `maximumUnsentBytes`           | 2 × `maximumAnsweringCalls` × `chunkBytes` + `maximumTransfers` × `windowBytes` + twice `maximumEnvelopeBytes` | what waits for a WebSocket's socket                                                  | WebSocket       |
+| `headersTimeout`               | 30 s                                                                                                           | how long a request's head may take to come whole                                     | HTTP, WebSocket |
+| `minimumBodyBytesPerSecond`    | 240                                                                                                            | the slowest a body may come, once its grace passed                                   | HTTP            |
+| `bodyGracePeriod`              | 5 s                                                                                                            | how long a body comes before its rate is held                                        | HTTP            |
 
 `exchangeTimeout`, `inactivityTimeout` and `connectionInactivityTimeout` may be without end;
-`maximumWait` is never without end.
+`maximumWait`, `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod` are never without end.
 
 Past the first four it answers 429 or 503, as section 15.6's table says.
+
+A server holds what waits to go out on each connection — what it handed its socket that the socket
+has not yet taken: at a WebSocket's address, every envelope; over HTTP, an exchange's answer — to a
+pace, and at a WebSocket's address to a bound besides. Each envelope handed moves the connection's
+deadline to the later of now plus the longer of `sendGracePeriod` and the time its bytes take at
+`minimumSendBytesPerSecond`, and the deadline before plus that time; a connection whose socket
+still holds something past its deadline is dropped, as Kestrel holds a response to its
+`MinResponseDataRate`; over HTTP, its exchange is lost (section 15.7). An envelope that would take
+what waits for a WebSocket's socket past `maximumUnsentBytes` drops it too. The server reports each
+drop, naming the bound. A dropped WebSocket connection closes with no closing handshake, its close
+unclean, since a peer that does not read would read no close frame waiting behind what it does not
+read ([RFC 6455 §7.1.7](https://www.rfc-editor.org/rfc/rfc6455#section-7.1.7)). The envelope is one
+its transport had, as an HTTP outbox's is (section 15.9): it is lost with the connection. These run
+on the platform's clock, as the heartbeat does.
+
+A request whose head does not come whole within `headersTimeout` is answered 408, as HTTP answers
+it, unmarked, its connection closed
+([RFC 9110 §15.5.9](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.9)): its HTTP server writes
+it before the transport reads anything of the request, so no refusal is told; it comes past its
+time, and within 2 seconds of it, on the platform's clock. A body is held, on the server's clock, to
+come at `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed since its head: one that has
+brought _R_ bytes and none more by its head's reading plus max(`bodyGracePeriod`, ⌈_R_ × 1,000 /
+`minimumBodyBytesPerSecond`⌉) milliseconds is refused 408, `too-slow`. An answer written before its
+request's body is whole carries `connection: close`, and its server closes the connection in stages,
+its write side first, reading on and dropping what still comes until its client closes or 2 seconds
+pass, so its client reads the answer before the close
+([RFC 9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112#section-9.6)). Nothing of such an exchange
+is handed on, and the close of its socket closes no Bead connection.
 
 A request names its authority by its target when the target is in absolute-form, the `Host`
 beside it ignored ([RFC 9112 §3.2.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.2)); over
@@ -1514,16 +1607,18 @@ bare, or as [RFC 7239 §6](https://www.rfc-editor.org/rfc/rfc7239#section-6) wri
 — an IPv4 address followed by `:` and a port, an IPv6 address in brackets, followed or not by `:`
 and a port — its port dropped. Any other entry, a zone, a name or `unknown` among them, or the
 field's end, ends the walk. Every address so read is held in one form, for its bound per address,
-an HTTP server's, its handle and its refusals: an IPv4-mapped address as that IPv4 address, an IPv6
-address in the text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#section-4) recommends,
-hexadecimal throughout. Its port is the socket's, the nearest proxy's connection's behind one. A
-server reads no `Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy
-that writes `X-Forwarded-For` would pass on as its client wrote it
+its handle and its refusals: an IPv4-mapped address as that IPv4 address, an IPv6 address in the
+text [RFC 5952 §4](https://www.rfc-editor.org/rfc/rfc5952#section-4) recommends, hexadecimal
+throughout. Its port is the socket's, the nearest proxy's connection's behind one. A server reads no
+`Forwarded` ([RFC 7239](https://www.rfc-editor.org/rfc/rfc7239)), which a proxy that writes
+`X-Forwarded-For` would pass on as its client wrote it
 ([§8.1](https://www.rfc-editor.org/rfc/rfc7239#section-8.1)). A proxy it neither names nor counts
 is a client as any other: its clients are its address, which its bound per address counts and its
 refusals tell. A bound by address counts as one the users behind one NAT, and as many the addresses
-of one IPv6 network. A WebSocket server bounds no address: the client's address is what its handle
-and its refusals name.
+of one IPv6 network. A WebSocket server bounds its connections, in all and by address, by the same
+two bounds, judged at its upgrade (section 15.2, step 8); an HTTP server's and a WebSocket server's
+are counted apart, each by its own server. Behind a proxy it neither names nor counts, every client
+is the proxy's address, as over HTTP.
 
 A server listens on `localhost`, both loopbacks — the IPv4 one, `127.0.0.1`
 ([RFC 6890 §2.2.2](https://www.rfc-editor.org/rfc/rfc6890#section-2.2.2)), and the IPv6 one, `::1`

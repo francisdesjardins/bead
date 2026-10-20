@@ -20,19 +20,19 @@
       "bead.interop": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.5.0, )"
+          "Bead.Core": "[0.6.0, )"
         }
       },
       "bead.transport.http": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.5.0, )"
+          "Bead.Core": "[0.6.0, )"
         }
       },
       "bead.transport.websockets": {
         "type": "Project",
         "dependencies": {
-          "Bead.Core": "[0.5.0, )"
+          "Bead.Core": "[0.6.0, )"
         }
       }
     }

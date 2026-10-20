@@ -239,10 +239,41 @@ public sealed class AnsweringCallsTests
         calls.Attach(call, ReceivingOf(answering, (1, "a", 4)));
         calls.Close(call, answering);
         Assert.Equal(["a", "b"], calls.Gauges().ConnectionHandles.Order());
-        Assert.Equal(new Dictionary<string, long> { ["abandonedCalls"] = 1, ["answeringCalls"] = 1 }, calls.Gauges().Counts);
+        Assert.Equal(new Dictionary<string, long> { ["abandonedCalls"] = 1, ["answeringCalls"] = 1, ["largestAnsweringCalls"] = 1 }, calls.Gauges().Counts);
         calls.TakeAll(null);
         Assert.Empty(calls.Gauges().ConnectionHandles);
-        Assert.Equal(new Dictionary<string, long> { ["abandonedCalls"] = 0, ["answeringCalls"] = 0 }, calls.Gauges().Counts);
+        Assert.Equal(new Dictionary<string, long> { ["abandonedCalls"] = 0, ["answeringCalls"] = 0, ["largestAnsweringCalls"] = 0 }, calls.Gauges().Counts);
+    }
+
+    [Fact]
+    public void Gauges_largestAnsweringCalls_under_its_ceiling_maximumAnsweringCalls_which_health_warns_at()
+    {
+        var calls = CallsOf(OptionsOf(new FakeTimeProvider()) with { Limits = RouterLimits.Default with { MaximumAnsweringCalls = 5 } });
+        var none = new LayerGauges([], new Dictionary<string, long>(), new Dictionary<string, long>(), 0);
+
+        HealthCheck CheckOf()
+        {
+            var router = LayerGauges.Of(calls.Gauges(), new HashSet<string> { "a", "b" });
+
+            return Assert.Single(Health.Of(new ServerGauges(router, none, none, none)).Checks["router:largestAnsweringCalls"]);
+        }
+
+        foreach (var callId in new uint[] { 1, 3, 5 })
+        {
+            calls.Open(new AnswerTarget("a", HeaderOf(callId)));
+        }
+
+        calls.Open(new AnswerTarget("b", HeaderOf(1)));
+
+        // the busiest connection's, never the sum of them, under the bound of one connection
+        Assert.Equal(5, calls.Gauges().Ceilings["largestAnsweringCalls"]);
+        Assert.Equal((4L, 3L), (calls.Gauges().Counts["answeringCalls"], calls.Gauges().Counts["largestAnsweringCalls"]));
+        Assert.Equal(3, calls.CountOn("a"));
+        Assert.Equal(new HealthCheck(3, HealthStatus.Pass, "3 of 5"), CheckOf());
+        calls.Open(new AnswerTarget("a", HeaderOf(7)));
+        Assert.Equal(new HealthCheck(4, HealthStatus.Warn, "4 of 5"), CheckOf());
+        calls.TakeAll("a");
+        Assert.Equal(1, calls.Gauges().Counts["largestAnsweringCalls"]);
     }
 
     [Fact]

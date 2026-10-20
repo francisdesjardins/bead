@@ -51,7 +51,7 @@ holds; `@bufbuild/protoplugin`, which the target is written on, takes the versio
 depends on. Where a caret would resolve higher here, `yarn set resolution` locks it, as for oxlint:
 
 ```sh
-yarn set resolution oxlint@npm:^1.86.0 npm:1.86.0
+yarn set resolution oxlint@npm:^1.88.0 npm:1.88.0
 yarn install --immutable
 ```
 
@@ -170,7 +170,7 @@ docker build -f builder/Dockerfile -t beadc:local .  # the image
 BEADC_IMAGE=beadc:local yarn test                    # from builder/: each wrapper runs it besides
 ```
 
-It holds Node from `node:26.10.0-trixie-slim`, pinned by its digest; beadc as this folder holds it,
+It holds Node from `node:26.12.0-trixie-slim`, pinned by its digest; beadc as this folder holds it,
 with its production packages, run by Node as written; buf, protoc-gen-es, protoc at its pin with its
 well-known types, `bead/options.proto`, the files of `spec/` beadc reads at their places beside it;
 and under `/opt/bead/licenses/` the licence texts of what it adds to its base, which

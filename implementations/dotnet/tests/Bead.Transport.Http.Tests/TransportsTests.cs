@@ -122,6 +122,12 @@ public sealed class TransportsTests
         return TimeSpan.FromMilliseconds(milliseconds.GetInt64());
     }
 
+    // a time in whole milliseconds, as a failure tells it
+    private static string MillisecondsOf(TimeSpan time)
+    {
+        return Math.Round(time.TotalMilliseconds, MidpointRounding.AwayFromZero).ToString(CultureInfo.InvariantCulture);
+    }
+
     private static string[] TextsOf(JsonElement texts)
     {
         return [.. texts.EnumerateArray().Select((text) =>
@@ -159,6 +165,11 @@ public sealed class TransportsTests
                 "origins" => options with { Origins = TextsOf(value) },
                 "trustedProxies" => options with { TrustedProxies = TextsOf(value) },
                 "unnamedProxies" => options with { UnnamedProxies = value.GetInt32() },
+                "minimumSendBytesPerSecond" => options with { MinimumSendBytesPerSecond = value.GetInt32() },
+                "sendGracePeriod" => options with { SendGracePeriod = TimeOf(value) },
+                "headersTimeout" => options with { HeadersTimeout = TimeOf(value) },
+                "minimumBodyBytesPerSecond" => options with { MinimumBodyBytesPerSecond = value.GetInt32() },
+                "bodyGracePeriod" => options with { BodyGracePeriod = TimeOf(value) },
 
                 // the server layer's, which ConnectionInactivityTimeoutOf reads
                 "connectionInactivityTimeout" => options,
@@ -200,6 +211,12 @@ public sealed class TransportsTests
                 "origins" => options with { Origins = TextsOf(option.Value) },
                 "trustedProxies" => options with { TrustedProxies = TextsOf(option.Value) },
                 "unnamedProxies" => options with { UnnamedProxies = option.Value.GetInt32() },
+                "maximumConnections" => options with { MaximumConnections = option.Value.GetInt32() },
+                "maximumConnectionsPerAddress" => options with { MaximumConnectionsPerAddress = option.Value.GetInt32() },
+                "minimumSendBytesPerSecond" => options with { MinimumSendBytesPerSecond = option.Value.GetInt32() },
+                "sendGracePeriod" => options with { SendGracePeriod = TimeOf(option.Value) },
+                "maximumUnsentBytes" => options with { MaximumUnsentBytes = option.Value.GetInt64() },
+                "headersTimeout" => options with { HeadersTimeout = TimeOf(option.Value) },
                 _ => throw new ArgumentException($"a case sets an option no test reads: {option.Name}", nameof(entry)),
             };
         }
@@ -231,6 +248,7 @@ public sealed class TransportsTests
                 "bufferedBytesBudget" => limits with { BufferedBytesBudget = value },
                 "maximumChunkRuns" => limits with { MaximumChunkRuns = value },
                 "maximumDetailBytes" => limits with { MaximumDetailBytes = value },
+                "maximumAnsweringCalls" => limits with { MaximumAnsweringCalls = value },
                 "transferInactivityTimeout" => limits with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(value) },
                 _ => throw new ArgumentException($"a case sets a limit no test reads: {limit.Name}", nameof(entry)),
             };
@@ -451,11 +469,27 @@ public sealed class TransportsTests
             // the HTTP server's own, which its server layer holds
             "connectionInactivityTimeout" => (long)HttpServerOptions.ConnectionInactivityTimeoutDefault.TotalMilliseconds,
 
+            // the bounds both servers hold alike, each the same on the WebSocket server's
+            "minimumSendBytesPerSecond" => Alike((http.MinimumSendBytesPerSecond, webSocket.MinimumSendBytesPerSecond)),
+            "sendGracePeriod" => Alike(((long)http.SendGracePeriod.TotalMilliseconds, (long)webSocket.SendGracePeriod.TotalMilliseconds)),
+            "headersTimeout" => Alike(((long)http.HeadersTimeout.TotalMilliseconds, (long)webSocket.HeadersTimeout.TotalMilliseconds)),
+            "minimumBodyBytesPerSecond" => http.MinimumBodyBytesPerSecond,
+            "bodyGracePeriod" => (long)http.BodyGracePeriod.TotalMilliseconds,
+
+            // what the WebSocket server holds for a socket when built alone, told none
+            "maximumUnsentBytes" => new WebSocketTransportServer(webSocket).MaximumUnsentBytes,
+
             // the bound the WebSocket server layer takes when built alone and told none
             "maximumMessageBytes" => new WebSocketTransportServer(webSocket).MaximumMessageBytes,
             "heartbeat" => (long)webSocket.Heartbeat.TotalMilliseconds,
             _ => throw new ArgumentException($"the file states a default no test reads: {bound}", nameof(bound)),
         };
+    }
+
+    // a default both servers hold alike; any other is a number no file states
+    private static long Alike((long Http, long WebSocket) defaults)
+    {
+        return defaults.Http == defaults.WebSocket ? defaults.Http : -1;
     }
 
     // an envelope sent, as a case writes what it expects; one that is none, as its bytes
@@ -799,7 +833,7 @@ public sealed class TransportsTests
         {
             var kind = step.EnumerateObject().First((property) =>
             {
-                return property.Name is not "on" and not "within";
+                return property.Name is not "on" and not "within" and not "after";
             }).Name;
 
             return step.TryGetProperty("on", out var on) ? $"{kind} on {on.GetString()}" : kind;
@@ -813,13 +847,13 @@ public sealed class TransportsTests
         public async Task Take(JsonElement step)
         {
             var on = step.TryGetProperty("on", out var named) ? named.GetString()! : "";
-            var wait = step.TryGetProperty("within", out var within) ? TimeOf(within) : Patience;
+            var timing = new Timing(step);
 
-            // a step is one act, on the exchange and within the time it may name: one that holds a
+            // a step is one act, on the exchange and within the times it may name: one that holds a
             // second act fails, never passes with it left unplayed
             var acts = step.EnumerateObject().Count((property) =>
             {
-                return property.Name is not "on" and not "within";
+                return property.Name is not "on" and not "within" and not "after";
             });
 
             if (acts != 1)
@@ -834,7 +868,7 @@ public sealed class TransportsTests
             }
             else if (step.TryGetProperty("expect", out var expected))
             {
-                await (expected.TryGetProperty("status", out _) ? Expect((expected, on, wait)) : Hear((expected, on, wait)));
+                await (expected.TryGetProperty("status", out _) ? Expect((expected, on, timing)) : Hear((expected, on, timing)));
             }
             else if (step.TryGetProperty("close", out _))
             {
@@ -957,19 +991,73 @@ public sealed class TransportsTests
             }
         }
 
-        // the response on an exchange: its head within its wait, then, when the case expects
-        // anything of it, its body, or that its socket was cut first; each written alike as expected
-        // and as it came
-        private async Task Expect((JsonElement Response, string On, TimeSpan Wait) step)
+        // what a task gives within its step's wait, once it came no sooner than the step's after;
+        // past a within missed, it waits up to a patience more, so the failure tells when it came,
+        // or that it never did
+        private static async Task<T> CameOf<T>(Task<T> task, (Timing Timing, string What) awaited)
         {
-            var (response, on, wait) = step;
+            var (timing, what) = awaited;
+
+            if (!await IsDoneWithin((task, timing.Wait)))
+            {
+                var late = timing.Within is null ? "" : await LateOf((task, timing));
+
+                throw new XunitException($"{what} did not come within {MillisecondsOf(timing.Wait)} ms{late}");
+            }
+
+            var cameAt = timing.Elapsed;
+
+            if (timing.After is { } after && cameAt < after)
+            {
+                throw new XunitException($"{what} came at {MillisecondsOf(cameAt)} ms, before its {MillisecondsOf(after)} ms");
+            }
+
+            return await task;
+        }
+
+        // whether a task is done within a wait; it throws as the task does
+        private static async Task<bool> IsDoneWithin((Task Task, TimeSpan Wait) awaited)
+        {
+            try
+            {
+                await awaited.Task.WaitAsync(awaited.Wait, Cancelled);
+
+                return true;
+            }
+            catch (TimeoutException)
+            {
+                return false;
+            }
+        }
+
+        // what befell a task in the patience past a wait it missed, as a failure tells it
+        private static async Task<string> LateOf((Task Task, Timing Timing) awaited)
+        {
+            try
+            {
+                return await IsDoneWithin((awaited.Task, Patience))
+                    ? $": it came at {MillisecondsOf(awaited.Timing.Elapsed)} ms"
+                    : $", nor in the {MillisecondsOf(Patience)} ms past it";
+            }
+            catch (Exception reason) when (reason is not OperationCanceledException)
+            {
+                return $", and failed at {MillisecondsOf(awaited.Timing.Elapsed)} ms: {reason.Message}";
+            }
+        }
+
+        // the response on an exchange: its head timed as its step says, then, when the case expects
+        // anything of it, its body within what is left of the step's wait, or that its socket was
+        // cut first; each written alike as expected and as it came
+        private async Task Expect((JsonElement Response, string On, Timing Timing) step)
+        {
+            var (response, on, timing) = step;
             var exchange = _exchanges[on];
             var expected = new List<string> { $"status {response.GetProperty("status").GetInt32()}" };
             Head head;
 
             try
             {
-                head = await exchange.Head.WaitAsync(wait, Cancelled);
+                head = await CameOf(exchange.Head, (timing, "the response's head"));
             }
             catch (IOException reason)
             {
@@ -1003,12 +1091,12 @@ public sealed class TransportsTests
             if (response.TryGetProperty("body", out var body))
             {
                 expected.Add(BodyOf(BytesOf(body.GetString()!)));
-                came.Add(await exchange.BodyWithin(wait) is { } bytes ? BodyOf(bytes) : "body: cut");
+                came.Add(await exchange.BodyWithin(timing.Left) is { } bytes ? BodyOf(bytes) : "body: cut");
             }
 
             if (response.TryGetProperty("envelope", out var envelope))
             {
-                var bytes = await exchange.BodyWithin(wait);
+                var bytes = await exchange.BodyWithin(timing.Left);
 
                 expected.Add(ExpectedOf(envelope));
                 came.Add(bytes is not null ? OutOf(bytes) : "body: cut");
@@ -1023,7 +1111,7 @@ public sealed class TransportsTests
             if (response.TryGetProperty("batch", out var batch))
             {
                 expected.AddRange(batch.EnumerateArray().Select(ExpectedOf));
-                came.AddRange(await exchange.BodyWithin(wait) is { } bytes ? BatchOf(bytes) : ["body: cut"]);
+                came.AddRange(await exchange.BodyWithin(timing.Left) is { } bytes ? BatchOf(bytes) : ["body: cut"]);
             }
 
             var (wanted, got) = (string.Join("; ", expected), string.Join("; ", came));
@@ -1088,10 +1176,10 @@ public sealed class TransportsTests
             return filled;
         }
 
-        // what the server sends next on an exchange that is a WebSocket, within its wait
-        private async Task Hear((JsonElement Heard, string On, TimeSpan Wait) step)
+        // what the server sends next on an exchange that is a WebSocket, timed as its step says
+        private async Task Hear((JsonElement Heard, string On, Timing Timing) step)
         {
-            var (heard, on, wait) = step;
+            var (heard, on, timing) = step;
             var expected = heard.EnumerateObject().Single();
             var wanted = expected.Name switch
             {
@@ -1100,9 +1188,35 @@ public sealed class TransportsTests
                 "close" => $"close {expected.Value.GetInt32()}",
                 _ => expected.Name,
             };
-            var came = await _exchanges[on].NextWithin(wait);
+            var exchange = _exchanges[on];
+            var came = await exchange.NextWithin(timing.Wait);
+            var cameAt = timing.Elapsed;
+            string seen;
 
-            Assert.Equal(wanted, came is null ? $"nothing within {wait.TotalMilliseconds} ms" : HeardOf((came, expected.Name)));
+            if (came is null && timing.Within is null)
+            {
+                seen = $"nothing within {MillisecondsOf(timing.Wait)} ms";
+            }
+            else if (came is null)
+            {
+                // past a within missed, up to a patience more: when what it hears came, or that
+                // nothing did
+                var late = await exchange.NextWithin(Patience);
+
+                seen = late is null
+                    ? $"nothing within {MillisecondsOf(timing.Wait)} ms, nor in the {MillisecondsOf(Patience)} ms past it"
+                    : $"nothing within {MillisecondsOf(timing.Wait)} ms: {HeardOf((late, expected.Name))} came at {MillisecondsOf(timing.Elapsed)} ms";
+            }
+            else if (timing.After is { } after && cameAt < after)
+            {
+                seen = $"{HeardOf((came, expected.Name))} came at {MillisecondsOf(cameAt)} ms, before its {MillisecondsOf(after)} ms";
+            }
+            else
+            {
+                seen = HeardOf((came, expected.Name));
+            }
+
+            Assert.Equal(wanted, seen);
 
             if (expected.Name == "envelope" && ExpectedDetailOf(expected.Value) is { } detail)
             {
@@ -1180,6 +1294,54 @@ public sealed class TransportsTests
 
     /// <summary>What the server sent on a WebSocket: a message whole, a close, a ping or a pong, by its opcode; or its socket's end.</summary>
     private sealed record Heard(int Kind, byte[] Bytes);
+
+    /// <summary>
+    /// How an expect is timed, from its step's start, on the real clock: its <c>within</c>, its wait,
+    /// a patience where it names none, and its <c>after</c>, the soonest what it reads may come.
+    /// </summary>
+    private sealed class Timing
+    {
+        private readonly Stopwatch _started = Stopwatch.StartNew();
+
+        public Timing(JsonElement step)
+        {
+            Within = step.TryGetProperty("within", out var within) ? TimeOf(within) : null;
+            After = step.TryGetProperty("after", out var after) ? TimeOf(after) : null;
+        }
+
+        public TimeSpan? Within { get; }
+
+        public TimeSpan? After { get; }
+
+        // how long it waits in all
+        public TimeSpan Wait
+        {
+            get
+            {
+                return Within ?? Patience;
+            }
+        }
+
+        // how long since its step started
+        public TimeSpan Elapsed
+        {
+            get
+            {
+                return _started.Elapsed;
+            }
+        }
+
+        // what is left of its wait
+        public TimeSpan Left
+        {
+            get
+            {
+                var left = Wait - Elapsed;
+
+                return left > TimeSpan.Zero ? left : TimeSpan.Zero;
+            }
+        }
+    }
 
     // an exchange: the socket of its own a request went on, and its response, read as it comes —
     // its head at once, its body after it; answered 101, a WebSocket, whose frames the peer writes
@@ -1333,6 +1495,12 @@ public sealed class TransportsTests
             {
                 if ((await Head).Status != 101)
                 {
+                    // * past its response, the socket's end alone: what its server ends of it, which
+                    // an answer written before its body is whole has it do in stages (spec 15.12)
+                    await Body;
+                    await reader.UntilEnd();
+                    _heard.Writer.TryWrite(new Heard(Ended, []));
+
                     return;
                 }
 
@@ -1387,6 +1555,17 @@ public sealed class TransportsTests
     // its fields, and its body by its length, de-chunked, or to the end of what comes
     private sealed class Reader(Func<Memory<byte>, ValueTask<int>> read)
     {
+        // what comes past a response, dropped, until its socket ends
+        public async Task UntilEnd()
+        {
+            var dropped = new byte[ReadBytes];
+
+            while (await read(dropped) > 0)
+            {
+                // dropped
+            }
+        }
+
         // what came and is not read yet
         private readonly List<byte> _came = [];
 

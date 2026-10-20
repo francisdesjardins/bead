@@ -1,0 +1,11 @@
+{
+  "name": "bead-fuzz",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Jazzer.js, which fuzzes the TypeScript side's parsers by coverage, by hand: installed apart, so neither the package's install nor CI fetches it.",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@jazzer.js/core": "4.0.0"
+  },
+  "packageManager": "yarn@4.18.1"
+}

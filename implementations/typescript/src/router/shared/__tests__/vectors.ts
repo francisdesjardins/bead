@@ -69,7 +69,30 @@ export interface IJwtVerdictVector {
   verdict: JwtVerdict;
 }
 
+/**
+ * A credential a server refuses as it resolves, but a `JWT`'s verdicts: the scheme it presents, by
+ * its name or a number to come, the situation a test sets up, the code it is answered, and the one
+ * word the access refused is told with (spec 13.12).
+ */
+export interface ICredentialRefusalVector {
+  clauses: string[];
+  code: number;
+  name: string;
+  reason: string;
+  scheme: 'ELSEWHERE' | 'JWT' | 'OPAQUE' | number;
+  situation:
+    | 'another-connections-session'
+    | 'end-come'
+    | 'no-keys'
+    | 'no-session'
+    | 'no-verifier'
+    | 'nothing-carried'
+    | 'scheme-to-come'
+    | 'verifier-makes-none';
+}
+
 export interface IVectors {
+  credentialRefusals: ICredentialRefusalVector[];
   envelopeRefusals: IRefusalVector[];
   envelopes: (INamed & { envelope: IEnvelopeVector })[];
   failureRefusals: { code: ProtocolCode; name: string; record: string }[];

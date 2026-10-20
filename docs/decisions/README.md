@@ -67,7 +67,8 @@ not hold:
   [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
 - **the DevTools extension on Firefox**, its own glue beside the core every browser shares
   ([0015](0015-a-pages-client-announces-itself-to-a-devtools-hook.md));
-- **a latency bench**, which measures a counted call against one not counted on each side
+- **a counted call's cost, measured**: a call counted against one not counted, on each side, a
+  measure beside those the benches take
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md));
 - **a constrained C side**, which builds debugging by its switches
   ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)), refuses a declaration out of
@@ -77,27 +78,27 @@ not hold:
 
 Ahead besides, each by a decision of its own that meets the Tenth Man:
 
-- **the bounds a server keeps against a peer that holds it**: a bound of the protocol's on the
-  calls a peer holds open over a transport that keeps its connection, a WebSocket or a Web Worker,
-  the open point of spec 8.3; a WebSocket server's connections, in all and per address, which an
-  HTTP server bounds (spec 15.12); what a WebSocket server queues for a client that no longer reads,
-  which an HTTP connection's outbox bounds (spec 15.9); and a request whose headers or body trickle
-  in, the support matrix's open row on a slow request body;
-- **a security event for a credential refused**, its scheme and its verdict's reason, never its
-  bytes, beside the refusals a server tells
-  ([0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)), as
-  nothing a side reports carries a credential
-  ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
-- **each side's parsers fuzzed**, guided by coverage — the envelope, a `json` payload, RFC 9651's
-  Items, `X-Forwarded-For`, a WebSocket's handshake — and both sides held to read one corpus alike,
-  as `tools/protobuf-conformance.mjs differential` holds a `proto` payload
-  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+- what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
+  keeps against a peer that holds it: a bound on the payload bytes of the calls a connection has
+  answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
+  connection; a requester's queue past it; and a budget of what waits for every socket together, as
+  `bodyBytesBudget` is for bodies;
+- **one corpus read alike by both sides' parsers**, held as a gate, as
+  `tools/protobuf-conformance.mjs differential` holds a `proto` payload
+  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
+  beside the four targets each side fuzzes by hand, guided by coverage
+  ([the root README](../../README.md#fuzzing)), with a target for a WebSocket's handshake and a
+  short run in CI;
 - what [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)
   names: `Forwarded`, once a proxy that writes it alone is met, an IPv6 client keyed by its prefix,
-  and a per-address value fit for a NAT;
+  and a per-address value fit for a NAT, for an HTTP server and a WebSocket server at once;
 - a hook that verifies a WebSocket's credential at its upgrade, refusing before the 101, and a
   credential replaced in place on a live connection
-  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)).
+  ([0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md));
+- **an opt-in that hands a procedure its call's bearer credential**, a `JWT`'s token or what its
+  transport carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone,
+  as RFC 8693's token exchange or a call on its user's behalf needs
+  ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
@@ -143,12 +144,14 @@ table.
 
 ### A server's edge
 
-| #                                                                                         | Decision                                                                                                                                | Status   |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)   | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority | accepted |
-| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII             | accepted |
-| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)       | An HTTP server answers CORS to the origins it names, and to no other                                                                    | accepted |
-| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)    | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                     | accepted |
+| #                                                                                         | Decision                                                                                                                                                                               | Status   |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)   | A server listens on the loopback, takes the loopback's names, IP literals and the hosts it is told, each named by a request's authority                                                | accepted |
+| [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md) | A server tells each refusal it judges of its own, a client names the one it reads, and a request's fields are visible ASCII                                                            | accepted |
+| [0027](0027-an-http-server-answers-cors-to-the-origins-it-names-and-to-no-other.md)       | An HTTP server answers CORS to the origins it names, and to no other                                                                                                                   | accepted |
+| [0030](0030-a-server-believes-x-forwarded-for-from-the-proxies-it-names-and-counts.md)    | A server believes `X-Forwarded-For` from the proxies it names and as many unnamed ones as it counts                                                                                    | accepted |
+| [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)                                     | A side bounds what a peer holds of it: the calls it answers on a connection, a request's bytes, a WebSocket server's connections, what waits for a socket, and a request that trickles | accepted |
+| [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)                | A server tells each access it refuses, never the credential                                                                                                                            | accepted |
 
 ### Time
 
@@ -183,7 +186,7 @@ table.
 
 ## Writing one
 
-The next decision is 0033. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0035. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

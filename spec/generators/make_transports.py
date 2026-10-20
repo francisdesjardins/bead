@@ -144,12 +144,17 @@ def refused(on, status, refusal, fields=None):
     return expect(on, status, fields={'bead-refusal': refusal, **(fields or {})}, body='')
 
 
+def unmarked_as(on, status):
+    """HTTP's own refusal, which its server writes as it does: no mark, its body empty, and none of
+    the fields every response on the path carries."""
+    return expect(on, status, fields={'bead-refusal': None, 'cache-control': None,
+                                      'x-content-type-options': None, 'vary': None,
+                                      'access-control-allow-origin': None}, body='')
+
+
 def unmarked(on):
-    """HTTP's own 400, which its server writes as it does: no mark, its body empty, and none of the
-    fields every response on the path carries."""
-    return expect(on, 400, fields={'bead-refusal': None, 'cache-control': None,
-                                   'x-content-type-options': None, 'vary': None,
-                                   'access-control-allow-origin': None}, body='')
+    """HTTP's own 400."""
+    return unmarked_as(on, 400)
 
 
 def drawn(on='connect', *, listening=False, fields=None):
@@ -177,6 +182,10 @@ def answered(on, envelope):
 
 
 ECHO = request(1, 'echo', '"x"')
+# a request of 100 bytes, whose POST declares them all and sends its 12-byte header alone
+TRICKLED = request(1, 'echo', '"' + 'x' * 86 + '"')
+TRICKLED_PREFIX = ' '.join(TRICKLED.replace('|', ' ').split()[:12])
+assert length_of(TRICKLED) == 100
 # what every answer to an origin the server names carries once that origin is judged, and what one
 # to any other carries of it (spec 15.6, 15.12)
 CORS = {'access-control-allow-origin': PAGE, 'access-control-expose-headers': '*', 'vary': 'Origin',
@@ -205,9 +214,18 @@ def preflight(on, method, *, origin=PAGE, fields=None, target='/bead', host='{ho
 
 # a bearer credential, RFC 6750's own example, its auth-scheme included
 BEARER = 'Bearer mF_9.B5f-4.1JqM'
+# a head's 408, played on the real clock: its headersTimeout; the soonest it comes, 100 ms short of
+# its time, which its server counts from its accept, before the step starts; and the latest, past its
+# time and within 2 seconds of it (spec 15.12), then 2 seconds more for the real clock under load.
+# ! Kestrel sets a head's deadline a heartbeat past its time (TimeoutControl.AssignTimeout) and fires
+# on the first heartbeat after it (CheckForTimeout), a heartbeat each second, so a connection's first
+# head is answered 1 to 2 seconds past its time; Node checks each second, so within one
+HEAD_TIMEOUT = 1000
+HEAD_408_AFTER = HEAD_TIMEOUT - 100
+HEAD_408_WITHIN = HEAD_TIMEOUT + 2000 + 2000
 # what a 503 busy carries besides its mark
-BUSY = {'retry-after': {'shape': 'delay-seconds'}}
-# what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 5),
+BUSY ={'retry-after': {'shape': 'delay-seconds'}}
+# what SESSION_REQUIRED's detail says of an ELSEWHERE whose transport carried nothing (9.2, step 6),
 # and of one its verifier does not hold, or whose end the wall clock has reached (13.11)
 NO_CREDENTIAL = 'no credential came'
 DOES_NOT_HOLD = 'the credential does not hold'
@@ -242,7 +260,7 @@ cases = [
         *drawn(), post('cancel', cancel(5)), expect('cancel', 204, body='')]),
     ('a request on the server\'s own parity is refused 400, marked', ['15.5.3', '15.6.4'], None, [
         *drawn(), post('even', request(2, 'echo', '"x"')), refused('even', 400, 'malformed')]),
-    ('a request on a call id already waiting is refused 409, marked', ['15.5.3', '15.6.8'], None, [
+    ('a request on a call id already waiting is refused 409, marked', ['15.5.3', '15.6.9'], None, [
         *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
         post('again', ECHO), refused('again', 409, 'call-waiting')]),
     # 15.5: a request's Authorization, which the transport hands on with it, and two refused
@@ -294,12 +312,12 @@ cases = [
         send('elsewhere', 'POST', '/elsewhere'), refused('elsewhere', 404, 'path-unknown')]),
     ('a method the server does not take is refused 405, its Allow naming those it does', ['15.6.7'], None, [
         send('put', 'PUT', body='A1'), refused('put', 405, 'method-refused', {'allow': 'GET, POST, DELETE'})]),
-    ('a body of another type, or encoded, is refused 415, marked', ['15.6.10'], None, [
+    ('a body of another type, or encoded, is refused 415, marked', ['15.6.11'], None, [
         *drawn(),
         send('plain', 'POST', fields={'bead-connection-token': '{token}', 'content-type': 'text/plain'}, body=ECHO),
         refused('plain', 415, 'type-refused'),
         post('encoded', ECHO, fields={'content-encoding': 'gzip'}), refused('encoded', 415, 'type-refused')]),
-    ('a body past its bound is refused 413, marked', ['15.6.9', '15.12.5'], {'maximumBodyBytes': 64}, [
+    ('a body past its bound is refused 413, marked', ['15.6.10', '15.12.5'], {'maximumBodyBytes': 64}, [
         *drawn(), post('large', request(1, 'echo', '"' + 'x' * 60 + '"')), refused('large', 413, 'too-large')]),
     # 15.6: a request at the path that holds two faults, answered by the first in 15.6's order
     ('a request at the path that holds two faults is answered by the first that applies, in the order section 15.6 gives',
@@ -495,11 +513,11 @@ cases = [
          connect('noorigin'), expect('noorigin', 201, fields=NO_CORS)]),
     # 15.12: the bounds, past which the server answers 429 or 503
     ('past the connections a server holds, a connect is refused 503, with Retry-After',
-     ['15.6.13', '15.12.1'], {'maximumConnections': 1}, [
+     ['15.6.14', '15.12.1'], {'maximumConnections': 1}, [
          *drawn('first'), connect('second'),
          refused('second', 503, 'busy', {'retry-after': {'shape': 'delay-seconds'}})]),
     ('past the connections one address holds, behind a proxy it names, a connect is refused 503',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
          refused('second', 503, 'busy', BUSY),
@@ -507,18 +525,18 @@ cases = [
     # 15.12: the client's address, walked from the right past each proxy a server names, every
     # runner's socket on 127.0.0.1
     ('an X-Forwarded-For from a socket no trustedProxies entry holds is not read: every client behind that proxy is its address, past whose bound a connect is refused 503',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['192.0.2.0/24']}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['192.0.2.0/24']}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '192.0.2.2'}), refused('second', 503, 'busy', BUSY)]),
     ('behind proxies it names, the client is the rightmost X-Forwarded-For entry none of them holds, what a client wrote to its left never read',
-     ['15.6.13', '15.12', '15.12.2'],
+     ['15.6.14', '15.12', '15.12.2'],
      {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.0/8', '10.0.0.0/8']}, [
          connect('first', fields={'x-forwarded-for': '198.51.100.7, 10.0.0.5'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '203.0.113.9, 198.51.100.7, 10.0.0.6'}),
          refused('second', 503, 'busy', BUSY),
          connect('other', fields={'x-forwarded-for': '198.51.100.8'}), expect('other', 201)]),
     ('an X-Forwarded-For entry that is no address ends the walk at the proxy that wrote it',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1', '10.0.0.0/8']}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1', '10.0.0.0/8']}, [
          connect('first', fields={'x-forwarded-for': 'evil, 10.0.0.5'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '10.0.0.5'}), refused('second', 503, 'busy', BUSY)]),
     ('a refusal behind a proxy it names tells the client\'s address, and its port the proxy\'s connection\'s',
@@ -526,7 +544,7 @@ cases = [
          connect('rebound', host='rebind.example', fields={'x-forwarded-for': '203.0.113.9'}),
          refused('rebound', 403, 'host-refused')]),
     ('an X-Forwarded-For entry is read in RFC 7239\'s node forms, its port dropped, and held in one form, an IPv4-mapped one as IPv4 and IPv6 as RFC 5952 writes it; a zone, a name or unknown ends the walk at the proxy',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}, [
          connect('ported', fields={'x-forwarded-for': '192.0.2.7:51234'}), expect('ported', 201),
          connect('mapped', fields={'x-forwarded-for': '::ffff:192.0.2.7'}), refused('mapped', 503, 'busy', BUSY),
          connect('bracketed', fields={'x-forwarded-for': '[2001:DB8::1]:443'}), expect('bracketed', 201),
@@ -538,7 +556,7 @@ cases = [
     # 15.12: unnamedProxies, the proxies on every path trustedProxies does not name, each costing one
     # of the count wherever it stands, a listed one none
     ('behind the proxies it counts, whatever their address, the client is the X-Forwarded-For entry that many hops from its socket, what a client wrote to its left never read',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 1}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 1}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
          refused('second', 503, 'busy', BUSY),
@@ -546,7 +564,7 @@ cases = [
          connect('rebound', host='rebind.example', fields={'x-forwarded-for': '203.0.113.9, 192.0.2.3'}),
          refused('rebound', 403, 'host-refused')]),
     ('unnamedProxies counts the addresses trustedProxies does not hold: one it holds costs none, and the walk stops at the first address past the count that it does not hold',
-     ['15.6.13', '15.12', '15.12.2'],
+     ['15.6.14', '15.12', '15.12.2'],
      {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['10.0.0.0/8'], 'unnamedProxies': 1}, [
          connect('first', fields={'x-forwarded-for': '198.51.100.7, 10.0.0.5'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '203.0.113.9, 198.51.100.7'}),
@@ -555,23 +573,41 @@ cases = [
     # a count of every hop, 2 for a sidecar the list names and a router it does not, reads one entry
     # too far: the one its client wrote
     ('a proxy both named and counted gives the client an entry it wrote: behind a socket trustedProxies holds, unnamedProxies 2 passes the one unnamed proxy and reads the entry to its left',
-     ['15.6.13', '15.12', '15.12.2'],
+     ['15.6.14', '15.12', '15.12.2'],
      {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1/32'], 'unnamedProxies': 2}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.66, 203.0.113.1, 198.51.100.7'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '192.0.2.66, 203.0.113.2, 198.51.100.7'}),
          refused('second', 503, 'busy', BUSY)]),
     ('an X-Forwarded-For entry that is no address ends the walk within the proxies it counts, and so does the field\'s end',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 3}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 3}, [
          connect('first', fields={'x-forwarded-for': 'unknown, 192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '192.0.2.1'}), refused('second', 503, 'busy', BUSY)]),
     ('unnamedProxies 0 counts none: the X-Forwarded-For of a socket trustedProxies does not hold is not read',
-     ['15.6.13', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 0}, [
+     ['15.6.14', '15.12', '15.12.2'], {'maximumConnectionsPerAddress': 1, 'unnamedProxies': 0}, [
          connect('first', fields={'x-forwarded-for': '192.0.2.1'}), expect('first', 201),
          connect('second', fields={'x-forwarded-for': '192.0.2.2'}), refused('second', 503, 'busy', BUSY)]),
     ('past the requests waiting on one connection, a request is refused 429, marked',
-     ['15.6.12', '15.12.3'], {'maximumWaitingExchanges': 1}, [
+     ['15.6.13', '15.12.3'], {'maximumWaitingExchanges': 1}, [
          *drawn(), post('slow', request(1, 'slow', SLOW)), expect('slow', 200),
          post('more', request(3, 'slow', SLOW)), refused('more', 429, 'busy')]),
+    # 15.12: a body held to its rate on the server's clock, past its grace; its 408 written before
+    # the body is whole closes the socket in stages, and the Bead connection stays
+    ('a body that comes slower than its rate past its grace is refused 408, marked, its connection closed in stages, its Bead connection kept',
+     ['15.1', '15.6.8', '15.12', '15.12.15', '15.12.16'], None, [
+         *drawn(),
+         send('slow', 'POST', fields=[('bead-connection-token', '{token}'), ('content-type', BEAD)],
+              body=TRICKLED_PREFIX, length=length_of(TRICKLED)),
+         armed(DEFAULTS['bodyGracePeriod']), advance(DEFAULTS['bodyGracePeriod']),
+         expect('slow', 408, fields={'bead-refusal': 'too-slow', 'connection': 'close'}, body=''),
+         {'expect': {'end': True}, 'on': 'slow'},
+         post('again', request(3, 'echo', '"y"')), answered('again', result(3, '"y"'))]),
+    # played on the real clock: the platform's parser holds a head, which no Bead code sees until it is
+    # whole, and answers it past its time and within 2 seconds of it, as its platform checks it
+    # (HEAD_408_AFTER, HEAD_408_WITHIN)
+    ('a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
+     ['15.12', '15.12.14'], {'headersTimeout': HEAD_TIMEOUT}, [
+         {'send': {'head': 'POST /bead HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
+         {**unmarked_as('slow', 408), 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
     ('a DELETE ends its connection, and an exchange after it is refused 404', ['15.4', '15.6.3', '15.6.6'], None, [
         *drawn(), send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body=''),
         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
@@ -603,7 +639,7 @@ cases = [
                                     batch=[notification(1, '1'), notification(1, '2')]),
         listen('left', 1, 0), expect('left', 200, fields={'bead-sequence': '2'}, batch=[notification(1, '2')]),
         listen('none', 2, 0), expect('none', 204, body='')]),
-    ('a listen of a client that did not say it listens is refused 409, marked', ['15.6.8', '15.8'], None, [
+    ('a listen of a client that did not say it listens is refused 409, marked', ['15.6.9', '15.8'], None, [
         *drawn(), listen('listen', 0, 0), refused('listen', 409, 'listen-undeclared')]),
     ('a listen whose count is none, or past what was sent, is refused 400, marked', ['15.6.4', '15.9'], None, [
         *drawn(listening=True),
@@ -649,7 +685,7 @@ cases = [
         post('two', tick(5, 2)), expect('two', 200, orLost=True), until('connections', 0),
         post('after', request(7, 'echo', '"x"')), refused('after', 404, 'connection-unknown')]),
     ('to a client that does not listen, a request that opens a subscription is answered SUBSCRIPTION_UNSUPPORTED',
-     ['15.8', '9.2.6'], None, [
+     ['15.8', '9.2.7'], None, [
          *drawn(), post('subscribe', SUBSCRIBE), answered('subscribe', failure(1, SUBSCRIPTION_UNSUPPORTED))]),
     ('to a client that does not listen, a request of the server\'s own fails before it goes', ['15.8'], None, [
         *drawn(), post('ask', request(1, 'ask', 'null')), answered('ask', failure(1, PROCEDURE_FAILED)),
@@ -1009,7 +1045,7 @@ websocket = [
          *upgrade('loopback', host='localhost'),
          handshake('other', host='rebind.example'), refused('other', 403, 'host-refused', UPGRADE_REFUSED)]),
     ('a WebSocket server whose hosts is * takes an upgrade naming any host that carries no Origin, refuses one whose Origin is its authority\'s 403 origin-refused, and judges one naming none by its version',
-     ['15.2', '15.2.2', '15.2.5', '15.2.7', '15.6.5', '15.6.11', '15.12'], {'options': {'hosts': ['*']}}, [
+     ['15.2', '15.2.2', '15.2.5', '15.2.7', '15.6.5', '15.6.12', '15.12'], {'options': {'hosts': ['*']}}, [
          handshake('rebound', {'origin': 'http://rebind.example:8080'}, host='rebind.example:8080'),
          refused('rebound', 403, 'origin-refused', UPGRADE_REFUSED),
          *upgrade('plain', host='rebind.example:8080'),
@@ -1069,7 +1105,7 @@ websocket = [
          asked('eighth', method='POST', version=8), refused('eighth', 405, 'method-refused', METHOD_REFUSED)]),
     # ! a HEAD's answer has no body: the peers read it by its length, which both sides write 0
     ('a request at a WebSocket\'s address that asks no WebSocket is answered 426, marked, its Upgrade naming websocket',
-     ['15.2', '15.2.4', '15.6.11'], {}, [
+     ['15.2', '15.2.4', '15.6.12'], {}, [
          asked('plain', **PLAIN), refused('plain', 426, 'upgrade-required', UPGRADE_REQUIRED),
          asked('unupgraded', upgrade=None), refused('unupgraded', 426, 'upgrade-required', UPGRADE_REQUIRED),
          asked('h2c', upgrade='h2c'), refused('h2c', 426, 'upgrade-required', UPGRADE_REQUIRED),
@@ -1084,7 +1120,7 @@ websocket = [
     # 15.2: an upgrade is judged by its Origin, the field an exchange is, so one of another version,
     # which may carry its origin elsewhere, is never taken, and is told the version before its form
     ('an upgrade of a version but 13, or of none, is refused 426, marked, naming 13 and websocket, whatever its Origin or its key',
-     ['15.2', '15.2.5', '15.6.11'], {}, [
+     ['15.2', '15.2.5', '15.6.12'], {}, [
          handshake('foreign', {'origin': 'https://elsewhere.test'}, version=8),
          refused('foreign', 426, 'version-refused', VERSION_REFUSED),
          handshake('none', version=8), refused('none', 426, 'version-refused', VERSION_REFUSED),
@@ -1125,6 +1161,29 @@ websocket = [
     ('a server that stops closes its connections with 1001', ['15.3'], {}, [
         *upgrade('first'), *upgrade('second'), {'stop': True},
         heard('first', close=GOING_AWAY), heard('second', close=GOING_AWAY)]),
+    # 15.2, step 8, and 15.12: a WebSocket server's connections, in all and by address, an upgrade
+    # taking its place as it is judged; the connection gone, its place is given back
+    ('past the connections a WebSocket server holds, an upgrade is refused 503, marked, with Retry-After, and one is taken once a connection closes',
+     ['15.2', '15.2.8', '15.6.14', '15.12.1'], {'options': {'maximumConnections': 1}}, [
+         *upgrade('first'), handshake('second'), refused('second', 503, 'busy', {**UPGRADE_REFUSED, **BUSY}),
+         message('first', close=NORMAL), heard('first', close=NORMAL), until('connections', 0),
+         *upgrade('third'), message('third', binary=ECHO), heard('third', envelope=result(1, '"x"'))]),
+    ('past the connections one address holds, behind a proxy it names, an upgrade is refused 503',
+     ['15.2.8', '15.6.14', '15.12', '15.12.2'], {'options': {'maximumConnectionsPerAddress': 1, 'trustedProxies': ['127.0.0.1']}}, [
+         *upgrade('first', {'x-forwarded-for': '192.0.2.1'}),
+         handshake('second', {'x-forwarded-for': '198.51.100.7, 192.0.2.1'}),
+         refused('second', 503, 'busy', {**UPGRADE_REFUSED, **BUSY}),
+         *upgrade('other', {'x-forwarded-for': '192.0.2.2'})]),
+    ('at its bounds, an upgrade from an origin it does not take is refused 403, its origin judged before its bounds',
+     ['15.2', '15.2.7', '15.2.8'], {'options': {'maximumConnections': 1}}, [
+         *upgrade('first'), handshake('foreign', {'origin': 'https://elsewhere.test'}),
+         refused('foreign', 403, 'origin-refused', UPGRADE_REFUSED),
+         handshake('second'), refused('second', 503, 'busy', {**UPGRADE_REFUSED, **BUSY})]),
+    # played on the real clock: the platform's parser holds a head, as over HTTP
+    ('a request at a WebSocket\'s address whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
+     ['15.2.1', '15.12', '15.12.14'], {'options': {'headersTimeout': HEAD_TIMEOUT}, 'realTime': True}, [
+         {'send': {'head': 'GET / HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
+         {**unmarked_as('slow', 408), 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
     # played on the real clock: no clock given reaches the ping the C# side's platform times
     ('a side pings its peer every heartbeat', ['15.3'], {'options': {'heartbeat': 200}, 'realTime': True}, [
         *upgrade(), heard('socket', within=1000, ping=True), heard('socket', within=1000, ping=True)]),
@@ -1284,6 +1343,10 @@ def tell(steps, options):
         expectation['told'] = told_of(heads[step['on']], expectation['status'], reason, options)
 
 
+# the cases over HTTP played on the real clock, as what no clock given reaches is
+HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
+assert HTTP_REAL_TIME <= {name for name, *_ in cases}
+
 for _name, _clauses, _options, _steps in cases:
     tell(_steps, _options)
 
@@ -1294,9 +1357,9 @@ document = {
     '$schema': 'schemas/transports.schema.json',
     '$comment': [
         "Bead's transports' cases: what a server of the interop service (its blueprint, interop-blueprint.json, and what it does, interop-service.json) does at its transport's edge, over HTTP and over WebSocket, with what a peer of the test's own sends it, played by every implementation's tests against its own server.",
-        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII; body, its octets in hexadecimal. close drops that socket.',
-        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
-        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, in milliseconds. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
+        'A step is what the test does — send, close, until — or what the server under test does next — expect, report. send writes a request to a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the server\'s host and port, an IP literal, which every server takes, and {token}, or any other name a field captured, the value captured under it, each of its characters one octet, its code point (ISO-8859-1), so that a character past U+007F is an octet past ASCII, and one without its last CRLF a head that never comes whole; body, its octets in hexadecimal, a content-length given past them leaving the body to come. close drops that socket.',
+        'expect reads the response on the exchange it names: its status; its fields, by name in any case, each its value, null for one absent, {"shape"} for a value of that shape, {"capture", "shape"} to keep it under that name; its body, exactly, in hexadecimal; or envelope, the one envelope it holds, as conversations.json expects one; or batch, the envelopes of a batch in order. told, on a marked refusal, is what the server\'s transport tells of it (spec 15.1): its status, its reason, the request\'s authority and origin as they came, or null, the client\'s address and the port it sent from, {port}, the local port of the socket the exchange was sent on, {host} put in as in a head; null where it tells nothing, as of the 404 that ends an exchange or a listen already taken as its connection closes (spec 15.7). A response is read by its content-length, or de-chunked, as responses checks every reader. orLost true lets the exchange be lost instead, its socket ending before any status, as a request handed on may be when its connection closes (spec 15.7). An expect of end, once a response was read, reads that its server ended its side of the socket, as an answer written before its body is whole has it (spec 15.12). The cut that follows a head is no step\'s to read: an exchange of that connection after its close, refused 404 connection-unknown, stands for it.',
+        'Over WebSocket, an exchange answered 101 keeps its socket as a WebSocket. send then writes a message: binary, in hexadecimal; text; frames, each with its opcode, its fin and its payload; or close and its code; every frame masked, as a client\'s is. expect then reads the next thing the server sends on it: envelope, one binary message holding that envelope; binary, its bytes; close, a close frame and its code; ping, a ping; end, the socket ended. The peer answers every ping with a pong, unless its case says answersPings false. within bounds an expect\'s wait, and after is the soonest what it reads may come, each in milliseconds from its step\'s start. stop stops the server under test. A case marked realTime plays on the real clock what no clock given reaches.',
         'until waits, on the real clock and within a patience, for a gauge of the transport, which both sides name alike, to reach its value. report is the next thing the server reports to its application, as in conversations.json.',
         'Before each send and close, and at the end, the server reported nothing, and told no refusal, that a case does not expect.',
         'A step may move time, on the clock the server is given (decision 0011): until timer waits, on the real clock and within a patience, for a timer armed on it, due exactly that many milliseconds from now; advance steps it that many milliseconds from due to due, as spec/clocks.json states and holds the test clocks of both sides to, and follows an until timer since the last send, expect or advance; wall moves the wall clock alone, forward or back. wallClock is where the wall clock starts.',
@@ -1313,7 +1376,8 @@ document = {
         for name, pieces, status, fields, body in responses
     ],
     'cases': [
-        {'name': name, 'clauses': clauses, 'transport': 'http', **({'options': options} if options else {}), 'steps': steps}
+        {'name': name, 'clauses': clauses, 'transport': 'http', **({'options': options} if options else {}),
+         **({'realTime': True} if name in HTTP_REAL_TIME else {}), 'steps': steps}
         for name, clauses, options, steps in cases
     ] + [
         {'name': name, 'clauses': clauses, 'transport': 'websocket', **fields, 'steps': steps}

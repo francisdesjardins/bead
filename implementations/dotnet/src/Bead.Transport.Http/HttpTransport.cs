@@ -80,6 +80,9 @@ public static class HttpRefusals
     /// <summary>A body past the envelope's limit: 413.</summary>
     public const string TooLarge = "too-large";
 
+    /// <summary>A body that came slower than its rate once its grace passed: 408 (spec 15.12).</summary>
+    public const string TooSlow = "too-slow";
+
     /// <summary>Not Bead's media type, or encoded: 415.</summary>
     public const string Type = "type-refused";
 }

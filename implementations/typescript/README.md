@@ -50,9 +50,26 @@ ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form
 request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
 13, the one it speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an
 `Origin` neither its own nor among `origins`; 503 `busy`, its `Retry-After` 1, to an upgrade it
-would take once its stop began. Each refusal but HTTP's own is marked, its body empty, closes its
-connection, and is told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken
-— see [HTTP](#http).
+would take past `maximumConnections`, 10,000, or `maximumConnectionsPerAddress`, 64, or once its
+stop began. Each refusal but HTTP's own is marked, its body empty, closes its connection, and is
+told, `refusal`; an `Upgrade` listing `websocket` among other protocols is taken — see
+[HTTP](#http). An upgrade takes its place as it is judged, after its origin, and holds it until its
+socket closes, so upgrades that cross take no more places than there are; behind a proxy, every
+client is the proxy's address unless `trustedProxies` or `unnamedProxies` names it, and its health
+warns once its busiest address holds 80% of `maximumConnectionsPerAddress`, before the first 503,
+gauged `largestAddressConnections`. A head that does not come whole within `headersTimeout`, 30
+seconds, is answered 408 by Node's own parser.
+
+What waits for a client's socket — what the server handed it that the socket has not taken — is
+held to a pace, as Kestrel holds a response to its `MinResponseDataRate`: each envelope moves the
+connection's deadline by the time its bytes take at `minimumSendBytesPerSecond`, 240, its grace
+`sendGracePeriod`, 5 seconds, at least, and a socket that still holds something past it, judged
+each second on the real clock, is dropped. An envelope that would take what waits past
+`maximumUnsentBytes` drops it too: what a peer that keeps every rule can be owed at once,
+184,551,424 bytes under the limits by default, which `createWSServer` derives from its router's.
+Each drop is reported on `error`, naming its bound, and its close is not clean; the heartbeat drops
+a reader that stops behind a large backlog besides. A paced subscription queues on the server what a
+client that falls behind has not credited.
 
 A server listens on `localhost` unless `start` is given an `address`: both loopbacks, `127.0.0.1`
 and `::1`, on one port, as Kestrel's `ListenLocalhost` does, so no other process can answer a client
@@ -313,7 +330,9 @@ in a listen's batch, which the failure says, `mayOvertake`. A call whose credent
 cannot carry fails before it goes, `DESTINATION_UNREACHABLE`, nothing tried and its credential kept:
 an `ELSEWHERE` over a transport that carries none, or, over a WebSocket, other bytes than its
 upgrade carried, a `JWT` or an `ELSEWHERE` over one that is not secure, since a bearer credential
-crosses only TLS off the machine (RFC 6750 §5.3).
+crosses only TLS off the machine (RFC 6750 §5.3). A credential no call presents — a `JWT` with no
+token, an `ELSEWHERE` with nothing to carry, a scheme to come — is a `ProgrammerError`, before the
+call starts.
 
 ```ts
 const client = createWSClient({ credential: { scheme: CredentialScheme.JWT, token } });
@@ -390,14 +409,20 @@ any router that meets `IRouterLike`: a request is answered once, and as `PROCEDU
 resolver fails first. A resolver answers the procedure's own failure, `response(null, { code: 21 })`
 with a code from 1 to 65,535, or a refusal of admission from its router's table. The types refuse
 the protocol's other failures; a code out of that range, or a refusal from the other side's table,
-fails the resolver, and the request is answered as `PROCEDURE_FAILED`. A `beforeRequest` admits a
-request only by returning `true`: anything else refuses it, with the `refusal` the function carries,
-or with `ACCESS_DENIED`. It is synchronous, and sees the request's header, its connection and the
-call's session, `session`, never its payload: its router asks it through the resolver's `admit`
-once the request's credential resolved and before the payload is read — or comes, for a transfer —
-so a request refused is never decoded, and a resolver called by a router that asked nothing asks it
-itself, first. An admission of the application's own reads the session's data — a token's claims,
-say — and a callback receives the same session, as `request.session`. A callback's
+fails the resolver, and the request is answered as `PROCEDURE_FAILED`, with no detail: the error is
+reported, never the peer's to read (spec 9.0). A `beforeRequest` admits a request only by returning
+`true`: anything else refuses it, with the `refusal` the function carries, or with `ACCESS_DENIED`.
+It is synchronous, and sees the request's header, its connection and the call's session, `session`,
+never its payload: its router asks it through the resolver's `admit` once the request's credential
+resolved and before the payload is read — or comes, for a transfer — so a request refused is never
+decoded, and a resolver called by a router that asked nothing asks it itself, first. An admission of
+the application's own reads the session's data — a token's claims, say — and a callback receives
+the same session, as `request.session`. The header a resolver, its `admit`, its callback and a
+`beforeRequest` are handed, a relay's `beforeRoute` among them, is an `IHandedRequestHeader`: the
+header as it came, but for its credential, a `HandedCredential`, which says of a `JWT` its scheme
+alone. No procedure is handed a bearer credential its call came with: a `JWT`'s token, and what a
+transport carried beside an `ELSEWHERE`, reach the side's verifier, its `credentials`, and a relay,
+which forwards them to leg B, alone (spec 13.1). A callback's
 `request.signal` is aborted when its call ends before its answer — a `CancelError` when its
 requester cancels it, a `DisconnectError` when its connection closes — so it may stop: its answer
 would go nowhere, and what it throws then is not reported. A listener of that signal that throws is
@@ -468,12 +493,14 @@ identifier moves that end to the later of the two: a credential renewed keeps it
 Each request runs in its call's session, which its admission reads and its callback receives as
 `session`: its connection's, its data a copy the call keeps, when it presents none or that session's
 token as `OPAQUE`, compared in constant time; a credential's, with its own credential's data — a
-`JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its connection's. A
-credential that does not hold — another token, an expired `JWT` — is refused `SESSION_REQUIRED`,
-whatever its procedure requires, and a verifier that fails `PROCEDURE_FAILED`, reported. A server's
-router resolves it once per request, its call id held, before `beforeRequest`: none and `OPAQUE` by
-its `sessionOf(request, signal)` — the server's gives the connection's session from its sessions —
-in the turn the request came; a `JWT` or an `ELSEWHERE` by its `credentials`, in a later turn,
+`JWT`'s claims set, frozen — when it presents a `JWT` or an `ELSEWHERE`, never its connection's, and
+never the bearer bytes the call came with, which its verifier alone reads (spec 13.1). A credential
+that does not hold — another token, an expired `JWT` — is refused `SESSION_REQUIRED`, whatever its
+procedure requires, and a verifier that fails `PROCEDURE_FAILED`, reported. A server's router
+resolves it once per request, its call id held, before `beforeRequest`: none and `OPAQUE` by its
+`sessionOf(request, signal)`, handed the connection and the header alone, nothing its transport
+carried — the server's gives the connection's session from its sessions — in the turn the request
+came; a `JWT` or an `ELSEWHERE` by its `credentials`, in a later turn,
 whether its verifier waits or not. A cancel, or its connection's close, meanwhile aborts the signal
 its verifier holds, and what it settles to then is dropped. `requireSession` is the `beforeRequest`
 of every other procedure: it tests the call's session, never the connection's, and refuses a call in
@@ -702,7 +729,7 @@ that opens a subscription always go in one envelope.
 | Limit                       | By default  | Bounds                                                                                                                                                                                                                                                                     |
 | --------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `maximumEnvelopeBytes`      | 16,778,240  | an envelope, as it comes in and as it goes out; the WebSocket transports' `maxPayload` follows it in `createWSServer` and `createWSClient`, never below; built alone, a transport takes 16,778,240, `MAXIMUM_MESSAGE_BYTES`, raised by hand for a router whose envelope is |
-| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in                                                                                                                                                                                                                |
+| `chunkBytes`                | 1,048,576   | a chunk's envelope, and the largest a payload goes whole in: a request that comes whole past it, or an opening, is refused `ENVELOPE_TOO_LARGE`, nothing of it held                                                                                                        |
 | `windowBytes`               | 4,194,304   | how far past what it received, from the start, a receiver lets its sender send                                                                                                                                                                                             |
 | `maximumPayloadBytes`       | 16,777,216  | a payload, whole or as a transfer; a procedure's own `maximumPayloadBytes` narrows it                                                                                                                                                                                      |
 | `bufferedBytesBudget`       | 268,435,456 | the bytes every transfer a router receives holds together                                                                                                                                                                                                                  |
@@ -710,17 +737,18 @@ that opens a subscription always go in one envelope.
 | `maximumChunkRuns`          | 1,024       | the runs of bytes apart a transfer received holds before it is whole                                                                                                                                                                                                       |
 | `transferInactivityTimeout` | 30,000      | the milliseconds a transfer waits for its next chunk or credit, and a call that received one keeps its call id                                                                                                                                                             |
 | `maximumDetailBytes`        | 1,024       | a failure's detail                                                                                                                                                                                                                                                         |
+| `maximumAnsweringCalls`     | 64          | the calls a connection's peer has a router answer at once — a request past them is refused `CAPACITY_EXCEEDED` before its route, its credential or its transfer — and the calls a requester has wait on a connection, one past them failed before it goes                  |
 
 The limits are options of each router and each facade — `createClient(layers, { limits })`,
 `createWSClient({ limits })`, `createServer(layers, { limits })`, `createWSServer({ limits })` — and
 must hold together, or the router is a `ProgrammerError`: an envelope of 64 bytes at least, a chunk
-from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a timeout a timer
-holds; and, on a side that takes or presents a `JWT`, a chunk and an envelope of 1,024 bytes at
-least, since its header holds 1,020. Nothing announces them: both ends of a connection are set
-alike. A transport that carries transfers delimits its messages, knows the envelope's size at both
-ends, delivers every chunk and credit — in any order, a copy tolerated — and carries both ways.
-WebSocket does all four. The router copies every payload it reads, so a transport may use its
-buffers again once `receive` returns.
+from 64 bytes to an envelope, a window of two chunks, a payload within the budget, a call at once at
+least, a timeout a timer holds; and, on a side that takes or presents a `JWT`, a chunk and an
+envelope of 1,024 bytes at least, since its header holds 1,020. Nothing announces them: both ends of
+a connection are set alike. A transport that carries transfers delimits its messages, knows the
+envelope's size at both ends, delivers every chunk and credit — in any order, a copy tolerated — and
+carries both ways. WebSocket does all four. The router copies every payload it reads, so a
+transport may use its buffers again once `receive` returns.
 
 What comes late is dropped in silence where it is known for late, and reported elsewhere:
 
@@ -884,6 +912,17 @@ from one alive, as a WebSocket's heartbeat does: a connection with no exchange u
 minutes closes, and, by `createHTTPServer`'s default, one without a session silent for 30 seconds,
 a listen held being no silence: the transport emits `listen` as it holds one and as it ends.
 
+No client follows a redirect: one answered to a connect or an upgrade fails it, its status named,
+and one answered to a send or a listen is lost, its `bead-refusal` unread (spec 15.6), since no
+refusal of the transport's own is one; a listen so answered is listened again, as after any status
+nothing marked. Following it would carry the connection's token, and a send's envelope, where they
+were not judged. Each fetch is handed `redirect: 'manual'`: on Node, a connect names the status,
+"the server drew no connection: 302"; a page's fetch reads no status of a redirect, an opaque one of
+status 0, "the server drew no connection: a redirect", or, from another origin, a network error, its
+preflight failing. A `fetch` given follows no redirect; one that follows all the same says so in its
+answer's `redirected`, and is caught there: the connect fails, "the server drew no connection: a
+redirect followed", and a send or a listen loses its connection, nothing of the answer read.
+
 | Status | `bead-refusal`                        | Says                                                                                                                                                                                                                                                                        |
 | ------ | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 200    |                                       | the request is with the router; its answer is the body — or, to a listen, a batch                                                                                                                                                                                           |
@@ -893,6 +932,7 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 | 403    | `host-refused`, `origin-refused`      | a host neither every server's nor among `hosts`, or none, whatever the request; an exchange, or a WebSocket's upgrade, whose `Origin` is neither the server's own nor among `origins`                                                                                       |
 | 404    | `path-unknown`, `connection-unknown`  | not the path; the connection is gone                                                                                                                                                                                                                                        |
 | 405    | `method-refused`                      | neither `GET`, `POST` nor `DELETE`, which `Allow` names; at a WebSocket's address, neither `GET` nor `HEAD`, which `Allow` names                                                                                                                                            |
+| 408    | `too-slow`                            | a body that came slower than `minimumBodyBytesPerSecond` once `bodyGracePeriod` passed                                                                                                                                                                                      |
 | 409    | `call-waiting`, `listen-undeclared`   | a request on a call id already waiting; a listen whose client did not say at connect it listens                                                                                                                                                                             |
 | 413    | `too-large`                           | a body past the envelope's limit                                                                                                                                                                                                                                            |
 | 415    | `type-refused`                        | not `application/prs.bead`, or encoded                                                                                                                                                                                                                                      |
@@ -901,8 +941,18 @@ a listen held being no silence: the transport emits `listen` as it holds one and
 | 503    | `busy`                                | too many connections — all, or one address's — bytes of body being read, or a connect or a WebSocket's upgrade once the server's stop began; `Retry-After`                                                                                                                  |
 
 The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 per address;
-`maximumWaitingExchanges`, 64 requests waiting on one connection; `bodyBytesBudget`, 256 MiB of body
-read at once across them all.
+`maximumWaitingExchanges`, 64 requests waiting on one connection, its router's
+`maximumAnsweringCalls` in `createHTTPServer`; `bodyBytesBudget`, 256 MiB of body read at once
+across them all. A head comes whole within `headersTimeout`, 30 seconds, or Node's own parser
+answers it 408: the transport sets `headersTimeout`, a `requestTimeout` of 0 and a
+`connectionsCheckingInterval` of a second on every server `createServer` builds, before it listens.
+A body comes at `minimumBodyBytesPerSecond`, 240, once `bodyGracePeriod`, 5 seconds, passed since
+its head, on the server's clock, or is refused 408 `too-slow`, its Bead connection kept. An answer
+written before its body is whole carries `connection: close`, and its socket closes in stages, its
+write side first, reading on and dropping what still comes until its client closes or 2 seconds
+pass, so a client that goes on sending reads it (RFC 9112 §9.6). An answer, and a listen's batch,
+are held to `minimumSendBytesPerSecond` past `sendGracePeriod`, as at a WebSocket's address: one
+past its deadline is an exchange lost, its connection closed at both ends, reported on `error`.
 
 A request names its authority by its target when the target is in absolute-form, `http://` or
 `https://` in lower case, read as it came, its `Host` judged as one field line alone, which an
@@ -997,7 +1047,7 @@ and `clients` name and what a refusal tells; its port stays the socket's. A prox
 counted is a client as any other: every client behind it is its address. Over HTTP,
 `maximumConnectionsPerAddress` counts it, so a told `busy` whose `address` is your proxy's, or a
 `largestAddressConnections` near its ceiling on `/health`, is a proxy to list; a WebSocket server
-bounds no address, so there it costs nothing but the address its handles and refusals name. A proxy
+counts it alike, at its upgrade. A proxy
 whose platform publishes its addresses is listed: Google Cloud's global load balancer by
 `130.211.0.0/22`, `35.191.0.0/16` and the forwarding rule's own address, Cloudflare by its ranges,
 an AWS ALB by its VPC's network. One whose addresses its platform does not publish — Heroku's
@@ -1043,15 +1093,15 @@ ignored; a listen without `bead-after`, or with a count that does not read so, i
 comes whole, bounded alone by its envelope limit, as a socket's frames are: no batch is bounded as a
 whole, and none is declared, as HTTP/2 bounds its frames and never its streams. What a listen lost
 or cut carried past what was heard comes again to the next, so nothing is lost and nothing heard
-twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, closes its connection, its client
-having fallen behind; a paced subscription queues on the server what its client has not credited,
-so that never reaches the outbox. The client listens from its connect on, asking a `wait` of 25 seconds; a
-listen lost is listened again from where it was, as EventSource reconnects: at once, then after 1,
-2, 4 seconds and on to 30, each wait drawn between half of it and all of it, so the clients one
-restart dropped come back apart. A listen that reaches the server ends the losses; a short outage
-costs nothing — the same connection, its session, its subscriptions, and what came meanwhile, in
-order. Past `inactivityTimeout` of losses — 5 minutes, the server's own — the client counts the
-connection lost; the server's marked 404 says it sooner.
+twice. An outbox past `maximumOutboxBytes`, two envelopes' worth, closes its connection, reported on
+`error`, its client having fallen behind; a paced subscription queues on the server what its client
+has not credited, so that never reaches the outbox. The client listens from its connect on, asking a
+`wait` of 25 seconds; a listen lost is listened again from where it was, as EventSource reconnects:
+at once, then after 1, 2, 4 seconds and on to 30, each wait drawn between half of it and all of
+it, so the clients one restart dropped come back apart. A listen that reaches the server ends the
+losses; a short outage costs nothing — the same connection, its session, its subscriptions, and
+what came meanwhile, in order. Past `inactivityTimeout` of losses — 5 minutes, the server's own —
+the client counts the connection lost; the server's marked 404 says it sooner.
 A listen held is an exchange under way, so a client that listens is never idle; `pause` spaces the
 listens that bring nothing, and must stay under the server's idleness. Long polling, rather than a
 response held open for ever: no heartbeat, nothing an intermediary buffers, and a batch lost comes
@@ -1091,13 +1141,14 @@ no counterpart to mirror.
 ### What a server holds
 
 `server.gauges()` counts what each layer holds right now: the server's connections, the transport's
-— and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read and
-the connections its busiest address holds, `largestAddressConnections` —
-the router's calls waited on and answered, the call ids it reserved, its transfers and the bytes
-they hold, its subscriptions in flight, waiting or notified, those paced whose credit is spent and
-what they queue — all together, and the fullest queue, at its bounds — its destinations, and the
-credentials' sessions it keeps and those of them timed, `credentialSessions` and
-`timedCredentialSessions` — and the connections' sessions.
+— and over HTTP its exchanges waiting, its listens held, its outboxes, the bodies being read, over
+a WebSocket what waits for its sockets, `largestUnsentBytes` the most one holds, and on both the
+connections its busiest address holds, `largestAddressConnections` — the router's calls waited on
+and answered, the busiest connection's, `largestAnsweringCalls`, the call ids it reserved, its
+transfers and the bytes they hold, its subscriptions in flight, waiting or notified, those paced
+whose credit is spent and what they queue — all together, and the fullest queue, at its bounds — its
+destinations, and the credentials' sessions it keeps and those of them timed, `credentialSessions`
+and `timedCredentialSessions` — and the connections' sessions.
 Nothing of it names a connection: no handle, token or address leaves the process. Each layer also
 says how many connections it keeps anything for that the transport no longer holds — an orphan,
 which is a leak — and what it found that should never be, such as timers kept through
@@ -1111,6 +1162,19 @@ demo on `/health`, on this machine alone, 503 when it fails. A relay's destinati
 connection on purpose, and is counted for none. What timers hold in closures — a heartbeat's, a
 stalled transfer's — no gauge sees; the tests' timer spies do. Every end-to-end test ends at rest:
 each layer back to nothing once its clients are gone, and a health that passes.
+
+A server's router tells each call it refuses as its credential resolves or as it is admitted,
+`accessRefused` (spec 13.12): its `stage`, `credential` or `admission`; the `code` answered; why, in
+one word — for a `JWT` the step of section 13.8 that refused it, for an `OPAQUE` `session`, for an
+`ELSEWHERE` `nothing-carried`, `verifier` or `end`, for a scheme it takes none of `scheme`, for an
+admission the one Bead gives that refused it, `requireSession`, `requireCredential`,
+`shareLegBSession`, or `no-before-route` for a relay with none, and none for the application's own;
+the credential's scheme, what was called, the connection, and the `address` and `port` of the
+request as its transport handed them — over HTTP its exchange's, not its connect's. Never the
+credential, any part of it, a claim, or an admission's detail, as OWASP's ASVS logs authentication
+and authorization failures. A verifier or an admission that fails is reported on `error` instead,
+and a call refused as it would wait for its issuer is neither. The record is built only while a
+listener listens; what one throws is reported with its connection, and the refusal stands.
 
 ### Debugging and metrics
 
@@ -1284,6 +1348,36 @@ while the extension watches, and its registry's exposition — never the client,
 credential. Announced, a client builds no `debug` event until a panel opens; `devtools: false` among
 its options refuses, and a router built alone announces nothing.
 
+### The parts of the core, the manager and the HTTP server
+
+The router's core, the service manager and the HTTP transport server are each built of parts: here
+a module of its own under `src/`, on the C# side a private nested type of its owner, in a partial
+file named after both under `src/`, the type named after the module. Each part has its twin; one
+row names no part: `router-limits.ts`, whose twin is the public `RouterLimits`, outside the owner.
+The C# side's README holds the same table. A part's tests sit in the file named after it: those
+that go through the owner, under the owner's describe, and those of the part's own factory or
+functions, under theirs.
+
+| TypeScript module                           | C# file                                                      | What it holds                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `router/shared/router-requester.ts`         | `Bead.Core/RouterCore.Requester.cs`                          | The calls this side starts: their request, its credential, its header and its payload, whole or as a transfer; their call ids, held among the pending calls; their timers, their cancel and its reservation; an answer paired with its call, a result received in a transfer; the pending calls' gauges                               |
+| `router/shared/router-writer.ts`            | `Bead.Core/RouterCore.Writer.cs`                             | What goes to the transport: an envelope under the payload's and the envelope's limits, a failure's detail cut to its envelope, traced, handed over with its transport's credential; the session announced to each connection, again when its answer does not go out, and forgotten with it; the announcements' gauges                 |
+| `router/shared/payload-placement.ts`        | `Bead.Core/RouterCore.PayloadPlacement.cs`                   | How a payload goes: whole, as a transfer, or refused `PAYLOAD_TOO_LARGE`; the largest envelope a payload goes whole in, the bytes a chunk carries, a procedure's limit within the router's, a chunk's envelope                                                                                                                        |
+| `router/shared/router-limits.ts`            | `Bead.Core/RouterLimits.cs`                                  | The router's limits over their defaults, checked whole and held together: `limitsOf`, whose twin is no part but the public `RouterLimits` and its `Validate`, outside the owner                                                                                                                                                       |
+| `router/shared/service-trace.ts`            | `Bead.Core/ServiceManager.Trace.cs`                          | The steps a call tells `debug`: whether anyone listens, a call's start and a notification's, each step with its connection, its duration, its failure and its payloads, handed to the manager, which guards each listener                                                                                                             |
+| `router/shared/service-requester.ts`        | `Bead.Core/ServiceManager.Requester.cs`                      | The calls the manager makes: their options over its defaults, their requester declared to the router, their value written, traced, `deprecated` raised, the close on timeout, their answer decoded                                                                                                                                    |
+| `router/shared/service-resolver.ts`         | `Bead.Core/ServiceManager.Resolver.cs`                       | The resolver of a procedure, which the manager registers: a request admitted on its header, its payload decoded, its callback run with its signal, its one answer, or a refusal or a failure in its place, each step traced                                                                                                           |
+| `transport/server/http-request-exchange.ts` | `Bead.Transport.Http/HttpTransportServer.RequestExchange.cs` | One envelope's exchange: its body read into one buffer under its limits, its prefix checked, the request handed on, a cancel's 204, the body's bytes charged and given back; its answer awaited and written here on the C# side, by the server's `send` on the TypeScript side, where Node pushes it to the response the server holds |
+| `transport/server/http-server-fields.ts`    | `Bead.Transport.Http/HttpTransportServer.ServerFields.cs`    | The fields a request carries, read: its target, its authority, its counts, its listen, its body's type; the fields of a preflight and of every answer; an end written once; a malformed request refused as HTTP refuses it                                                                                                            |
+
+What stays in each owner: in `router-core.ts` and `RouterCore.cs`, what comes in, read, traced
+and dispatched, the peer's requests, their credential's session, their answers and the results
+sent as transfers, the transfers a request comes in, the registrations, the teardown and the gauges
+merged; in `service-manager.ts` and `ServiceManager.cs`, the manager, its events and its
+notifications, a resolver's registration and the guard on each `debug` listener; in
+`http-transport-server.ts` and `HttpTransportServer.cs`, the connections and their tokens checked,
+the listens, the outboxes and the server's life, under one lock on the C# side.
+
 ### Following a call
 
 Three paths cross the stack. Each step names its file under `src/` and the function that takes the
@@ -1291,19 +1385,20 @@ call there.
 
 **A request, from a client to a server, and back.**
 
-1. `services.getRequest(procedure, dependencies)(payload)(options)` — `router/shared/service-manager.ts`,
-   `callOf`, the body every requester shares: its declaration to the router, its value written — one
-   that does not write fails the call before anything goes, nothing traced —, the trace, the
-   `deprecated` event, `router.request` with the series the declaration gave, the close on timeout,
-   the decoding of the answer.
+1. `services.getRequest(procedure, dependencies)(payload)(options)` —
+   `router/shared/service-requester.ts`, `callOf`, the body every requester shares: its declaration
+   to the router, its value written — one that does not write fails the call before anything goes,
+   nothing traced —, the trace, the `deprecated` event, `router.request` with the series the
+   declaration gave, the close on timeout, the decoding of the answer.
 2. `request` — `router/client/router-client.ts`: refuses a programmer's error first, binds the
    notification a call subscribes, when it subscribes one, and hands the rest to the core.
-3. `request` — `router/shared/router-core.ts`: refuses a programmer's error or an aborted signal,
-   uncounted, then starts the call, counted when the router has a registry, draws an odd call id
-   and waits under it (`pending-calls.ts`), then `deliver`s the envelope — written by `envelope.ts`
-   and `header.ts`, traced, handed to the transport. A payload too large for one envelope goes as a
-   transfer (`transfer.ts`, `sending-transfers.ts`): its opening first, then each chunk the server's
-   credit lets go, the call waiting on the transfer's inactivity until the last is handed off.
+3. `request` — `router/shared/router-requester.ts`: refuses a programmer's error or an aborted
+   signal, uncounted, then starts the call, counted when the router has a registry, draws an odd
+   call id and waits under it (`pending-calls.ts`), then `deliver`s the envelope through
+   `router-writer.ts` — written by `envelope.ts` and `header.ts`, traced, handed to the
+   transport. A payload too large for one envelope goes as a transfer (`transfer.ts`,
+   `sending-transfers.ts`): its opening first, then each chunk the server's credit lets go, the
+   call waiting on the transfer's inactivity until the last is handed off.
 4. On the server, `server/server.ts` counts the message as its session's activity, and
    `router/server/router-server.ts` notes the connection open. `receive`, in the core, reads the
    prefix and the envelope — what does not read goes through `gate` — and `receiveRequest` checks
@@ -1313,17 +1408,19 @@ call there.
    resolver with it and the controller's `signal`. An opening is held first
    (`receiving-transfers.ts`), credited, and its chunks put together — `receiveChunk` — until the
    payload is whole.
-5. The resolver — `createResolver`, in the service manager — decodes the payload, its admission
-   asked already, runs the callback, and its `response` calls `router.respond`, then the core's
-   `respond`: an answer to a call no longer answered goes nowhere; `beforeAnswer` lets the server
-   settle what the call subscribed; the answer carries the session when it changed
+5. The resolver — `createResolver`, in `router/shared/service-resolver.ts` — decodes the payload,
+   its admission asked already, runs the callback, and its `response` calls `router.respond`, then
+   the core's `respond`: an answer to a call no longer answered goes nowhere; `beforeAnswer` lets
+   the server settle what the call subscribed; the answer carries the session when it changed
    (`announcements.ts`); the call closes as the transport takes the answer. A result too large for
    one envelope goes as a transfer — `sendResult` — its chunks under the client's credit, and the
    call closes once the last is handed off.
-6. Back on the client, `receiveAnswer` pairs the answer with its call by call id, and settles it. A
-   result that opens a transfer is credited as a request's is, and `receiveChunk` settles the call
-   once the result is whole, its call id reserved a while. A call its timeout or its signal ends
-   sends a CANCEL first, and its call id stays reserved a while.
+6. Back on the client, `receiveAnswer`, in `router/shared/router-requester.ts`, pairs the answer
+   with its call by call id, and settles it. A result that opens a transfer is credited as a
+   request's is, and the core's `receiveChunk` hands each chunk to the requester's
+   `receiveResultChunk`, which settles the call once the result is whole, its call id reserved a
+   while. A call its timeout or its signal ends sends a CANCEL first, and its call id stays reserved
+   a while.
 
 ```mermaid
 sequenceDiagram
@@ -1368,8 +1465,8 @@ sequenceDiagram
 1. `services.getNotification(procedure, dependencies)(payload, callback)()` — the service manager
    makes one notification per procedure (`router/shared/notification.ts`), which registers itself
    with the router before its request goes out, since a notification can come in the same read as
-   the answer, then sends the request through the manager's `callOf`, with the notification it
-   `subscribes`.
+   the answer, then sends the request through the service requester's `callOf`, with the
+   notification it `subscribes`.
 2. The client's router binds the call id to the notification as the core draws it, and the request
    carries the SUBSCRIPTION flag — and PACED, when the notification has a `window`.
 3. On the server, the resolver's `response.registerNotification()` calls `subscribe`, which puts
@@ -1439,9 +1536,9 @@ stateDiagram-v2
 
 **A command**, the server's request of one client: `server.services.getCommand(procedure,
 dependencies)(payload)({ connectionHandle })` goes through `callOf` to `request` in
-`router-server.ts`, which needs the connection named and open, then to the core, which draws an even
-call id. The client runs it with the resolver `getCommandResolver` made, and answers through its
-router's `respond`.
+`router-server.ts`, which needs the connection named and open, then to the core's requester, which
+draws an even call id. The client runs it with the resolver `getCommandResolver` made, and answers
+through its router's `respond`.
 
 **The names, and the words they are chosen over.** Every name says one thing, and none is
 abbreviated ([0003](../../docs/decisions/0003-one-word-one-meaning.md)).
@@ -1564,7 +1661,14 @@ across a reload with Preserve log, and exports its records as JSON, `bead-devtoo
 The keyboard moves through the calls (`↑`, `↓`), unfolds them (`→`,
 `←`) and reaches the filter (`/`); a call's context menu copies its request, its answer, or a
 snippet that makes it again by the page's own service manager, and hides or shows its procedure
-alone.
+alone. `←`, `→`, `Home` and `End` move across the view tabs and a call's tabs, and the `?` beside
+the filter opens its syntax, which `Escape` closes. Its status bar's Detail choice puts a call's
+detail right of the list, under it, or, at Auto, as DevTools' Elements panel places its sidebar:
+beside a split wider than 680 px, under it otherwise. The splitter between them follows the
+pointer, or, focused, `←` and `→` (`↑` and `↓` when stacked), `Home` and `End` to its limits, and
+`Enter`, which collapses the list to its least and, pressed again, restores it. The list keeps its
+least first, eight rows when stacked, and the detail its whole tab bar where the panel holds both;
+the panel's page keeps both choices.
 
 A client announces itself as it is built, so a page opened before the extension was installed shows
 nothing until it reloads, which the panel offers; and the hook watches only while a panel is open —
@@ -1581,7 +1685,10 @@ leaves the page; `wire.ts` and `exposition.ts`; and what the parts say to each o
 `messages.ts`, JSON alone. Chrome's, in `chrome/`: its manifest; `bridge.ts`, beside the hook in the
 extension's world, which alone may open a runtime port; `background.ts`, which pairs each tab's
 page with the panel open on it; `devtools.ts`, which adds the panel; `panel.ts`, which makes the
-panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed.
+panel's host of Chrome's API; and `api.ts`, the part of that API they use, typed. Its type scale
+and spacing are penumbra's, its two sheets copied whole into `devtools/penumbra/` with the commit
+they came from; the panel's skin over them, in `panel.html`, sets every colour the panel draws with,
+DevTools' own.
 
 `yarn test:devtools` runs its tests, in a Playwright config of their own, apart from the package's
 unit project: its pure modules in Node, the panel's model among them, fed one traffic of the demo's

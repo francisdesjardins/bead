@@ -2,7 +2,7 @@ namespace Bead;
 
 /// <summary>
 /// How a side resolves a request presenting a <see cref="CredentialScheme.Jwt"/> or an
-/// <see cref="CredentialScheme.Elsewhere"/> to its credential's session (spec 9.2, step 5), from
+/// <see cref="CredentialScheme.Elsewhere"/> to its credential's session (spec 9.2, step 6), from
 /// the <see cref="Credentials"/> it was given, on the clock it runs on: a JWT verified as section
 /// 13.8 states, its key found among the application's keys and those its key set answered that
 /// serve, as section 13.9 states; an ELSEWHERE by the application's verifier, as section 13.11
@@ -601,7 +601,17 @@ internal sealed class CredentialResolver
     /// <see cref="OperationCanceledException"/> as <paramref name="signal"/> ends a wait on its key
     /// set, which goes on for the others.
     /// </summary>
-    public ValueTask<CallSession?> Resolve(SessionRequest request, CancellationToken signal)
+    public async ValueTask<CallSession?> Resolve(SessionRequest request, CancellationToken signal)
+    {
+        return (await ResolutionOf(request, signal)).Session;
+    }
+
+    /// <summary>
+    /// What <see cref="Resolve"/> resolves to, and why a credential that does not hold does not:
+    /// for a JWT, the step of section 13.8 that refused it; for an ELSEWHERE, <c>verifier</c>, its
+    /// verifier made no session of it, or <c>end</c>, its end had come as it settled (spec 13.12).
+    /// </summary>
+    internal ValueTask<CredentialResolution> ResolutionOf(SessionRequest request, CancellationToken signal)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -609,13 +619,34 @@ internal sealed class CredentialResolver
         {
             { Scheme: CredentialScheme.Jwt, Token: { } token } => ResolveJwt(token, (request.Audiences ?? _audiences, signal)),
             { Scheme: CredentialScheme.Elsewhere } when request.TransportCredential is { } carried => ResolveElsewhere(carried, signal),
-            _ => ValueTask.FromResult<CallSession?>(null),
+            _ => ValueTask.FromResult(new CredentialResolution(null, CredentialResolution.SessionReason)),
+        };
+    }
+
+    // the step of section 13.8 that refused a JWT, as spec/vectors.json writes it
+    private static string ReasonOf(JwtRefusal refusal)
+    {
+        return refusal switch
+        {
+            JwtRefusal.Token => "token",
+            JwtRefusal.Crit => "crit",
+            JwtRefusal.Typ => "typ",
+            JwtRefusal.Kid => "kid",
+            JwtRefusal.Alg => "alg",
+            JwtRefusal.Key => "key",
+            JwtRefusal.Signature => "signature",
+            JwtRefusal.Iss => "iss",
+            JwtRefusal.Exp => "exp",
+            JwtRefusal.Nbf => "nbf",
+            JwtRefusal.Aud => "aud",
+            JwtRefusal.Sid => "sid",
+            _ => "sub",
         };
     }
 
     // a JWT, verified against the keys that serve; one of an issuer the key set names whose key does
     // not serve waits for that issuer's keys, then is verified again
-    private async ValueTask<CallSession?> ResolveJwt(string token, (IReadOnlyCollection<string> Audiences, CancellationToken Signal) against)
+    private async ValueTask<CredentialResolution> ResolveJwt(string token, (IReadOnlyCollection<string> Audiences, CancellationToken Signal) against)
     {
         var (verdict, judged) = await VerdictOf(token, against.Audiences);
 
@@ -629,28 +660,30 @@ internal sealed class CredentialResolver
 
         if (!verdict.Holds)
         {
-            return null;
+            return new CredentialResolution(null, ReasonOf(verdict.Reason!.Value));
         }
 
         var identifier = verdict.Identifier!;
 
-        return new CallSession
-        {
-            Data = verdict.Claims,
-            Identifier = new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = identifier.Issuer, Sid = identifier.Sid, Sub = identifier.Sub },
-            End = verdict.End,
-        };
+        return new CredentialResolution(
+            new CallSession
+            {
+                Data = verdict.Claims,
+                Identifier = new SessionIdentifier { Scheme = CredentialScheme.Jwt, Issuer = identifier.Issuer, Sid = identifier.Sid, Sub = identifier.Sub },
+                End = verdict.End,
+            },
+            null);
     }
 
     // an ELSEWHERE, by the application's verifier: its end rounded up to a millisecond, E, against
     // the wall clock read as it settles, W; W ≥ E does not hold
-    private async ValueTask<CallSession?> ResolveElsewhere(string carried, CancellationToken signal)
+    private async ValueTask<CredentialResolution> ResolveElsewhere(string carried, CancellationToken signal)
     {
         var session = await _credentials.Verify!(carried, signal);
 
         if (session is null)
         {
-            return null;
+            return new CredentialResolution(null, "verifier");
         }
 
         if (session.Id is null)
@@ -662,15 +695,17 @@ internal sealed class CredentialResolver
 
         if (end is { } ends && Now() >= ends)
         {
-            return null;
+            return new CredentialResolution(null, "end");
         }
 
-        return new CallSession
-        {
-            Data = session.Data,
-            Identifier = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = session.Id },
-            End = end,
-        };
+        return new CredentialResolution(
+            new CallSession
+            {
+                Data = session.Data,
+                Identifier = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = session.Id },
+                End = end,
+            },
+            null);
     }
 
     // an end in milliseconds since the epoch, rounded up to a whole one, as a number every side

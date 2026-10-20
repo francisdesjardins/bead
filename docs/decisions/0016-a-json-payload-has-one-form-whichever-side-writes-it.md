@@ -255,14 +255,15 @@ refuses bytes that are not UTF-8, and a `text` writer a string holding a surroga
 **What does not read, or does not write, fails where it is**, the same on both sides:
 
 - a request's payload that does not read is answered `PAYLOAD_UNDECODABLE`, before its resolver sees
-  it (`service-manager.ts`; `ServiceManager.cs`);
-- a result's fails its call `PAYLOAD_UNDECODABLE` at the requester (`service-manager.ts`;
-  `ServiceManager.cs`);
+  it (`service-resolver.ts`; `ServiceManager.Resolver.cs`);
+- a result's fails its call `PAYLOAD_UNDECODABLE` at the requester (`service-requester.ts`;
+  `ServiceManager.Requester.cs`);
 - a notification's is reported `PAYLOAD_UNDECODABLE`, and no callback hears it (`notification.ts`,
   `Notification.cs`);
 - a request's value that does not write fails its call before anything goes, written before its
   trace and its deprecation: no call is made, and nothing is traced;
-- an answer's, as a resolver that fails: `PROCEDURE_FAILED`, reported (`ServiceManager.cs`);
+- an answer's, as a resolver that fails: `PROCEDURE_FAILED`, reported (`service-resolver.ts`;
+  `ServiceManager.Resolver.cs`);
 - a notification's goes to none of its subscriptions: reported, and counted `failed` for each.
 
 **Where Bead departs from the standards it names, it says so:**

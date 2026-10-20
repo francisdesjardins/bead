@@ -59,6 +59,8 @@ tests/
   Shared/                       what several test projects link: the test clock, the durations'
                                 helper, the JSON payloads, the addresses a server listens on
 tools/
+  Bead.Fuzz/                    the fuzz targets, the TypeScript side's one for one, which
+                                tools/fuzz.mjs runs under libFuzzer (README, Fuzzing)
   Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
                                 Generated/ is what tools/protobuf-conformance.mjs generates at run
                                 time; failing.txt, its failure list (decision 0028)
@@ -67,6 +69,35 @@ tools/
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
 application of its own: one port for both comes from a proxy in front, never from a server they
 share.
+
+### The parts of the core, the manager and the HTTP server
+
+`RouterCore`, `ServiceManager` and `HttpTransportServer` are each built of parts: a private nested
+type of its owner, in a partial file named after both under `src/`, the type named after the
+TypeScript module it is the twin of, in PascalCase (`RouterRequester`, `ServiceTrace`,
+`HttpRequestExchange<TConnection>`); nothing of a part is reachable from outside its owner. One
+row names no part: `router-limits.ts`, whose twin is the public `RouterLimits`, outside the owner.
+The TypeScript side's README holds the same table:
+
+| TypeScript module                           | C# file                                                      | What it holds                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `router/shared/router-requester.ts`         | `Bead.Core/RouterCore.Requester.cs`                          | The calls this side starts: their request, its credential, its header and its payload, whole or as a transfer; their call ids, held among the pending calls; their timers, their cancel and its reservation; an answer paired with its call, a result received in a transfer; the pending calls' gauges                               |
+| `router/shared/router-writer.ts`            | `Bead.Core/RouterCore.Writer.cs`                             | What goes to the transport: an envelope under the payload's and the envelope's limits, a failure's detail cut to its envelope, traced, handed over with its transport's credential; the session announced to each connection, again when its answer does not go out, and forgotten with it; the announcements' gauges                 |
+| `router/shared/payload-placement.ts`        | `Bead.Core/RouterCore.PayloadPlacement.cs`                   | How a payload goes: whole, as a transfer, or refused `PAYLOAD_TOO_LARGE`; the largest envelope a payload goes whole in, the bytes a chunk carries, a procedure's limit within the router's, a chunk's envelope                                                                                                                        |
+| `router/shared/router-limits.ts`            | `Bead.Core/RouterLimits.cs`                                  | The router's limits over their defaults, checked whole and held together: `limitsOf`, whose twin is no part but the public `RouterLimits` and its `Validate`, outside the owner                                                                                                                                                       |
+| `router/shared/service-trace.ts`            | `Bead.Core/ServiceManager.Trace.cs`                          | The steps a call tells `debug`: whether anyone listens, a call's start and a notification's, each step with its connection, its duration, its failure and its payloads, handed to the manager, which guards each listener                                                                                                             |
+| `router/shared/service-requester.ts`        | `Bead.Core/ServiceManager.Requester.cs`                      | The calls the manager makes: their options over its defaults, their requester declared to the router, their value written, traced, `deprecated` raised, the close on timeout, their answer decoded                                                                                                                                    |
+| `router/shared/service-resolver.ts`         | `Bead.Core/ServiceManager.Resolver.cs`                       | The resolver of a procedure, which the manager registers: a request admitted on its header, its payload decoded, its callback run with its signal, its one answer, or a refusal or a failure in its place, each step traced                                                                                                           |
+| `transport/server/http-request-exchange.ts` | `Bead.Transport.Http/HttpTransportServer.RequestExchange.cs` | One envelope's exchange: its body read into one buffer under its limits, its prefix checked, the request handed on, a cancel's 204, the body's bytes charged and given back; its answer awaited and written here on the C# side, by the server's `send` on the TypeScript side, where Node pushes it to the response the server holds |
+| `transport/server/http-server-fields.ts`    | `Bead.Transport.Http/HttpTransportServer.ServerFields.cs`    | The fields a request carries, read: its target, its authority, its counts, its listen, its body's type; the fields of a preflight and of every answer; an end written once; a malformed request refused as HTTP refuses it                                                                                                            |
+
+What stays in each owner: in `router-core.ts` and `RouterCore.cs`, what comes in, read, traced
+and dispatched, the peer's requests, their credential's session, their answers and the results
+sent as transfers, the transfers a request comes in, the registrations, the teardown and the gauges
+merged; in `service-manager.ts` and `ServiceManager.cs`, the manager, its events and its
+notifications, a resolver's registration and the guard on each `debug` listener; in
+`http-transport-server.ts` and `HttpTransportServer.cs`, the connections and their tokens checked,
+the listens, the outboxes and the server's life, under one lock on the C# side.
 
 ## Modules
 
@@ -128,6 +159,24 @@ share.
   limit of Kestrel's, so a body past the limit is the marked 413 and one past the budget the marked
   503; a refusal of HTTP/1 whose body it does not read says `connection: close`; `X-Forwarded-For`,
   on both transports, is read by one rule of its own, `TrustedProxies`, as the section below says.
+  Kestrel's `MinRequestBodyDataRate` and `MinResponseDataRate` are none, Bead's own rules in their
+  place (spec 15.12): a body that comes slower than `MinimumBodyBytesPerSecond`, 240, once
+  `BodyGracePeriod`, 5 s, passed is refused 408 `too-slow`, marked and told, its connection kept;
+  an answer, or a listen's batch, its socket still holds past the longer of `SendGracePeriod` and
+  its bytes at `MinimumSendBytesPerSecond` is lost, its connection closed at both ends and reported
+  through `Error`, naming the bound, as an outbox past `MaximumOutboxBytes` is. A head is Kestrel's
+  `RequestHeadersTimeout`, the transport's `HeadersTimeout`, 30 s, on both transports, answered 408
+  as HTTP answers it. Every answer written before its body is whole closes its socket in stages
+  (RFC 9112 §9.6): its end flushed, what still comes read and dropped until its client closes or 2
+  seconds pass, so a reset never erases it.
+- **A WebSocket server** bounds its connections as an HTTP server does, `MaximumConnections`,
+  10,000, and `MaximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its
+  101, its place taken as it is judged (spec 15.2, step 8), so behind a proxy it needs
+  `TrustedProxies` or `UnnamedProxies`, its health warning once its busiest address holds 80% of
+  `MaximumConnectionsPerAddress`, gauged `largestAddressConnections`, before the first 503; and
+  holds what waits for a client's socket to `MinimumSendBytesPerSecond` past `SendGracePeriod` and
+  to `MaximumUnsentBytes`, the facade's drawn from its router's limits, a client behind either
+  dropped, its close unclean, and reported through `Error`, naming the bound.
   `BeadHttpClient` is its client, as .NET's own is `HttpClient`.
   The connection's token, in `bead-connection-token`, is readable by script, where a socket is not:
   off the machine, HTTPS.
@@ -151,9 +200,16 @@ share.
   clear, it says `Secure = false`. Both clients race the address families of a name, as RFC 8305 asks and Node's
   clients and the browsers do, through `HappyEyeballs`, a `SocketsHttpHandler.ConnectCallback`: a
   connect by `localhost` to a server on one family never waits out the other's refusal; an HTTP
-  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: a 3xx
-  answered to a connect, a send or an upgrade fails it, its status named (spec 15.6), the
-  WebSocket client's handler built with `AllowAutoRedirect = false` as the HTTP client's is.
+  client given a `Handler` keeps the handler's behaviour. Neither follows a redirect: one
+  answered to a connect or an upgrade fails it, its status named, and one answered to a send or a
+  listen is lost, its `bead-refusal` unread (spec 15.6), each client's own handler built with
+  `AllowAutoRedirect = false`. A `Handler` given follows none either: an `HttpClientHandler` or a
+  `SocketsHttpHandler`, innermost of the `DelegatingHandler`s given, whose `AllowAutoRedirect` is
+  true is an `ArgumentException` naming it as the client is built, where the TypeScript side,
+  which cannot read a `fetch` before it answers, catches one at its first answer; a handler of
+  another kind that follows all the same is caught by its answer's `RequestMessage`, gone to
+  another URL than the one asked, which fails the connect, and loses the connection of a send or a
+  listen.
 - **The credential a transport carries** beside an envelope, which a call presenting `ELSEWHERE`
   stands for: over HTTP, each `POST`'s `Authorization`; over a WebSocket, its upgrade's, for every
   envelope of the connection, toward its server alone (spec 15.2, [decision
@@ -171,7 +227,9 @@ share.
   carries none, whatever its `Authorization`: a page's browser writes its own authentication on it.
   One connection carries one credential: a client presents another by connecting again, and gives
   its router's default the same bytes, from one source; between the two, a call fails before it
-  goes, `DESTINATION_UNREACHABLE`.
+  goes, `DESTINATION_UNREACHABLE`. A call's options present `Credential.Elsewhere(carried)`: the
+  header's `Credential.Elsewhere()`, nothing to carry, a JWT with no token and a scheme to come are
+  an `ArgumentException`, before the call starts (spec 13.4).
 
   ```csharp
   // one source for the upgrade's credential and the router's default, renewed together
@@ -195,6 +253,15 @@ share.
       },
   });
   ```
+
+  No procedure is handed a bearer credential its call came with (spec 13.1). The `RequestHeader` a
+  resolver, its callback and a `BeforeRequest` are handed, a relay's `BeforeRoute` among them,
+  carries a `Credential` whose `Token` is none for a `JWT`, its scheme alone; what the transport
+  carried beside an `ELSEWHERE`, and a `JWT`'s token, reach the side's verifier, its `Credentials`,
+  and a relay, which moves them to leg B, alone. A server's `SessionOf`, asked for a call presenting
+  none or `OPAQUE`, is handed a `SessionRequest` of its connection and its header, which carries no
+  transport credential.
+
 - **A `proto` payload** is read by the codec beadc generates over Google.Protobuf, which calls
   `ProtoRecords.Check`, of `Bead.Protobuf`, first: it walks the payload's records by the message's
   own descriptor, its shape built once and cached by it, and refuses what protobuf refuses where a
@@ -300,8 +367,8 @@ prefix are set, and a network of prefix 0, which would trust what every client w
 `ArgumentException` as the transport is built. `Forwarded` is never read. The client's address so
 read names its connection, `ip=` in its handle, and its refusals; its port is the socket's, the
 nearest proxy's connection's behind one. A proxy neither listed nor counted is a client as any
-other: every client behind it is its address, which names them on either transport and which an
-HTTP server's `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
+other: every client behind it is its address, which names them on either transport and which
+either server's `MaximumConnectionsPerAddress` counts, so a told `busy` whose `Address` is your
 proxy's, or a `largestAddressConnections` near its ceiling on `/health`, is a proxy to list. A
 proxy whose platform publishes its addresses is listed: Google Cloud's global load balancer by
 `130.211.0.0/22`, `35.191.0.0/16` and the forwarding rule's own address, Cloudflare by its ranges,
@@ -343,6 +410,23 @@ server.Transport.Refusal += (refusal) =>
 };
 ```
 
+A server's router tells each access it refuses, `AccessRefused`, an `AccessRefusal` of its stage,
+`Credential` or `Admission`, the code answered, its reason — a `JWT`'s step of section 13.8, an
+`OPAQUE`'s `session`, an `ELSEWHERE`'s `nothing-carried`, `verifier` or `end`, `scheme` for a scheme
+the server takes none of, or the admission of Bead's own that refused, `requireSession`,
+`requireCredential`, `shareLegBSession`, `no-before-route` — the scheme, what was called, the
+connection, and the refused request's own address and port, over HTTP its exchange's, never its
+connect's; never the credential, a claim of a token nor an admission's detail (spec 13.12). A
+scanner's every token is an event: what the listener writes, and at what rate, is the
+application's.
+
+```csharp
+server.Router.AccessRefused += (refusal) =>
+{
+    Console.Error.WriteLine($"access refused {refusal.Stage} {refusal.Code} {refusal.Reason}: {refusal.ServiceId}/{refusal.ProcedureId} from {refusal.Address}:{refusal.Port}");
+};
+```
+
 A transport goes on through what its listener throws, a reconnection's listener among them, and
 awaits nothing it returns (spec 15.1): what one throws is reported through the transport's `Error`,
 which no router forwards to its own. A server gives its transport as `IServerTransport`, which
@@ -353,6 +437,10 @@ process, so a listener catches its own. The threading analyzers'
 [VSTHRD101](https://microsoft.github.io/vs-threading/analyzers/VSTHRD101.html) says where one is
 given, at build: Bead's own projects hold it, and an application's may, by
 `Microsoft.VisualStudio.Threading.Analyzers`.
+
+An error of a side's own, a resolver that throws or a result it cannot send, is reported through its
+router's `Error` and answered `PROCEDURE_FAILED` with no detail: an exception's message is the
+side's, never the peer's to read (spec 9.0).
 
 ```csharp
 server.Router.Error += (reason, connectionHandle) =>

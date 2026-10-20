@@ -16,7 +16,7 @@
     "Each item of differs names a row of docs/support.md an entry crosses, which names this file and the entry, and the language it excuses: a value that language's type cannot hold, or a payload its stock protobuf library reads otherwise than 17.9 says. A harness plays every entry but those a differs excuses its language from.",
     "clauses are the units of spec.md an entry checks: a clause, 17.6; an item of its numbered list, 17.5.7."
   ],
-  "specVersion": "0.6.0",
+  "specVersion": "0.7.0",
   "payloads": [
     {
       "name": "a string outside ASCII, written as it is",

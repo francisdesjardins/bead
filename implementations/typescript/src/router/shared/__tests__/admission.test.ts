@@ -106,6 +106,40 @@ test.describe('admissionOf', () => {
     }
   });
 
+  // spec 13.1
+  test('hands beforeRequest the connection, the header and the call’s session alone, never a bearer credential its call came with', () => {
+    const asked: IAdmissionRequest<Handle>[] = [];
+    const admitting: IBeforeRequest<Handle> = (admission) => {
+      asked.push(admission);
+
+      return true;
+    };
+    const session = Object.freeze({ data: 'ada' });
+    // a request as a destination's handler admits it: its header as it came, a JWT's token in it,
+    // and what its transport carried beside it
+    const carried = {
+      connectionHandle: 'a',
+      header: { ...request.header, credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } },
+      session,
+      transportCredential: 'Bearer e',
+    } as const;
+
+    expect(admissionOf(admitting, SERVER_FAILURES)(carried)).toBeUndefined();
+    expect(asked).toHaveLength(1);
+    expect(Object.keys(asked[0] ?? {}).toSorted()).toEqual([
+      'connectionHandle',
+      'header',
+      'session',
+    ]);
+    expect(asked[0]).toStrictEqual({
+      connectionHandle: 'a',
+      header: { ...request.header, credential: { scheme: CredentialScheme.JWT } },
+      session,
+    });
+    // what came is left as it came
+    expect(carried.header.credential.token).toBe('a.b.c');
+  });
+
   test('throws what the admission throws', () => {
     const thrown = new Error('no admission today');
     const throwing: IBeforeRequest<Handle> = () => {

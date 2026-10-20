@@ -3,6 +3,10 @@
 [![CI](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/francisdesjardins/bead/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+Bead is an exploration: how far one `.proto` file, a generator and a hybrid binary protocol can go —
+a specification with its conformance files, two implementations at parity, and the tools around
+them. It is a personal project, kept at its author's pace.
+
 Bead is a binary wire protocol for calls between a client and a server: a request and its result or
 failure, a subscription and its notifications, the commands a server sends back, cancels, sessions,
 relays, and transfers of large payloads under credit. Each envelope is written at fixed big-endian
@@ -20,7 +24,52 @@ This repository holds the protocol and its implementations, side by side:
 - **an interop service** each side offers, which the other side's client calls over both
   transports.
 
-Nothing is published.
+**Nothing is published before 1.0.0.** No package goes to npm or NuGet, and no image to a
+registry, so that the wire, the names and the API can change freely until then, with no deprecation
+cycle. Build on a commit, pinned.
+
+## At a glance
+
+A service is declared once, in a `.proto` with Bead's options, and `beadc` generates its server and
+its client in TypeScript and in C#. What is left to write is the resolvers and the calls, here
+abridged from [`examples/hello`](examples/hello), whose C# half writes the same:
+
+```ts
+// the server: its admission hooks, by the names the .proto gives them, and a resolver that asks
+// its caller back before it answers
+const hello = new HelloServer({ admissions: { greeted } });
+
+hello.on('sayHello', async ({ connectionHandle, payload }, response) => {
+  const name =
+    payload.name === ''
+      ? (await hello.command.askName({ question: 'What is your name?' })({ connectionHandle })).name
+      : payload.name;
+
+  return response({ greeting: `Hello, ${name}!` });
+});
+hello.offer(server);
+
+// the client: answers the server's command, calls, and follows a subscription at its own pace
+await using client = createWSClient();
+const greeter = new HelloClient(client, { windows: { countDown: 1 } });
+
+greeter.on('askName', (_request, response) => {
+  return response({ name: 'Ada' });
+});
+await client.connect({ host: '127.0.0.1', port });
+
+const { greeting } = await greeter.sayHello({ name: '' })(); // 'Hello, Ada!'
+
+await greeter.notifications.countDown({ from: 3 }, async ({ remaining }) => {
+  // a window of 1: the next tick waits until this callback settles
+})();
+```
+
+## Next to the alternatives
+
+gRPC-Web and Connect carry unary calls and server streaming to a browser, neither a client's stream
+nor the server's own calls to the client; Bead carries both, and subscriptions the client paces,
+over a WebSocket or plain HTTP.
 
 ## Why Bead
 
@@ -29,8 +78,8 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, from
-0.6.0, a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, ahead,
+a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -63,19 +112,18 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
 own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: the bounds a server keeps against a peer that holds it — the calls a peer holds open
-  over a WebSocket or a Web Worker (spec 8.3), a WebSocket server's connections, what a WebSocket
-  server queues for a client that no longer reads, a request whose headers or body trickle in — and
-  a security event for a credential refused, each by a decision of its own; then each side's
-  parsers fuzzed, guided by coverage, Jazzer.js on the TypeScript side and SharpFuzz on the C#
-  side, both held to read one corpus alike, a short run in CI.
-- **0.6.0**: a topic-based publish/subscribe broker as one more transport, one core and one
-  adapter a broker, Bead's envelope, routers and sessions the same at each end
+- **Next**: one corpus read alike by both sides' parsers, held as a gate as
+  `tools/protobuf-conformance.mjs differential` holds a `proto` payload, a target for a
+  WebSocket's handshake beside the four of [Fuzzing](#fuzzing), and a short run of them in CI; and a
+  guard in CI against a gross regression of the benches, where their spread on CI's runners lets
+  one hold ([Measurement](#measurement)).
+- **Then**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
+  a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
 - **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
-  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a
-  latency bench and a constrained C side, each bound by the records that
-  [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
+  conformance, a relay across languages in the interop, the DevTools extension on Firefox, a counted
+  call's cost measured against an uncounted one, and a constrained C side, each bound by the records
+  that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
 - **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
   one port, mounted in an application's own web server, which would take the place of the
   small local proxy that couples the two transports
@@ -89,7 +137,7 @@ spec/                         spec.md, debugging.md, the conformance files both 
   schemas/                    their JSON Schemas
 implementations/
   typescript/                 a Yarn project of its own: src/, interop/, demo/, devtools/, browser/, tools/
-  dotnet/                     Bead.slnx: src/, interop/, tests/; and tools/, outside it
+  dotnet/                     Bead.slnx: src/, interop/, tests/, tools/Bead.Fuzz; and the other tools/, outside it
 builder/                      beadc, the builder: a Yarn project of its own: src/, proto/, test/, tools/
   Dockerfile                  beadc's image, built from the root, its tests run on the image itself
   wrappers/                   beadc.sh and beadc.ps1, which run the image, as templates beadc fills
@@ -100,7 +148,8 @@ beadc.yaml                    the interop's code, generated from its blueprint b
 docs/
   decisions/                  the decision records, and their index
   support.md                  the support matrix: each feature in each language, and its test
-tools/                        repository checks, the release and the coverage report, Node without dependencies
+tools/                        repository checks, the release, the coverage report, bench-compare.mjs and fuzz.mjs, Node without dependencies
+  fuzz/                       fuzzer.json, the pin of the C# side's fuzzer and of its instrumenter
 .githooks/                    the repository checks before each commit, opt-in
 .github/workflows/ci.yml      the CI
 CLAUDE.md, .claude/workflows/ the standing instructions for Claude sessions, and their workflows
@@ -120,16 +169,16 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 
 | File                                                    | What it holds                                                                                                                                                                                         |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`vectors.json`](spec/vectors.json)                     | 230 named vectors in 10 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, and a `JWT`'s verdicts                                                  |
+| [`vectors.json`](spec/vectors.json)                     | 238 named vectors in 11 groups: headers and envelopes read and written back to their bytes, the refusals, each with its code, a `JWT`'s verdicts, and the credentials refused with their told reason  |
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
-| [`transports.json`](spec/transports.json)               | 116 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
+| [`transports.json`](spec/transports.json)               | 122 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
-| [`durations.json`](spec/durations.json)                 | 21 places that take a duration an application gives a side, by 31 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
+| [`durations.json`](spec/durations.json)                 | 26 places that take a duration an application gives a side, by 36 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
 | [`codecs.json`](spec/codecs.json)                       | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
 | [`codecs.proto`](spec/codecs.proto)                     | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
 | [`debug-filters.json`](spec/debug-filters.json)         | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                   |
-| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 50 exits of the interop service's server, the series each step moved                                                |
+| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 52 exits of the interop service's server, the series each step moved                                                |
 | [`interop-blueprint.json`](spec/interop-blueprint.json) | the interop service's API: its one service, its 18 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                    |
 | [`interop-service.json`](spec/interop-service.json)     | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                      |
 
@@ -321,7 +370,9 @@ same file, and prints each file's lines and branches run, then the lines no repo
 `--floor`, it fails under the side's floor, or when it measured nothing, and with `--summary`, it
 writes the report into the run's summary. A floor sits half a point under what was measured, and
 rises with `--raise`, never down but by a decision
-([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Locally, the same commands as CI's:
+([0006](docs/decisions/0006-a-rule-has-its-gate.md)). Each run keeps its reports 14 days, among its
+artifacts: `coverage-typescript`, c8's HTML to browse and its lcov, and `coverage-csharp`, the
+cobertura files. Locally, the same commands as CI's:
 
 ```sh
 cd implementations/typescript
@@ -335,6 +386,164 @@ rm -rf TestResults/coverage  # every report in the folder is merged: a stale one
 dotnet test --solution Bead.slnx --coverage --coverage-output-format cobertura --results-directory TestResults/coverage
 node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --under implementations/dotnet/src --floor csharp
 ```
+
+## Measurement
+
+Both sides measure the same four layers on the loopback. Run each bench separately on a quiet
+machine, with Node, the TypeScript dependencies and .NET installed. Both benches start the other
+side's interop server as the interop tests do: `interop/serve.ts` for TypeScript, and
+`dotnet run -c Release --project interop/Bead.Interop.Server` for C#. The server reports its
+WebSocket and HTTP ports and serves until its standard input closes. A launch failure fails the
+bench; every reported measure has every requested run.
+
+From the root:
+
+```sh
+node --expose-gc implementations/typescript/tools/bench.mjs --runs 3 --seconds 3 --json > typescript.json
+dotnet build -c Release implementations/dotnet/tools/Bead.Benchmarks
+dotnet run -c Release --no-build --project implementations/dotnet/tools/Bead.Benchmarks -- --runs 3 --seconds 3 --json > csharp.json
+node tools/bench-compare.mjs typescript.json csharp.json
+```
+
+`--runs` defaults to 3; `--seconds` defaults to 3 and bounds each timed phase of each run. Both
+require positive integers. Each codec warms for 5,000 round trips, each call payload for 500 calls,
+and each large echo for one call. Longer phases give the runtimes more time to warm. Without
+`--json`, the report prints its environment and method, then each measure's median, minimum and
+maximum. Progress goes to stderr; JSON alone goes to stdout.
+
+| Layer         | Measure                                                    | Unit and scope                                                                     |
+| ------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                     |
+| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                          |
+| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP and WebSocket            |
+| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                     |
+| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes |
+| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                |
+| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                |
+| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                             |
+
+Every call measure runs with client and server in the same process (`local`) and with the other
+language's interop server in a child process (`interop`), on each transport. The report's `side`
+names its client: `typescript` calls C# in `interop`, and `csharp` calls TypeScript. Codecs,
+notifications and large echoes run locally. The notification producer targets a 1 ms cadence,
+uses a credit window of 32 and gives every value its own place, with no replacement key. At each
+wake-up it sends every value whose deadline passes, catching up after a late timer; at most 32
+values await their handlers. It sleeps until the next deadline when caught up. Each value's
+monotonic timestamp is taken immediately before its own notify; latency includes serialization,
+scheduling, transport and decoding. Every due notification reaches the handler within the timed
+phase plus a 30 s drain allowance. Throughput records the achieved rate, including drain time.
+
+A WebSocket carries the 20 MiB echo as protocol transfer chunks. HTTP carries each payload in one
+whole envelope, with a 32 MiB envelope and payload limit on both endpoints; HTTP supports no
+protocol transfer chunks. The large-echo rows compare the cost of moving the same application
+payload through each transport's supported framing.
+
+Both sides count bytes allocated on their managed heap around 2,000 calls, process-wide, including
+transient objects and unrelated background work. C# uses `GC.GetTotalAllocatedBytes(true)`. Node
+uses `v8.GCProfiler`, with `used_heap_size` readings just inside its start/stop interval:
+`allocated = usedEnd - usedStart + sum(beforeGC.heapStatistics.usedHeapSize - afterGC.heapStatistics.usedHeapSize)`.
+The sum counts bytes reclaimed by every collection, so transient allocations count too. The
+profiler's camelCase fields and the heap reading's snake_case field carry those names on Node
+24.9. `--expose-gc` is optional: it allows a full GC before profiling, reducing garbage carried
+into the interval. The calculation requires no explicit GC. A negative or non-finite allocation
+value fails the run. Both counters include client and server in `local`, and only the client
+process in `interop`. Neither counts the remote server or native allocations; V8 also excludes
+external buffers such as `ArrayBuffer` backing stores. The reports state each counter and scope.
+
+Both JSON reports use `bead-bench/1`:
+
+- `side`: `typescript` or `csharp`;
+- `environment`: CPU model and logical count, OS platform/release/architecture, Node and V8
+  versions, .NET version information, and the measured Git commit;
+- `method`: runs, seconds per phase, concurrency, notification interval/window, memory call count,
+  the memory method/scope/limitations, and the large-echo and interop scopes;
+- `measures`: rows with `id`, `name`, `scenario`, `transport`, `sizeBytes`, `unit`, `direction`, raw
+  `samples` in run order, and their `median`, `min` and `max`. An even run count averages the two
+  central samples. The ID is `<scenario>.<transport>.<sizeBytes>.<name>`; codecs use transport
+  `none`. Latency, codec time and memory use direction `lower`; throughputs use `higher`.
+
+The comparison matches IDs, checks units, directions, samples and statistics, and requires the
+same measurement set. It prints the candidate median's change relative to the baseline median's
+absolute value: positive means a larger value. A zero baseline gives an unbounded change unless
+both values are zero. It also identifies different memory methods. Every number belongs to its
+machine, runtime, method and run; compare on the same machine and inspect the spread.
+
+```sh
+node tools/bench-compare.mjs baseline.json candidate.json --threshold 25%
+node tools/bench-compare.mjs baseline.json candidate.json --threshold 25% --threshold call.p99=15% --threshold local.http.1024.call.p99=10%
+```
+
+A threshold tests regression: an increase for `lower`, a decrease for `higher`. An exact ID takes
+precedence over a measure name, which takes precedence over the default percentage. Repeat
+`--threshold` for distinct selectors. Equality passes; a regression strictly past its threshold
+exits 1. Without thresholds the tool prints a comparison and exits 0; invalid reports, incompatible
+measurement sets and selectors that match nothing exit 2. These commands run by hand; CI has no
+performance guard.
+
+Each release keeps both reports, `.bench/v<version>-typescript.json` and
+`.bench/v<version>-csharp.json`, which git ignores, and compares each with the last release's on
+the machine that made them:
+
+```sh
+node tools/bench-compare.mjs .bench/v0.5.0-typescript.json .bench/v0.6.0-typescript.json --threshold 25%
+node tools/bench-compare.mjs .bench/v0.5.0-csharp.json .bench/v0.6.0-csharp.json --threshold 25%
+```
+
+A regression past its threshold is read before the finish: explained in the release's notes, or
+fixed.
+
+## Fuzzing
+
+Both sides fuzz the same four parsers, guided by coverage, each fed raw bytes: `envelope`, the
+envelope reader, header and body, and a failure's record; `payload-codecs`, the `json` and `text`
+codecs' readers, what they read written back; `http-fields`, the HTTP transport's field parsers,
+an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the target and its
+`Host`, and `Origin`, the first byte picking the field; `debug-filter`, the `debug` filter's
+parser and the patterns of the filter it returns. A target lets its parser's documented refusal
+pass; any other exception, an input past 1 s, or memory past 256 MiB of its own is a finding. The
+TypeScript side runs [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) over
+`implementations/typescript/tools/fuzz/`, a Yarn project of its own, installed by hand, which
+neither the package's install nor CI fetches. The C# side runs
+[SharpFuzz](https://github.com/Metalnem/sharpfuzz) and libFuzzer for Windows,
+[libfuzzer-dotnet](https://github.com/Metalnem/libfuzzer-dotnet), over
+`implementations/dotnet/tools/Bead.Fuzz`, whose fuzzer `tools/fuzz/fuzzer.json` pins by its release
+and its SHA-256. `tools/fuzz.mjs` drives both, by hand; CI only builds and checks the targets.
+
+From the root, once, then after every change to what a target reads:
+
+```sh
+(cd implementations/typescript/tools/fuzz && yarn install)
+node tools/fuzz.mjs fetch
+node tools/fuzz.mjs seed
+node tools/fuzz.mjs build typescript
+node tools/fuzz.mjs build csharp
+```
+
+`fetch` writes the fuzzer and SharpFuzz's instrumenter into `Bead.Fuzz/.fuzzer/`; `seed` writes the
+bytes of `spec/vectors.json`, `conversations.json`, `transports.json`, `codecs.json` and
+`debug-filters.json` into each side's `corpus/<target>/`; `build csharp` publishes `Bead.Fuzz` and
+instruments its copy of `Bead.Core`. Then, for ten minutes:
+
+```sh
+node tools/fuzz.mjs run typescript envelope -- -max_total_time=600
+node tools/fuzz.mjs run csharp envelope -- -max_total_time=600
+```
+
+A run grows its side's `corpus/<target>/` and writes a finding to `findings/<target>/`, as
+`crash-`, `timeout-` or `oom-` and the input's SHA-1; git ignores both folders. The run prints the
+finding's exception and its stack. Given files in place of the corpus, a run reads each once, on
+either side, so a finding replays on its own side and on the other:
+
+```sh
+node tools/fuzz.mjs run csharp http-fields implementations/dotnet/tools/Bead.Fuzz/findings/http-fields/crash-<sha1>
+node tools/fuzz.mjs run typescript http-fields implementations/dotnet/tools/Bead.Fuzz/findings/http-fields/crash-<sha1>
+node tools/fuzz.mjs run csharp http-fields <finding> -- -minimize_crash=1 -runs=10000
+```
+
+On the C# side, libFuzzer's `cov` counts its own driver's edges; Bead.Core's coverage is its `ft`.
+Node and Jazzer.js hold about 220 MiB before the first input, so the TypeScript side's process limit
+is 512 MiB; the C# side's runtime holds its managed heap to 256 MiB. A finding becomes a case of the
+side's envelope fuzz test, or of its parser's own test file, its input in hexadecimal.
 
 ## Support
 
@@ -351,6 +560,8 @@ against each server.
   must also be UTF-8 without a byte order mark.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
+- `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
+  sites that report alone (spec 9.0), on either side. Given files, those alone.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, and each conformance file's with its document's — and each released section
@@ -416,8 +627,9 @@ image in `ci.yml`, each to its tag's current digest; CI then builds and tests th
 `prepare` lists what else the release owes by hand: the CHANGELOG's line, under the release, that
 tells a document's new version and its tag, the spec's or its companion's; each of
 [0006](docs/decisions/0006-a-rule-has-its-gate.md)'s gates owed that names the release, whose rule
-moves to that record's table; and the documents brought to the release by the
-`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)).
+moves to that record's table; the documents brought to the release by the
+`bead-release-documents` workflow ([`.claude/workflows/`](.claude/workflows/README.md)); and both
+benches' reports, kept and compared with the last release's, as [Measurement](#measurement) says.
 
 A waiver of CI's `beadc breaking` step, an `--except`, holds until the release that carries its
 change is the one the step compares against: the release's own commit is still compared with the

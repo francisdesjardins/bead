@@ -21,6 +21,16 @@ public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool 
     public string? Credential { get; init; }
 
     /// <summary>
+    /// The address of what brought it, toward a server (spec 15.1): over HTTP its exchange's, read
+    /// as section 15.12 reads it; over a WebSocket its connection's; none where the transport names
+    /// none, and toward a client.
+    /// </summary>
+    public string? Address { get; init; }
+
+    /// <summary>The port of what brought it, as <see cref="Address"/>; none where the transport names none.</summary>
+    public int? Port { get; init; }
+
+    /// <summary>
     /// Whether it came by a way that keeps no order with the answers to the requests its side sent,
     /// which it may overtake: over HTTP, a listen's batch (spec 15.9). None for any other.
     /// </summary>
@@ -31,7 +41,7 @@ public readonly record struct TransportMessage(ReadOnlyMemory<byte> Bytes, bool 
     {
         // ! a credential's own string reaches no log, no exception's message and no debugger (spec
         // 15.1): whether there is one, alone
-        builder.Append(CultureInfo.CurrentCulture, $"Bytes = {Bytes}, IsText = {IsText}, MayOvertake = {MayOvertake}, Credential = ");
+        builder.Append(CultureInfo.CurrentCulture, $"Bytes = {Bytes}, IsText = {IsText}, Address = {Address}, Port = {Port}, MayOvertake = {MayOvertake}, Credential = ");
         builder.Append(Credential is null ? "none" : "carried");
 
         return true;
@@ -117,7 +127,7 @@ public sealed record RouterServerOptions
 
     /// <summary>
     /// The call's session a request's credential resolves to, asked once per request, with the
-    /// call's signal, between holding its call id and its admission (spec 9.2, step 5): none, for a
+    /// call's signal, between holding its call id and its admission (spec 9.2, step 6): none, for a
     /// request presenting none, runs it in none; for one presenting a credential, says that
     /// credential does not hold, and it is refused SESSION_REQUIRED. One that throws or faults fails
     /// the call, PROCEDURE_FAILED, and is reported. It may wait, never for a request presenting none
@@ -282,6 +292,17 @@ public sealed class RouterServer : IRouterLike, IDisposable
     /// <see cref="Error"/>, with that connection, and changes nothing.
     /// </summary>
     public event Action<DebugDirection, TracedEnvelope>? Debug;
+
+    /// <summary>
+    /// Each access it refuses, as it answers the refusal (spec 13.12): a scheme it takes none of, a
+    /// credential that does not hold, an admission's refusal — a procedure's or a relay's — each with
+    /// its stage, the code answered, why, what was called, the connection and the request's address
+    /// and port; never the credential, nor a claim, nor an admission's detail. Nothing is built while
+    /// none listens. Neither a verifier nor an admission that fails, which is reported, nor a call
+    /// refused as it would wait for its issuer, is told. A listener that throws is reported through
+    /// <see cref="Error"/>, with that connection, and changes nothing: the refusal goes as it would.
+    /// </summary>
+    public event Action<AccessRefusal>? AccessRefused;
 
     /// <inheritdoc/>
     public RouterSide Side
@@ -1061,7 +1082,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
 
         // a request that names a destination goes on through the relay
-        public IRequestHandler? HandlerOfDestination(RequestHeader header)
+        public IDestinationHandler? HandlerOfDestination(RequestHeader header)
         {
             return server._relay.HandlerOf(header);
         }
@@ -1091,19 +1112,51 @@ public sealed class RouterServer : IRouterLike, IDisposable
         // SessionTokenOf stays the announcement's alone, asked for each answer
         public ValueTask<CallSession?> SessionOf(SessionRequest request, CancellationToken signal)
         {
-            if (request.Header.Credential?.Scheme is { } scheme && server._resolver.Schemes.Contains(scheme) && scheme != CredentialScheme.Opaque)
-            {
-                return server._resolver.Resolve(
-                    request.Header.DestinationId is null ? request : request with { Audiences = server._relay.Audiences() },
-                    signal);
-            }
-
             if (server._sessionOf is { } sessionOf)
             {
                 return sessionOf(request, signal);
             }
 
             return ValueTask.FromResult<CallSession?>(null);
+        }
+
+        // as SessionOf says, why a credential that does not hold does not among it: a JWT's and an
+        // ELSEWHERE's by its credentials, any other's `session`
+        public ValueTask<CredentialResolution> ResolutionOf(SessionRequest request, CancellationToken signal)
+        {
+            if (request.Header.Credential?.Scheme is { } scheme && server._resolver.Schemes.Contains(scheme) && scheme != CredentialScheme.Opaque)
+            {
+                return server._resolver.ResolutionOf(
+                    request.Header.DestinationId is null ? request : request with { Audiences = server._relay.Audiences() },
+                    signal);
+            }
+
+            return IRouterCorePort.ResolutionOfSession(SessionOf(request, signal));
+        }
+
+        public bool TellsAccessRefusals
+        {
+            get
+            {
+                return server.AccessRefused is not null;
+            }
+        }
+
+        // each listener within a guard: what one throws is reported with its connection, and changes
+        // nothing
+        public void TellAccessRefused(AccessRefusal refusal)
+        {
+            foreach (var listener in Delegate.EnumerateInvocationList(server.AccessRefused))
+            {
+                try
+                {
+                    listener(refusal);
+                }
+                catch (Exception reason)
+                {
+                    server.Error?.Invoke(reason, refusal.ConnectionHandle);
+                }
+            }
         }
 
         public CallSession OnResolved(CallSession session, string connectionHandle)

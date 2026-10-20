@@ -75,8 +75,8 @@ Five ways were weighed for the surface and its counts:
   files, and a registry of Bead's own that writes the Prometheus text format.** Chosen.
 
 Where to count was weighed too. The service manager, where the trace is, sees a request only once
-its router admitted it: a refusal of its route, its credential or its admission (spec 9.2, steps 3
-to 7) and a relayed call never reach it — a server that refuses every call `ACCESS_DENIED` would
+its router admitted it: a refusal of its route, its credential or its admission (spec 9.2, steps 4
+to 8) and a relayed call never reach it — a server that refuses every call `ACCESS_DENIED` would
 count none failed — and its clock starts once the credential resolved and the transfer came whole,
 past the waits an operator looks for. Of a call it makes, it sees neither the refusals its router
 makes before the request goes nor the moment the request is handed to the transport. The router's
@@ -269,10 +269,10 @@ has its reason:
 **Nothing is paid while nobody listens and no registry is given** (debugging 3). One check a call,
 one an envelope, is the whole cost. A side that counts reads the monotonic clock twice a call, at
 its router's gates, never the wall clock, and adds to series it reaches through what it holds
-already, with no lookup of its own and no allocation. A latency bench, where Bead goes
-([the index](README.md#where-bead-goes)), measures what a counted call costs against one not
-counted, on each side, and gates nothing: what the clause bounds, the readings and the allocations,
-its gates hold.
+already, with no lookup of its own and no allocation. Where Bead goes
+([the index](README.md#where-bead-goes)), a counted call is measured against one not counted, on
+each side, a measure beside those the benches take ([the root README](../../README.md#measurement)),
+and it gates nothing: what the clause bounds, the readings and the allocations, its gates hold.
 
 - **Its gates** ([0006](0006-a-rule-has-its-gate.md)): each side's test clock counts its readings;
   twin tests over a manager on a fake router show a call made, a request answered, a notification
@@ -376,7 +376,9 @@ supervision link or a relay's, is the C side's to decide.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-six rounds. Its objections, each with the answer that holds:
+six rounds. A closing connection's teardown, with debugging 9.7 and an exit of
+`spec/metrics.json`, met it in [0001](0001-the-envelope-sits-at-fixed-offsets.md)'s round, which
+keeps its objections and answers. Its objections, each with the answer that holds:
 
 ### The first round
 
@@ -389,7 +391,7 @@ six rounds. Its objections, each with the answer that holds:
 | Cardinality is set by the peer, not the application, and lazily created series break both alerts and the C profile                           | Chosen, as the Context weighs it: codes by their section-8 names, one fallback for a code none names, `application` for a procedure's own unless declared; every known series made at 0 as its resolver or requester is made; each family capped; `service` the service's id; the fallback is `_OTHER`, and a declaration past the cap is refused (the second round).                                         |
 | `durations.json` pins what the spec leaves free: English refusal sentences, and client defaults that no clause states                        | Accepted, in [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s file: it pins each outcome and its reason by a stable place id; the sentences stay with the twin tests; a default the file holds cites a clause that states it, or is marked informative, or left out; a close's timeout stays the server's until the client part decides.                                              |
 | `debug-filters.json` settles what a procedure name is ahead of the identity-rules decision, and pins a silent trap                           | Chosen, as the Context weighs it: ASCII alone — the comma and ASCII white space part words, case folds in ASCII, a name outside ASCII compared as it is; a word holding a parenthesis that is not a selector refused; `t()` takes the trace's words, the letters kept; the ABNF references every value; the identity rules are [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)'s. |
-| "Nothing is paid when off" has a gate for clock readings only, and the 1 kHz loop is served by the build switch, not by this rework          | Accepted: no clock reading and no allocation for debugging while nobody listens and no registry is given; readings gated over a manager on a fake router, allocations on the C# side, the TypeScript side by inspection in the matrix; two build switches; a counted call's cost stated; a latency bench measures it.                                                                                         |
+| "Nothing is paid when off" has a gate for clock readings only, and the 1 kHz loop is served by the build switch, not by this rework          | Accepted: no clock reading and no allocation for debugging while nobody listens and no registry is given; readings gated over a manager on a fake router, allocations on the C# side, the TypeScript side by inspection in the matrix; two build switches; a counted call's cost stated, and its measure where Bead goes.                                                                                     |
 | The platforms' own instrumentation APIs were never weighed, and a separate Bead text cannot be appended to the application's scrape          | Chosen, as the Context weighs it: a registry of Bead's, no dependency, writing the Prometheus text format 0.0.4 and giving its media type; served at `/metrics` or appended to an application's 0.0.4 scrape; the platforms' instruments weighed in the Context and set aside.                                                                                                                                |
 | Section 16 inside the wire spec ties debugging's changes to the version every conformance file carries                                       | Chosen, as the Context weighs it: a companion document, `spec/debugging.md`, with its own version, its files repeating it; a constrained profile that leaves debugging out conforms to the wire, with its row in the matrix.                                                                                                                                                                                  |
 | The durations file is a separate decision, bundled under a debugging title                                                                   | Accepted: durations are [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)'s.                                                                                                                                                                                                                                                                                                             |

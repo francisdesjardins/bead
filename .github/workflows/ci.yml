@@ -110,6 +110,13 @@ jobs:
         run: >-
           node tools/coverage-report.mjs implementations/typescript/coverage/coverage-final.json
           --under implementations/typescript/src --floor typescript --summary "$GITHUB_STEP_SUMMARY"
+      # the report to browse, c8's HTML and its lcov, kept with the run whether the floor held or not
+      - if: ${{ !cancelled() && matrix.node == '26' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-typescript
+          path: implementations/typescript/coverage/
+          retention-days: 14
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
@@ -175,6 +182,13 @@ jobs:
         run: >-
           node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml
           --under implementations/dotnet/src --floor csharp --summary "$GITHUB_STEP_SUMMARY"
+      # each test project's cobertura report, kept with the run whether the floor held or not
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-csharp
+          path: implementations/dotnet/TestResults/coverage/*.cobertura.xml
+          retention-days: 14
       - run: $YARN test:interop
         working-directory: implementations/typescript
       - run: $YARN playwright install --with-deps chromium
@@ -509,6 +523,8 @@ jobs:
           node tools/check-commits.mjs "$@"
       - name: Check the links
         run: node tools/check-links.mjs
+      - name: Check the details
+        run: node tools/check-details.mjs
       # Each version agrees with itself, the C# lock files' project ranges included, and a released
       # section of the CHANGELOG stays as its tag shipped it; on a release branch, a pull request
       # into main and main, the release moved each version its changes owe, dated its section, and
@@ -536,7 +552,7 @@ jobs:
       - name: The dependencies, against the known advisories
         run: >-
           docker run --rm -v "$PWD:/src:ro"
-          ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+          ghcr.io/google/osv-scanner:v2.7.0@sha256:4f3b7e2c64b9d38a5febc5a7e4a3dfef1d1362f726dea7a2ef4762b46469fcd0
           scan source --recursive /src
       # Semgrep's community rules for TypeScript, C#, GitHub Actions and secrets, the scanner at
       # its digest, the generated folders and the goldens left out: a blocking finding fails the
@@ -545,7 +561,7 @@ jobs:
       - name: The code, under Semgrep's community rules
         run: >-
           docker run --rm -v "$PWD:/src:ro" -w /src
-          semgrep/semgrep:1.178.0@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+          semgrep/semgrep:1.181.0@sha256:81474464c1f07483ba0682a44787fd93c91397419762a04abe2bafaae396304b
           semgrep scan --config p/typescript --config p/csharp --config p/github-actions --config p/secrets
           --metrics=off --error --exclude node_modules --exclude builder/test/golden
           --exclude '**/Generated' --exclude '**/generated' --exclude '**/dist' --exclude .claude

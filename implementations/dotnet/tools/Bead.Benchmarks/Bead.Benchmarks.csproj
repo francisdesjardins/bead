@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Loopback measurements, in the TypeScript bench's units, outside Bead.slnx. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Bead.Benchmarks</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../tests/Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
+    <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
+    <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
+  </ItemGroup>
+</Project>

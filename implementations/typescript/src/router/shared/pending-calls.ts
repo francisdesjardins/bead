@@ -64,6 +64,8 @@ interface IReservation {
 /** The calls one side opened and waits on, and the call ids it reserved, by connection. */
 export interface IPendingCalls<Handle extends string> {
   add(call: ICallAddress<Handle>, pendingRequest: IPendingRequest<Handle>): void;
+  /** The calls this side waits on over `connectionHandle`; the call ids it reserved not among them. */
+  countOn(connectionHandle: Handle): number;
   /**
    * A call id of this side's for `connectionHandle`, skipping those waited on, reserved, or in use
    * by the side; `undefined` once every one is.
@@ -166,6 +168,9 @@ export const createPendingCalls = <Handle extends string>(
 
       requests.set(callId, pendingRequest);
       pending.set(connectionHandle, requests);
+    },
+    countOn: (connectionHandle) => {
+      return pending.get(connectionHandle)?.size ?? 0;
     },
     draw: (connectionHandle) => {
       return nextCallId((candidate) => {

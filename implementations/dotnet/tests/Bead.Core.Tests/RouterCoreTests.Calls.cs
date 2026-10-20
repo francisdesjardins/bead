@@ -327,7 +327,51 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_never_with_one_of_another()
     {
+        var server = new Peer(RouterSide.Server, RouterLimits.Default);
+        using var serverCore = server.Core;
+        var first = serverCore.Request(ReadOnlyMemory<byte>.Empty, CallOf("a", (Echo, TimeSpan.FromSeconds(1))));
+        var second = serverCore.Request(ReadOnlyMemory<byte>.Empty, CallOf("a", (Echo, TimeSpan.FromMilliseconds(50))));
+        var tooLarge = new byte[16_778_241];
+
+        Vectors.FromHexadecimal("A2 11 00 02  00 00 00 04").CopyTo(tooLarge, 0);
+        serverCore.Receive(tooLarge, "a");
+        await server.Settle();
+        await server.Deliver("A2 11 00 02  00 00 00 04", "a");
+        await server.Deliver("A2 12 00 02  00 00 00 04  00 13 00 00", "a");
+        await server.Deliver("A1 12 00 02  00 00 00 02  00 13 00", "b");
+        await server.Deliver("A1 12 00 02  00 00 00 02  00 13 00", "a");
+
+        var malformed = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return first.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.EnvelopeMalformed, FailureOrigin.Local, RouterSide.Server, Echo.Address),
+            (malformed.Code, malformed.Origin, malformed.Side, malformed.ProcedureAddress));
+        await server.Advance(TimeSpan.FromMilliseconds(50));
+        Assert.True(second.IsCompleted);
+
+        var timedOut = await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return second.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal("no answer came in 50 milliseconds", timedOut.Message);
+        Assert.Equal(
+            [(EnvelopeKind.Request, 2u), (EnvelopeKind.Request, 4u), (EnvelopeKind.Cancel, 2u), (EnvelopeKind.Cancel, 4u)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.Kind, envelope.Header.CallId);
+            }));
+        Assert.Equal(
+            [(ushort)ProtocolCode.EnvelopeTooLarge, (ushort)ProtocolCode.LayoutUnsupported,
+                (ushort)ProtocolCode.LayoutUnsupported, (ushort)ProtocolCode.EnvelopeMalformed],
+            server.Reports.Select(CodeOf));
+        Assert.Equal(["a", "a", "a", "b"], server.ReportedOn);
+
         var client = new Peer(RouterSide.Client);
+        using var clientCore = client.Core;
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await client.Settle();
@@ -344,11 +388,20 @@ public sealed partial class RouterCoreTests
         });
 
         Assert.Equal((FailureOrigin.Local, Echo.Address), (ended.Origin, ended.ProcedureAddress));
+        Assert.Equal(((ushort)ProtocolCode.EnvelopeMalformed, RouterSide.Client), (ended.Code, ended.Side));
         Assert.IsType<CancelHeader>(client.Sent[^1].Header);
 
         // on another connection, it answers no call
         await client.Deliver("A1 12 00 02  00 00 00 01 | 00", "other");
         Assert.Equal(2, client.Reports.Count);
+        Assert.Equal([(ushort)ProtocolCode.LayoutUnsupported, (ushort)ProtocolCode.EnvelopeMalformed], client.Reports.Select(CodeOf));
+        Assert.Equal([Handle, "other"], client.ReportedOn);
+        Assert.Equal(
+            [(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u)],
+            client.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.Kind, envelope.Header.CallId);
+            }));
     }
 
     [Fact]
@@ -429,7 +482,46 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Lets_a_resolver_that_fails_after_it_answered_take_nothing_from_the_call_holding_its_call_id_now()
     {
+        var crossing = new Peer(RouterSide.Server);
+        using var crossingCore = crossing.Core;
+        var heldResolver = crossing.Resolve();
+        var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var late = new InvalidOperationException("late");
+
+        heldResolver.Handling = async (props) =>
+        {
+            if (heldResolver.Requests.Count == 1)
+            {
+                await crossingCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(props.ConnectionHandle, props.Header));
+                await failing.Task;
+            }
+            else
+            {
+                await holding.Task;
+            }
+        };
+        await crossing.Deliver(new Envelope { Header = RequestOf(5) });
+        await crossing.Deliver(new Envelope { Header = RequestOf(5) });
+        Assert.Equal(2, heldResolver.Requests.Count);
+        failing.SetException(late);
+        await crossing.Settle();
+        await crossing.Deliver(new Envelope { Header = RequestOf(5) });
+        Assert.Equal([5u, 5u], heldResolver.Requests.Select((props) =>
+        {
+            return props.Header.CallId;
+        }));
+        Assert.Same(late, crossing.Reports[0]);
+        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, CodeOf(crossing.Reports[1]));
+        Assert.Equal(2, crossing.Reports.Count);
+        Assert.Equal([Handle, Handle], crossing.ReportedOn);
+        Assert.Equal(5u, Assert.IsType<ResultHeader>(Assert.Single(crossing.Sent).Header).CallId);
+        Assert.Empty(crossing.Sent[0].Payload.ToArray());
+        holding.SetResult();
+        await crossing.Settle();
+
         var server = new Peer(RouterSide.Server);
+        using var serverCore = server.Core;
         var resolver = server.Resolve();
         var broken = new InvalidOperationException("the resolver broke after its answer");
 
@@ -445,12 +537,15 @@ public sealed partial class RouterCoreTests
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
         Assert.Same(broken, Assert.Single(server.Reports));
         Assert.IsType<ResultHeader>(Assert.Single(server.Sent).Header);
+        Assert.Equal(new byte[] { 1 }, server.Sent[0].Payload.ToArray());
 
         // the call after it on its call id stays open: the same call id again is refused
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 3 } });
         Assert.Equal(2, resolver.Requests.Count);
         Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, CodeOf(server.Reports[^1]));
+        Assert.Equal(2, server.Reports.Count);
+        Assert.Equal([Handle, Handle], server.ReportedOn);
     }
 
     [Fact]
@@ -518,21 +613,6 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Reserves_a_call_id_5_s_when_given_no_time()
-    {
-        var client = new Peer(RouterSide.Client);
-
-        client.Core.Reserve(new CallAddress(1, Handle));
-        await client.Settle();
-        await client.Advance(TimeSpan.FromSeconds(4.9));
-        await client.Deliver(ResultOf(1));
-        Assert.Empty(client.Reports);
-        await client.Advance(TimeSpan.FromSeconds(0.1));
-        await client.Deliver(ResultOf(1));
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
-    }
-
-    [Fact]
     public void Refuses_a_second_resolver_for_one_procedure_and_an_address_a_revision_or_a_name_outside_section_16()
     {
         var server = new Peer(RouterSide.Server);
@@ -566,134 +646,6 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Sends_its_requests_on_a_call_id_of_its_side_naming_their_procedure_and_nothing_of_a_session()
-    {
-        var client = new Peer(RouterSide.Client)
-        {
-            TokenOf = (_) =>
-            {
-                throw new InvalidOperationException("a request asks no session");
-            },
-        };
-        var heard = new List<string>();
-
-        client.OnSend = (envelope) =>
-        {
-            heard.Add($"sent {envelope.Header.CallId}");
-
-            return Task.CompletedTask;
-        };
-
-        var asked = client.Core.Request(new byte[] { 1 }, CallOf(Handle, (Echo, TimeSpan.FromSeconds(5))) with
-        {
-            OnCallId = (callId) =>
-            {
-                heard.Add($"call id {callId}");
-            },
-        });
-
-        await client.Settle();
-        Assert.Equal(["call id 1", "sent 1"], heard);
-        Assert.Equal(RequestOf(1), client.Sent[0].Header);
-        Assert.Equal([RouterActivity.Request], client.Activities);
-        await client.Deliver(ResultOf(1));
-        await asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.Equal([RouterActivity.Request, RouterActivity.Response], client.Activities);
-        Assert.Empty(client.Reports);
-    }
-
-    [Fact]
-    public async Task Writes_the_destination_a_request_names_and_none_left_out()
-    {
-        var client = new Peer(RouterSide.Client);
-
-        _ = client.Core.Request(new byte[] { 1 }, CallOf(Handle, (Echo, TimeSpan.FromSeconds(5))) with
-        {
-            Options = new ResolvedRequestOptions { DestinationId = 7, Timeout = TimeSpan.FromSeconds(5) },
-        });
-        _ = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
-        await client.Settle();
-        Assert.Equal([7u, null], client.Sent.Select((envelope) =>
-        {
-            return ((RequestHeader)envelope.Header).DestinationId;
-        }));
-    }
-
-    [Fact]
-    public async Task Pairs_its_requests_by_call_id_alone_on_their_own_connection_once()
-    {
-        var server = new Peer(RouterSide.Server);
-        var command = server.Core.Request(new byte[] { 1 }, CallOf("a", (Echo, TimeSpan.FromSeconds(5))));
-
-        await server.Settle();
-        await server.Deliver(ResultOf(2), "b");
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(server.Reports)));
-        Assert.False(command.IsCompleted);
-        await server.Deliver(ResultOf(2), "a");
-        await command.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        await server.Deliver(ResultOf(2), "a");
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(server.Reports[^1]));
-    }
-
-    [Fact]
-    public async Task Offers_the_side_a_failure_that_answers_no_call_waiting_and_never_a_result()
-    {
-        var offered = new List<uint>();
-        var client = new Peer(RouterSide.Client)
-        {
-            Unpaired = (envelope) =>
-            {
-                offered.Add(envelope.Header.CallId);
-
-                return true;
-            },
-        };
-
-        await client.Deliver(new Envelope { Header = new FailureHeader { CallId = 7 }, Failure = Failure.OfApplication(9) });
-        Assert.Empty(client.Reports);
-        await client.Deliver(ResultOf(7));
-        Assert.Equal([7u], offered);
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
-    }
-
-    // spec 12.3.2
-    [Fact]
-    public async Task Rejects_a_result_whose_transfer_is_past_the_payload_s_limit_and_cancels_its_call()
-    {
-        var client = new Peer(RouterSide.Client);
-        var asked = client.Core.Request(new byte[] { 1 }, CallOf(Handle, (Echo with { MaximumPayloadBytes = 100 }, TimeSpan.FromSeconds(5))));
-
-        await client.Settle();
-        await client.Deliver(ResultOpeningOf(1, (PatternOf(300), 32)));
-
-        var refused = await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-
-        Assert.Equal(((ushort)ProtocolCode.PayloadTooLarge, FailureOrigin.Local), (refused.Code, refused.Origin));
-        Assert.IsType<CancelHeader>(client.Sent[^1].Header);
-        Assert.Empty(CreditsOf(client.Sent));
-    }
-
-    [Fact]
-    public async Task Rejects_with_a_DisconnectException_what_waits_on_one_connection_or_on_every_one()
-    {
-        var client = new Peer(RouterSide.Client);
-        var gone = client.Core.Request(new byte[] { 1 }, CallOf("a", (Echo, TimeSpan.FromSeconds(5))));
-        var kept = client.Core.Request(new byte[] { 1 }, CallOf("b", (Echo, TimeSpan.FromSeconds(5))));
-
-        await client.Settle();
-        client.Core.RejectPending("the connection closed", "a");
-        await Assert.ThrowsAsync<DisconnectException>(() =>
-        {
-            return gone.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        await client.Deliver(ResultOf(3), "b");
-        await kept.WaitAsync(Patience, TestContext.Current.CancellationToken);
-    }
-
-    [Fact]
     public async Task Refuses_a_failure_whose_code_is_not_one_sending_nothing_and_telling_nothing()
     {
         var server = new Peer(RouterSide.Server);
@@ -705,42 +657,6 @@ public sealed partial class RouterCoreTests
         });
         Assert.Equal(0, server.BeforeAnswers);
         Assert.Empty(server.Sent);
-    }
-
-    [Fact]
-    public async Task Hears_its_request_handed_to_the_transport_then_refused_by_it_and_nothing_of_one_never_handed()
-    {
-        var client = new Peer(RouterSide.Client);
-        var refused = new IOException("the transport refused the request");
-        var heard = new List<bool>();
-
-        client.OnSend = (_) =>
-        {
-            return Task.FromException(refused);
-        };
-
-        var faulted = client.Core.Request(new byte[] { 1 }, CallOf(Handle, (Echo, TimeSpan.FromSeconds(5))) with { OnSent = heard.Add });
-
-        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return faulted.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        }));
-        Assert.Equal([true, false], heard);
-
-        // a transport that throws as it is handed the request never had it
-        heard.Clear();
-        client.OnSend = (_) =>
-        {
-            throw refused;
-        };
-
-        var thrown = client.Core.Request(new byte[] { 1 }, CallOf(Handle, (Echo, TimeSpan.FromSeconds(5))) with { OnSent = heard.Add });
-
-        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return thrown.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        }));
-        Assert.Empty(heard);
     }
 
     [Fact]
@@ -767,82 +683,6 @@ public sealed partial class RouterCoreTests
             return resolver.Answer(1, new byte[11]).WaitAsync(Patience, TestContext.Current.CancellationToken);
         })).Code);
         Assert.Equal(1, server.BeforeAnswers);
-    }
-
-    [Fact]
-    public async Task Keeps_the_announcement_in_the_order_answers_were_written_whatever_order_they_settle_in()
-    {
-        var token = SessionToken.FromBytes(PatternOf(16));
-        var other = SessionToken.FromBytes(PatternOf(17).AsSpan(1));
-        var current = token;
-        var held = new List<TaskCompletionSource>();
-        var server = new Peer(RouterSide.Server)
-        {
-            TokenOf = (_) =>
-            {
-                return current;
-            },
-        };
-
-        server.OnSend = (_) =>
-        {
-            var send = new TaskCompletionSource();
-
-            held.Add(send);
-
-            return send.Task;
-        };
-
-        var first = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)));
-
-        await server.Settle();
-        current = other;
-
-        var second = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(3)));
-
-        await server.Settle();
-
-        // the second settles first, then the first fails: what the second wrote stands
-        held[1].SetResult();
-        await second.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        held[0].SetException(new IOException("gone"));
-        await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return first.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        server.OnSend = null;
-        await server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(5)))
-            .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.Equal(
-            [
-                new ResultHeader { CallId = 1, Credential = token },
-                new ResultHeader { CallId = 3, Credential = other },
-                new ResultHeader { CallId = 5 },
-            ],
-            server.Sent.Select((envelope) =>
-            {
-                return envelope.Header;
-            }));
-    }
-
-    [Fact]
-    public async Task Fails_the_answer_whose_session_cannot_be_told()
-    {
-        var unknown = new InvalidOperationException("no session to tell");
-        var server = new Peer(RouterSide.Server)
-        {
-            TokenOf = (_) =>
-            {
-                throw unknown;
-            },
-        };
-
-        Assert.Same(unknown, await Assert.ThrowsAsync<InvalidOperationException>(() =>
-        {
-            return server.Core.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(Handle, RequestOf(1)))
-                .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        }));
-        Assert.Empty(server.Sent);
     }
 
     // debugging 5.1
@@ -888,183 +728,6 @@ public sealed partial class RouterCoreTests
         Assert.Empty(server.Sent);
     }
 
-    // spec 10.4
-    [Fact]
-    public async Task Cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
-    {
-        var client = new Peer(RouterSide.Client);
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(1));
-
-        await client.Settle();
-        await client.Advance(TimeSpan.FromSeconds(1));
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        _ = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(1));
-        await client.Settle();
-        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u), (EnvelopeKind.Request, 3u)], client.Sent.Select((envelope) =>
-        {
-            return (envelope.Kind, envelope.Header.CallId);
-        }));
-    }
-
-    [Fact]
-    public async Task Drops_a_late_answer_while_its_call_id_is_reserved_then_reports_it()
-    {
-        var client = new Peer(RouterSide.Client);
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(1));
-
-        await client.Settle();
-        await client.Advance(TimeSpan.FromSeconds(1));
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        await client.Deliver(ResultOf(1));
-        Assert.Empty(client.Reports);
-        await client.Advance(TimeSpan.FromSeconds(1));
-        await client.Deliver(ResultOf(1));
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
-    }
-
-    [Fact]
-    public async Task Cancels_on_its_token_once_sent_throwing_its_own_reason_though_the_cancel_cannot_go_out()
-    {
-        var client = new Peer(RouterSide.Client);
-        var refused = new IOException("the transport refused the cancel");
-
-        using var source = new CancellationTokenSource();
-
-        client.OnSend = (envelope) =>
-        {
-            return envelope.Header is CancelHeader ? Task.FromException(refused) : Task.CompletedTask;
-        };
-
-        var asked = client.Request(new byte[] { 1 }, (TimeSpan.FromSeconds(5), source.Token));
-
-        await client.Settle();
-        await source.CancelAsync();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        await client.Settle();
-        Assert.Same(refused, Assert.Single(client.Reports));
-    }
-
-    [Fact]
-    public async Task Sends_no_cancel_for_a_call_answered_in_the_turn_its_token_is_cancelled()
-    {
-        var client = new Peer(RouterSide.Client);
-
-        using var source = new CancellationTokenSource();
-        using var gate = new ManualResetEventSlim();
-
-        var asked = client.Request(new byte[] { 1 }, (TimeSpan.FromSeconds(5), source.Token));
-
-        await client.Settle();
-
-        // the scheduler held, its result comes, then its token is cancelled
-        client.Loop.Post(() =>
-        {
-            gate.Wait(TestContext.Current.CancellationToken);
-        });
-        client.Core.Receive(EnvelopeCodec.WriteEnvelope(ResultOf(1)), Handle);
-        await source.CancelAsync();
-        gate.Set();
-        await client.Settle();
-        await asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.DoesNotContain(client.Sent, (envelope) =>
-        {
-            return envelope.Header is CancelHeader;
-        });
-
-        // nothing reserved its call id: the same result again answers no call
-        await client.Deliver(ResultOf(1));
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
-    }
-
-    [Fact]
-    public async Task Sends_no_cancel_for_a_request_the_transport_never_had_and_reserves_nothing()
-    {
-        var client = new Peer(RouterSide.Client);
-        var refused = new IOException("the transport refused the request");
-
-        client.OnSend = (_) =>
-        {
-            throw refused;
-        };
-
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
-
-        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        }));
-        await client.Settle();
-        Assert.Single(client.Sent);
-
-        // its call id was never reserved
-        await client.Deliver(ResultOf(1));
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
-    }
-
-    // spec 10.4
-    [Fact]
-    public async Task Cancels_a_call_waiting_once_throwing_and_reserving_its_call_id_on_its_connection_alone()
-    {
-        var client = new Peer(RouterSide.Client);
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
-
-        await client.Settle();
-        client.Core.Cancel(new CallAddress(1, Handle));
-        client.Core.Cancel(new CallAddress(1, Handle));
-        await client.Settle();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        Assert.Single(client.Sent, (envelope) =>
-        {
-            return envelope.Header is CancelHeader;
-        });
-        await client.Deliver(ResultOf(1));
-        Assert.Empty(client.Reports);
-        await client.Deliver(ResultOf(1), "other");
-        Assert.Equal((ushort)ProtocolCode.CallUnknown, CodeOf(Assert.Single(client.Reports)));
-    }
-
-    [Fact]
-    public async Task Reserves_by_connection_and_forgets_the_reservations_of_a_connection_or_of_every_one_as_they_go()
-    {
-        var client = new Peer(RouterSide.Client);
-
-        client.Core.Reserve(new CallAddress(1, "a"), TimeSpan.FromSeconds(5));
-        client.Core.Reserve(new CallAddress(1, "b"), TimeSpan.FromSeconds(5));
-        client.Core.RejectPending("the connection closed", "a");
-        await client.Settle();
-        await client.Deliver(ResultOf(1), "a");
-        await client.Deliver(ResultOf(1), "b");
-        Assert.Single(client.Reports);
-        client.Core.RejectPending("the router closed");
-        await client.Settle();
-        await client.Deliver(ResultOf(1), "b");
-        Assert.Equal(2, client.Reports.Count);
-    }
-
-    [Fact]
-    public async Task Drops_an_answer_that_does_not_read_on_a_call_id_reserved_and_reports_one_of_a_layout_to_come()
-    {
-        var client = new Peer(RouterSide.Client);
-
-        client.Core.Reserve(new CallAddress(1, Handle), TimeSpan.FromSeconds(5));
-        await client.Deliver("A1 12 00 02  00 00 00 01 | 00");
-        Assert.Empty(client.Reports);
-        await client.Deliver("A2 11 00 02  00 00 00 01");
-        Assert.Equal((ushort)ProtocolCode.LayoutUnsupported, CodeOf(Assert.Single(client.Reports)));
-    }
-
     [Fact]
     public async Task Cancels_the_signal_of_each_call_a_closing_connection_opened_and_of_no_other()
     {
@@ -1093,6 +756,57 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Once_disposed_rejects_what_waits_and_sends_nothing_more()
     {
+        var server = new Peer(RouterSide.Server);
+        var incoming = server.Resolve();
+        var answering = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? lateAnswer = null;
+
+        incoming.Handling = async (props) =>
+        {
+            await answering.Task;
+            lateAnswer = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(props.ConnectionHandle, props.Header));
+        };
+
+        var waiting = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
+
+        await server.Deliver(new Envelope { Header = RequestOf(5) });
+        Assert.False(server.Core.IsDisposed);
+        server.Core.Dispose();
+        await server.Settle();
+        Assert.True(server.Core.IsDisposed);
+        Assert.Equal(2u, Assert.IsType<RequestHeader>(Assert.Single(server.Sent).Header).CallId);
+        server.Sent.Clear();
+        Assert.Equal("the router was disposed before the answer", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return waiting.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        })).Message);
+        answering.SetResult();
+        await server.Settle();
+        Assert.NotNull(lateAnswer);
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return lateAnswer.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        server.Core.Cancel(new CallAddress(2, Handle));
+        await server.Settle();
+        Assert.Empty(server.Reports);
+        Assert.Equal(0, server.Core.Gauges().Counts["reservedCallIds"]);
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)))
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 } }, Handle)
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        Assert.Empty(server.Sent);
+
         var client = new Peer(RouterSide.Client);
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
@@ -1116,105 +830,8 @@ public sealed partial class RouterCoreTests
         client.Core.Cancel(new CallAddress(3, Handle));
         await client.Settle();
         Assert.Single(client.Sent);
-    }
-
-    // spec 12.3.2
-    [Fact]
-    public async Task Holds_a_procedure_s_limit_both_ways_once_admitted()
-    {
-        var server = new Peer(RouterSide.Server);
-        var resolver = server.Resolve(maximumPayloadBytes: 10);
-
-        resolver.Admission = (request) =>
-        {
-            return request.Header.CallId == 5 ? Failure.OfProtocol(ProtocolCode.AccessDenied) : null;
-        };
-
-        // past it, whole or by the total a transfer declares, before any credit; its admission first
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[11] });
-        await server.Deliver(RequestOpeningOf(3, (PatternOf(300), 44)));
-        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = new byte[11] });
-        Assert.Equal(
-            [(ushort)ProtocolCode.PayloadTooLarge, (ushort)ProtocolCode.PayloadTooLarge, (ushort)ProtocolCode.AccessDenied],
-            server.Sent.Select((envelope) =>
-            {
-                return envelope.Failure!.Code;
-            }));
-
-        // its answer, past it, is refused here
-        await server.Deliver(new Envelope { Header = RequestOf(7), Payload = new byte[10] });
-        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, (await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return resolver.Answer(0, new byte[11]).WaitAsync(Patience, TestContext.Current.CancellationToken);
-        })).Code);
-    }
-
-    [Fact]
-    public async Task Holds_the_router_s_limit_where_a_procedure_s_is_larger()
-    {
-        var server = new Peer(RouterSide.Server, Chunked with { MaximumPayloadBytes = 10 });
-
-        server.Resolve(maximumPayloadBytes: 100);
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[11] });
-        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, server.Sent[^1].Failure!.Code);
-        Assert.Equal("a payload is 10 bytes at most, not 11", server.Sent[^1].Failure!.Detail);
-        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, (await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = new byte[11] }, Handle)
-                .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        })).Code);
-    }
-
-    [Fact]
-    public async Task Refuses_a_limit_below_1_drawing_nothing_and_takes_its_edge()
-    {
-        var client = new Peer(RouterSide.Client);
-        var drawn = new List<uint>();
-
-        CoreRequest Drawing(CoreRequest request)
-        {
-            return request with { OnCallId = drawn.Add };
-        }
-
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-        {
-            return client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo with { MaximumPayloadBytes = 0 }, TimeSpan.FromSeconds(5)))));
-        });
-        Assert.Empty(drawn);
-        _ = client.Core.Request(new byte[] { 1 }, Drawing(CallOf(Handle, (Echo with { MaximumPayloadBytes = 1 }, TimeSpan.FromSeconds(5)))));
-        await client.Settle();
-        Assert.Equal([1u], drawn);
-    }
-
-    [Fact]
-    public async Task Cuts_a_failure_s_detail_to_its_envelope_s_room_and_to_its_own_limit_both_ways()
-    {
-        var detail = new string('x', 100);
-
-        async Task<string> AnsweredOf(RouterLimits limits)
-        {
-            var server = new Peer(RouterSide.Server, limits);
-            var resolver = server.Resolve();
-
-            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-            await resolver.Fail(0, Failure.OfApplication(7, detail)).WaitAsync(Patience, TestContext.Current.CancellationToken);
-
-            return server.Sent[^1].Failure!.Detail;
-        }
-
-        Assert.Equal(32, (await AnsweredOf(RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 })).Length);
-        Assert.Equal(10, (await AnsweredOf(RouterLimits.Default with { MaximumDetailBytes = 10 })).Length);
-
-        // what comes in is cut to its own limit too
-        var client = new Peer(RouterSide.Client, RouterLimits.Default with { MaximumDetailBytes = 10 });
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
-
-        await client.Settle();
-        await client.Deliver(new Envelope { Header = new FailureHeader { CallId = 1 }, Failure = Failure.OfApplication(7, detail) });
-        Assert.Equal(10, (await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        })).Detail.Length);
+        Assert.Empty(client.Reports);
+        Assert.Equal(0, client.Core.Gauges().Counts["reservedCallIds"]);
     }
 
     [Fact]
@@ -1230,35 +847,6 @@ public sealed partial class RouterCoreTests
         await client.Deliver(new Envelope { Header = new ChunkHeader { CallId = 7, IsLast = true, Offset = 0 }, Payload = new byte[] { 1 } });
         Assert.Equal([(ushort)ProtocolCode.EnvelopeMalformed, (ushort)ProtocolCode.CallUnknown], client.Reports.Select(CodeOf));
         Assert.Contains("call 1 receives no transfer", client.Reports[0].Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task Sends_a_payload_in_one_envelope_to_its_limit_and_one_byte_more_as_a_transfer()
-    {
-        var small = RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 };
-        var client = new Peer(RouterSide.Client, small);
-
-        _ = client.Request(new byte[52], TimeSpan.FromSeconds(5));
-        _ = client.Request(new byte[53], TimeSpan.FromSeconds(5));
-        await client.Settle();
-        Assert.Equal([null, 53L], client.Sent.Select((envelope) =>
-        {
-            return ((RequestHeader)envelope.Header).Total;
-        }));
-
-        // a result's room counts the 20 bytes of the announcement it may carry
-        var server = new Peer(RouterSide.Server, small);
-        var resolver = server.Resolve();
-
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-        await server.Deliver(new Envelope { Header = RequestOf(3), Payload = new byte[] { 1 } });
-        await resolver.Answer(0, new byte[36]).WaitAsync(Patience, TestContext.Current.CancellationToken);
-        _ = resolver.Answer(1, new byte[37]);
-        await server.Settle();
-        Assert.Equal([null, 37L], server.Sent.Select((envelope) =>
-        {
-            return ((ResultHeader)envelope.Header).Total;
-        }));
     }
 
     [Fact]
@@ -1282,17 +870,78 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_a_notification_too_large_for_one_envelope_and_sends_one_that_fits()
+    public async Task Answers_CAPACITY_EXCEEDED_a_request_past_the_calls_its_peer_has_it_answer_on_its_connection_before_its_route_its_credential_or_its_transfer_and_takes_one_once_a_call_ends()
     {
-        var server = new Peer(RouterSide.Server, RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 });
-
-        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, (await Assert.ThrowsAsync<FailureException>(() =>
+        var server = new Peer(RouterSide.Server, RouterLimits.Default with { MaximumAnsweringCalls = 2, MaximumEnvelopeBytes = 1_024, ChunkBytes = 64, WindowBytes = 128 })
         {
-            return server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = new byte[57] }, Handle)
-                .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        })).Code);
-        await server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = new byte[56] }, Handle)
-            .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.Single(server.Sent);
+            Schemes = [CredentialScheme.Jwt],
+        };
+        var resolver = server.Resolve();
+        var payload = PatternOf(100);
+
+        await server.Deliver(new Envelope { Header = RequestOf(1) });
+        await server.Deliver(new Envelope { Header = RequestOf(3) });
+
+        // another connection's calls are its own
+        await server.Deliver(new Envelope { Header = RequestOf(1) }, "b");
+        await server.Deliver(new Envelope { Header = RequestOf(5) with { ServiceId = 8 } });
+        await server.Deliver(new Envelope { Header = RequestOf(7) with { DestinationId = 4 } });
+        await server.Deliver(new Envelope { Header = RequestOf(9) with { Credential = Credential.Jwt("a.b.c") } });
+        await server.Deliver(new Envelope { Header = RequestOf(11) with { Total = 100 }, Payload = payload.AsMemory(0, 8) });
+
+        Assert.Equal(3, resolver.Requests.Count);
+        Assert.DoesNotContain(server.Resolved, (resolved) =>
+        {
+            return resolved.Request.Header.Credential is not null;
+        });
+        Assert.Equal(
+            [(5u, (ushort)ProtocolCode.CapacityExceeded), (7u, (ushort)ProtocolCode.CapacityExceeded), (9u, (ushort)ProtocolCode.CapacityExceeded), (11u, (ushort)ProtocolCode.CapacityExceeded)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure!.Code);
+            }));
+        Assert.Equal("the calls a connection has answered at once are 2 at most", server.Sent[0].Failure!.Detail);
+
+        // a call answered gives its place back, and the next request is taken
+        await resolver.Answer(0, ReadOnlyMemory<byte>.Empty);
+        await server.Settle();
+        await server.Deliver(new Envelope { Header = RequestOf(13) });
+
+        Assert.Equal(4, resolver.Requests.Count);
+        Assert.Equal(13u, resolver.Requests[3].Header.CallId);
+    }
+
+    [Fact]
+    public async Task Answers_ENVELOPE_TOO_LARGE_a_request_that_came_whole_past_chunkBytes_and_holds_nothing_of_it()
+    {
+        var server = new Peer(RouterSide.Server, Chunked with { MaximumEnvelopeBytes = 1_024 });
+        var resolver = server.Resolve();
+
+        // 12 bytes of header, then 53 of payload: one past chunkBytes, within an envelope
+        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = PatternOf(53) });
+
+        // an opening past it too
+        await server.Deliver(new Envelope { Header = RequestOf(3) with { Total = 300 }, Payload = PatternOf(49) });
+
+        // a request of chunkBytes, taken
+        await server.Deliver(new Envelope { Header = RequestOf(5), Payload = PatternOf(52) });
+
+        Assert.Equal(
+            [(1u, (ushort)ProtocolCode.EnvelopeTooLarge), (3u, (ushort)ProtocolCode.EnvelopeTooLarge)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.CallId, envelope.Failure!.Code);
+            }));
+        Assert.Equal("a request is 64 bytes at most, not 65", server.Sent[0].Failure!.Detail);
+        Assert.Equal(
+            [5u],
+            resolver.Requests.Select((request) =>
+            {
+                return request.Header.CallId;
+            }));
+
+        var counts = (await GaugesOf(server)).Counts;
+
+        Assert.Equal((1L, 0L), (counts["answeringCalls"], counts["receivingTransfers"]));
     }
 }

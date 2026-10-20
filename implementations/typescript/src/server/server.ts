@@ -62,7 +62,9 @@ export {
   TimeoutError,
 } from '../transport/shared/errors';
 export type {
+  AccessRefusalStage,
   AdmissionFailure,
+  IAccessRefusal,
   IAdmissionRequest,
   IBeforeRequest,
   ICallSession,

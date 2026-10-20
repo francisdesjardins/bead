@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { once } from 'node:events';
-import { type AddressInfo, createServer as createNetServer } from 'node:net';
+import {
+  type AddressInfo,
+  connect as createNetConnection,
+  createServer as createNetServer,
+} from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createWSClient } from '../../client/ws-client';
 import { createRouterServer } from '../../router/server/router-server';
@@ -1187,6 +1191,103 @@ test('keeps two sockets from one address and port, to two of its addresses, as t
   } finally {
     await alice[Symbol.asyncDispose]();
     await other[Symbol.asyncDispose]();
+    await server[Symbol.asyncDispose]();
+    await allClosed();
+  }
+});
+
+test('answers leg A DESTINATION_LOST when its leg B over WebSocket is dropped behind its socket', async () => {
+  // a relay that admits every call, whose sockets hold 64 KiB at most for a peer
+  const server = createWSServer({
+    relay: {
+      beforeRoute: () => {
+        return true;
+      },
+    },
+    transport: {
+      heartbeat: Infinity,
+      maximumUnsentBytes: 65_536,
+      minimumSendBytesPerSecond: 0,
+      WebSocketServer,
+    },
+  });
+  const { port } = await server.transport.start({ address: host, findOpenPort: true });
+  const drops: string[] = [];
+
+  server.transport.on('error', (error) => {
+    drops.push(error.message);
+  });
+
+  // a device behind its own socket, its leg B, which reads nothing once upgraded
+  const connected = new Promise<TransportServerConnectionHandle>((resolve) => {
+    server.transport.once('connection', (...[, , connectionHandle]) => {
+      resolve(connectionHandle);
+    });
+  });
+  const device = createNetConnection(port, host);
+  let upgraded = false;
+
+  device.on('error', () => {});
+  device.on('data', () => {
+    if (!upgraded) {
+      upgraded = true;
+      device.pause();
+    }
+  });
+  await once(device, 'connect');
+  device.write(
+    `GET / HTTP/1.1\r\nHost: ${host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+      `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n`
+  );
+  server.router.registerDestination({ connectionHandle: await connected }, { destinationId: 7 });
+
+  const client = createWSClient({ transport: { WebSocket } });
+
+  await client.connect({ host, port });
+
+  try {
+    const calling = client.services.getRequest(echo, {
+      serializer: {
+        decode: (payload: Uint8Array) => {
+          return payload;
+        },
+        encode: (payload: Uint8Array) => {
+          return payload;
+        },
+      },
+    });
+    // the calls leg A may have answered at once, each whole, which leg B carries to a socket that
+    // takes them no more once the platform's buffers are full
+    const outcomes = await Promise.all(
+      Array.from({ length: 64 }, () => {
+        return calling(new Uint8Array(1_000_000))({ destinationId: 7, timeout: 30_000 }).catch(
+          (reason: unknown) => {
+            return reason;
+          }
+        );
+      })
+    );
+
+    const codes = outcomes.map((outcome) => {
+      return outcome instanceof FailureError ? outcome.code : String(outcome);
+    });
+
+    // the calls under way on leg B as it was dropped are lost; those that came after find no
+    // destination there
+    expect(codes[0]).toBe(ProtocolCode.DESTINATION_LOST);
+    expect(
+      codes.filter((code) => {
+        return (
+          code !== ProtocolCode.DESTINATION_LOST && code !== ProtocolCode.DESTINATION_UNREACHABLE
+        );
+      })
+    ).toEqual([]);
+    expect(drops).toEqual([
+      'the client fell behind: what waits for its socket would pass maximumUnsentBytes, 65536 bytes',
+    ]);
+  } finally {
+    device.destroy();
+    await client[Symbol.asyncDispose]();
     await server[Symbol.asyncDispose]();
     await allClosed();
   }

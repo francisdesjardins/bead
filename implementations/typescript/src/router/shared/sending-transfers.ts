@@ -34,6 +34,11 @@ export interface ISendingTransfers<Handle extends string> {
    */
   close(sending: ISending<Handle>): void;
   /**
+   * Ends every transfer — `connectionHandle`'s alone, when given: nothing more of them goes, and a
+   * credit on their calls is for none. Ending one that ended already does nothing.
+   */
+  closeAll(connectionHandle?: Handle): void;
+  /**
    * A credit received on `call`: it raises the end of the transfer sent there, `onCredit` hears it
    * when it did, then the chunks it lets go are sent. A credit that comes while chunks go out only
    * raises the end, which the chunks going out take on; one for no transfer is dropped in silence.
@@ -109,6 +114,16 @@ export const createSendingTransfers = <Handle extends string>(): ISendingTransfe
 
   return {
     close: end,
+    closeAll: (connectionHandle) => {
+      // a map's entry deleted as it is visited leaves the others to visit
+      for (const [handle, calls] of sent) {
+        if (connectionHandle === undefined || handle === connectionHandle) {
+          for (const { sending } of calls.values()) {
+            end(sending);
+          }
+        }
+      }
+    },
     credit: ({ callId, connectionHandle }, creditEnd) => {
       const held = sent.get(connectionHandle)?.get(callId);
 

@@ -7,14 +7,14 @@ import { entriesOf, gaugesOf } from '../../transport/shared/gauges';
 import type { IGauges } from '../../transport/shared/types';
 import { LIMIT_DEFAULTS } from './constants';
 import { CallEnding, type IProcedureSeries, microsecondsOf } from './metrics-registry';
-import type { CallId, ICallAddress, IRequestHeader, IRouterLimits } from './types';
+import type { CallId, ICallAddress, IHandedRequestHeader, IRouterLimits } from './types';
 
 // interfaces
 
 /** A request as it was dispatched: the connection it came from, and its header. */
 interface IDispatchedRequest<Handle extends string> {
   connectionHandle: Handle;
-  header: IRequestHeader;
+  header: IHandedRequestHeader;
 }
 
 /**
@@ -62,13 +62,18 @@ export interface IAnsweringCalls<
   /** Takes out the call `controller` is for — none that took its call id since. */
   close(call: ICallAddress<Handle>, controller: AbortController): void;
   /** The controller of the request dispatched with `header`; `undefined` for one never dispatched. */
-  controllerOf(header: IRequestHeader): AbortController | undefined;
+  controllerOf(header: IHandedRequestHeader): AbortController | undefined;
+  /** The calls `connectionHandle`'s peer has this side answer now; those abandoned not among them. */
+  countOn(connectionHandle: Handle): number;
   /**
    * Counts the call of a request ended, as `ending` says — its answer handed to its transport, say
    * — once, into the series it was opened with; nothing for a call that counts none.
    */
   end(request: IDispatchedRequest<Handle>, ending: CallEnding): void;
-  /** The calls answered and those abandoned, counted, and their connections. */
+  /**
+   * The calls answered and those abandoned, counted, and their connections; and the busiest
+   * connection's calls, under their ceiling, `maximumAnsweringCalls`.
+   */
   gauges(): IGauges<Handle>;
   /** Whether the peer's call is open on `call`'s call id, whichever request opened it. */
   has(call: ICallAddress<Handle>): boolean;
@@ -91,7 +96,8 @@ export interface IAnsweringCalls<
   take(call: ICallAddress<Handle>): AbortController | undefined;
   /**
    * Takes out every call — `connectionHandle`'s alone, when given — and gives their controllers,
-   * for the caller to abort; the calls abandoned go with them, and none is abandoned.
+   * for the caller to abort; the calls abandoned go with them, and none is abandoned. Each call is
+   * counted closed once all are out.
    */
   takeAll(connectionHandle?: Handle): AbortController[];
 }
@@ -119,14 +125,21 @@ export const createAnsweringCalls = <
   Receiving extends IReceivingCredit = IReceivingCredit,
 >(options: {
   clock: IClock;
-  limits?: Pick<IRouterLimits, 'maximumTransfers' | 'transferInactivityTimeout'> | undefined;
+  limits?:
+    | (Pick<IRouterLimits, 'maximumTransfers' | 'transferInactivityTimeout'> &
+        Partial<Pick<IRouterLimits, 'maximumAnsweringCalls'>>)
+    | undefined;
   onRemove?: ((receiving: Receiving) => void) | undefined;
 }): IAnsweringCalls<Handle, Receiving> => {
   const { clock } = options;
-  const { maximumTransfers, transferInactivityTimeout } = options.limits ?? LIMIT_DEFAULTS;
+  const {
+    maximumAnsweringCalls = LIMIT_DEFAULTS.maximumAnsweringCalls,
+    maximumTransfers,
+    transferInactivityTimeout,
+  } = options.limits ?? LIMIT_DEFAULTS;
   const answering = new Map<Handle, Map<CallId, IAnswering<Receiving>>>();
   // the controller of each request dispatched, by its header
-  const dispatched = new WeakMap<IRequestHeader, AbortController>();
+  const dispatched = new WeakMap<IHandedRequestHeader, AbortController>();
   const abandoned = new Map<Handle, Map<CallId, IAbandoned>>();
 
   // forgets a call abandoned, and its timer
@@ -238,6 +251,9 @@ export const createAnsweringCalls = <
     controllerOf: (header) => {
       return dispatched.get(header);
     },
+    countOn: (connectionHandle) => {
+      return answering.get(connectionHandle)?.size ?? 0;
+    },
     end: ({ connectionHandle, header }, ending) => {
       const entry = answering.get(connectionHandle)?.get(header.callId);
 
@@ -246,9 +262,21 @@ export const createAnsweringCalls = <
       }
     },
     gauges: () => {
+      let largestAnsweringCalls = 0;
+
+      // * the busiest connection's, under its ceiling: the health warns before its first refusal
+      for (const { size } of answering.values()) {
+        largestAnsweringCalls = Math.max(largestAnsweringCalls, size);
+      }
+
       return gaugesOf({
+        ceilings: { largestAnsweringCalls: maximumAnsweringCalls },
         connectionHandles: [...answering.keys(), ...abandoned.keys()],
-        counts: { abandonedCalls: entriesOf(abandoned), answeringCalls: entriesOf(answering) },
+        counts: {
+          abandonedCalls: entriesOf(abandoned),
+          answeringCalls: entriesOf(answering),
+          largestAnsweringCalls,
+        },
       });
     },
     has: ({ callId, connectionHandle }) => {
@@ -296,13 +324,12 @@ export const createAnsweringCalls = <
         connectionHandle === undefined
           ? new Set([...answering.keys(), ...abandoned.keys()])
           : [connectionHandle];
-      const controllers: AbortController[] = [];
+      const taken: IAnswering<Receiving>[] = [];
 
       for (const handle of connections) {
         for (const [callId, entry] of answering.get(handle)?.entries() ?? []) {
           forget({ callId, connectionHandle: handle });
-          ended(entry, CallEnding.CLOSED);
-          controllers.push(entry.controller);
+          taken.push(entry);
         }
 
         // a map's entry deleted as it is visited leaves the others to visit
@@ -311,7 +338,14 @@ export const createAnsweringCalls = <
         }
       }
 
-      return controllers;
+      // each counted once every one is out, so none is counted while another is still held
+      for (const entry of taken) {
+        ended(entry, CallEnding.CLOSED);
+      }
+
+      return taken.map(({ controller }) => {
+        return controller;
+      });
     },
   };
 };

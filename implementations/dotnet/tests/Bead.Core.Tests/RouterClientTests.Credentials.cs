@@ -567,8 +567,12 @@ public sealed partial class RouterClientTests
             {
                 Refusal = Failure.OfProtocol(ProtocolCode.SessionRequired, "short of its scope"),
             });
-        transport.Carrying(new Envelope { Header = RequestHeaderOf(2) with { Credential = Credential.Elsewhere() }, Payload = new byte[] { 1 } }, "Interop sub=server");
-        transport.Deliver(new Envelope { Header = RequestHeaderOf(4), Payload = new byte[] { 1 } });
+        // ! in one turn of the router's scheduler, as one read brings them
+        router.Core.Loop.Post(() =>
+        {
+            transport.Carrying(new Envelope { Header = RequestHeaderOf(2) with { Credential = Credential.Elsewhere() }, Payload = new byte[] { 1 } }, "Interop sub=server");
+            transport.Deliver(new Envelope { Header = RequestHeaderOf(4), Payload = new byte[] { 1 } });
+        });
         await scripted.Settle();
 
         // the command in none first: it resolves in the turn it came

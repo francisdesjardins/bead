@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EnvelopeKind } from '../../src/router/shared/constants';
@@ -19,14 +19,32 @@ interface IFake {
   reloads: number;
 }
 
+// types
+
+/** DevTools' themes, as `chrome.devtools.panels.themeName` names them. */
+type ThemeName = (typeof THEMES)[number];
+
+// constants
+
+const THEMES = Object.freeze(['dark', 'default'] as const);
+
+/** A selected tab and another, in the views' bar and in a call's. */
+const TAB_PAIRS = Object.freeze([
+  ['[data-tab="calls"]', '[data-tab="state"]'],
+  ['[data-detail="overview"]', '[data-detail="payload"]'],
+] as const);
+
 // helpers
 
 const encoder = new TextEncoder();
 
 /** The panel, on a page of its own, over a fake of what DevTools and the runtime give it. */
-const openPanel = async (page: Page): Promise<void> => {
+const openPanel = async (
+  page: Page,
+  { themeName = 'dark' }: { themeName?: ThemeName } = {}
+): Promise<void> => {
   await assertBuilt();
-  await page.addInitScript(() => {
+  await page.addInitScript((theme) => {
     const listeners = {
       disconnect: [] as ((port: unknown) => void)[],
       finished: [] as ((entry: unknown) => void)[],
@@ -71,7 +89,7 @@ const openPanel = async (page: Page): Promise<void> => {
             openResource: (url: string, line: number) => {
               fake.opened.push([url, line]);
             },
-            themeName: 'dark',
+            themeName: theme,
           },
         },
         runtime: {
@@ -95,7 +113,7 @@ const openPanel = async (page: Page): Promise<void> => {
       },
       fake,
     });
-  });
+  }, themeName);
   await page.goto(pathToFileURL(join(EXTENSION, 'panel.html')).href);
 };
 
@@ -114,8 +132,11 @@ const fakeOf = (page: Page): Promise<IFake> => {
 };
 
 /** The panel, its page connected, a client announced, and the traffic heard. */
-const openWithTraffic = async (page: Page): Promise<void> => {
-  await openPanel(page);
+const openWithTraffic = async (
+  page: Page,
+  options: { themeName?: ThemeName } = {}
+): Promise<void> => {
+  await openPanel(page, options);
   await deliver(page, { type: 'page-connected' });
   await deliver(page, { sources: [{ id: 1, protocol: 1, side: 'client' }], type: 'sources' });
   await deliver(page, { dropped: 0, records: [...TRAFFIC], type: 'records' });
@@ -123,6 +144,149 @@ const openWithTraffic = async (page: Page): Promise<void> => {
 
 const rowOf = (page: Page, name: string) => {
   return page.locator('#calls tr.call', { hasText: name });
+};
+
+/** What tells a tab's state apart: its text's colour, its tint and its underline. */
+const lookOf = (page: Page, selector: string) => {
+  return page.locator(selector).evaluate((element) => {
+    const style = getComputedStyle(element);
+
+    return { color: style.color, tint: style.backgroundColor, underline: style.borderBottomColor };
+  });
+};
+
+/** Where a focused element's outline falls: inside its box when its offset takes its width back. */
+const outlineOf = (page: Page, selector: string) => {
+  return page.locator(selector).evaluate((element) => {
+    const style = getComputedStyle(element);
+
+    return {
+      isFocusVisible: element.matches(':focus-visible'),
+      isInside: Number.parseFloat(style.outlineOffset) + Number.parseFloat(style.outlineWidth) <= 0,
+      style: style.outlineStyle,
+    };
+  });
+};
+
+/** The WCAG 2 contrast of an element's text over its tint, laid on the panel's paper. */
+const contrastOf = (page: Page, selector: string): Promise<number> => {
+  return page.locator(selector).evaluate((element) => {
+    const channelsOf = (color: string): number[] => {
+      return (color.match(/[\d.]+/gu) ?? []).map(Number);
+    };
+    const luminanceOf = (rgb: number[]): number => {
+      const [red = 0, green = 0, blue = 0] = rgb.map((value) => {
+        const share = value / 255;
+
+        return share <= 0.039_28 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+      });
+
+      return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    };
+    const [red = 0, green = 0, blue = 0, alpha = 1] = channelsOf(
+      getComputedStyle(element).backgroundColor
+    );
+    const paper = channelsOf(getComputedStyle(document.body).backgroundColor);
+    const ground = [red, green, blue].map((value, at) => {
+      return value * alpha + (paper[at] ?? 0) * (1 - alpha);
+    });
+    const [lighter = 0, darker = 0] = [
+      luminanceOf(channelsOf(getComputedStyle(element).color).slice(0, 3)),
+      luminanceOf(ground),
+    ].sort((one, other) => {
+      return other - one;
+    });
+
+    return (lighter + 0.05) / (darker + 0.05);
+  });
+};
+
+/** The viewport made `width` by `height`, once the panel has laid itself out again. */
+const resize = async (page: Page, { height, width }: { height: number; width: number }) => {
+  await page.setViewportSize({ height, width });
+  await page.evaluate(() => {
+    // a resize is dispatched before the next frame's callbacks: two frames see it handled
+    return new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+  });
+};
+
+/** Whether an element shows all it holds across, with nothing to scroll sideways. */
+const isWholeOf = (page: Page, selector: string): Promise<boolean> => {
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((element) => {
+      return element.scrollWidth <= element.clientWidth;
+    });
+};
+
+/** Whether each tab, focused, is wholly within its bar. */
+const isEveryTabInSightAsFocused = (page: Page): Promise<boolean> => {
+  return page.evaluate(() => {
+    return [...document.querySelectorAll<HTMLElement>('[role="tab"]')].every((tab) => {
+      tab.focus();
+
+      const bar = (tab.parentElement as HTMLElement).getBoundingClientRect();
+      const box = tab.getBoundingClientRect();
+
+      return box.left >= bar.left - 0.5 && box.right <= bar.right + 0.5;
+    });
+  });
+};
+
+/** The call rows the list shows whole. */
+const rowsShownOf = (page: Page): Promise<number> => {
+  return page.evaluate(() => {
+    const list = document.getElementById('list')?.getBoundingClientRect();
+
+    return [...document.querySelectorAll('#calls tr.call')].filter((row) => {
+      const box = row.getBoundingClientRect();
+
+      return list !== undefined && box.top >= list.top && box.bottom <= list.bottom + 0.5;
+    }).length;
+  });
+};
+
+/** Where the detail sits against the list, and each side's size along the split, in pixels. */
+const splitOf = (page: Page) => {
+  return page.evaluate(() => {
+    const list = document.getElementById('list')?.getBoundingClientRect();
+    const detail = document.querySelector('.detail')?.getBoundingClientRect();
+
+    if (list === undefined || detail === undefined) {
+      return { detail: 0, list: 0, placement: 'none' };
+    }
+
+    const isRight = detail.left >= list.right;
+
+    return {
+      detail: isRight ? detail.width : detail.height,
+      list: isRight ? list.width : list.height,
+      placement: isRight ? 'right' : detail.top >= list.bottom ? 'bottom' : 'none',
+    };
+  });
+};
+
+const placementOf = async (page: Page): Promise<string> => {
+  return (await splitOf(page)).placement;
+};
+
+/** The splitter's value and its limits, as its ARIA attributes say. */
+const splitterOf = (page: Page) => {
+  return page.locator('#splitter').evaluate((splitter) => {
+    return {
+      max: Number(splitter.getAttribute('aria-valuemax')),
+      min: Number(splitter.getAttribute('aria-valuemin')),
+      now: Number(splitter.getAttribute('aria-valuenow')),
+      orientation: splitter.getAttribute('aria-orientation'),
+    };
+  });
 };
 
 /** Bytes as text whose every character is one of them, as DevTools may give a request's body. */
@@ -133,6 +297,45 @@ const latin1Of = (bytes: Uint8Array): string => {
 // definition
 
 test.describe('the panel', () => {
+  test('defines every custom property its styles and its views draw with, on penumbra’s sheets or its own skin', async () => {
+    const devtools = new URL('../', import.meta.url);
+    const read = (path: string): Promise<string> => {
+      return readFile(new URL(path, devtools), 'utf8');
+    };
+    const views = (await readdir(new URL('views/', devtools))).filter((name) => {
+      return name.endsWith('.ts');
+    });
+    const sheets = await Promise.all(
+      ['panel.html', 'penumbra/tokens.system.css', 'penumbra/tokens.skin.base.css'].map(read)
+    );
+    const scripts = await Promise.all(
+      [
+        'panel.ts',
+        ...views.map((name) => {
+          return `views/${name}`;
+        }),
+      ].map(read)
+    );
+    const defined = new Set(
+      sheets.flatMap((text) => {
+        return [...text.matchAll(/(--[\w-]+)\s*:/gu)].map(([, name]) => {
+          return name;
+        });
+      })
+    );
+    const undefinedOnes = [...sheets, ...scripts]
+      .flatMap((text) => {
+        return [...text.matchAll(/var\((--[\w-]+)/gu)].map(([, name]) => {
+          return name;
+        });
+      })
+      .filter((name) => {
+        return !defined.has(name);
+      });
+
+    expect([...new Set(undefinedOnes)]).toEqual([]);
+  });
+
   test('greets the background with its tab, follows DevTools’ theme, and reads the registries as its Metrics view opens', async ({
     page,
   }) => {
@@ -141,7 +344,7 @@ test.describe('the panel', () => {
     expect((await fakeOf(page)).posted).toEqual([{ tabId: 7, type: 'panel' }]);
     expect(
       await page.evaluate(() => {
-        return document.documentElement.dataset['theme'];
+        return document.documentElement.dataset['colorScheme'];
       })
     ).toBe('dark');
 
@@ -161,6 +364,650 @@ test.describe('the panel', () => {
     await page.click('#empty button');
     expect((await fakeOf(page)).reloads).toBe(1);
   });
+
+  test('opens filter syntax without changing the filter, dismisses it, and keeps it inside a narrow panel', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 600, width: 400 });
+    await openWithTraffic(page);
+    await page.fill('#filter', 'whoami');
+
+    const button = page.getByRole('button', { name: 'Filter syntax' });
+    const help = page.locator('#filter-help');
+
+    await button.click();
+    await expect(button).toHaveAttribute('aria-expanded', 'true');
+    await expect(help).toBeVisible();
+    await expect(help).toContainText('d(rx)');
+    await expect(page.locator('#filter')).toHaveValue('whoami');
+    await expect(rowOf(page, 'whoami')).toBeVisible();
+
+    const box = await help.boundingBox();
+
+    expect(box).not.toBeNull();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(400);
+    expect((box?.y ?? 0) + (box?.height ?? 0)).toBeLessThanOrEqual(600);
+
+    await page.keyboard.press('Escape');
+    await expect(help).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(button).toBeFocused();
+    await button.click();
+    await page.keyboard.press('/');
+    await expect(help).toBeHidden();
+    await expect(page.locator('#filter')).toBeFocused();
+    await button.click();
+    await page.locator('#filter').click();
+    await expect(help).toBeHidden();
+    await button.click();
+    await page.locator('#filter').focus();
+    await page.keyboard.press('Escape');
+    await expect(help).toBeHidden();
+    await expect(page.locator('#filter')).toBeFocused();
+    await expect(page.locator('#filter')).toHaveValue('whoami');
+  });
+
+  test('keeps its filter syntax open while focus stays in the field or the help, and closes it as focus leaves', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    const button = page.getByRole('button', { name: 'Filter syntax' });
+    const help = page.locator('#filter-help');
+
+    await button.click();
+    await page.locator('#filter').focus();
+    await expect(help).toBeVisible();
+    await help.click();
+    await expect(help).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(help).toBeHidden();
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('stands every control and group of its bars at one height, and centres the icons of record and clear', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    const measured = await page.evaluate(() => {
+      const boxOf = (selector: string) => {
+        return document.querySelector(selector)!.getBoundingClientRect();
+      };
+      const heights = Object.fromEntries(
+        [
+          '#record',
+          '#clear',
+          '#source',
+          '#filter',
+          'header .group',
+          '.list-bar .group',
+          '#layout',
+        ].map((selector) => {
+          return [selector, boxOf(selector).height];
+        })
+      );
+      const offsets = ['#record', '#clear'].map((selector) => {
+        const button = boxOf(selector);
+        const icon = boxOf(`${selector} svg`);
+
+        return {
+          x: icon.left + icon.width / 2 - (button.left + button.width / 2),
+          y: icon.top + icon.height / 2 - (button.top + button.height / 2),
+        };
+      });
+
+      return { heights, offsets };
+    });
+
+    expect(new Set(Object.values(measured.heights)).size, JSON.stringify(measured.heights)).toBe(1);
+    for (const offset of measured.offsets) {
+      expect(Math.abs(offset.x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(offset.y)).toBeLessThanOrEqual(0.5);
+    }
+  });
+
+  test('gives each control edge at least 3:1 contrast against its surfaces in both themes', async ({
+    page,
+  }) => {
+    for (const themeName of THEMES) {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
+      await page.mouse.move(0, 0);
+      await page.keyboard.press('Tab');
+      await page.locator('#splitter').focus();
+
+      const edges = await page.evaluate(() => {
+        const channelsOf = (color: string): number[] => {
+          return (color.match(/[\d.]+/gu) ?? []).map(Number);
+        };
+        const blend = (color: number[], ground: number[]): number[] => {
+          const alpha = color[3] ?? 1;
+
+          return color.slice(0, 3).map((value, index) => {
+            return value * alpha + (ground[index] ?? 0) * (1 - alpha);
+          });
+        };
+        const backgroundOf = (element: Element | null): number[] => {
+          const layers: number[][] = [];
+
+          for (let held = element; held !== null; held = held.parentElement) {
+            layers.unshift(channelsOf(getComputedStyle(held).backgroundColor));
+          }
+
+          return layers.reduce(
+            (ground, color) => {
+              return blend(color, ground);
+            },
+            [255, 255, 255]
+          );
+        };
+        const luminanceOf = (rgb: number[]): number => {
+          const [red = 0, green = 0, blue = 0] = rgb.map((value) => {
+            const share = value / 255;
+
+            return share <= 0.040_45 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4;
+          });
+
+          return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+        };
+        const contrastOf = (color: number[], ground: number[]): number => {
+          const [darker = 0, lighter = 0] = [luminanceOf(color), luminanceOf(ground)].sort(
+            (one, other) => {
+              return one - other;
+            }
+          );
+
+          return (lighter + 0.05) / (darker + 0.05);
+        };
+
+        return [...document.querySelectorAll('button, input, select, #splitter')].flatMap(
+          (element) => {
+            if (element.getClientRects().length === 0) {
+              return [];
+            }
+
+            const style = getComputedStyle(element);
+            const inside = backgroundOf(element);
+            const outside = backgroundOf(element.parentElement);
+            const properties = ['border-top', 'border-right', 'border-bottom', 'border-left'];
+
+            if (element.id === 'splitter' && element.matches(':focus-visible')) {
+              properties.push('outline');
+            }
+
+            return properties.flatMap((property) => {
+              const color = channelsOf(style.getPropertyValue(`${property}-color`));
+              const width = Number.parseFloat(style.getPropertyValue(`${property}-width`));
+              const edgeStyle = style.getPropertyValue(`${property}-style`);
+
+              if (width === 0 || edgeStyle === 'none' || (color[3] ?? 1) === 0) {
+                return [];
+              }
+
+              const edge = blend(color, inside);
+
+              return [
+                {
+                  id: element.id,
+                  inside: contrastOf(edge, inside),
+                  name: `${element.id || element.textContent.trim()} ${property}`,
+                  outside: contrastOf(edge, outside),
+                },
+              ];
+            });
+          }
+        );
+      });
+
+      await test.info().attach(`control-edges-${themeName}`, {
+        body: JSON.stringify(edges, null, 2),
+        contentType: 'application/json',
+      });
+
+      for (const id of ['record', 'clear', 'source', 'filter', 'layout', 'splitter']) {
+        expect(
+          edges.some((edge) => {
+            return edge.id === id;
+          }),
+          `${themeName}: ${id} has a measured edge`
+        ).toBe(true);
+      }
+
+      for (const edge of edges) {
+        expect(edge.inside, `${themeName}: ${edge.name} against its fill`).toBeGreaterThanOrEqual(
+          3
+        );
+        expect(
+          edge.outside,
+          `${themeName}: ${edge.name} against its surround`
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  for (const themeName of THEMES) {
+    test(`keeps a hovered tab apart from the selected one, and the selected one as it is under the mouse, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
+
+      for (const [selected, other] of TAB_PAIRS) {
+        await page.mouse.move(0, 0);
+
+        const atRest = await lookOf(page, selected);
+
+        await page.hover(other);
+
+        const hovered = await lookOf(page, other);
+
+        expect({ tint: hovered.tint, underline: hovered.underline }).not.toEqual({
+          tint: atRest.tint,
+          underline: atRest.underline,
+        });
+        await page.hover(selected);
+        expect(await lookOf(page, selected)).toEqual(atRest);
+      }
+    });
+
+    test(`reads its selected tab at least as clearly as the others, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
+      await page.mouse.move(0, 0);
+
+      for (const [selected, other] of TAB_PAIRS) {
+        const contrast = await contrastOf(page, selected);
+
+        expect(contrast).toBeGreaterThanOrEqual(4.5);
+        expect(contrast).toBeGreaterThanOrEqual(await contrastOf(page, other));
+      }
+    });
+
+    test(`draws the focus ring of the list and of the detail inside them, where their scrolling keeps it, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await rowOf(page, 'whoami').click();
+
+      await page.locator('[data-tab="calls"]').focus();
+      await page.keyboard.press('Tab');
+      await expect(page.locator('#list')).toBeFocused();
+      expect(await outlineOf(page, '#list')).toEqual({
+        isFocusVisible: true,
+        isInside: true,
+        style: 'solid',
+      });
+
+      await page.locator('[data-detail="overview"]').focus();
+      await page.keyboard.press('Tab');
+      await expect(page.locator('#detail')).toBeFocused();
+      expect(await outlineOf(page, '#detail')).toEqual({
+        isFocusVisible: true,
+        isInside: true,
+        style: 'solid',
+      });
+    });
+  }
+
+  test('places its detail as DevTools’ Elements panel does, beside a split wider than 680 px and under it otherwise, and where its Detail choice says', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openWithTraffic(page);
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
+
+    for (const [width, height, placement, orientation] of [
+      [1280, 800, 'right', 'vertical'],
+      [900, 950, 'right', 'vertical'],
+      [681, 500, 'right', 'vertical'],
+      [680, 500, 'bottom', 'horizontal'],
+      [600, 900, 'bottom', 'horizontal'],
+    ] as const) {
+      await resize(page, { height, width });
+      expect(await placementOf(page)).toBe(placement);
+      expect((await splitterOf(page)).orientation).toBe(orientation);
+    }
+
+    await resize(page, { height: 500, width: 680 });
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('right');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+  });
+
+  test('keeps the detail’s tab bar whole beside the list, as Auto places it and with the detail at its least', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 600, width: 760 });
+    await openWithTraffic(page);
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+    expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+
+    await page.locator('#splitter').focus();
+    await page.keyboard.press('End');
+    expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+
+    await resize(page, { height: 800, width: 1280 });
+    await page.keyboard.press('End');
+    await expect(page.locator('#splitter')).not.toHaveAttribute('aria-valuenow', '60');
+    expect(await isWholeOf(page, '.detail-tabs')).toBe(true);
+  });
+
+  test('keeps the list its rows first in a tight panel, and its status bar on one line', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    // the rows the panel showed at these sizes before its type grew
+    for (const [width, height, rows] of [
+      [690, 400, 5],
+      [600, 500, 8],
+    ] as const) {
+      await resize(page, { height, width });
+      expect(await rowsShownOf(page)).toBeGreaterThanOrEqual(rows);
+    }
+
+    await resize(page, { height: 600, width: 400 });
+
+    const bar = await page.locator('.statusbar').evaluate((statusbar) => {
+      const counts = statusbar.querySelector('#footer') as HTMLElement;
+      const choice = statusbar.querySelector('label') as HTMLElement;
+
+      return {
+        isCut: counts.scrollWidth > counts.clientWidth,
+        isOneLine:
+          Math.abs(counts.getBoundingClientRect().top - choice.getBoundingClientRect().top) < 8,
+        right: choice.getBoundingClientRect().right,
+      };
+    });
+
+    expect(bar.isCut).toBe(true);
+    expect(bar.isOneLine).toBe(true);
+    expect(bar.right).toBeLessThanOrEqual(400);
+  });
+
+  test('keeps the calls table within its list on a wide panel', async ({ page }) => {
+    await openWithTraffic(page);
+
+    for (const width of [1280, 1366]) {
+      await resize(page, { height: 800, width });
+      expect(await isWholeOf(page, '#list')).toBe(true);
+    }
+  });
+
+  test('scrolls no page sideways in a narrow panel, and brings each tab into sight as it is focused', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+
+    for (const width of [360, 320]) {
+      await resize(page, { height: 640, width });
+      expect(await isWholeOf(page, 'html')).toBe(true);
+      // a bar narrower than its tabs, as a platform's wider type may make it, scrolls within itself
+      expect(await isEveryTabInSightAsFocused(page)).toBe(true);
+    }
+  });
+
+  test('moves its splitter by keyboard and by pointer, within the least each side keeps', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openWithTraffic(page);
+
+    const splitter = page.getByRole('separator', { name: 'Calls list' });
+
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+    await splitter.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '55');
+
+    // Enter collapses the list to its least, and restores the share it had
+    await page.keyboard.press('Enter');
+
+    const collapsed = await splitterOf(page);
+
+    expect(collapsed.now).toBe(collapsed.min);
+    await page.keyboard.press('Enter');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '55');
+
+    await page.keyboard.press('Home');
+
+    const atLeast = await splitterOf(page);
+
+    expect(atLeast.now).toBe(atLeast.min);
+    expect((await splitOf(page)).list).toBeGreaterThanOrEqual(240);
+    expect((await splitOf(page)).list).toBeLessThan(240 + 3);
+
+    await page.keyboard.press('End');
+
+    const atMost = await splitterOf(page);
+
+    expect(atMost.now).toBe(atMost.max);
+    expect((await splitOf(page)).detail).toBeGreaterThanOrEqual(260);
+
+    const box = await splitter.boundingBox();
+
+    if (box === null) {
+      throw new Error('the splitter has no box');
+    }
+
+    await page.mouse.move(box.x, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(400, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+    expect(Math.abs((await splitOf(page)).list - 400)).toBeLessThan(3);
+
+    await page.mouse.move(400, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(1270, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+
+    const dragged = await splitterOf(page);
+
+    expect(dragged.now).toBe(dragged.max);
+    expect((await splitOf(page)).detail).toBeGreaterThanOrEqual(260);
+
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await splitter.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+    await page.keyboard.press('ArrowDown');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+  });
+
+  test('keeps its layout and each placement’s split, a share dragged among them, across a reload of its page', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openPanel(page);
+
+    const splitter = page.locator('#splitter');
+
+    await splitter.focus();
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await splitter.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('bottom');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('right');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '50');
+
+    const box = await splitter.boundingBox();
+
+    if (box === null) {
+      throw new Error('the splitter has no box');
+    }
+
+    await page.mouse.move(box.x, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(500, box.y + box.height / 2, { steps: 4 });
+    await page.mouse.up();
+
+    const dragged = (await splitterOf(page)).now;
+
+    expect(dragged).not.toBe(50);
+    await page.reload();
+    await expect(splitter).toHaveAttribute('aria-valuenow', String(dragged));
+  });
+
+  test('keeps its defaults, and its choices for the page’s life, when its storage refuses', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        get: () => {
+          throw new DOMException('refused', 'SecurityError');
+        },
+      });
+    });
+    await page.setViewportSize({ height: 800, width: 1280 });
+    await openPanel(page);
+
+    const splitter = page.locator('#splitter');
+
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+    await page.getByRole('combobox', { name: 'Detail' }).selectOption('bottom');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('bottom');
+    await splitter.focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '65');
+
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'Detail' })).toHaveValue('auto');
+    await expect
+      .poll(() => {
+        return placementOf(page);
+      })
+      .toBe('right');
+    await expect(splitter).toHaveAttribute('aria-valuenow', '60');
+  });
+
+  test('moves between views and detail tabs with arrows and Home and End, keeping one tab stop in each', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await rowOf(page, 'whoami').click();
+    await page.locator('[data-tab="calls"]').focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('[data-tab="wire"]')).toBeFocused();
+    await expect(page.locator('[data-view="wire"]')).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-tab="calls"]')).toBeFocused();
+    await expect(page.locator('[data-view="calls"]')).toBeVisible();
+    await page.keyboard.press('End');
+    await expect(page.locator('[data-tab="wire"]')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(page.locator('[data-tab="calls"]')).toBeFocused();
+    await expect(page.locator('.tabs [tabindex="0"]')).toHaveCount(1);
+    // ! the view comes back at the next frame: a tab of its detail takes no focus while hidden
+    await expect(page.locator('[data-view="calls"]')).toBeVisible();
+
+    await page.locator('[data-detail="overview"]').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-detail="payload"]')).toBeFocused();
+    await expect(page.locator('#detail .tree')).toBeVisible();
+    await expect(page.locator('#detail')).toHaveAttribute('aria-labelledby', 'payload-tab');
+    await page.keyboard.press('End');
+    await expect(page.locator('[data-detail="trace"]')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('[data-detail="overview"]')).toBeFocused();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Home');
+    await expect(page.locator('[data-detail="overview"]')).toBeFocused();
+    await expect(page.locator('.detail-tabs [tabindex="0"]')).toHaveCount(1);
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#detail')).toBeFocused();
+  });
+
+  for (const themeName of THEMES) {
+    test(`filters by client through the styled select, including a client with no calls, in DevTools’ ${themeName} theme`, async ({
+      page,
+    }) => {
+      await openWithTraffic(page, { themeName });
+      await deliver(page, {
+        sources: [
+          { id: 1, protocol: 1, side: 'client' },
+          { id: 2, protocol: 1, side: 'client' },
+        ],
+        type: 'sources',
+      });
+
+      const source = page.locator('#source');
+
+      await source.click();
+      await expect(page.locator('#source:open')).toBeVisible();
+
+      for (const name of ['All clients', 'Client 1', 'Client 2']) {
+        await expect(source.getByRole('option', { name, exact: true })).toBeVisible();
+      }
+
+      const picker = await source.evaluate((element) => {
+        const style = getComputedStyle(element, '::picker(select)');
+        const paper = getComputedStyle(document.body);
+
+        return {
+          background: style.backgroundColor,
+          border: style.borderTopStyle,
+          color: style.color,
+          paper: paper.backgroundColor,
+          shadow: style.boxShadow,
+          text: paper.color,
+        };
+      });
+
+      expect(picker.background).toBe(picker.paper);
+      expect(picker.color).toBe(picker.text);
+      expect(picker.border).toBe('solid');
+      expect(picker.shadow).not.toBe('none');
+      await source.getByRole('option', { name: 'Client 2', exact: true }).click();
+      await expect(page.locator('#source:open')).toHaveCount(0);
+      await expect(page.locator('#calls tr.call')).toHaveCount(0);
+      await source.click();
+      await source.getByRole('option', { name: 'Client 1', exact: true }).click();
+      await expect(page.locator('#calls tr.call')).toHaveCount(10);
+      await source.click();
+      await source.getByRole('option', { name: 'All clients', exact: true }).click();
+      await expect(page.locator('#calls tr.call')).toHaveCount(10);
+    });
+  }
 
   test('shows a call a row, newest first, its outcome in words, a command read the right way round', async ({
     page,
@@ -200,6 +1047,71 @@ test.describe('the panel', () => {
     await expect(page.locator('#envelopes tr')).toHaveCount(25);
     await page.fill('#filter', 'e(credit)');
     await expect(page.locator('#envelopes tr')).toHaveCount(3);
+  });
+
+  test('keeps the call whose envelope was clicked selected in the Envelopes mode, each of its envelopes marked', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await page.click('[data-mode="envelopes"]');
+    await page.locator('#envelopes tr', { hasText: 'download' }).last().click();
+
+    const selected = page.locator('#envelopes tr[aria-selected="true"]');
+    const backgroundOf = (row: ReturnType<Page['locator']>): Promise<string> => {
+      return row
+        .locator('td')
+        .first()
+        .evaluate((cell) => {
+          return getComputedStyle(cell).backgroundColor;
+        });
+    };
+
+    await expect(selected).toHaveCount(5);
+    await expect(selected).toContainText(
+      Array.from({ length: 5 }, () => {
+        return 'download';
+      })
+    );
+    expect(await backgroundOf(selected.first())).not.toBe(
+      await backgroundOf(page.locator('#envelopes tr[aria-selected="false"]').first())
+    );
+  });
+
+  test('steps through the envelopes shown with ↑ and ↓ in the Envelopes mode, the call’s mark following', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ height: 500, width: 1280 });
+    await openWithTraffic(page);
+    await page.click('[data-mode="envelopes"]');
+
+    const rows = page.locator('#envelopes tr[data-key]');
+    const keys = await rows.evaluateAll((elements) => {
+      return elements.map((element) => {
+        return (element as HTMLElement).dataset['key'];
+      });
+    });
+    const stepped = [0];
+
+    // each step lands on the next row of another call
+    for (let step = 0; step < 12; step += 1) {
+      const from = stepped.at(-1) ?? 0;
+      const next = keys.findIndex((key, at) => {
+        return at > from && key !== keys[from];
+      });
+
+      stepped.push(next < 0 ? from : next);
+    }
+
+    await rows.first().click();
+
+    for (const at of stepped.slice(1)) {
+      await page.keyboard.press('ArrowDown');
+      await expect(rows.nth(at)).toHaveAttribute('aria-selected', 'true');
+    }
+
+    await expect(rows.nth(stepped.at(-1) ?? 0)).toBeInViewport();
+    await page.keyboard.press('ArrowUp');
+    await expect(rows.nth(stepped.at(-1) ?? 0)).toHaveAttribute('aria-selected', 'false');
   });
 
   test('filters as the package’s filter does, keeps the last filter that held when one is refused, and says why', async ({
@@ -334,7 +1246,10 @@ test.describe('the panel', () => {
     await expect(page.locator('#calls tr.call')).toHaveCount(10);
 
     await page.keyboard.press('Control+e');
-    await expect(page.locator('#record')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByRole('button', { exact: true, name: 'Record' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
     await deliver(page, { dropped: 0, records: TRAFFIC.slice(0, 4), type: 'records' });
     await expect(page.locator('#footer')).toContainText('paused: 4 records not recorded');
     await expect(page.locator('#calls tr.call')).toHaveCount(10);

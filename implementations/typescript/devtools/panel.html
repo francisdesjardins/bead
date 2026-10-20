@@ -4,48 +4,83 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Bead</title>
+    <link rel="stylesheet" href="penumbra/tokens.system.css" />
+    <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <style>
+      /* the panel's skin over penumbra's two sheets: its typefaces, its brand, and what it takes
+         from DevTools' own look in place of the base's, each declared here on purpose */
       :root {
-        --paper: #ffffff;
-        --raised: #f3f5f4;
-        --ink: #1f2623;
-        --muted: #5f6b66;
-        --faint: #8a9590;
-        --line: #dfe4e2;
-        --accent: #0b6e5a;
-        --accent-soft: rgb(11 110 90 / 0.1);
-        --answered: #1a73e8;
-        --answered-soft: rgb(26 115 232 / 0.12);
-        --bad: #c5221f;
+        --app-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --app-font-mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+
+        /* panel radii: narrow meters and small furniture, then the system’s control/menu steps */
+        /* the radius scale gives narrow meters a two-pixel corner */
+        --app-radius-xs: 2px;
+        /* the small radius step matches four-pixel furniture corners */
+        --app-radius-sm: 4px;
+
+        /* DevTools' own type scale: 12 px for controls, rows and tabs, 11 px for what is secondary;
+           penumbra's steps keep their names at a panel's density */
+        --app-text-sm: 0.6875rem;
+        --app-text-md: 0.75rem;
+        --app-text-base: 0.8125rem;
+        --app-text-lg: 0.9375rem;
+
+        --app-flame: #0b6e5a;
+        --app-flame-wash: rgb(11 110 90 / 0.1);
+        --app-accent: #0b6e5a;
+        --app-ring: #0b6e5a;
+
+        /* DevTools' grounds, text and edges, so the panel sits beside its own */
+        --app-paper: #ffffff;
+        --app-bg: #f3f5f4;
+        --app-text: #1f2623;
+        --app-text-secondary: #53635b;
+        --app-text-tertiary: #68776f;
+        --app-divider: #dfe4e2;
+        --app-control-border: #738c7d;
+        --app-error: #c5221f;
+        --app-info: #1a73e8;
+        --app-info-wash: rgb(26 115 232 / 0.12);
+        --app-ok-wash: rgb(30 142 62 / 0.14);
+        /* a panel of rows reads denser than a page of prose */
+        --app-lh-body: 1.5;
+
         --bad-soft: rgb(197 34 31 / 0.1);
         --ended: #80868b;
-        --added: rgb(30 142 62 / 0.14);
         --removed: rgb(197 34 31 / 0.12);
-        --mono: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+        --syntax-string: #925b12;
+        --list-bar-height: calc(var(--app-space-8) + var(--app-space-1));
+        /* the compact DevTools control floor is independent of text padding */
+        --control-height: 22px;
+        /* a button inside a group: the control's height less the group's two hairlines and insets */
+        --segment-height: calc(var(--control-height) - 4px);
+        --menu-row-height: calc(var(--app-space-6) + var(--app-space-1));
         color-scheme: light;
-        font:
-          12px/1.45 system-ui,
-          -apple-system,
-          'Segoe UI',
-          sans-serif;
       }
 
-      :root[data-theme='dark'] {
-        --paper: #202124;
-        --raised: #292a2d;
-        --ink: #e3e6e4;
-        --muted: #9aa5a0;
-        --faint: #747d79;
-        --line: #3c4043;
-        --accent: #3cc7a6;
-        --accent-soft: rgb(60 199 166 / 0.14);
-        --answered: #8ab4f8;
-        --answered-soft: rgb(138 180 248 / 0.16);
-        --bad: #f28b82;
+      :root[data-color-scheme='dark'] {
+        --app-flame: #3cc7a6;
+        --app-flame-wash: rgb(60 199 166 / 0.14);
+        --app-accent: #3cc7a6;
+        --app-ring: #3cc7a6;
+
+        --app-paper: #202124;
+        --app-bg: #292a2d;
+        --app-text: #e3e6e4;
+        --app-text-secondary: #b2bdb7;
+        --app-text-tertiary: #9aa59f;
+        --app-divider: #3c4043;
+        --app-control-border: #78877d;
+        --app-error: #f28b82;
+        --app-info: #8ab4f8;
+        --app-info-wash: rgb(138 180 248 / 0.16);
+        --app-ok-wash: rgb(129 201 149 / 0.16);
+
         --bad-soft: rgb(242 139 130 / 0.14);
         --ended: #9aa0a6;
-        --added: rgb(129 201 149 / 0.16);
         --removed: rgb(242 139 130 / 0.16);
+        --syntax-string: #e9bc79;
         color-scheme: dark;
       }
 
@@ -56,36 +91,161 @@
       body {
         display: grid;
         grid-template-rows: auto auto minmax(0, 1fr) auto;
+        /* ! the panel's width bounds every row: a split's fractions never widen the page */
+        grid-template-columns: minmax(0, 1fr);
         height: 100vh;
         margin: 0;
-        background: var(--paper);
-        color: var(--ink);
+        background: var(--app-paper);
+        color: var(--app-text);
+        /* ! on the body, never the root: penumbra's scale is in rem, which the root's size sets */
+        font: var(--app-text-md) / var(--app-lh-body) var(--app-font-body);
       }
 
       .bar {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px 8px;
-        padding: 5px 8px;
-        border-bottom: 1px solid var(--line);
-        background: var(--raised);
+        gap: var(--app-space-1);
+        padding: var(--app-space-1) var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        background: var(--app-bg);
       }
 
       select,
       input,
       button {
-        min-height: 22px;
-        padding: 1px 6px;
-        border: 1px solid var(--line);
-        border-radius: 4px;
-        background: var(--paper);
-        color: var(--ink);
+        min-height: var(--control-height);
+        /* the control's height centres its line: no padding above or below adds to it */
+        padding: 0 var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-control-border);
+        border-radius: var(--app-radius);
+        background: var(--app-paper);
+        color: var(--app-text);
         font: inherit;
+        font-size: var(--app-text-md);
+        line-height: var(--app-lh-snug);
+      }
+
+      select {
+        /* a content-width floor keeps this label or plot readable before it scrolls */
+        min-width: 112px;
+        padding: 0 var(--app-space-8) 0 var(--app-space-2);
+        appearance: none;
+        background-image:
+          linear-gradient(45deg, transparent 50%, var(--app-text-secondary) 50%),
+          linear-gradient(135deg, var(--app-text-secondary) 50%, transparent 50%);
+        background-repeat: no-repeat;
+        background-position:
+          /* the fallback chevron’s paired triangles share the same centre */
+          right 14px center,
+          /* the fallback chevron’s paired triangles share the same centre */ right 10px center;
+        /* the fallback chevron uses two four-pixel triangles */
+        background-size: 4px 4px;
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      select:hover {
+        border-color: var(--app-text-secondary);
+        background-color: var(--app-bg);
+      }
+
+      select:open {
+        border-color: var(--app-accent);
+      }
+
+      @supports (appearance: base-select) {
+        select,
+        select::picker(select) {
+          appearance: base-select;
+        }
+
+        select {
+          gap: var(--app-space-3);
+          padding-right: var(--app-space-2);
+          background-image: none;
+        }
+
+        select::picker-icon {
+          /* this fixed drawing width keeps the small glyph or data meter legible */
+          width: 7px;
+          /* this fixed drawing height keeps the small glyph or data meter legible */
+          height: 7px;
+          align-self: center;
+          /* the chevron uses a thin rotated stroke */
+          border-right: 1.5px solid var(--app-text-secondary);
+          /* the chevron uses a thin rotated stroke */
+          border-bottom: 1.5px solid var(--app-text-secondary);
+          color: var(--app-text-secondary);
+          content: '';
+          /* the chevron’s two-pixel shift centres its rotated strokes */
+          transform: translateY(-2px) rotate(45deg);
+        }
+
+        select:open::picker-icon {
+          border-color: var(--app-accent);
+          /* the chevron’s two-pixel shift centres its rotated strokes */
+          transform: translateY(2px) rotate(225deg);
+        }
+
+        select::picker(select) {
+          min-width: anchor-size(width);
+          /* the popup height is capped for short DevTools viewports */
+          max-height: 280px;
+          margin-top: var(--app-space-2);
+          padding: var(--app-space-1);
+          overflow: auto;
+          /* a one-pixel hairline separates the surfaces */
+          border: 1px solid var(--app-control-border);
+          border-radius: var(--app-radius-md);
+          background: var(--app-paper);
+          color: var(--app-text);
+          /* the shadow’s hairline and blur express elevation rather than spacing */
+          box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+        }
+
+        option {
+          display: flex;
+          align-items: center;
+          gap: var(--app-space-3);
+          min-height: var(--menu-row-height);
+          padding: var(--app-space-1) var(--app-space-2);
+          border-radius: var(--app-radius-sm);
+          font: inherit;
+        }
+
+        option:hover,
+        option:focus-visible {
+          background: var(--app-bg);
+          /* the offset tracks the two-pixel focus stroke */
+          outline-offset: -2px;
+        }
+
+        option:checked {
+          background: var(--app-flame-wash);
+          color: var(--app-accent);
+          font-weight: 600;
+        }
+
+        option::checkmark {
+          order: 1;
+          margin-left: auto;
+          content: '✓';
+        }
       }
 
       button {
+        font-weight: 500;
         cursor: pointer;
+      }
+
+      button:hover:not(:disabled, [role='tab']) {
+        border-color: var(--app-text-secondary);
+        background: var(--app-flame-wash);
       }
 
       button:disabled {
@@ -94,32 +254,65 @@
       }
 
       button[aria-pressed='true'] {
-        border-color: var(--accent);
-        background: var(--accent-soft);
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
+        color: var(--app-accent);
       }
 
       :focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: -1px;
+        /* the two-pixel focus stroke stays distinct from the control’s hairline */
+        outline: 2px solid var(--app-accent);
+        /* the offset tracks the two-pixel focus stroke */
+        outline-offset: 2px;
+      }
+
+      #list:focus-visible,
+      #detail:focus-visible,
+      [data-view]:focus-visible,
+      pre:focus-visible,
+      [role='tab']:focus-visible {
+        /* the offset tracks the two-pixel focus stroke */
+        outline-offset: -2px;
+      }
+
+      #record,
+      #clear {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--control-height);
+        padding: 0;
+      }
+
+      .icon {
+        /* the icons' drawing size, centred in a control's square */
+        width: 14px;
+        height: 14px;
       }
 
       #record[aria-pressed='true'] {
-        color: var(--bad);
+        color: var(--app-error);
       }
 
       #filter {
-        flex: 1 1 220px;
+        flex: 1 1 auto;
         min-width: 0;
-        font-family: var(--mono);
+        width: 100%;
+        padding-right: var(--app-space-8);
+      }
+
+      #filter::placeholder {
+        color: var(--app-text-tertiary);
+        opacity: 1;
       }
 
       #filter[aria-invalid='true'] {
-        border-color: var(--bad);
+        border-color: var(--app-error);
         background: var(--bad-soft);
       }
 
       #filter-state {
-        color: var(--bad);
+        color: var(--app-error);
       }
 
       #filter-state:empty {
@@ -129,45 +322,106 @@
       .group {
         display: inline-flex;
         flex-wrap: wrap;
-        gap: 2px;
+        gap: var(--app-space-1);
+        /* a one-pixel inset keeps a pressed button's edge inside the group's, the group a control's
+           height */
+        padding: 1px;
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+      }
+
+      .group button {
+        min-height: var(--segment-height);
+        line-height: var(--app-lh-tight);
+        border-color: transparent;
+        background: transparent;
+      }
+
+      .group button[aria-pressed='true'] {
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
       }
 
       label {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
+        gap: var(--app-space-2);
         white-space: nowrap;
       }
 
+      input[type='checkbox'] {
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 15px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
+        height: 15px;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        accent-color: var(--app-accent);
+      }
+
       #status {
+        flex: 0 1 auto;
+        min-width: 0;
         margin-left: auto;
-        color: var(--muted);
+        overflow: hidden;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #status::before {
+        display: inline-block;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 6px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
+        height: 6px;
+        margin-right: var(--app-space-2);
+        border-radius: var(--app-radius-pill);
+        background: currentColor;
+        content: '';
+        /* the glyph’s optical offset aligns it with the text baseline */
+        vertical-align: 2px;
       }
 
       #status[data-state='open'] {
-        color: var(--accent);
+        color: var(--app-accent);
       }
 
       .tabs {
         display: flex;
-        gap: 2px;
-        padding: 0 8px;
+        gap: var(--app-space-1);
+        padding: 0 var(--app-space-2);
         overflow-x: auto;
-        border-bottom: 1px solid var(--line);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
       }
 
-      .tabs button {
-        min-height: 26px;
+      [role='tab'] {
+        flex-shrink: 0;
+        padding: var(--app-space-1) var(--app-space-3);
         border: 0;
+        /* the two-pixel underline marks the selected or hovered tab */
         border-bottom: 2px solid transparent;
         border-radius: 0;
         background: none;
-        color: var(--muted);
+        color: var(--app-text-secondary);
+        font-weight: 600;
+        white-space: nowrap;
       }
 
-      .tabs button[aria-selected='true'] {
-        border-bottom-color: var(--accent);
-        color: var(--ink);
+      [role='tab'][aria-selected='true'] {
+        border-bottom-color: var(--app-accent);
+        background: var(--app-flame-wash);
+        color: var(--app-text);
+      }
+
+      [role='tab']:hover:not([aria-selected='true']) {
+        border-bottom-color: var(--app-control-border);
+        color: var(--app-text);
       }
 
       main {
@@ -188,46 +442,71 @@
         opacity: 0.6;
       }
 
+      /* the detail right of the list, or under it, a splitter between them; the panel sets each
+         side's share, and the side the detail takes, as its layout says */
       .split {
         display: grid;
-        grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+        /* the splitter occupies a one-pixel track; its hit area extends beyond it */
+        grid-template: minmax(0, 1fr) / minmax(0, 3fr) 1px minmax(0, 2fr);
         overflow: hidden;
       }
 
-      .split > div {
+      .split[data-layout='bottom'] {
+        /* the splitter occupies a one-pixel track; its hit area extends beyond it */
+        grid-template: minmax(0, 3fr) 1px minmax(0, 2fr) / minmax(0, 1fr);
+      }
+
+      #list,
+      .detail {
+        min-width: 0;
         min-height: 0;
         overflow: auto;
       }
 
-      .detail {
-        border-left: 1px solid var(--line);
+      #splitter {
+        position: relative;
+        z-index: 2;
+        background: var(--app-divider);
+        cursor: col-resize;
+        touch-action: none;
+      }
+
+      .split[data-layout='bottom'] #splitter {
+        cursor: row-resize;
+      }
+
+      /* ! the line is a pixel; what the pointer catches reaches past it on each side */
+      #splitter::before {
+        position: absolute;
+        inset: 0 calc(-1 * var(--app-space-1));
+        content: '';
+      }
+
+      .split[data-layout='bottom'] #splitter::before {
+        inset: calc(-1 * var(--app-space-1)) 0;
+      }
+
+      #splitter:hover,
+      #splitter.is-dragging {
+        background: var(--app-accent);
       }
 
       .rows {
         container-type: inline-size;
       }
 
-      @container (max-width: 760px) {
+      /* ! measured on the rows' type: the table needs about 870 px with its waterfall, 740 without */
+      /* the table’s measured column widths set this visibility breakpoint */
+      @container (max-width: 880px) {
         .wide {
           display: none;
         }
       }
 
-      @container (max-width: 520px) {
+      /* the table’s measured column widths set this visibility breakpoint */
+      @container (max-width: 750px) {
         .mid {
           display: none;
-        }
-      }
-
-      @media (max-width: 720px) {
-        .split {
-          grid-template-columns: minmax(0, 1fr);
-          grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
-        }
-
-        .detail {
-          border-top: 1px solid var(--line);
-          border-left: 0;
         }
       }
 
@@ -236,13 +515,20 @@
         top: 0;
         z-index: 1;
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        gap: 6px;
-        padding: 3px 8px;
-        border-bottom: 1px solid var(--line);
-        background: var(--paper);
-        color: var(--muted);
+        gap: var(--app-space-2);
+        min-height: var(--list-bar-height);
+        padding: 0 var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        background: var(--app-paper);
+        color: var(--app-text-secondary);
+      }
+
+      #range {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .list-bar .chip {
@@ -252,32 +538,33 @@
       table {
         width: 100%;
         border-collapse: collapse;
-        font: 11.5px/1.5 var(--mono);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
       }
 
       th {
         position: sticky;
-        top: 29px;
-        padding: 2px 6px;
-        border-bottom: 1px solid var(--line);
-        background: var(--raised);
-        color: var(--muted);
-        font:
-          600 11px system-ui,
-          sans-serif;
+        top: var(--list-bar-height);
+        padding: var(--app-space-1) var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        background: var(--app-bg);
+        color: var(--app-text-secondary);
+        font: 600 var(--app-text-sm)/var(--app-lh-body) var(--app-font-body);
         text-align: left;
         white-space: nowrap;
       }
 
       td {
-        padding: 1px 6px;
-        border-bottom: 1px solid var(--line);
+        padding: 0 var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
         white-space: nowrap;
       }
 
       td.outcome {
         width: 100%;
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 120px;
         max-width: 0;
         overflow: hidden;
@@ -295,46 +582,47 @@
 
       tr.call.failed td.outcome,
       tr.call.failed td.name {
-        color: var(--bad);
+        color: var(--app-error);
       }
 
-      tr.call[aria-selected='true'] td {
-        background: var(--accent-soft);
+      tr.call[aria-selected='true'] td,
+      tr.flat[aria-selected='true'] td {
+        background: var(--app-flame-wash);
       }
 
       tr.envelope td {
-        color: var(--muted);
-        background: var(--raised);
+        color: var(--app-text-secondary);
+        background: var(--app-bg);
       }
 
       tr.envelope td.name {
-        padding-left: 28px;
+        padding-left: calc(var(--app-space-4) + var(--app-space-3));
       }
 
       tr.marker td {
-        padding: 2px 8px;
-        color: var(--muted);
-        font-family: system-ui, sans-serif;
+        padding: var(--app-space-1) var(--app-space-2);
+        color: var(--app-text-secondary);
+        font-family: var(--app-font-body);
         text-align: center;
       }
 
       tr.marker.gap td {
-        color: var(--bad);
+        color: var(--app-error);
         background: var(--bad-soft);
       }
 
       tr[data-direction='tx'].flat td {
-        color: var(--muted);
+        color: var(--app-text-secondary);
       }
 
       .twist {
-        width: 16px;
+        width: var(--app-space-4);
         min-height: 0;
         padding: 0;
         border: 0;
         background: none;
-        color: var(--muted);
-        font-size: 9px;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-xs);
       }
 
       .twist[aria-expanded='true'] {
@@ -342,111 +630,128 @@
       }
 
       .tag {
-        margin-left: 6px;
-        padding: 0 4px;
-        border-radius: 3px;
-        background: var(--raised);
-        color: var(--muted);
-        font-size: 10.5px;
+        margin-left: var(--app-space-2);
+        padding: 0 var(--app-space-1);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-bg);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
       }
 
       .status {
         display: inline-block;
-        width: 12px;
-        height: 12px;
+        width: var(--app-space-3);
+        height: var(--app-space-3);
+        /* the glyph’s optical offset aligns it with the text baseline */
         vertical-align: -2px;
       }
 
       .wf {
         position: relative;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 120px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 10px;
       }
 
       .wf i {
         position: absolute;
+        /* the marker’s pixel offset aligns it inside its data track */
         top: 2px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 6px;
+        /* two pixels keep even a very short duration visible */
         min-width: 2px;
-        border-radius: 1px;
-        background: var(--answered);
+        border-radius: var(--app-radius-xs);
+        background: var(--app-info);
       }
 
       .wf i.failed {
-        background: var(--bad);
+        background: var(--app-error);
       }
 
       .wf i.ended {
+        /* a one-pixel hairline separates the surfaces */
         border: 1px dashed var(--ended);
         background: none;
       }
 
       .wf i.flight {
-        background: var(--answered-soft);
-        box-shadow: inset 0 0 0 1px var(--answered);
+        background: var(--app-info-wash);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: inset 0 0 0 1px var(--app-info);
       }
 
       .wf i.open,
       .wf i.closed {
-        top: 4px;
+        top: var(--app-space-1);
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 2px;
-        background: var(--muted);
+        background: var(--app-text-secondary);
       }
 
       .wf b {
         position: absolute;
+        /* the marker’s pixel offset aligns it inside its data track */
         top: 1px;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 1px;
-        height: 8px;
-        background: var(--ink);
+        height: var(--app-space-2);
+        background: var(--app-text);
       }
 
       .detail-tabs {
         position: sticky;
         top: 0;
         display: flex;
-        gap: 2px;
-        padding: 0 6px;
+        z-index: 1;
+        gap: var(--app-space-1);
+        padding: 0 var(--app-space-1);
         overflow-x: auto;
-        border-bottom: 1px solid var(--line);
-        background: var(--paper);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        background: var(--app-paper);
       }
 
-      .detail-tabs button {
-        min-height: 26px;
-        border: 0;
-        border-bottom: 2px solid transparent;
-        border-radius: 0;
-        background: none;
-        color: var(--muted);
+      .detail-tabs [role='tab'] {
+        padding-inline: var(--app-space-2);
       }
 
-      .detail-tabs button[aria-selected='true'] {
-        border-bottom-color: var(--accent);
-        color: var(--ink);
+      /* a narrow panel keeps every tab in sight */
+      /* the controls’ measured widths set this wrapping breakpoint */
+      @media (max-width: 400px) {
+        [role='tab'] {
+          padding-inline: var(--app-space-2);
+        }
+
+        .detail-tabs [role='tab'] {
+          padding-inline: var(--app-space-1);
+        }
       }
 
       #detail {
-        padding: 8px 10px;
+        padding: var(--app-space-3);
+        font-size: var(--app-text-sm);
       }
 
       .title {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin-bottom: 8px;
+        gap: var(--app-space-2);
+        margin-bottom: var(--app-space-2);
+        font-size: var(--app-text-md);
         font-weight: 650;
       }
 
       .facts {
         display: grid;
         grid-template-columns: max-content minmax(0, 1fr);
-        gap: 3px 10px;
+        gap: var(--app-space-1) var(--app-space-3);
         margin: 0;
       }
 
       .facts dt {
-        color: var(--muted);
+        color: var(--app-text-secondary);
       }
 
       .facts dd {
@@ -455,14 +760,16 @@
       }
 
       .outcome-box {
-        margin-top: 10px;
-        padding: 6px 8px;
-        border-left: 3px solid var(--answered);
-        background: var(--raised);
+        margin-top: var(--app-space-3);
+        padding: var(--app-space-2) var(--app-space-3);
+        /* the three-pixel semantic marker is a stroke rather than an inset */
+        border-left: 3px solid var(--app-info);
+        background: var(--app-bg);
+        border-radius: 0 var(--app-radius-sm) var(--app-radius-sm) 0;
       }
 
       .outcome-box.failed {
-        border-color: var(--bad);
+        border-color: var(--app-error);
       }
 
       .outcome-box.ended {
@@ -472,11 +779,12 @@
       h3 {
         display: flex;
         align-items: center;
-        gap: 6px;
-        margin: 10px 0 4px;
-        color: var(--muted);
-        font-size: 11px;
-        font-weight: 650;
+        gap: var(--app-space-2);
+        margin: var(--app-space-3) 0 var(--app-space-1);
+        color: var(--app-text);
+        font-size: var(--app-text-md);
+        font-weight: 600;
+        min-height: var(--control-height);
       }
 
       h3 .spacer {
@@ -484,40 +792,42 @@
       }
 
       .link {
-        min-height: 0;
-        padding: 0 4px;
-        border: 0;
-        background: none;
-        color: var(--accent);
-        font-size: 11px;
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-divider);
+        background: var(--app-paper);
+        color: var(--app-accent);
       }
 
       pre {
         margin: 0;
-        padding: 6px 8px;
+        padding: var(--app-space-1) var(--app-space-2);
         overflow: auto;
-        border-radius: 4px;
-        background: var(--raised);
-        font: 11px/1.5 var(--mono);
+        border-radius: var(--app-radius);
+        background: var(--app-bg);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-divider);
       }
 
       .tree {
-        padding: 4px 8px;
-        border-radius: 4px;
-        background: var(--raised);
-        font: 11px/1.6 var(--mono);
+        padding: var(--app-space-1) var(--app-space-2);
+        border-radius: var(--app-radius);
+        background: var(--app-bg);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-divider);
       }
 
       .tree details {
         margin: 0;
-        padding-left: 14px;
+        padding-left: var(--app-space-4);
       }
 
       .tree summary {
-        margin-left: -14px;
-        color: var(--ink);
+        margin-left: calc(-1 * var(--app-space-4));
+        color: var(--app-text);
         cursor: pointer;
       }
 
@@ -526,107 +836,120 @@
       }
 
       .tree .key {
-        color: var(--accent);
+        color: var(--app-accent);
       }
 
       .tree .string {
-        color: var(--bad);
-      }
-
-      :root[data-theme='dark'] .tree .string {
-        color: #f9ab73;
+        color: var(--syntax-string);
       }
 
       .tree .tagged {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         font-style: italic;
       }
 
       .diff .added {
         display: block;
-        background: var(--added);
+        background: var(--app-ok-wash);
       }
 
       .diff .removed {
         display: block;
         background: var(--removed);
         text-decoration: line-through;
-        text-decoration-color: var(--faint);
+        text-decoration-color: var(--app-text-tertiary);
       }
 
       .diff .same {
         display: block;
-        color: var(--muted);
+        color: var(--app-text-secondary);
       }
 
       .diff-item {
-        margin-bottom: 8px;
+        margin-bottom: var(--app-space-2);
       }
 
       .diff-item header {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-bottom: 2px;
-        color: var(--muted);
+        gap: var(--app-space-2);
+        margin-bottom: var(--app-space-1);
+        color: var(--app-text-secondary);
       }
 
       .frames {
         margin: 0;
         padding: 0;
         list-style: none;
-        font: 11px/1.7 var(--mono);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
       }
 
       .frames li {
         display: flex;
         flex-wrap: wrap;
-        gap: 2px 8px;
-        border-bottom: 1px solid var(--line);
+        gap: var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        align-items: center;
+        padding: var(--app-space-1) 0;
       }
 
       .frames .fn {
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 120px;
       }
 
       .frames button {
-        min-height: 0;
-        padding: 0;
+        min-height: var(--app-space-6);
+        padding: var(--app-space-1) var(--app-space-1);
         border: 0;
         background: none;
-        color: var(--accent);
-        font: inherit;
+        color: var(--app-accent);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         text-align: left;
         overflow-wrap: anywhere;
+        border-radius: var(--app-radius-sm);
       }
 
       .thread svg {
         display: block;
         max-width: 100%;
         height: auto;
+        overflow: visible;
       }
 
       .thread .life {
-        stroke: var(--line);
+        stroke: var(--app-divider);
         stroke-width: 1.5;
       }
 
-      .thread .lane {
-        fill: var(--ink);
-        font:
-          600 11px system-ui,
-          sans-serif;
+      .thread .lane,
+      .thread .kind {
+        fill: var(--app-text);
+        font: 600 var(--app-text-sm) var(--app-font-body);
       }
 
       .thread .lane-sub,
+      .thread .words,
       .thread .offset,
       .thread .note {
-        fill: var(--muted);
-        font: 10px var(--mono);
+        fill: var(--app-text-secondary);
+        font: var(--app-text-xs) var(--app-font-mono);
+      }
+
+      /* a label over the call's string keeps a rim of the ground, so the string breaks under it */
+      .thread .words,
+      .thread .note,
+      .thread .kind {
+        paint-order: stroke;
+        stroke: var(--app-paper);
+        /* the SVG label’s three-pixel paper stroke clears the thread behind it */
+        stroke-width: 3px;
+        stroke-linejoin: round;
       }
 
       .thread .arrow {
-        stroke: var(--muted);
+        stroke: var(--app-text-secondary);
         stroke-width: 1.2;
         fill: none;
       }
@@ -636,54 +959,42 @@
       }
 
       .thread .head {
-        fill: var(--muted);
+        fill: var(--app-text-secondary);
       }
 
       .thread .string {
-        stroke: var(--ink);
+        stroke: var(--app-text);
         stroke-width: 1;
         fill: none;
         opacity: 0.35;
       }
 
       .thread .bead {
-        fill: var(--paper);
-        stroke: var(--ink);
+        fill: var(--app-paper);
+        stroke: var(--app-text);
         stroke-width: 1.5;
       }
 
       .thread .bead.answer {
-        fill: var(--answered);
-        stroke: var(--answered);
+        fill: var(--app-info);
+        stroke: var(--app-info);
       }
 
       .thread .bead.failure {
-        fill: var(--bad);
-        stroke: var(--bad);
+        fill: var(--app-error);
+        stroke: var(--app-error);
       }
 
       .thread .bead.credit {
         stroke-dasharray: 2 2;
       }
 
-      .thread .kind {
-        fill: var(--ink);
-        font:
-          600 10.5px system-ui,
-          sans-serif;
-      }
-
-      .thread .words {
-        fill: var(--muted);
-        font: 10.5px var(--mono);
-      }
-
       .progress {
         position: relative;
-        height: 8px;
-        margin: 8px 0 4px;
-        border-radius: 4px;
-        background: var(--line);
+        height: var(--app-space-2);
+        margin: var(--app-space-2) 0 var(--app-space-1);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-divider);
       }
 
       .progress i {
@@ -691,68 +1002,76 @@
         top: 0;
         bottom: 0;
         left: 0;
-        border-radius: 4px;
-        background: var(--answered);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-info);
       }
 
       .progress u {
         position: absolute;
+        /* the marker’s pixel offset aligns it inside its data track */
         top: -2px;
+        /* the marker extends past the data track by its stroke width */
         bottom: -2px;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 2px;
-        background: var(--ink);
+        background: var(--app-text);
       }
 
       .legend {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px 14px;
-        color: var(--muted);
+        gap: var(--app-space-1) var(--app-space-3);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
       }
 
       .note {
-        margin: 8px 0;
-        color: var(--muted);
+        margin: var(--app-space-2) 0;
+        color: var(--app-text-secondary);
       }
 
       [data-view] > .note,
       .empty {
-        margin: 12px;
+        margin: var(--app-space-3);
       }
 
       .empty h2 {
-        margin: 0 0 6px;
-        font-size: 13px;
+        margin: 0 0 var(--app-space-2);
+        font-size: var(--app-text-base);
       }
 
       .empty ul {
-        margin: 6px 0 10px;
-        padding-left: 18px;
-        color: var(--muted);
+        margin: var(--app-space-2) 0 var(--app-space-2);
+        padding-left: var(--app-space-4);
+        color: var(--app-text-secondary);
       }
 
       .sect {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--line);
+        padding: var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
       }
 
       .sect h2 {
         display: flex;
         align-items: baseline;
-        gap: 8px;
-        margin: 0 0 6px;
-        font-size: 12px;
+        gap: var(--app-space-2);
+        margin: 0 0 var(--app-space-2);
+        font-size: var(--app-text-md);
+        font-weight: 600;
       }
 
       .count {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         font-weight: 400;
       }
 
       table.plain td,
       table.plain th {
         position: static;
-        border-bottom: 1px solid var(--line);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        padding: var(--app-space-1) var(--app-space-2);
       }
 
       .scrub {
@@ -761,51 +1080,61 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px 10px;
-        padding: 6px 12px;
-        border-bottom: 1px solid var(--line);
-        background: var(--raised);
+        gap: var(--app-space-1) var(--app-space-2);
+        padding: var(--app-space-2) var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
+        background: var(--app-bg);
       }
 
       .scrub input[type='range'] {
+        /* the filter’s preferred width yields to the controls beside it */
         flex: 1 1 200px;
         padding: 0;
         border: 0;
         background: none;
+        appearance: none;
+        height: var(--control-height);
+        min-height: var(--control-height);
+        accent-color: var(--app-accent);
       }
 
       .scrub .when {
-        font: 12px var(--mono);
+        font: var(--app-text-sm) var(--app-font-mono);
       }
 
       .scrub .said {
         flex-basis: 100%;
-        color: var(--muted);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
       }
 
       .meter {
         display: inline-flex;
-        gap: 2px;
+        gap: var(--app-space-1);
         vertical-align: middle;
       }
 
       .meter i {
-        width: 8px;
-        height: 8px;
-        border: 1px solid var(--answered);
-        border-radius: 2px;
+        width: var(--app-space-2);
+        height: var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-info);
+        border-radius: var(--app-radius-xs);
       }
 
       .meter i.on {
-        background: var(--answered);
+        background: var(--app-info);
       }
 
       .bar-mini {
         position: relative;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
         width: 140px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
         height: 6px;
-        border-radius: 3px;
-        background: var(--line);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-divider);
       }
 
       .bar-mini i {
@@ -813,32 +1142,31 @@
         top: 0;
         bottom: 0;
         left: 0;
-        border-radius: 3px;
-        background: var(--answered);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-info);
       }
 
       #timeline svg {
         display: block;
         width: 100%;
+        /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 560px;
         user-select: none;
       }
 
       #timeline .grid {
-        stroke: var(--line);
+        stroke: var(--app-divider);
       }
 
       #timeline .axis,
       #timeline .row-id {
-        fill: var(--muted);
-        font: 10px var(--mono);
+        fill: var(--app-text-secondary);
+        font: var(--app-text-sm) var(--app-font-mono);
       }
 
       #timeline .row-name {
-        fill: var(--ink);
-        font:
-          11px system-ui,
-          sans-serif;
+        fill: var(--app-text);
+        font: var(--app-text-sm) var(--app-font-body);
       }
 
       #timeline .hit {
@@ -846,131 +1174,173 @@
       }
 
       #timeline .hit:hover {
-        fill: var(--accent-soft);
+        fill: var(--app-flame-wash);
       }
 
       #timeline .brush {
-        fill: var(--accent-soft);
-        stroke: var(--accent);
+        fill: var(--app-flame-wash);
+        stroke: var(--app-accent);
       }
 
       .tl-bar {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 6px 12px;
-        padding: 6px 12px;
-        border-bottom: 1px solid var(--line);
+        gap: var(--app-space-1) var(--app-space-2);
+        padding: var(--app-space-2) var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
       }
 
       .spark {
-        stroke: var(--answered);
+        stroke: var(--app-info);
         stroke-width: 1.3;
         fill: none;
       }
 
       .chip {
-        padding: 0 6px;
-        border-radius: 4px;
-        background: var(--raised);
-        box-shadow: 0 0 0 1px var(--line);
-        font: 11px var(--mono);
+        padding: var(--app-space-1) var(--app-space-2);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-bg);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: 0 0 0 1px var(--app-divider);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
+        display: inline-flex;
+        align-items: center;
+        /* the compact chip floor follows its text line box */
+        min-height: 22px;
+        margin: var(--app-space-1);
       }
 
       .chip.failure {
-        color: var(--bad);
+        color: var(--app-error);
         background: var(--bad-soft);
         box-shadow: none;
       }
 
       details.raw {
-        margin: 6px 0;
+        margin: var(--app-space-3) 0;
       }
 
       summary {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         cursor: pointer;
       }
 
       details.raw pre {
         max-height: 50vh;
-        margin-top: 4px;
+        margin-top: var(--app-space-1);
         white-space: pre;
       }
 
       .exchange {
-        padding: 4px 12px 8px;
-        border-bottom: 1px solid var(--line);
+        padding: var(--app-space-2) var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
+        border-bottom: 1px solid var(--app-divider);
       }
 
       .exchange .line {
         display: flex;
         flex-wrap: wrap;
-        align-items: baseline;
-        gap: 4px 12px;
+        align-items: center;
+        gap: var(--app-space-1) var(--app-space-2);
       }
 
       .exchange .envelopes {
-        margin: 2px 0 0 12px;
-        color: var(--muted);
-        font: 11px/1.6 var(--mono);
+        margin: var(--app-space-1) 0 0 var(--app-space-3);
+        color: var(--app-text-secondary);
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-mono);
       }
 
       .statusbar {
         display: flex;
-        flex-wrap: wrap;
-        gap: 2px 16px;
-        padding: 3px 8px;
-        border-top: 1px solid var(--line);
-        background: var(--raised);
-        color: var(--muted);
+        align-items: center;
+        gap: var(--app-space-1) var(--app-space-3);
+        padding: var(--app-space-1) var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border-top: 1px solid var(--app-divider);
+        background: var(--app-bg);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
       }
 
       .statusbar b {
-        color: var(--ink);
+        color: var(--app-text);
         font-weight: 600;
+      }
+
+      #footer {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #footer > span + span {
+        margin-left: var(--app-space-3);
+      }
+
+      .statusbar > label {
+        flex-shrink: 0;
+        margin-left: auto;
+      }
+
+      #layout {
+        min-width: 0;
+        font-size: var(--app-text-sm);
       }
 
       #menu {
         position: fixed;
         z-index: 10;
-        min-width: 180px;
-        padding: 4px 0;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: var(--paper);
-        box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+        /* a content-width floor keeps this label or plot readable before it scrolls */
+        min-width: 208px;
+        padding: var(--app-space-1);
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-control-border);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
       }
 
       #menu button {
         display: block;
         width: 100%;
-        min-height: 24px;
-        padding: 2px 12px;
+        min-height: var(--menu-row-height);
+        padding: var(--app-space-1) var(--app-space-2);
         border: 0;
-        border-radius: 0;
+        border-radius: var(--app-radius-sm);
         background: none;
         text-align: left;
+        font-weight: 400;
       }
 
       #menu button:hover:not(:disabled),
       #menu button:focus-visible {
-        background: var(--accent-soft);
+        background: var(--app-flame-wash);
+        color: var(--app-accent);
+        /* the offset tracks the two-pixel focus stroke */
+        outline-offset: -2px;
       }
 
       #toast {
         position: fixed;
-        right: 12px;
-        bottom: 32px;
-        padding: 4px 10px;
-        border-radius: 4px;
-        background: var(--ink);
-        color: var(--paper);
+        right: var(--app-space-3);
+        /* the toast clears the status bar and its focused controls */
+        bottom: 44px;
+        padding: var(--app-space-2) var(--app-space-3);
+        border-radius: var(--app-radius);
+        background: var(--app-text);
+        color: var(--app-paper);
+        font-size: var(--app-text-sm);
       }
 
       @media (prefers-reduced-motion: no-preference) {
         .spin {
+          /* the spinner turns about the centre of its twelve-pixel status glyph */
           transform-origin: 6px 6px;
           animation: spin 1s linear infinite;
         }
@@ -981,25 +1351,267 @@
           }
         }
       }
+
+      .filter-field {
+        position: relative;
+        display: flex;
+        /* the filter’s preferred width yields to the controls beside it */
+        flex: 1 1 240px;
+        align-items: center;
+        min-width: 0;
+      }
+
+      /* wide enough, the bar keeps to one line: the filter takes what the other controls leave, down
+         to its floor, and the status ellipsizes after it */
+      /* the controls’ measured widths set this wrapping breakpoint */
+      @media (min-width: 1060px) {
+        .bar {
+          flex-wrap: nowrap;
+        }
+
+        .bar .group {
+          flex-shrink: 0;
+        }
+
+        .filter-field {
+          flex-basis: 0;
+          /* a content-width floor keeps this label or plot readable before it scrolls */
+          min-width: 100px;
+        }
+      }
+
+      .filter-help-toggle {
+        position: absolute;
+        /* the help button sits one pixel inside the field’s border */
+        right: 1px;
+        display: grid;
+        width: var(--app-space-6);
+        height: var(--app-space-6);
+        min-height: var(--app-space-6);
+        padding: 0;
+        place-items: center;
+        border: 0;
+        border-radius: var(--app-radius-sm);
+        background: transparent;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
+      }
+
+      #filter-help {
+        position: fixed;
+        inset: auto;
+        z-index: 20;
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: min(380px, calc(100vw - 24px));
+        /* the popup height is capped for short DevTools viewports */
+        max-height: calc(100vh - 24px);
+        margin: 0;
+        padding: var(--app-space-3);
+        /* a one-pixel hairline separates the surfaces */
+        border: 1px solid var(--app-control-border);
+        border-radius: var(--app-radius-md);
+        background: var(--app-paper);
+        color: var(--app-text);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: 0 8px 24px rgb(0 0 0 / 0.18);
+        font: inherit;
+        overflow: auto;
+      }
+
+      #filter-help strong {
+        display: block;
+        margin-bottom: var(--app-space-2);
+        font-size: var(--app-text-md);
+      }
+
+      #filter-help dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: var(--app-space-1) var(--app-space-3);
+        margin: 0;
+        font-size: var(--app-text-sm);
+      }
+
+      #filter-help dt {
+        color: var(--app-accent);
+        font-family: var(--app-font-mono);
+        font-size: var(--app-text-sm);
+      }
+
+      #filter-help dd {
+        margin: 0;
+        color: var(--app-text-secondary);
+      }
+
+      #filter-help code {
+        color: var(--app-text);
+        font-family: var(--app-font-mono);
+        font-size: var(--app-text-sm);
+      }
+
+      #filter-help p {
+        margin: var(--app-space-2) 0 0;
+        padding-top: var(--app-space-2);
+        /* a one-pixel hairline separates the surfaces */
+        border-top: 1px solid var(--app-divider);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
+      }
+
+      h3:first-child {
+        margin-top: 0;
+      }
+
+      .link:hover:not(:disabled) {
+        border-color: var(--app-accent);
+        color: var(--app-accent);
+      }
+
+      .sect h2 .count {
+        font-size: var(--app-text-sm);
+      }
+
+      .sect .note {
+        margin: var(--app-space-2) 0;
+        font-size: var(--app-text-sm);
+      }
+
+      table.plain {
+        font: var(--app-text-sm)/var(--app-lh-body) var(--app-font-body);
+      }
+
+      table.plain .num {
+        font-family: var(--app-font-mono);
+        font-size: var(--app-text-sm);
+      }
+
+      .scrub input[type='range']::-webkit-slider-runnable-track {
+        height: var(--app-space-1);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-divider);
+      }
+
+      .scrub input[type='range']::-webkit-slider-thumb {
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 14px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
+        height: 14px;
+        /* the WebKit thumb is centred: (4px track - 14px thumb) / 2 = -5px */
+        margin-top: -5px;
+        appearance: none;
+        /* the two-pixel paper rim separates the thumb from its track */
+        border: 2px solid var(--app-paper);
+        border-radius: var(--app-radius-pill);
+        background: var(--app-accent);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: 0 0 0 1px var(--app-accent);
+      }
+
+      .scrub input[type='range']::-moz-range-track {
+        height: var(--app-space-1);
+        border-radius: var(--app-radius-sm);
+        background: var(--app-divider);
+      }
+
+      .scrub input[type='range']::-moz-range-thumb {
+        /* this fixed drawing width keeps the small glyph or data meter legible */
+        width: 10px;
+        /* this fixed drawing height keeps the small glyph or data meter legible */
+        height: 10px;
+        /* the two-pixel paper rim separates the thumb from its track */
+        border: 2px solid var(--app-paper);
+        border-radius: var(--app-radius-pill);
+        background: var(--app-accent);
+        /* the shadow’s hairline and blur express elevation rather than spacing */
+        box-shadow: 0 0 0 1px var(--app-accent);
+      }
+
+      .tl-bar .note {
+        flex-basis: 100%;
+        margin: 0;
+        font-size: var(--app-text-sm);
+      }
+
+      .registry .link {
+        min-height: var(--app-space-6);
+        padding: 0 var(--app-space-1);
+        border-color: transparent;
+        background: transparent;
+        font-weight: 500;
+      }
+
+      details.raw > summary {
+        padding: var(--app-space-2) 0;
+        font-size: var(--app-text-sm);
+      }
+
+      .exchange .line .note {
+        margin: 0;
+        font-size: var(--app-text-sm);
+      }
     </style>
   </head>
   <body>
     <header class="bar">
-      <button type="button" id="record" aria-pressed="true" title="Record, or pause (Ctrl+E)">
-        ●
+      <button
+        type="button"
+        id="record"
+        aria-label="Record"
+        aria-pressed="true"
+        title="Record, or pause (Ctrl+E)"
+      >
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="4.5" fill="currentColor" />
+        </svg>
       </button>
-      <button type="button" id="clear" title="Clear (Ctrl+L)" aria-label="Clear">⊘</button>
+      <button type="button" id="clear" title="Clear (Ctrl+L)" aria-label="Clear">
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path d="M3.9 12.1 12.1 3.9" stroke="currentColor" stroke-width="1.5" />
+        </svg>
+      </button>
       <select id="source" aria-label="Client">
         <option value="all">All clients</option>
       </select>
-      <input
-        id="filter"
-        type="search"
-        spellcheck="false"
-        aria-label="Filter"
-        aria-describedby="filter-state"
-        placeholder="Filter, as bead:debug reads one: d(rx), t(request), -token, e(request)"
-      />
+      <span class="filter-field">
+        <input
+          id="filter"
+          type="search"
+          spellcheck="false"
+          aria-label="Filter"
+          aria-describedby="filter-state"
+          placeholder="Filter…"
+        />
+        <button
+          id="filter-help-button"
+          class="filter-help-toggle"
+          type="button"
+          aria-label="Filter syntax"
+          aria-controls="filter-help"
+          aria-expanded="false"
+        >
+          ?
+        </button>
+      </span>
+      <div id="filter-help" role="group" aria-labelledby="filter-help-title" tabindex="-1" hidden>
+        <strong id="filter-help-title">Filter syntax</strong>
+        <dl>
+          <dt>who*</dt>
+          <dd>Procedures by name, <code>*</code> any run of characters</dd>
+          <dt>-name</dt>
+          <dd>Leaves a procedure out, which wins</dd>
+          <dt>d(rx)</dt>
+          <dd>Received, or <code>tx</code> sent</dd>
+          <dt>t(request|command)</dt>
+          <dd>Types of call, <code>r</code>, <code>c</code> and <code>n</code> for short</dd>
+          <dt>e(chunk|credit)</dt>
+          <dd>Envelopes by kind: request, result, failure, notification, chunk, credit, cancel</dd>
+        </dl>
+        <p>
+          Words are parted by spaces or commas, and the values a <code>|</code> joins add up. It is
+          <code>bead:debug</code>’s filter. Press / to reach it.
+        </p>
+      </div>
       <span id="filter-state" role="status"></span>
       <span class="group" role="group" aria-label="Quick filters">
         <button type="button" data-quick="t(request)" aria-pressed="false">Requests</button>
@@ -1018,14 +1630,70 @@
       <span id="status" role="status">waiting for the page…</span>
     </header>
     <nav class="tabs" role="tablist" aria-label="Views">
-      <button type="button" role="tab" data-tab="calls" aria-selected="true">Calls</button>
-      <button type="button" role="tab" data-tab="state" aria-selected="false">State</button>
-      <button type="button" role="tab" data-tab="timeline" aria-selected="false">Timeline</button>
-      <button type="button" role="tab" data-tab="metrics" aria-selected="false">Metrics</button>
-      <button type="button" role="tab" data-tab="wire" aria-selected="false">Wire</button>
+      <button
+        type="button"
+        role="tab"
+        id="calls-tab"
+        aria-controls="calls-view"
+        tabindex="0"
+        data-tab="calls"
+        aria-selected="true"
+      >
+        Calls
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="state-tab"
+        aria-controls="state"
+        tabindex="-1"
+        data-tab="state"
+        aria-selected="false"
+      >
+        State
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="timeline-tab"
+        aria-controls="timeline"
+        tabindex="-1"
+        data-tab="timeline"
+        aria-selected="false"
+      >
+        Timeline
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="metrics-tab"
+        aria-controls="metrics"
+        tabindex="-1"
+        data-tab="metrics"
+        aria-selected="false"
+      >
+        Metrics
+      </button>
+      <button
+        type="button"
+        role="tab"
+        id="wire-tab"
+        aria-controls="wire"
+        tabindex="-1"
+        data-tab="wire"
+        aria-selected="false"
+      >
+        Wire
+      </button>
     </nav>
     <main>
-      <section data-view="calls" class="split" aria-label="Calls">
+      <section
+        role="tabpanel"
+        aria-labelledby="calls-tab"
+        id="calls-view"
+        data-view="calls"
+        class="split"
+      >
         <div id="list" class="rows" tabindex="0" aria-label="Calls, newest first">
           <div class="list-bar">
             <span class="group" role="group" aria-label="Show">
@@ -1063,31 +1731,118 @@
           </table>
           <div id="empty"></div>
         </div>
+        <div
+          id="splitter"
+          role="separator"
+          tabindex="0"
+          aria-label="Calls list"
+          aria-controls="list"
+          aria-orientation="vertical"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="60"
+        ></div>
         <div class="detail">
-          <nav class="detail-tabs" role="tablist" aria-label="Detail">
-            <button type="button" role="tab" data-detail="overview" aria-selected="true">
+          <nav id="detail-tabs" class="detail-tabs" role="tablist" aria-label="Detail">
+            <button
+              type="button"
+              role="tab"
+              id="overview-tab"
+              aria-controls="detail"
+              tabindex="0"
+              data-detail="overview"
+              aria-selected="true"
+            >
               Overview
             </button>
-            <button type="button" role="tab" data-detail="payload" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              id="payload-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="payload"
+              aria-selected="false"
+            >
               Payload
             </button>
-            <button type="button" role="tab" data-detail="exchange" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              id="exchange-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="exchange"
+              aria-selected="false"
+            >
               Exchange
             </button>
-            <button type="button" role="tab" data-detail="diff" aria-selected="false">Diff</button>
-            <button type="button" role="tab" data-detail="trace" aria-selected="false">
+            <button
+              type="button"
+              role="tab"
+              id="diff-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="diff"
+              aria-selected="false"
+            >
+              Diff
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="trace-tab"
+              aria-controls="detail"
+              tabindex="-1"
+              data-detail="trace"
+              aria-selected="false"
+            >
               Trace
             </button>
           </nav>
-          <div id="detail" tabindex="-1"></div>
+          <div id="detail" role="tabpanel" aria-labelledby="overview-tab" tabindex="0"></div>
         </div>
       </section>
-      <section data-view="state" id="state" aria-label="State" hidden></section>
-      <section data-view="timeline" id="timeline" aria-label="Timeline" hidden></section>
-      <section data-view="metrics" id="metrics" aria-label="Metrics" hidden></section>
-      <section data-view="wire" id="wire" aria-label="Wire" hidden></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="state-tab"
+        data-view="state"
+        id="state"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="timeline-tab"
+        data-view="timeline"
+        id="timeline"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="metrics-tab"
+        data-view="metrics"
+        id="metrics"
+        hidden
+      ></section>
+      <section
+        role="tabpanel"
+        aria-labelledby="wire-tab"
+        data-view="wire"
+        id="wire"
+        hidden
+      ></section>
     </main>
-    <footer id="footer" class="statusbar" aria-live="polite"></footer>
+    <footer class="statusbar">
+      <div id="footer" aria-live="polite"></div>
+      <label
+        >Detail
+        <select id="layout">
+          <option value="auto">Auto</option>
+          <option value="right">Right</option>
+          <option value="bottom">Bottom</option>
+        </select>
+      </label>
+    </footer>
     <div id="menu" role="menu" hidden></div>
     <div id="toast" role="status" hidden></div>
     <script src="panel.js"></script>

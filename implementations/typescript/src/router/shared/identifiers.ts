@@ -131,7 +131,7 @@ export const isSessionToken = (value: unknown): value is SessionToken => {
 };
 
 /**
- * Whether `presented` is the token `held`, compared in constant time (spec 9.2, step 5): every
+ * Whether `presented` is the token `held`, compared in constant time (spec 9.2, step 6): every
  * character of `held` is read, wherever the two differ. Base64url spells 16 bytes one way only, so
  * comparing the characters compares the bytes.
  */

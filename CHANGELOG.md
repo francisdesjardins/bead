@@ -7,6 +7,188 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-20
+
+### Added
+
+- `SECURITY.md` says how to report a vulnerability, privately, and what to expect of a personal
+  project; the README opens on what Bead explores, shows it at a glance, and where it stands next
+  to the alternatives.
+- The benches measure HTTP and WebSocket, cross-language calls, notifications and allocation over
+  repeated runs; `tools/bench-compare.mjs` compares their reports.
+- `implementations/typescript/tools/bench.mjs` and `implementations/dotnet/tools/Bead.Benchmarks`: the
+  same four layers measured on each side in the same units, the envelope codec, the `json` payload
+  codec, an echo over a WebSocket on the loopback and a transfer of 20 MiB, by hand (README,
+  Measurement).
+- `tools/check-details.mjs`, in CI: no exception's message goes into a failure's detail but at
+  the sites that report alone, or where the error is the side's own (spec 9.0), on either side
+  (decision 0006).
+- Each CI run keeps its coverage reports 14 days, among its artifacts: the TypeScript side's HTML
+  and lcov, the C# side's cobertura files.
+- Each side's envelope readers are fuzzed in its suite: seeded mutations of `spec/vectors.json`'s
+  bytes, each read returning or refusing with a failure within a second; `BEAD_FUZZ_INPUTS` draws
+  more for a longer run.
+- `tools/fuzz.mjs`: coverage-guided fuzzing of both sides' parsers by hand, Jazzer.js on the
+  TypeScript side and SharpFuzz with libFuzzer on the C# side, the envelope reader, the `json` and
+  `text` codecs, the HTTP fields and the debug filter, seeded from the conformance files (README,
+  Fuzzing).
+- The DevTools panel places its detail right of the list, under it, or by the panel's width as
+  DevTools' Elements panel does, and a splitter between them sizes both; the panel keeps both
+  choices.
+- Debugging 9.7 states that a call made on a connection that closes fails as closed,
+  `DisconnectError`, `DisconnectException`, even when the signal it was given is that of a call the
+  close ends; an exit of `spec/metrics.json` closes a connection while a call on it awaits its
+  command, and counts both `closed`, once each.
+- A router limit of the protocol's, `maximumAnsweringCalls`, `MaximumAnsweringCalls`, 64: a
+  requester holds its calls on a connection to it, failing one past it before it goes, and a request
+  past it is answered `CAPACITY_EXCEEDED` before anything else of it is read, on every transport
+  (spec 9.1, 9.2's new step 3; decision 0033). Each side gauges `largestAnsweringCalls`, the busiest
+  connection's, which its health warns on at 80%.
+- A server holds what waits for a client's socket to `minimumSendBytesPerSecond`, 240, past
+  `sendGracePeriod`, 5 s, and a WebSocket server to `maximumUnsentBytes` besides, dropping and
+  reporting a client behind them, its close unclean; over HTTP, an answer or a listen's batch behind
+  its pace is an exchange lost, its connection closed at both ends (spec 15.7, 15.12; decision
+  0033).
+- Both transports' servers bound a request's head, `headersTimeout`, 30 s, answered 408 as HTTP
+  answers it, and an HTTP server a body, `minimumBodyBytesPerSecond`, 240, past `bodyGracePeriod`,
+  5 s, refused 408 `too-slow`, marked and told (spec 15.6, 15.12; decision 0033).
+- A server's router tells each access it refuses, `accessRefused`, `AccessRefused`: its stage, the
+  code answered, its reason, the credential's scheme, what was called, the connection, and the
+  refused request's own address and port, which its transport hands beside each envelope; never the
+  credential, nor a claim (spec 13.12, 15.1; decision 0034). `spec/vectors.json` gains
+  `credentialRefusals`, the reason of each credential refused but a `JWT`'s.
+- The conversations of 9.2's new step 3 and of a request held to `chunkBytes`; the transports'
+  cases of a WebSocket server's connections, a body's rate and a head's time; the durations of
+  `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod`; and an exit that counts a request past
+  the calls its connection has answered.
+
+### Changed
+
+- The spec moves to 0.7.0 (`spec-v0.7.0`), and its companion, `spec/debugging.md`, to 0.3.0
+  (`debugging-v0.3.0`).
+- The documents are brought to 0.6.0: the records, the spec and its companion in form alone, the
+  READMEs and the matrix; no record moves, and the broker and what remains of the fuzzing and the
+  measurement stay ahead.
+- The DevTools panel uses penumbra's spacing grid and a shared radius scale, with comments for
+  measured glyphs, strokes and native slider alignment.
+
+- Both sides close a closing connection's sending transfers with its receiving ones, before they
+  settle its calls: every transfer of the connection ends, and every call of it is taken out, before
+  any of its calls is counted.
+- The README says why nothing is published before 1.0.0: the wire, the names and the API change
+  freely until then, with no deprecation cycle.
+- The DevTools panel reads at DevTools' own density, penumbra's type scale set to 12 px under a
+  skin of DevTools' own colours: its controls and their groups stand 22 px, its record and clear
+  icons are drawn centred, its controls and tabs are of one look in both themes, and its bar holds
+  on one line on a wide panel. Its tabs move on the arrow keys, Home and End, its filter's syntax opens from a
+  `?` beside it, and an exchange's labels stop short of the next lane, whole in a tooltip.
+- The `json` codec reads and writes a large payload in a fraction of the time, its output the
+  same: the C# side writes a string that holds no escape as its bytes, and the TypeScript side
+  finds the end of a string by search rather than character by character. A 64 KiB echo over a
+  WebSocket goes in a twelfth of the time on the C# side, a 20 MiB transfer in an eighth.
+- The toolchain is current: buf 1.74.0, Playwright 1.64.1, oxfmt 0.73.0, oxlint 1.88, Roslyn 5.9.0,
+  xunit.v3 4.0.2, and OSV-Scanner 2.7.0 and Semgrep 1.181.0 in CI; beadc's image is on Node 26.12.0.
+  The floors stay (protobuf-es 2.13, Node 24.9).
+- A redirect, 301, 302, 303, 307 or 308, is judged as any status that is not 2xx, its
+  `bead-refusal` left unread, on both sides (spec 15.6): the C# side's listen counts a marked one
+  lost and listens again, and its send no longer rejects one. The TypeScript side's fetch receives
+  `redirect: 'manual'` (`IFetchInit.redirect`), so a connect answered with a redirect names its
+  status on Node, and `the server drew no connection: a redirect` in a page, which reads none.
+- A redirect followed all the same by a fetch or a handler given is caught at its answer, read from
+  `redirected` on the TypeScript side, which `IFetchResponseLike` may now say, and from the
+  response's `RequestMessage` on the C# side: its connect fails
+  `the server drew no connection: a redirect followed`, and a send or a listen loses its
+  connection, its answer never read. The C# side refuses at construction, with an
+  `ArgumentException` naming `AllowAutoRedirect`, a `Handler` whose innermost `HttpClientHandler`
+  or `SocketsHttpHandler` would follow.
+- On the TypeScript side, the header a resolver, its `admit`, its callback and a `beforeRequest` are
+  handed is an `IHandedRequestHeader`, exported beside `IRequestHeader`: its credential, a
+  `HandedCredential`, says a `JWT`'s scheme alone, so a procedure that reads a `JWT`'s token there
+  no longer compiles. The C# side's `RequestHeader` says so with a `Credential` whose `Token` is
+  none.
+- A WebSocket server bounds its connections, `maximumConnections`, 10,000, and
+  `maximumConnectionsPerAddress`, 64, an upgrade past them refused 503 `busy` before its 101: behind
+  a proxy it now needs `trustedProxies` or `unnamedProxies`, as an HTTP server does, or every client
+  past the 64th is refused (spec 15.2, step 8, 15.12; decision 0033).
+- A request that came whole, and a transfer's opening, is held to `chunkBytes`, answered
+  `ENVELOPE_TOO_LARGE` past it, as its requester sends it (spec 12.2). An HTTP server's
+  `maximumWaitingExchanges` follows its router's `maximumAnsweringCalls`.
+- The TypeScript HTTP server's answers are held to `minimumSendBytesPerSecond`, as the C# one's were
+  to Kestrel's `MinResponseDataRate`, which the C# side sets to none, Bead's rule in its place, as
+  Bead's body rate replaces Kestrel's `MinRequestBodyDataRate`; a head is answered 408 at 30 s,
+  where Node's 60 s held, the transport setting `headersTimeout`, `requestTimeout` and
+  `connectionsCheckingInterval` on every server it listens on, those its `createServer` builds
+  among them.
+- An HTTP outbox past its bound is reported as it closes its connection (spec 15.9).
+- Spec 9.2's steps 3 to 8 are steps 4 to 9, and 15.6's rows from 409 on one later, past its new 408;
+  debugging 9.4's rows from its second on are one later. Spec 15.12's table names the transports
+  each bound holds on.
+- Three conversations ask `bytes` for the result they send as a transfer, and the one of a relay's
+  legs' payload limit sends leg A's request whole within `chunkBytes`; leg B's header, counted call
+  by call, is its twins'.
+- Spec 15.12 states that a head's 408 comes past its time and within 2 seconds of it, on the
+  platform's clock, as Kestrel's heartbeat answers a connection's first head 1 to 2 seconds past it.
+  An `expect` of `spec/transports.json` may name `after`, the soonest what it reads may come, which
+  the head's two cases set to their `headersTimeout` less 100 ms; a runner that misses a `within`
+  tells when the response came, or that it never did.
+
+### Removed
+
+- `transportCredential` from `IAdmissionRequest`, `IRequestResolverProps` and `ISessionRequest`,
+  and `forwardsCredentials` from `IRequestHandler`, on the TypeScript side;
+  `SessionRequest.TransportCredential` and `IRequestHandler.ForwardsCredentials` from the C# side's
+  public surface, and `RouterCore`, `RouterCoreOptions`, `IRouterCorePort`, `CoreRequest` and
+  `AnswerInfo`, internal as the TypeScript side's core is. A procedure no longer takes a credential
+  unverified to pass on; a relay's destination does.
+
+### Fixed
+
+- The C# HTTP server tells a listen that replaces another as held before it tells the end of the
+  one it replaced, as the TypeScript side does, so a count of the listens held never falls to 0
+  as one takes over.
+- The DevTools panel's control borders reach at least 3:1 contrast against their surfaces in both
+  themes.
+
+- On the C# side, a resolver hears its signal before its call's rejection when its connection
+  closes, whatever scheduler it runs on: the teardown cancels each incoming call's token in its own
+  turn, by `CancelAsync`, its callbacks run after it. On the thread pool under load, a resolver
+  could catch its outgoing call's `DisconnectException` with its token not yet cancelled.
+- In the DevTools panel's Envelopes mode, the call whose envelope is clicked stays selected, each of
+  its envelopes marked, as its row is in the Calls mode.
+- Spec 15.6 states that a send answered with a redirect is lost, as both sides play it, and that a
+  page reads no status of a redirect; it said the send failed.
+- Both sides hand `sessionOf` what a transport carried beside a request presenting `ELSEWHERE`
+  alone, as spec 15.1 says; one presenting none, `OPAQUE` or a `JWT` came with it all the same.
+- On the C# side, a relay refuses an `ELSEWHERE` that leg A's transport carried nothing for, to a
+  connection of its own as to any other leg B, `DESTINATION_UNREACHABLE`, as the TypeScript side does;
+  no transport reaches it today.
+- On the C# side, a call or a command presenting `Credential.Elsewhere()`, nothing for its
+  transport to carry, a JWT with no token, or a scheme to come is an `ArgumentException` before the
+  call starts, not counted, as the TypeScript side's `ProgrammerError` is; it failed counted,
+  `DESTINATION_UNREACHABLE`, or went with a scheme no side writes (spec 13.4, debugging 9.3).
+- On the C# side, a call that would present a default withdrawn is counted, started and ended
+  `SESSION_REQUIRED`, as on the TypeScript side, and fails after a programmer's error and before a
+  connection not open, as there.
+- On the C# side, a request whose sending fails as its router is disposed is rejected as disposed,
+  as the TypeScript side rejects it, not with the transport's refusal, which raced the disposal.
+- On the C# side, an HTTP body whose read Kestrel fails — slower than its rate, a malformed chunked
+  one — is answered the status of its failure, unmarked, its connection closed, never 200 and empty,
+  which said the server had the envelope (spec 15.7).
+- Every answer an HTTP server writes before its request's body is whole closes its socket in
+  stages, its write side first, so its client reads it before the close, the TypeScript side's 404
+  `connection-unknown` among them, which kept its socket and drained the body (spec 15.12).
+- Spec 8.3's open point closes: a receiver bounds the calls a peer has it answer on a connection
+  that keeps it, a WebSocket's or a Web Worker's, and what it holds of their requests in bytes (spec
+  9.2, step 3, 12.2).
+
+### Security
+
+- A procedure is handed no bearer credential its call came with, on both sides: its resolver, its
+  admission, a `beforeRequest` and a relay's `beforeRoute` read the call's session, and of a `JWT`
+  its scheme alone; what a transport carried beside an `ELSEWHERE`, and a `JWT`'s token, reach the
+  side's verifier and a relay alone. A registered resolver and its `admit` were handed both, and on
+  the C# side so were a `BeforeRequest` and a relay's `BeforeRoute`.
+
 ## [0.5.0] - 2026-10-14
 
 ### Added
@@ -1345,7 +1527,8 @@ duration }`: on the C# side `StartedAt`, a `DateTimeOffset`, and `Duration`, a `
   workflows.
 - The licence, Apache-2.0.
 
-[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.5.0...develop
+[Unreleased]: https://github.com/francisdesjardins/bead/compare/v0.6.0...develop
+[0.6.0]: https://github.com/francisdesjardins/bead/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/francisdesjardins/bead/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/francisdesjardins/bead/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/francisdesjardins/bead/compare/v0.3.0...v0.4.0

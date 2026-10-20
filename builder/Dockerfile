@@ -15,8 +15,8 @@
 # ! the frontend and the base by their digests: one Dockerfile dialect on every engine, and the
 # base named once, for its FROM and its labels. A release bumps both by hand, and shellcheck's in
 # ci.yml with them
-ARG NODE_IMAGE=node:26.10.0-trixie-slim
-ARG NODE_DIGEST=sha256:930557a230abacbc3f4fd9b8648abf8f4bee1e17cb72195dcdfb2f709bc85b33
+ARG NODE_IMAGE=node:26.12.0-trixie-slim
+ARG NODE_DIGEST=sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4
 # ! the licences of what the image adds to its base, its label's expression, which
 # tools/licenses.mjs holds every package to; the base's own are its, under base.name and
 # /usr/share/doc

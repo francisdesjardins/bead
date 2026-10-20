@@ -30,7 +30,7 @@ public sealed class NoFailure : IApplicationFailure
 /// <summary>
 /// A refusal of admission a resolver answers, beside the failures its procedure lists:
 /// ACCESS_DENIED or SESSION_REQUIRED, and why. Its router answers SESSION_REQUIRED of a call that
-/// presented a credential ACCESS_DENIED, its detail kept (spec 9.2, step 5).
+/// presented a credential ACCESS_DENIED, its detail kept (spec 9.2, step 6).
 /// </summary>
 public sealed record AdmissionFailure
 {

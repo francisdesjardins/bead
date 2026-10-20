@@ -276,6 +276,101 @@ public sealed partial class DurationsTests
         return Taken();
     }
 
+    // httpTransportServer.sendGracePeriod, httpTransportServer.headersTimeout
+
+    // the transport server's options, as it is built: taken or refused, on the real clock
+    private static Task<Observed> SendGracePeriodByHttpOptions(TimeSpan? given)
+    {
+        return HttpServerBuilt(new HttpTransportServerOptions { SendGracePeriod = Assert.NotNull(given) });
+    }
+
+    private static Task<Observed> HeadersTimeoutByHttpOptions(TimeSpan? given)
+    {
+        return HttpServerBuilt(new HttpTransportServerOptions { HeadersTimeout = Assert.NotNull(given) });
+    }
+
+    // an HTTP transport server built, taken or refused
+    private static async Task<Observed> HttpServerBuilt(HttpTransportServerOptions options)
+    {
+        HttpTransportServer server;
+
+        try
+        {
+            server = new HttpTransportServer(options);
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Refused(refused);
+        }
+
+        await server.DisposeAsync();
+
+        return Taken();
+    }
+
+    // httpTransportServer.bodyGracePeriod
+
+    // the transport server's options, as it is built: the due of the timer it arms for a body that
+    // declares its bytes and brings none, on a connection that arms no other; refused, no server built
+    private static Task<Observed> BodyGracePeriodByOptions(TimeSpan? given)
+    {
+        var options = new HttpTransportServerOptions { InactivityTimeout = Never };
+
+        return HttpServerOf(given is { } grace ? options with { BodyGracePeriod = grace } : options, async (drive) =>
+        {
+            var connectionToken = await drive.Connect(false);
+            using var socket = new TcpClient();
+
+            await socket.ConnectAsync(IPAddress.Loopback, drive.Url.Port, Cancelled);
+            await socket.GetStream().WriteAsync(
+                Encoding.ASCII.GetBytes($"POST {HttpTransport.Pathname} HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {connectionToken}\r\nContent-Length: 100\r\n\r\n"),
+                Cancelled);
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var dues = drive.Clock.Dues();
+
+            while (dues.Count == 0 && watch.Elapsed < Patience)
+            {
+                await Task.Delay(5, Cancelled);
+                dues = drive.Clock.Dues();
+            }
+
+            return dues;
+        });
+    }
+
+    // webSocketTransportServer.sendGracePeriod, webSocketTransportServer.headersTimeout
+
+    // the transport server's options, as it is built: taken or refused, on the real clock
+    private static Task<Observed> SendGracePeriodByWebSocketOptions(TimeSpan? given)
+    {
+        return WebSocketServerBuilt(new WebSocketTransportServerOptions { SendGracePeriod = Assert.NotNull(given) });
+    }
+
+    private static Task<Observed> HeadersTimeoutByWebSocketOptions(TimeSpan? given)
+    {
+        return WebSocketServerBuilt(new WebSocketTransportServerOptions { HeadersTimeout = Assert.NotNull(given) });
+    }
+
+    // a WebSocket transport server built, taken or refused
+    private static async Task<Observed> WebSocketServerBuilt(WebSocketTransportServerOptions options)
+    {
+        WebSocketTransportServer server;
+
+        try
+        {
+            server = new WebSocketTransportServer(options);
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Refused(refused);
+        }
+
+        await server.DisposeAsync();
+
+        return Taken();
+    }
+
     // webSocketTransportServer.closeTimeout
 
     // the transport server's options, as it is built: taken or refused

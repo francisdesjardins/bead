@@ -94,6 +94,18 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.MaximumWait), MaximumWaitByOptions),
         }),
+        ["httpTransportServer.sendGracePeriod"] = (nameof(HttpTransportServerOptions.SendGracePeriod), new()
+        {
+            ["options"] = new(nameof(HttpTransportServerOptions.SendGracePeriod), SendGracePeriodByHttpOptions),
+        }),
+        ["httpTransportServer.headersTimeout"] = (nameof(HttpTransportServerOptions.HeadersTimeout), new()
+        {
+            ["options"] = new(nameof(HttpTransportServerOptions.HeadersTimeout), HeadersTimeoutByHttpOptions),
+        }),
+        ["httpTransportServer.bodyGracePeriod"] = (nameof(HttpTransportServerOptions.BodyGracePeriod), new()
+        {
+            ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
+        }),
         ["httpTransportClient.inactivityTimeout"] = (nameof(HttpTransportClientOptions.InactivityTimeout), new()
         {
             ["options"] = new(nameof(HttpTransportClientOptions.InactivityTimeout), ClientInactivityByOptions),
@@ -123,6 +135,14 @@ public sealed partial class DurationsTests
         ["webSocketTransportServer.closeTimeout"] = ("a close timeout", new()
         {
             ["options"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByOptions),
+        }),
+        ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
+        {
+            ["options"] = new(nameof(WebSocketTransportServerOptions.SendGracePeriod), SendGracePeriodByWebSocketOptions),
+        }),
+        ["webSocketTransportServer.headersTimeout"] = (nameof(WebSocketTransportServerOptions.HeadersTimeout), new()
+        {
+            ["options"] = new(nameof(WebSocketTransportServerOptions.HeadersTimeout), HeadersTimeoutByWebSocketOptions),
         }),
     };
 

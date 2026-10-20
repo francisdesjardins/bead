@@ -16,6 +16,7 @@ import type {
   IRequestHeader,
   IRequestResolverProps,
   OutgoingEnvelope,
+  RequestCredential,
 } from '../../shared/types';
 import {
   createTestClock,
@@ -2108,6 +2109,54 @@ test.describe('createRouterClient', () => {
       expect(errors).toEqual([]);
     });
 
+    test('answers CAPACITY_EXCEEDED a command past the calls its server has it answer', async () => {
+      const { deliver, sent, transport } = createScriptedTransport();
+      using router = createRouterClient(transport, { limits: { maximumAnsweringCalls: 2 } });
+      const errors = recordErrors(router);
+      const held: IRequestResolverProps<'server'>[] = [];
+
+      router.registerResolver(
+        Object.assign((props: IRequestResolverProps<'server'>) => {
+          held.push(props);
+
+          return Promise.resolve();
+        }, service)
+      );
+
+      for (const callId of [30, 32, 34]) {
+        deliver({
+          header: requestHeaderOf(callId),
+          kind: EnvelopeKind.REQUEST,
+          payload: new Uint8Array(0),
+        });
+      }
+
+      await sleep(0);
+
+      expect(held).toHaveLength(2);
+      expect(sent).toMatchObject([
+        {
+          failure: { code: ProtocolCode.CAPACITY_EXCEEDED },
+          header: { callId: 34, kind: EnvelopeKind.FAILURE },
+        },
+      ]);
+
+      // one answered, the next is taken
+      await router.respond(
+        { payload: Uint8Array.of(1) },
+        held[0] as IRequestResolverProps<'server'>
+      );
+      deliver({
+        header: requestHeaderOf(36),
+        kind: EnvelopeKind.REQUEST,
+        payload: new Uint8Array(0),
+      });
+      await sleep(0);
+
+      expect(held).toHaveLength(3);
+      expect(errors).toEqual([]);
+    });
+
     test('of the client’s own parity are reported, and never answered', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterClient(transport);
@@ -2667,6 +2716,13 @@ test.describe('createRouterClient', () => {
       const refused = await Promise.all([
         ask({ subscribes: notificationOf([]) }),
         ask({ options: { ...options, credential: { scheme: CredentialScheme.JWT, token: '' } } }),
+        ask({
+          options: {
+            ...options,
+            credential: { scheme: CredentialScheme.ELSEWHERE } as unknown as RequestCredential,
+          },
+        }),
+        ask({ options: { ...options, credential: { scheme: 4 } as unknown as RequestCredential } }),
         ask({ options: { ...options, timeout: 0 } }),
         ask({ options: { ...options, signal: AbortSignal.abort() } }),
       ]);
@@ -2675,13 +2731,50 @@ test.describe('createRouterClient', () => {
         refused.map((reason) => {
           return (reason as Error).name;
         })
-      ).toEqual(['ProgrammerError', 'ProgrammerError', 'ProgrammerError', 'CancelError']);
+      ).toEqual([
+        'ProgrammerError',
+        'ProgrammerError',
+        'ProgrammerError',
+        'ProgrammerError',
+        'ProgrammerError',
+        'CancelError',
+      ]);
       expect(countedOf(metricsRegistry)).toContain(made('started_total{} 2'));
       expect(
         (await Promise.all([noSession, uncarried])).map((reason) => {
           return (reason as FailureError).code;
         })
       ).toEqual([ProtocolCode.SESSION_REQUIRED, ProtocolCode.DESTINATION_UNREACHABLE]);
+    });
+
+    // debugging 9.3, spec 13.4
+    test('counts a call that would present a withdrawn default as started and ended in the turn it started, SESSION_REQUIRED', async () => {
+      const metricsRegistry = createMetricsRegistry();
+      const scripted = createScriptedTransport();
+      using router = createRouterClient(scripted.transport, {
+        clock: createTestClock(),
+        credential: JWT,
+        metricsRegistry,
+      });
+      const series = router.declareRequester(service);
+      const call = () => {
+        return router.request(new Uint8Array(0), { options, procedure: service, series });
+      };
+      const refused = call();
+
+      scripted.deliver(sessionRequiredOf(1));
+      await expect(refused).rejects.toMatchObject({ code: ProtocolCode.SESSION_REQUIRED });
+      await expect(call()).rejects.toMatchObject({
+        code: ProtocolCode.SESSION_REQUIRED,
+        detail: 'the default credential was withdrawn',
+      });
+
+      expect(countedOf(metricsRegistry)).toEqual([
+        made('duration_seconds_count{} 2'),
+        made('handled_total{outcome="failure",code="SESSION_REQUIRED"} 2'),
+        made('started_total{} 2'),
+      ]);
+      expect(scripted.sent).toHaveLength(1);
     });
 
     // debugging 9.6.11

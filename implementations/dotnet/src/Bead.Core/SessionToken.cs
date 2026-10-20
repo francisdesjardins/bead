@@ -135,7 +135,7 @@ public readonly record struct SessionToken
 
     /// <summary>
     /// Whether <paramref name="other"/> is this token, compared in a time that does not depend on
-    /// where they differ (spec 9.2, step 5): what a request presents tells nothing of the token it
+    /// where they differ (spec 9.2, step 6): what a request presents tells nothing of the token it
     /// was held to.
     /// </summary>
     internal bool FixedTimeEquals(SessionToken other)

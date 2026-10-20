@@ -8,7 +8,8 @@
   The bound itself is 15.12's table; the refusal told,
   [0026](0026-a-server-tells-each-refusal-it-judges-and-a-client-names-the-one-it-reads.md)'s;
   the listening address and the form of an IP literal,
-  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s.
+  [0024](0024-a-server-takes-the-loopbacks-names-ip-literals-and-the-hosts-it-is-told.md)'s; a
+  WebSocket server's bound per address, [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s.
 
 ## Context
 
@@ -181,17 +182,19 @@ before checking its known proxies; this is the same reading, stated.
 **`X-Forwarded-For` alone is read**; `Forwarded` is not, and 15.12 says so. **A WebSocket server
 takes the same list and the same count, refuses the same entries and counts as it is built, and
 walks the field of the request that asks its upgrade**, by the module the HTTP transport walks it
-with, on each side. It bounds no address, so what the walk moves is the address its handles and its
-refusals name: behind the proxies it names and counts, the client's, where the proxy's would be.
+with, on each side. It bounds its connections by address as an HTTP server does
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)), so what the walk moves is the address its
+bound, its handles and its refusals name: behind the proxies it names and counts, the client's,
+where the proxy's would be.
 One option of each on both transports, as `hosts` and `origins` are, so a deployment that puts both
 behind one proxy tells each alike.
 
-**No event; a gauge.** Each side's HTTP transport gauges `largestAddressConnections`, the
-connections its busiest address holds, under its ceiling `maximumConnectionsPerAddress`, as
-`largestOutboxBytes` sits under `maximumOutboxBytes`. One count, no set a peer grows. The health
-check warns at 80% of any ceiling, so a proxy left off the list or uncounted shows `warn` on
-`/health` at 52 connections from one address, before any 503. A gauge is no part of the spec: twins
-by the same sentence hold it.
+**No event; a gauge.** Each server transport of each side, HTTP and WebSocket, gauges
+`largestAddressConnections`, the connections its busiest address holds, under its ceiling
+`maximumConnectionsPerAddress`, as `largestOutboxBytes` sits under `maximumOutboxBytes`. One count,
+no set a peer grows. The health check warns at 80% of any ceiling, so a proxy left off the list or
+uncounted shows `warn` on `/health` at 52 connections from one address, before any 503. A gauge is
+no part of the spec: twins by the same sentence hold it.
 
 ## Consequences
 
@@ -212,7 +215,8 @@ says; an IPv6 host holds a /64 or more ([RFC 6177](https://www.rfc-editor.org/rf
 15.12 names both.
 
 **Ahead, each by a decision of its own**: `Forwarded`, once a proxy that writes it alone is met;
-IPv6 keyed by a prefix; a per-address value fit for a NAT.
+IPv6 keyed by a prefix; a per-address value fit for a NAT; each for an HTTP server and a WebSocket
+server at once.
 
 **The gate.** `spec/transports.json`, played by both sides. Over HTTP: the bound behind a proxy
 named; a field from a socket no entry holds, not read; the walk past two networks, what a client

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bead's parsers fed raw bytes, guided by coverage: the targets the TypeScript side's
+       tools/fuzz holds, one for one. libFuzzer runs this executable as its child, one target by
+       its name, once SharpFuzz has instrumented Bead.Core in a copy of its build; tools/fuzz.mjs at
+       the root does both. It builds and is formatted with the solution, and needs neither the
+       fuzzer nor the instrumentation to. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Bead.Fuzz</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- a target that holds more than 256 MiB of managed memory runs out of it, a finding: libFuzzer
+         measures its own process, not this one -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="268435456" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
+    <PackageReference Include="SharpFuzz" />
+  </ItemGroup>
+</Project>

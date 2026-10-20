@@ -94,8 +94,8 @@ phase('Plan');
 const planned = await agent(
   `${COMMON}
 # Your task: the plan (effort xhigh)
-Read every document whole, the CHANGELOG's section for ${VERSION}, and what changed since ${SINCE} (\`git log\`, \`git diff --stat\`, and the diff of each document and of what it cites). For each document, say what moves: the sentences that state as coming what ${VERSION} carries; what is past and leaves; what stays ahead; in the spec, what moves in form and what is a finding for the user; a record to merge, split, move in the index or rename, and why it is clearer so. No record changes its number, and no number is given twice.
-Write ${OUT}/plan.md: the plan, document by document, and the records' \`Where Bead goes\` as it is to read. Return \`moves\`, every record whose file changes, \`from\` and \`to\` as four digits and \`file\` a file name: a merged record, \`to\` its successor and \`file\` the successor's file; a renamed one, \`to\` its own number and \`file\` its new name; a part split out, \`from\` the record it leaves, \`to\` the next number never given and \`file\` its file; and \`batches\`: the documents in five or six batches of about equal weight, the spec and its companion a batch of their own, each a list of the file paths as they are now, with the task for its rewriter: the moves this plan asks of those documents, a record's merges and splits whole within one batch.`,
+Start from what changed since ${SINCE}: the CHANGELOG's section for ${VERSION}, \`git log\` and \`git diff --stat\`, and the diff of each document. **The documents in scope** are those whose files changed since ${SINCE}; those that cite a record, a section of the spec or a file that changed; and those a grep finds stating as ahead what the CHANGELOG's section lists (\`ahead\`, \`yet\`, \`until\`, \`will\`, \`planned\`, \`to come\`, the names of what landed). Read those whole; leave the others, naming them in the plan as out of scope and why. For each document in scope, say what moves: the sentences that state as coming what ${VERSION} carries; what is past and leaves; what stays ahead; in the spec, what moves in form and what is a finding for the user; a record to merge, split, move in the index or rename, and why it is clearer so. No record changes its number, and no number is given twice.
+Write ${OUT}/plan.md: the plan, document by document, and the records' \`Where Bead goes\` as it is to read. Return \`moves\`, every record whose file changes, \`from\` and \`to\` as four digits and \`file\` a file name: a merged record, \`to\` its successor and \`file\` the successor's file; a renamed one, \`to\` its own number and \`file\` its new name; a part split out, \`from\` the record it leaves, \`to\` the next number never given and \`file\` its file; and \`batches\`: the documents in scope in as many batches as their weight needs, one to six, of about equal weight, the spec and its companion a batch of their own when either is in scope, its key \`spec\`, each a list of the file paths as they are now, with the task for its rewriter: the moves this plan asks of those documents, a record's merges and splits whole within one batch.`,
   { label: 'plan', phase: 'Plan', effort: 'xhigh', schema: PLAN }
 );
 
@@ -117,7 +117,7 @@ Write each as it is to read at ${VERSION} under ${OUT}/documents/, at its path f
   (report, batch) => {
     return agent(
       `${COMMON}
-# Your task: verify batch ${batch.key} (effort xhigh)
+# Your task: verify batch ${batch.key} (effort ${batch.key === 'spec' ? 'xhigh' : 'high'})
 The plan is ${OUT}/plan.md; the records' moves (merged, renamed, split out):
 ${MOVES}
 The batch's documents as they are in the repository (${batch.documents.join(', ')}), and as rewritten, under ${OUT}/documents/. Its rewriter's report:
@@ -130,7 +130,14 @@ Hold the rewrite to this, and fix under ${OUT}/documents/ what fails:
 - no sentence narrates how things were, or how the document came to be;
 - every citation of a merged record names its successor, of a renamed one its new file name, and every link resolves once the files move; no number is given twice.
 Return \`holds\`, what you \`fixed\`, what you \`left\` for the integration, each with its file and line, and \`forTheUser\`.`,
-      { label: `verify:${batch.key}`, phase: 'Verify', effort: 'xhigh', schema: VERDICT }
+      // * xhigh where a requirement's meaning could move unseen, the spec and its companion; high
+      // for the records and the READMEs, whose claims the verifier holds to the code
+      {
+        label: `verify:${batch.key}`,
+        phase: 'Verify',
+        effort: batch.key === 'spec' ? 'xhigh' : 'high',
+        schema: VERDICT,
+      }
     );
   }
 );

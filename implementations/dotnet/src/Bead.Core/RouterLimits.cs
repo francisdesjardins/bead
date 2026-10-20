@@ -49,6 +49,13 @@ public sealed record RouterLimits
     /// <summary>A failure's detail, in bytes, cut at a character's boundary, written and read.</summary>
     public int MaximumDetailBytes { get; init; } = LimitDefaults.MaximumDetailBytes;
 
+    /// <summary>
+    /// The calls a connection's peer has this side answer at once, each from its request until its
+    /// answer is wholly sent, its cancel or its connection's close; and the calls this side has wait
+    /// on a connection, each failed before it goes past them. Both ends are set alike.
+    /// </summary>
+    public int MaximumAnsweringCalls { get; init; } = LimitDefaults.MaximumAnsweringCalls;
+
     /// <summary>A whole envelope, its header included, in bytes, as it comes in and goes out.</summary>
     public int MaximumEnvelopeBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
 
@@ -69,9 +76,10 @@ public sealed record RouterLimits
 
     /// <summary>
     /// These limits, checked, a transfer's inactivity held: whole numbers, positive but for the
-    /// transfers and the detail; an envelope of 64 bytes at least; a chunk from 64 bytes to an
-    /// envelope; a window of two chunks at least; a payload within the budget; a transfer's
-    /// inactivity from 1 to 2³¹ − 1 milliseconds, rounded to the nearest whole one. Throws an
+    /// transfers and the detail, a number of calls of 1 at least among them; an envelope of 64 bytes
+    /// at least; a chunk from 64 bytes to an envelope; a window of two chunks at least; a payload
+    /// within the budget; a transfer's inactivity from 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one. Throws an
     /// <see cref="ArgumentException"/> for the first that does not hold, an
     /// <see cref="ArgumentOutOfRangeException"/> for the inactivity.
     /// </summary>
@@ -82,7 +90,7 @@ public sealed record RouterLimits
             ("every limit is above 0, but for the transfers and the detail",
                 BufferedBytesBudget > 0 && ChunkBytes > 0 && MaximumChunkRuns > 0
                 && MaximumEnvelopeBytes > 0 && MaximumPayloadBytes > 0 && WindowBytes > 0
-                && MaximumDetailBytes >= 0 && MaximumTransfers >= 0),
+                && MaximumAnsweringCalls > 0 && MaximumDetailBytes >= 0 && MaximumTransfers >= 0),
             ("an envelope is 64 bytes at least", MaximumEnvelopeBytes >= 64),
             ("a chunk's envelope is 64 bytes at least, and an envelope at most",
                 ChunkBytes >= 64 && ChunkBytes <= MaximumEnvelopeBytes),

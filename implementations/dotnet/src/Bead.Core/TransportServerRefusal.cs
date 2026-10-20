@@ -11,10 +11,10 @@ namespace Bead;
 /// HTAB, as a server takes a field (spec 15.12).
 /// </summary>
 /// <param name="Address">
-/// The client's address, as <c>Clients</c> reports it (spec 15.12): over HTTP, the
-/// <c>X-Forwarded-For</c> entry reached past the proxies its <c>TrustedProxies</c> names, else the
-/// socket's; at a WebSocket's address, the socket's; in its one form, an IPv4 address an IPv6 socket
-/// carries mapped read as IPv4. None when the platform gives no socket's address.
+/// The client's address, as <c>Clients</c> reports it (spec 15.12): the <c>X-Forwarded-For</c> entry
+/// reached past the proxies its <c>TrustedProxies</c> names, a WebSocket's from its upgrade's, else
+/// the socket's; in its one form, an IPv4 address an IPv6 socket carries mapped read as IPv4. None
+/// when the platform gives no socket's address.
 /// </param>
 /// <param name="Authority">
 /// The request's authority as it came, its port included (spec 15.12): an absolute-form target's,

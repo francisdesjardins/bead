@@ -63,7 +63,7 @@ export interface IServer<
    * A `beforeRequest` that lets through only a call with a session, its call's, never its
    * connection's (spec 13.5): what every procedure but the one that makes the session asks for. It
    * refuses with its `refusal`, SESSION_REQUIRED, which its router answers a call that presented a
-   * credential with ACCESS_DENIED (spec 9.2, step 5). A composition by `&&` loses that refusal and
+   * credential with ACCESS_DENIED (spec 9.2, step 6). A composition by `&&` loses that refusal and
    * answers ACCESS_DENIED; a caller that wants to keep SESSION_REQUIRED puts `refusal` on its own
    * function.
    */

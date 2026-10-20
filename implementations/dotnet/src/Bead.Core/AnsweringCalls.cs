@@ -11,7 +11,7 @@ internal sealed class AnsweringCall
 
     public bool IsAnswered { get; set; }
 
-    /// <summary>Whether its call ended, said at once on the router's scheduler; its signal follows.</summary>
+    /// <summary>Whether its call ended, said at once on the router's scheduler, as its signal is; its signal's callbacks follow.</summary>
     public bool IsAborted { get; set; }
 
     /// <summary>What it receives of its payload as a transfer; none once the call leaves.</summary>
@@ -20,7 +20,10 @@ internal sealed class AnsweringCall
     /// <summary>The call's session, once its credential resolved; none for a call in none.</summary>
     public CallSession? Session { get; set; }
 
-    /// <summary>What its transport carried beside its request, kept for one presenting ELSEWHERE alone.</summary>
+    /// <summary>
+    /// What its transport carried beside its request, kept for one presenting ELSEWHERE that names a
+    /// destination alone, which its relay checks and moves to leg B; none for a procedure's call.
+    /// </summary>
     public string? TransportCredential { get; set; }
 
     /// <summary>What hears, on the router's scheduler, that the call ended before its answer went: a result going as a transfer.</summary>
@@ -118,7 +121,16 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
         return _dispatched.TryGetValue(header, out var call) ? call : null;
     }
 
-    /// <summary>What it holds: the calls being answered, those abandoned, and their connections.</summary>
+    /// <summary>The calls a connection's peer has this side answer right now.</summary>
+    public int CountOn(string connectionHandle)
+    {
+        return _answering.TryGetValue(connectionHandle, out var calls) ? calls.Count : 0;
+    }
+
+    /// <summary>
+    /// What it holds: the calls being answered, the most on one connection under its ceiling,
+    /// <see cref="RouterLimits.MaximumAnsweringCalls"/>, those abandoned, and their connections.
+    /// </summary>
     public Gauges Gauges()
     {
         return Bead.Gauges.Of(
@@ -132,8 +144,15 @@ internal sealed class AnsweringCalls(AnsweringCallsOptions options)
                 {
                     return (long)calls.Count;
                 }),
+                ["largestAnsweringCalls"] = _answering.Values.Select((calls) =>
+                {
+                    return (long)calls.Count;
+                }).DefaultIfEmpty().Max(),
             },
-            _answering.Keys.Concat(_abandoned.Keys));
+            _answering.Keys.Concat(_abandoned.Keys)) with
+        {
+            Ceilings = new Dictionary<string, long> { ["largestAnsweringCalls"] = options.Limits.MaximumAnsweringCalls },
+        };
     }
 
     /// <summary>Whether the peer's call is open on a call id, whichever request opened it.</summary>

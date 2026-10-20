@@ -18,7 +18,7 @@ hold what of them a test can. The why of each rule is in the decisions:
 - [0017](../docs/decisions/0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md): the
   names it reads (1.2, 6.10, 7.3, 8.3).
 
-**Version: 0.2.1**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
+**Version: 0.3.0**. Each of its conformance files repeats it as its `debuggingVersion`, and follows
 its schema in [`schemas/`](schemas/). It moves by `spec.md`'s rule, under a version of its own
 ([0008](../docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)): the minor
 when an implementation that conforms to its last version must change to conform to this one, the
@@ -129,7 +129,7 @@ disposed, is answered nothing (`spec.md` 9.4) and tells no failure; nor does a r
 once it answered.
 
 4.3. A request refused by its admission, or whose admission fails, answered `PROCEDURE_FAILED`
-(`spec.md` 9.2, step 5), or whose payload does not decode, is not traced: no step of it was told,
+(`spec.md` 9.2, step 6), or whose payload does not decode, is not traced: no step of it was told,
 and none of its answer is; nor is a call whose value does not write, which is not made (`spec.md`
 17.2). A relayed call is no call of a service manager's at the relay: neither of its legs is traced
 as one, and their envelopes are, each leg under its own call id (5.1).
@@ -374,22 +374,26 @@ _Metrics: `spec/metrics.json`._
 counted at its hand-off, and the refusal is reported (`spec.md` 9.0).
 
 9.3. A router takes a call it makes in this order: first what makes it a programmer's error, a
-timeout or a payload's limit that does not hold, a credential no header of its request holds
-(`spec.md` 4.4), a subscription its router does not hold, a command that names no connection, and
-a signal aborted already, each refused and not counted; then the call starts; then every check that
-can refuse it, each ending it in the turn it started. A request whose header does not read,
-answered at the gate (`spec.md` 9.6.2), starts and ends in one turn too, under `_OTHER`.
+timeout or a payload's limit that does not hold, a credential no call presents (`spec.md` 13.4)
+and one no header of its request holds (`spec.md` 4.4), a subscription its router does not hold, a
+command that names no connection, and a signal aborted already, each refused and not counted; then
+the call starts; then every check that can refuse it, each ending it in the turn it started. A
+request whose header does not read, answered at the gate (`spec.md` 9.6.2), starts and ends in one
+turn too, under `_OTHER`; so does a request past the calls its connection has its side answer at
+once (`spec.md` 9.2, step 3), under its procedure's series when its router declares it, `_OTHER`'s
+otherwise (7.3).
 
 9.4. Each call a side answers ends as one of these, the sections `spec.md`'s:
 
 | A call this side answers                                                                                                            | `outcome`   | `code`                                                                                |
 | ----------------------------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
 | its result is handed to its transport, whole or by its last chunk (9.3, 12.5)                                                       | `result`    |                                                                                       |
-| its route is refused (9.2, steps 3 and 4)                                                                                           | `failure`   | `DESTINATION_UNKNOWN`, `SERVICE_UNKNOWN`, `PROCEDURE_UNKNOWN`                         |
-| its credential is refused, or its verifier fails, or it would wait past the calls let wait for its issuer (9.2, step 5; 13.8, 13.9) | `failure`   | `CREDENTIAL_UNSUPPORTED`, `SESSION_REQUIRED`, `PROCEDURE_FAILED`, `CAPACITY_EXCEEDED` |
-| its admission refuses it, or fails (9.2, step 5)                                                                                    | `failure`   | the refusal's name, of the admission's block; `PROCEDURE_FAILED`                      |
-| its subscription cannot be carried back (9.2, step 6)                                                                               | `failure`   | `SUBSCRIPTION_UNSUPPORTED`                                                            |
-| its payload, or its transfer's total, past its limit, or a transfer its side takes none of (9.2, step 7; 12.3)                      | `failure`   | `PAYLOAD_TOO_LARGE`                                                                   |
+| its call past those its connection has it answer at once (9.2, step 3)                                                              | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
+| its route is refused (9.2, steps 4 and 5)                                                                                           | `failure`   | `DESTINATION_UNKNOWN`, `SERVICE_UNKNOWN`, `PROCEDURE_UNKNOWN`                         |
+| its credential is refused, or its verifier fails, or it would wait past the calls let wait for its issuer (9.2, step 6; 13.8, 13.9) | `failure`   | `CREDENTIAL_UNSUPPORTED`, `SESSION_REQUIRED`, `PROCEDURE_FAILED`, `CAPACITY_EXCEEDED` |
+| its admission refuses it, or fails (9.2, step 6)                                                                                    | `failure`   | the refusal's name, of the admission's block; `PROCEDURE_FAILED`                      |
+| its subscription cannot be carried back (9.2, step 7)                                                                               | `failure`   | `SUBSCRIPTION_UNSUPPORTED`                                                            |
+| its payload, or its transfer's total, past its limit, or a transfer its side takes none of (9.2, step 8; 12.3)                      | `failure`   | `PAYLOAD_TOO_LARGE`                                                                   |
 | its transfer's opening refused: no byte of its payload, or its whole total (12.3)                                                   | `failure`   | `CHUNK_INVALID`                                                                       |
 | its transfer's opening past the transfers its connection receives at once, or past the budget left (12.3)                           | `failure`   | `CAPACITY_EXCEEDED`                                                                   |
 | its request's transfer ended before its payload is whole: a chunk refused, or nothing came (12.6, 12.7)                             | `failure`   | `CHUNK_INVALID`, `CREDIT_EXCEEDED`, `TRANSFER_STALLED`                                |
@@ -413,9 +417,9 @@ subscription and is refused in its own answer, its queue past its bounds before 
 
 | A call this side makes                                                                                                                                                        | `outcome`   | `code`                            |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | --------------------------------- |
-| it asks for `OPAQUE` and its side knows no session, before it goes (13.4)                                                                                                     | `failure`   | `SESSION_REQUIRED`                |
+| it asks for `OPAQUE` and its side knows no session, or would present a default withdrawn, before it goes (13.4)                                                               | `failure`   | `SESSION_REQUIRED`                |
 | it presents a credential its transport cannot carry, before it goes (13.4)                                                                                                    | `failure`   | `DESTINATION_UNREACHABLE`         |
-| no call id is free (9.1)                                                                                                                                                      | `failure`   | `CAPACITY_EXCEEDED`               |
+| no call id is free, or its calls waiting on the connection number `maximumAnsweringCalls`, before it goes (9.1)                                                               | `failure`   | `CAPACITY_EXCEEDED`               |
 | its payload past its limit, a transfer its side sends none of, or one its header leaves no opening, past 1,020 bytes or without a byte within `chunkBytes` (12.1, 12.2, 12.3) | `failure`   | `PAYLOAD_TOO_LARGE`               |
 | a result comes whole (9.7, 12.6), whether its requester decodes it or not                                                                                                     | `result`    |                                   |
 | a failure comes (9.7), passed on by relays or not (7.5)                                                                                                                       | `failure`   | its name, `application`, `_OTHER` |
@@ -426,8 +430,10 @@ subscription and is refused in its own answer, its queue past its bounds before 
 | anything else its router fails it with: a transport that refuses its request                                                                                                  | `error`     |                                   |
 
 9.7. A call to a connection that is not open fails with the type a connection that closes fails it
-with, `DisconnectError`, `DisconnectException`, and counts alike, `closed`: the two are one race with
-a close.
+with, `DisconnectError`, `DisconnectException`, and counts alike, `closed`: the two are one race
+with a close. A call made on a connection that closes fails and counts so too, even when the signal
+it was given is that of a call the close ends: never as a cancel, `CancelError`,
+`OperationCanceledException`.
 
 9.8. The metrics count what the wire carried, and the trace tells what the side made of it. A result
 its requester cannot decode came as a result, and is counted so at both ends; the trace tells the

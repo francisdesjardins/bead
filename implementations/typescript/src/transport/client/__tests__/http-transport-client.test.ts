@@ -1,4 +1,6 @@
-import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { createServer, type IncomingMessage, request as requestHTTP, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
 import {
   createHTTPTransportServer,
@@ -35,6 +37,7 @@ import {
   SEQUENCE_HEADER,
   WAIT,
   WAIT_HEADER,
+  type FetchLike,
   type HTTPTransportClient,
   type IHTTPTransportClientOptions,
 } from '../http-transport-client';
@@ -1045,7 +1048,7 @@ test.describe('createHTTPTransportClient, listening', () => {
           [WAIT_HEADER]: '1000',
         },
         method: 'GET',
-        redirect: 'error',
+        redirect: 'manual',
       },
     ]);
 
@@ -1674,6 +1677,496 @@ test.describe('createHTTPTransportClient, listening', () => {
 
     expect([fake.calls.length, fake.calls[0]?.init.headers[LISTEN_HEADER]]).toEqual([1, undefined]);
     await client.disconnect({ isQuick: true });
+  });
+});
+
+/** Where a redirect points: a listener that notes each request's method and answers as a server would. */
+const startTarget = async () => {
+  const heard: string[] = [];
+  const server = createServer((request, reply) => {
+    heard.push(request.method ?? '');
+    request.resume();
+
+    // a connection drawn, a listen's batch, an exchange's answer: what would be heard, were it read
+    if (request.headers[CONNECTION_TOKEN_HEADER] === undefined) {
+      reply.writeHead(201, { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22), [LISTEN_HEADER]: '?1' });
+      reply.end();
+    } else if (request.method === 'GET') {
+      reply.writeHead(200, { 'content-type': BEAD_BATCH_MEDIA_TYPE, [SEQUENCE_HEADER]: '1' });
+      reply.end(batchOf(envelopeOf(0x13, { callId: 1 })));
+    } else {
+      reply.writeHead(200, { 'content-type': BEAD_MEDIA_TYPE });
+      reply.end(envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }));
+    }
+  });
+
+  return listenedOn(server, { heard });
+};
+
+/**
+ * A listener in front of the server at `upstream`, which answers each request `redirectOf` gives a
+ * redirect for with it, its `Location` the target at `location`, and forwards the rest; the methods
+ * it forwarded.
+ */
+const startRedirecting = async ({
+  location,
+  redirectOf,
+  upstream,
+}: {
+  location: number;
+  redirectOf: (
+    request: IncomingMessage
+  ) => { headers?: Record<string, string>; status: number } | undefined;
+  upstream?: number;
+}) => {
+  const forwarded: string[] = [];
+  const server = createServer((request, reply) => {
+    const redirect = redirectOf(request);
+
+    if (redirect !== undefined || upstream === undefined) {
+      request.resume();
+      reply.writeHead(redirect?.status ?? 502, {
+        location: `http://${host}:${String(location)}/bead`,
+        ...redirect?.headers,
+      });
+      reply.end('moved');
+
+      return;
+    }
+
+    forwarded.push(request.method ?? '');
+
+    const forwarding = requestHTTP(
+      { headers: request.headers, host, method: request.method, path: request.url, port: upstream },
+      (answer) => {
+        reply.writeHead(answer.statusCode ?? 502, answer.headers);
+        answer.pipe(reply);
+      }
+    );
+
+    forwarding.on('error', () => {
+      reply.destroy();
+    });
+    request.pipe(forwarding);
+  });
+
+  return listenedOn(server, { forwarded });
+};
+
+/** `server` listening on a free port, with what it notes, and its close. */
+const listenedOn = async <T extends object>(server: Server, noted: T) => {
+  server.listen(0, host);
+  await once(server, 'listening');
+
+  return {
+    ...noted,
+    port: (server.address() as AddressInfo).port,
+    [Symbol.asyncDispose]: () => {
+      server.closeAllConnections();
+
+      return new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    },
+  };
+};
+
+/** Whether `request` is an exchange of `method` on a connection drawn: one that presents its token. */
+const isExchange = (request: IncomingMessage, method: string): boolean => {
+  return request.method === method && request.headers[CONNECTION_TOKEN_HEADER] !== undefined;
+};
+
+/**
+ * The platform's fetch, told to follow every redirect whatever it is handed. Its bytes go as a
+ * `Blob`, which Node 24.9's fetch sends again on a 307 or a 308, where bytes fail it, detached.
+ */
+const followingFetch: FetchLike = (url, init) => {
+  const { body } = init;
+
+  return fetch(url, {
+    ...init,
+    ...(body instanceof Uint8Array ? { body: new Blob([body as BlobPart]) } : {}),
+    redirect: 'follow',
+  } as RequestInit);
+};
+
+/** Fetch's redirect statuses. */
+const REDIRECTS = [301, 302, 303, 307, 308] as const;
+
+// spec 15.6
+test.describe('createHTTPTransportClient, redirects', () => {
+  test.afterAll(async () => {
+    await tcpSocketsClosed();
+  });
+
+  test('fails its connect on a redirect, 301, 302, 303, 307 or 308, naming its status, its target hearing nothing', async () => {
+    await using target = await startTarget();
+
+    // its status alone, a mark it carries unread
+    for (const status of REDIRECTS) {
+      for (const headers of [{}, { [REFUSAL_HEADER]: 'busy' }]) {
+        await using redirecting = await startRedirecting({
+          location: target.port,
+          redirectOf: () => {
+            return { headers, status };
+          },
+        });
+        const client = createHTTPTransportClient();
+
+        await expect(client.connect({ host, port: redirecting.port })).rejects.toThrow(
+          new ConnectError(`the server drew no connection: ${String(status)}`)
+        );
+        expect(client.isClosed()).toBe(true);
+      }
+    }
+
+    expect(target.heard).toEqual([]);
+  });
+
+  test('counts a send answered with a redirect, 301, 302, 303, 307 or 308, lost, its target hearing nothing', async () => {
+    await using target = await startTarget();
+
+    for (const status of REDIRECTS) {
+      await using started = await startServer();
+      await using redirecting = await startRedirecting({
+        location: target.port,
+        redirectOf: (request) => {
+          return isExchange(request, 'POST') ? { status } : undefined;
+        },
+        upstream: started.port,
+      });
+      const client = createHTTPTransportClient({ isListening: false });
+
+      await client.connect({ host, port: redirecting.port });
+
+      const closed = nextEvent(client, 'close');
+
+      await expect(
+        client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) }),
+        String(status)
+      ).resolves.toBeUndefined();
+      expect(await closed).toEqual([false, false]);
+      // the connection released, at the origin
+      await expect
+        .poll(() => {
+          return redirecting.forwarded;
+        })
+        .toEqual(['POST', 'DELETE']);
+    }
+
+    expect(target.heard).toEqual([]);
+  });
+
+  test('listens again after a listen answered with a redirect, its target hearing nothing', async () => {
+    await using target = await startTarget();
+    await using started = await startServer();
+    let listens = 0;
+    await using redirecting = await startRedirecting({
+      location: target.port,
+      redirectOf: (request) => {
+        if (!isExchange(request, 'GET')) {
+          return undefined;
+        }
+
+        listens += 1;
+
+        return [undefined, { status: 302 }, { status: 307 }][listens];
+      },
+      upstream: started.port,
+    });
+    const client = createHTTPTransportClient();
+    const envelope = envelopeOf(0x13, { callId: 1 });
+
+    await client.connect({ host, port: redirecting.port });
+
+    const message = nextEvent(client, 'message');
+
+    void started.server.send({ data: envelope }, handleOf(started.server));
+
+    // lost at once, listened again at once, lost, then after a wait drawn between 0.5 and 1 s heard
+    const [{ data }] = (await message) as [ITransportMessage];
+
+    expect([[...new Uint8Array(data as ArrayBuffer)], client.isOpen(), listens]).toEqual([
+      [...envelope],
+      true,
+      3,
+    ]);
+    await client.disconnect();
+    expect(target.heard).toEqual([]);
+  });
+
+  test('leaves a redirect’s bead-refusal unread: a send so answered is lost, and a listen listened again', async () => {
+    await using target = await startTarget();
+    const marked = { headers: { [REFUSAL_HEADER]: CONNECTION_UNKNOWN }, status: 307 };
+
+    // a send: resolved, its connection lost and released, as no connection told gone is
+    {
+      await using started = await startServer();
+      await using redirecting = await startRedirecting({
+        location: target.port,
+        redirectOf: (request) => {
+          return isExchange(request, 'POST') ? marked : undefined;
+        },
+        upstream: started.port,
+      });
+      const client = createHTTPTransportClient({ isListening: false });
+
+      await client.connect({ host, port: redirecting.port });
+
+      const closed = nextEvent(client, 'close');
+
+      await expect(
+        client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+      ).resolves.toBeUndefined();
+      expect(await closed).toEqual([false, false]);
+      await expect
+        .poll(() => {
+          return redirecting.forwarded;
+        })
+        .toEqual(['POST', 'DELETE']);
+    }
+
+    // a listen: listened again, its connection kept
+    {
+      await using started = await startServer();
+      let listens = 0;
+      await using redirecting = await startRedirecting({
+        location: target.port,
+        redirectOf: (request) => {
+          if (!isExchange(request, 'GET')) {
+            return undefined;
+          }
+
+          listens += 1;
+
+          return listens === 1 ? marked : undefined;
+        },
+        upstream: started.port,
+      });
+      const client = createHTTPTransportClient();
+      const envelope = envelopeOf(0x13, { callId: 1 });
+
+      await client.connect({ host, port: redirecting.port });
+
+      const message = nextEvent(client, 'message');
+
+      void started.server.send({ data: envelope }, handleOf(started.server));
+
+      const [{ data }] = (await message) as [ITransportMessage];
+
+      expect([[...new Uint8Array(data as ArrayBuffer)], client.isOpen()]).toEqual([
+        [...envelope],
+        true,
+      ]);
+      await client.disconnect();
+    }
+
+    expect(target.heard).toEqual([]);
+  });
+
+  test('catches a redirect followed all the same: its connect fails, and a send or a listen loses its connection', async () => {
+    // a 302 turns a POST into a GET, a 307 keeps it a POST
+    for (const [status, method] of [
+      [302, 'GET'],
+      [307, 'POST'],
+    ] as const) {
+      // a connect: what the target drew is never taken
+      {
+        await using target = await startTarget();
+        await using redirecting = await startRedirecting({
+          location: target.port,
+          redirectOf: () => {
+            return { status };
+          },
+        });
+        const client = createHTTPTransportClient({ fetch: followingFetch });
+
+        await expect(client.connect({ host, port: redirecting.port })).rejects.toThrow(
+          new ConnectError('the server drew no connection: a redirect followed')
+        );
+        expect([client.isClosed(), target.heard]).toEqual([true, [method]]);
+      }
+
+      // a send: the target's answer unheard, and the connection released at the origin
+      {
+        await using target = await startTarget();
+        await using started = await startServer();
+        await using redirecting = await startRedirecting({
+          location: target.port,
+          redirectOf: (request) => {
+            return isExchange(request, 'POST') ? { status } : undefined;
+          },
+          upstream: started.port,
+        });
+        const client = createHTTPTransportClient({ fetch: followingFetch, isListening: false });
+        const heard: unknown[] = [];
+
+        client.on('message', ({ data }) => {
+          heard.push(data);
+        });
+        await client.connect({ host, port: redirecting.port });
+
+        const closed = nextEvent(client, 'close');
+
+        await expect(
+          client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) })
+        ).resolves.toBeUndefined();
+        expect(await closed).toEqual([false, false]);
+        await expect
+          .poll(() => {
+            return redirecting.forwarded;
+          })
+          .toEqual(['POST', 'DELETE']);
+        expect([heard, target.heard]).toEqual([[], [method]]);
+      }
+
+      // a listen, a GET either way: the target's batch unheard, and the connection released at
+      // the origin, where a 404 the target marked gone would have released nothing
+      {
+        await using target = await startTarget();
+        await using started = await startServer();
+        await using redirecting = await startRedirecting({
+          location: target.port,
+          redirectOf: (request) => {
+            return isExchange(request, 'GET') ? { status } : undefined;
+          },
+          upstream: started.port,
+        });
+        const client = createHTTPTransportClient({ fetch: followingFetch });
+        const heard: unknown[] = [];
+
+        client.on('message', ({ data }) => {
+          heard.push(data);
+        });
+
+        const closed = nextEvent(client, 'close');
+
+        await client.connect({ host, port: redirecting.port });
+
+        expect(await closed).toEqual([false, false]);
+        await expect
+          .poll(() => {
+            return redirecting.forwarded;
+          })
+          .toEqual(['POST', 'DELETE']);
+        expect([heard, target.heard]).toEqual([[], ['GET']]);
+      }
+    }
+  });
+
+  test('judges a redirect before its mark, and a status of 0, a page’s opaque redirect, as one: its connect fails, a send is lost and a listen listened again', async () => {
+    for (const [answer, message] of [
+      [
+        { headers: { [REFUSAL_HEADER]: 'busy' }, status: 307 },
+        'the server drew no connection: 307',
+      ],
+      [{ status: 0 }, 'the server drew no connection: a redirect'],
+    ] as const) {
+      const fake = createFakeFetch();
+      const connecting = createHTTPTransportClient({ fetch: fake.fetch }).connect({
+        host,
+        port: 80,
+      });
+
+      fake.calls[0]?.answer(answer);
+
+      await expect(connecting).rejects.toThrow(new ConnectError(message));
+      expect(fake.calls).toHaveLength(1);
+    }
+
+    // a send: resolved, its connection lost and released
+    {
+      const { client, fake } = await connectFake();
+      const closed = nextEvent(client, 'close');
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+      fake.calls[1]?.answer({ status: 0 });
+
+      await expect(sending).resolves.toBeUndefined();
+      expect(await closed).toEqual([false, false]);
+      expect(fake.calls[2]?.init).toMatchObject({ keepalive: true, method: 'DELETE' });
+    }
+
+    // a listen: listened again at once, from where it was
+    {
+      const { callOf, client } = await connectListening();
+
+      (await callOf(1))?.answer({ status: 0 });
+
+      expect((await callOf(2))?.init).toMatchObject({
+        headers: { [AFTER_HEADER]: '0' },
+        method: 'GET',
+      });
+      expect(client.isOpen()).toBe(true);
+      await client.disconnect({ isQuick: true });
+    }
+  });
+
+  test('catches a fetch whose answer says it followed a redirect: its connect fails, nothing released, and a send or a listen loses its connection, released, nothing of the answer heard', async () => {
+    const envelope = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
+
+    // a connect: the connection that answer drew is none of its own
+    {
+      const fake = createFakeFetch();
+      const client = createHTTPTransportClient({ fetch: fake.fetch });
+      const connecting = client.connect({ host, port: 80 });
+
+      fake.calls[0]?.answer({
+        headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22), [LISTEN_HEADER]: '?1' },
+        redirected: true,
+        status: 201,
+      });
+
+      await expect(connecting).rejects.toThrow(
+        new ConnectError('the server drew no connection: a redirect followed')
+      );
+      expect([client.isClosed(), fake.calls.length]).toEqual([true, 1]);
+    }
+
+    // a send: its answer unheard
+    {
+      const { client, fake } = await connectFake();
+      const heard: unknown[] = [];
+
+      client.on('message', ({ data }) => {
+        heard.push(data);
+      });
+
+      const closed = nextEvent(client, 'close');
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+      fake.calls[1]?.answer({
+        body: envelope,
+        headers: { 'content-type': BEAD_MEDIA_TYPE },
+        redirected: true,
+        status: 200,
+      });
+
+      await expect(sending).resolves.toBeUndefined();
+      expect(await closed).toEqual([false, false]);
+      expect([heard, fake.calls[2]?.init]).toMatchObject([
+        [],
+        { keepalive: true, method: 'DELETE' },
+      ]);
+    }
+
+    // a listen: its batch unheard, and never listened again
+    {
+      const { callOf, client, fake, heard } = await connectListening();
+      const closed = nextEvent(client, 'close');
+
+      (await callOf(1))?.answer({ ...batch(1, envelope), redirected: true });
+
+      expect(await closed).toEqual([false, false]);
+      expect([
+        heard,
+        fake.calls.slice(2).map(({ init }) => {
+          return init.method;
+        }),
+      ]).toEqual([[], ['DELETE']]);
+    }
   });
 });
 

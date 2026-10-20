@@ -10,6 +10,7 @@ import {
 import { request as requestHTTPS } from 'node:https';
 import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
+import { WebSocketServer } from 'ws';
 import {
   EnvelopeKind,
   LIMIT_DEFAULTS,
@@ -23,6 +24,7 @@ import {
   BEAD_BATCH_MEDIA_TYPE,
   BEAD_MEDIA_TYPE,
   BODY_BYTES_BUDGET,
+  BODY_GRACE_PERIOD,
   BURIAL_MILLISECONDS,
   CONNECTION_TOKEN_HEADER,
   createHTTPTransportServer,
@@ -39,10 +41,11 @@ import {
   SEQUENCE_HEADER,
   START_DEFAULTS,
   WAIT_HEADER,
-  type HTTPTransportServer,
   type IHTTPTransportServerOptions,
 } from '../http-transport-server';
 import type { ITransportServerRefusal, TransportServerConnectionHandle } from '../types';
+import type { IHeadBoundServerLike } from '../server-bounds';
+import { createWSTransportServer } from '../ws-transport-server';
 import {
   bindError,
   holdIPv6Loopback,
@@ -53,272 +56,33 @@ import {
 } from './addresses';
 import { createFakeHTTPServer } from './fake-http-server';
 import { TLS_FIXTURE } from './tls-fixture';
+import {
+  BEARER,
+  PAGE,
+  batchOf,
+  bytesOf,
+  connect,
+  envelopeOf,
+  fieldsOf,
+  host,
+  namesOf,
+  post,
+  preflightAnswerOf,
+  rawAnswerOf,
+  rawConnectOf,
+  recordOf,
+  refusalOf,
+  portOf,
+  rawSocketOn,
+  refusalsOf,
+  startScripted,
+  startTransport,
+} from './http-transport-server-fixtures';
 
 // helpers
 
-const host = '127.0.0.1';
-
 /** HTTP/2's error code of a malformed request (RFC 9113 §7). */
 const PROTOCOL_ERROR = http2Constants.NGHTTP2_PROTOCOL_ERROR;
-
-/** A bearer credential, RFC 6750's own example, its auth-scheme included. */
-const BEARER = 'Bearer mF_9.B5f-4.1JqM';
-
-/** A page of another origin, which a server answers CORS to when `origins` names it. */
-const PAGE = 'https://page.test';
-
-/** The fields every response on the path carries but HTTP's own 400, and the one CORS names. */
-const PATH_FIELDS = [
-  'access-control-allow-origin',
-  'cache-control',
-  'vary',
-  'x-content-type-options',
-] as const;
-
-/** What a preflight from {@link PAGE} is answered beside its 204, whatever it asks for, but the fields it allows. */
-const PREFLIGHT_ANSWER = Object.freeze({
-  'access-control-allow-credentials': null,
-  'access-control-allow-methods': 'GET, POST, DELETE',
-  'access-control-allow-origin': PAGE,
-  'access-control-expose-headers': '*',
-  'access-control-max-age': '7200',
-  'bead-refusal': null,
-  'cache-control': 'no-store',
-  vary: 'Origin',
-  'x-content-type-options': 'nosniff',
-});
-
-/**
- * What a preflight from {@link PAGE} is answered beside its 204, whatever method it asks for:
- * `authorization`, the fields it asks for as they came, then any.
- */
-const preflightAnswerOf = (asked?: string) => {
-  const allowed = ['authorization', ...(asked === undefined ? [] : [asked]), '*'];
-
-  return { ...PREFLIGHT_ANSWER, 'access-control-allow-headers': allowed.join(', ') };
-};
-
-/** What every answer to {@link PAGE} carries of CORS once its origin is judged, but a preflight's. */
-const NAMED_ANSWER = Object.freeze({
-  'access-control-allow-credentials': null,
-  'access-control-allow-methods': null,
-  'access-control-allow-origin': PAGE,
-  'access-control-expose-headers': '*',
-  vary: 'Origin',
-});
-
-/** What an answer that names no origin carries of CORS. */
-const UNNAMED_ANSWER = Object.freeze({
-  'access-control-allow-credentials': null,
-  'access-control-allow-methods': null,
-  'access-control-allow-origin': null,
-  'access-control-expose-headers': null,
-  vary: 'Origin',
-});
-
-/** The fields `expected` names, as `headers` carries them: each one's value, or null when absent. */
-const fieldsOf = (
-  headers: { get(name: string): string | null | undefined },
-  expected: Readonly<Record<string, string | null>>
-) => {
-  return Object.fromEntries(
-    Object.keys(expected).map((name) => {
-      return [name, headers.get(name) ?? null];
-    })
-  );
-};
-
-/** An envelope as the transport reads it: its layout, its kind, its call id, and `extra` bytes. */
-const envelopeOf = (
-  kind: number,
-  { callId, extra = 0, layout = 0xa1 }: { callId: number; extra?: number; layout?: number }
-): Uint8Array => {
-  const bytes = new Uint8Array(8 + extra).fill(7);
-  const view = new DataView(bytes.buffer);
-
-  view.setUint8(0, layout);
-  view.setUint8(1, kind);
-  view.setUint32(4, callId);
-
-  return bytes;
-};
-
-/** What a listen brings back of `envelopes`: each after its length in 4 bytes. */
-const batchOf = (...envelopes: Uint8Array[]): number[] => {
-  return envelopes.flatMap((envelope) => {
-    const length = new Uint8Array(4);
-
-    new DataView(length.buffer).setUint32(0, envelope.length);
-
-    return [...length, ...envelope];
-  });
-};
-
-/** The events a transport server emits, each as its name and what it carries. */
-const recordOf = (server: HTTPTransportServer) => {
-  const events: [string, ...unknown[]][] = [];
-
-  server.on('connection', (...[shown, drawing, connectionHandle]) => {
-    events.push(['connection', shown, drawing, connectionHandle]);
-  });
-  server.on('message', ({ data }, connectionHandle) => {
-    events.push(['message', [...(data as Uint8Array)], connectionHandle]);
-  });
-  server.on('close', (wasClean, connectionHandle) => {
-    events.push(['close', wasClean, connectionHandle]);
-  });
-  server.on('error', (error, connectionHandle) => {
-    events.push(['error', error.message, connectionHandle]);
-  });
-
-  return events;
-};
-
-const namesOf = (events: [string, ...unknown[]][], name: string) => {
-  return events.filter(([each]) => {
-    return each === name;
-  });
-};
-
-/** A transport server on a free port, with the events it emitted, and its URL. */
-const startTransport = async (options?: Partial<IHTTPTransportServerOptions>) => {
-  const server = createHTTPTransportServer({
-    createServer: (listener) => {
-      return createServer(listener);
-    },
-    ...options,
-  });
-  const { port } = await server.start({ address: host, findOpenPort: true });
-  const events = recordOf(server);
-
-  return {
-    events,
-    server,
-    url: `http://${host}:${String(port)}/bead`,
-    [Symbol.asyncDispose]: () => {
-      return server.stop();
-    },
-  };
-};
-
-const post = (
-  url: string,
-  {
-    body,
-    connectionToken,
-    headers,
-    signal,
-  }: {
-    body?: Uint8Array | ReadableStream<Uint8Array>;
-    connectionToken?: string;
-    headers?: Record<string, string>;
-    signal?: AbortSignal;
-  } = {}
-) => {
-  return fetch(url, {
-    body,
-    // a stream goes chunked, its length unknown
-    ...(body instanceof ReadableStream ? { duplex: 'half' } : {}),
-    headers: {
-      'content-type': BEAD_MEDIA_TYPE,
-      ...(connectionToken === undefined ? {} : { [CONNECTION_TOKEN_HEADER]: connectionToken }),
-      ...headers,
-    },
-    method: 'POST',
-    signal,
-  } as RequestInit);
-};
-
-/** Connects: the token the server drew, and the handle it named the connection by. */
-const connect = async (url: string, server: HTTPTransportServer) => {
-  const response = await post(url);
-
-  return {
-    connectionHandle: server.clients.at(-1)?.connectionHandle as TransportServerConnectionHandle,
-    connectionToken: response.headers.get(CONNECTION_TOKEN_HEADER) ?? '',
-    response,
-  };
-};
-
-const bytesOf = async (response: Response) => {
-  return [...new Uint8Array(await response.arrayBuffer())];
-};
-
-/** What a response says of itself: its status and its refusal's reason. */
-const refusalOf = async (answered: Promise<Response>) => {
-  const response = await answered;
-
-  await response.arrayBuffer().catch(() => {});
-
-  return [response.status, response.headers.get(REFUSAL_HEADER)];
-};
-
-/** A scripted transport server, listening, with the events it emitted. */
-const startScripted = async (options?: Partial<IHTTPTransportServerOptions>) => {
-  const fake = createFakeHTTPServer();
-  const server = createHTTPTransportServer({ createServer: fake.createServer, ...options });
-  const starting = server.start({ address: host, port: 4_321 });
-
-  fake.listen();
-  await starting;
-
-  const events = recordOf(server);
-
-  // a connect: its token, and the handle it drew; `isListening`, its client listens
-  const connectScripted = ({
-    isListening = false,
-    socket,
-  }: {
-    isListening?: boolean;
-    socket?: { remoteAddress?: string; remotePort?: number };
-  } = {}) => {
-    const { response } = fake.exchange({
-      headers: {
-        'content-type': BEAD_MEDIA_TYPE,
-        ...(isListening ? { [LISTEN_HEADER]: '?1' } : {}),
-      },
-      ...(socket === undefined ? {} : { socket }),
-    });
-
-    return {
-      connectionHandle: server.clients.at(-1)?.connectionHandle as TransportServerConnectionHandle,
-      connectionToken: response.headers?.[CONNECTION_TOKEN_HEADER] ?? '',
-    };
-  };
-
-  // an exchange on a connection, its body fed by the test
-  const exchangeOf = (connectionToken: string, headers: Record<string, string> = {}) => {
-    return fake.exchange({
-      headers: {
-        'content-type': BEAD_MEDIA_TYPE,
-        [CONNECTION_TOKEN_HEADER]: connectionToken,
-        ...headers,
-      },
-    });
-  };
-
-  // a listen, its counts in their fields (spec 15.9): `bead-after` 0 unless given, `null` leaving it
-  // out, and `bead-wait` left out unless given
-  const listenOf = (
-    connectionToken: string,
-    {
-      after = '0',
-      wait,
-    }: { after?: string | string[] | null; wait?: string | string[] | undefined } = {}
-  ) => {
-    return fake.exchange({
-      headers: {
-        [CONNECTION_TOKEN_HEADER]: connectionToken,
-        ...(after === null ? {} : { [AFTER_HEADER]: after }),
-        ...(wait === undefined ? {} : { [WAIT_HEADER]: wait }),
-      },
-      method: 'GET',
-      url: '/bead',
-    });
-  };
-
-  return { connectScripted, events, exchangeOf, fake, listenOf, server };
-};
 
 // definition
 
@@ -533,36 +297,6 @@ test.describe('createHTTPTransportServer', () => {
     await server.stop();
   });
 
-  test('refuses a POST with two Authorization fields 400, malformed, before reading its body, and hands the router nothing', async () => {
-    const { connectScripted, events, fake, server } = await startScripted();
-    const { connectionToken } = connectScripted();
-    const twice = (authorization: string[]) => {
-      const { request, response } = fake.exchange({
-        headers: {
-          authorization,
-          'content-length': '8',
-          'content-type': BEAD_MEDIA_TYPE,
-          [CONNECTION_TOKEN_HEADER]: connectionToken,
-        },
-      });
-
-      fake.feed(request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
-
-      return [
-        response.status,
-        response.headers?.[REFUSAL_HEADER],
-        response.headers?.['connection'],
-      ];
-    };
-
-    expect([twice([BEARER, BEARER]), twice([BEARER, ''])]).toEqual([
-      [400, REFUSALS.MALFORMED, 'close'],
-      [400, REFUSALS.MALFORMED, 'close'],
-    ]);
-    expect(namesOf(events, 'message')).toEqual([]);
-    await server.stop();
-  });
-
   test('ends the exchange a cancel names, empty, and drops a request its cancel came before', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;
@@ -750,64 +484,6 @@ test.describe('createHTTPTransportServer', () => {
     ]);
   });
 
-  test('answers a request without a Host, with two, or with one that is no host, 400 as HTTP does, unmarked', async () => {
-    // the status, the mark and the body of a connect whose `Host` lines are `hosts`, once the
-    // server closed its socket; a body in chunks read whole
-    const answerOf = async (port: number, hostLines: readonly string[]) => {
-      const socket = connectTcp(port, host);
-      let text = '';
-
-      socket.on('data', (chunk: Buffer) => {
-        text += chunk.toString('latin1');
-      });
-      await once(socket, 'connect');
-      socket.write(
-        'POST /bead HTTP/1.1\r\n' +
-          hostLines
-            .map((line) => {
-              return `Host: ${line}\r\n`;
-            })
-            .join('') +
-          `Content-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
-      );
-      await once(socket, 'close');
-
-      const [head = '', body = ''] = text.split(/\r\n\r\n(?<body>.*)/su);
-
-      return [
-        Number(head.split(' ')[1]),
-        new RegExp(`${REFUSAL_HEADER}: (.*)\r\n`, 'iu').exec(head)?.[1] ?? null,
-        /transfer-encoding: chunked/iu.test(head) && body === '0\r\n\r\n' ? '' : body,
-      ];
-    };
-
-    // its head is the HTTP server's own, Node's for a `Host` missing, whether the server takes
-    // every host or names some
-    for (const hosts of [undefined, ['bead.test']]) {
-      await using started = await startTransport({ hosts });
-      const port = Number(new URL(started.url).port);
-
-      expect(
-        await Promise.all(
-          [
-            [],
-            ['bead.test', 'elsewhere.test'],
-            ['elsewhere.test', 'bead.test'],
-            ['bead.test', 'bead.test'],
-            ['bad host'],
-          ].map((hostLines) => {
-            return answerOf(port, hostLines);
-          })
-        )
-      ).toEqual(
-        Array.from({ length: 5 }, () => {
-          return [400, null, ''];
-        })
-      );
-      expect(namesOf(started.events, 'connection')).toEqual([]);
-    }
-  });
-
   test('refuses a request on a call id already waiting, 409', async () => {
     await using started = await startTransport();
     const { server, url } = started;
@@ -823,37 +499,6 @@ test.describe('createHTTPTransportServer', () => {
     expect([first.status, again]).toEqual([200, [409, REFUSALS.CALL_WAITING]]);
     await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 }) }, connectionHandle);
     expect(await bytesOf(first)).toEqual([...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 7 })]);
-  });
-
-  test('refuses a body past its limit, 413, declared or counted, and hands the router nothing', async () => {
-    await using started = await startTransport({ maximumBodyBytes: 64 });
-    const { events, server, url } = started;
-    const { connectionToken } = await connect(url, server);
-    const declared = await refusalOf(
-      post(url, {
-        body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 57 }),
-        connectionToken,
-      })
-    );
-    const counted = await post(url, {
-      body: new ReadableStream<Uint8Array>({
-        start: (controller) => {
-          controller.enqueue(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3, extra: 40 }));
-          controller.enqueue(new Uint8Array(40));
-          controller.close();
-        },
-      }),
-      connectionToken,
-    }).catch((reason: unknown) => {
-      return reason;
-    });
-
-    expect(declared).toEqual([413, REFUSALS.TOO_LARGE]);
-    // the socket closes behind a 413 on HTTP/1.1: its client may see it, or the reset
-    expect(counted instanceof Response ? String(counted.status) : 'reset').toMatch(
-      /^(?:413|reset)$/u
-    );
-    expect(namesOf(events, 'message')).toEqual([]);
   });
 
   // spec 15.12.4
@@ -1986,6 +1631,12 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await expect(starting).rejects.toBe(refused);
     expect([failing.servers[0]?.closes, server.isClosed()]).toEqual([1, true]);
 
+    const restarted = server.start({ findOpenPort: true });
+
+    await failing.listenEach(2);
+    expect((await restarted).port).not.toBe(4_321);
+    await server.stop();
+
     const aborting = createFakeHTTPServer();
     const aborted = createHTTPTransportServer({ createServer: aborting.createServer });
     const controller = new AbortController();
@@ -1994,126 +1645,27 @@ test.describe('createHTTPTransportServer, its edges', () => {
     controller.abort();
 
     await expect(abortedStart).rejects.toBeInstanceOf(CancelError);
-    expect(aborting.servers[0]?.closes).toBe(1);
-  });
+    expect([aborting.servers[0]?.closes, aborted.isClosed()]).toEqual([1, true]);
 
-  test('reads any target without throwing, a header given twice by its first, and HTTP/2’s authority as the host', async () => {
-    const { fake, server } = await startScripted({ hosts: ['bead.example'] });
-    const statusOf = (
-      headers: Record<string, string | string[]>,
-      { url, httpVersionMajor }: { httpVersionMajor?: number; url?: string } = {}
-    ) => {
-      const { response } = fake.exchange({
-        headers: { host: 'bead.example', ...headers },
-        ...(httpVersionMajor === undefined ? {} : { httpVersionMajor }),
-        ...(url === undefined ? {} : { url }),
-      });
+    const resumed = aborted.start({ findOpenPort: true });
 
-      return [response.status, response.headers?.[REFUSAL_HEADER]];
-    };
-    const bead = { 'content-type': BEAD_MEDIA_TYPE };
+    await aborting.listenEach(2);
+    expect((await resumed).port).not.toBe(0);
+    await aborted.stop();
 
-    expect([
-      statusOf({ 'content-type': [BEAD_MEDIA_TYPE, 'text/plain'] }),
-      statusOf(bead, { url: '//:99999/bead' }),
-      statusOf(bead, { url: '//[' }),
-      statusOf(bead, { url: '/bead?after=1' }),
-      statusOf({ ...bead, origin: 'not an origin' }),
-      statusOf({ ...bead, host: 'rebound.example' }),
-      // an HTTP/1.1 request with no host, which HTTP refuses of its own, unmarked
-      statusOf({ 'content-type': BEAD_MEDIA_TYPE, host: [] as unknown as string }),
-      // HTTP/2 names its host by its authority, and a browser's origin matches it
-      statusOf(
-        {
-          ':authority': 'bead.example:8443',
-          'content-type': BEAD_MEDIA_TYPE,
-          host: undefined as unknown as string,
-          origin: 'https://bead.example:8443',
-        },
-        { httpVersionMajor: 2 }
-      ),
-      statusOf({}),
-      // HTTP/2's authority before a host beside it, one way and the other
-      statusOf(
-        { ':authority': 'bead.example', 'content-type': BEAD_MEDIA_TYPE, host: 'rebound.example' },
-        { httpVersionMajor: 2 }
-      ),
-      statusOf(
-        { ':authority': 'rebound.example', 'content-type': BEAD_MEDIA_TYPE, host: 'bead.example' },
-        { httpVersionMajor: 2 }
-      ),
-      // a target in absolute-form names the authority, its Host ignored but for being one, its
-      // path read after it, and its query by no exchange
-      statusOf(bead, { url: 'http://bead.example:8443/bead' }),
-      statusOf({ ...bead, host: 'rebound.example' }, { url: 'https://bead.example/bead' }),
-      statusOf({ ...bead, host: 'bad host' }, { url: 'http://localhost/bead?after=1' }),
-      statusOf(bead, { url: 'http://rebound.example/bead' }),
-      statusOf(bead, { url: 'http://bead.example' }),
-      statusOf(bead, { url: 'http://bead.example?after=1' }),
-      // and HTTP refuses one that names no host, a colon with no port and a userinfo among them,
-      // another scheme's, or one beside two Host lines
-      statusOf(bead, { url: 'http:///bead' }),
-      statusOf(bead, { url: 'http://a%41.test/bead' }),
-      statusOf(bead, { url: 'http://127.0.0.1:/bead' }),
-      statusOf(bead, { url: 'http://user@bead.example/bead' }),
-      statusOf(bead, { url: 'HTTP://bead.example/bead' }),
-      statusOf(bead, { url: 'ftp://bead.example/bead' }),
-      statusOf(
-        { ...bead, host: ['bead.example', 'bead.example'] },
-        { url: 'http://bead.example/bead' }
-      ),
-    ]).toEqual([
-      [201, undefined],
-      [404, REFUSALS.PATH],
-      [404, REFUSALS.PATH],
-      [201, undefined],
-      [403, REFUSALS.ORIGIN],
-      [403, REFUSALS.HOST],
-      [400, undefined],
-      [201, undefined],
-      [415, REFUSALS.TYPE],
-      [201, undefined],
-      [403, REFUSALS.HOST],
-      [201, undefined],
-      [201, undefined],
-      [201, undefined],
-      [403, REFUSALS.HOST],
-      [404, REFUSALS.PATH],
-      [404, REFUSALS.PATH],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
-      [400, undefined],
-    ]);
+    // a signal cancelled before the start opens nothing
+    const cancelled = createFakeHTTPServer();
+    const before = createHTTPTransportServer({ createServer: cancelled.createServer });
+    const signal = AbortSignal.abort();
 
-    // HTTP/2's authority that is no host resets its stream, nothing written
-    const reset = fake.exchange({
-      headers: { ':authority': 'localhost:', 'content-type': BEAD_MEDIA_TYPE },
-      httpVersionMajor: 2,
-    });
+    await expect(before.start({ port: 4_321, signal })).rejects.toBeInstanceOf(CancelError);
+    expect([cancelled.servers.length, before.isClosed()]).toEqual([0, true]);
 
-    expect([reset.response.status, reset.response.isDestroyed]).toEqual([undefined, true]);
+    const retrying = before.start({ findOpenPort: true });
 
-    const { response } = fake.exchange({ headers: bead, httpVersion: '1.0' });
-    const absolute = fake.exchange({
-      headers: bead,
-      httpVersion: '1.0',
-      url: 'http://bead.example/bead',
-    });
-    // no target at all: the root, which is not the path
-    const untargeted = fake.exchange({
-      headers: { ...bead, host: 'bead.example' },
-      url: undefined,
-    });
-
-    // no host at all, which an HTTP/1.0 request may name, where hosts are listed; and none beside
-    // a target in absolute-form, which names it
-    expect([response.status, absolute.response.status]).toEqual([403, 201]);
-    expect(untargeted.response.headers?.[REFUSAL_HEADER]).toBe(REFUSALS.PATH);
-    await server.stop();
+    await cancelled.listenEach(2);
+    expect((await retrying).port).not.toBe(0);
+    await before.stop();
   });
 
   // spec 15.12
@@ -2235,61 +1787,11 @@ test.describe('createHTTPTransportServer, its edges', () => {
     }
   });
 
-  test('puts a body together from as many pieces as it comes in, and hands on one envelope', async () => {
-    const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
-    const { connectionToken } = connectScripted();
-    const envelope = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 70_000 });
-    const { request } = exchangeOf(connectionToken);
-
-    fake.feed(
-      request,
-      Array.from({ length: Math.ceil(envelope.length / 1_000) }, (_, index) => {
-        return envelope.subarray(index * 1_000, (index + 1) * 1_000);
-      })
-    );
-
-    expect(namesOf(events, 'message')).toEqual([['message', [...envelope], expect.any(String)]]);
-    await server.stop();
-  });
-
-  test('ends an upload whose cancel came as it came, never handing it on, and one past its limit, reading no more of it', async () => {
-    const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
-      maximumBodyBytes: 64,
-    });
-    const { connectionToken } = connectScripted();
-    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 40 });
-    const upload = exchangeOf(connectionToken);
-
-    upload.request.emit('data', request.subarray(0, 16));
-
-    const cancel = exchangeOf(connectionToken);
-
-    fake.feed(cancel.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 })]);
-    fake.feed(upload.request, [request.subarray(16)]);
-
-    expect([cancel.response.status, upload.response.status]).toEqual([204, 204]);
-
-    // cancelled, and still coming past the limit: refused, and read no more
-    const endless = exchangeOf(connectionToken);
-
-    endless.request.emit('data', request.subarray(0, 16));
-    fake.feed(exchangeOf(connectionToken).request, [
-      envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 }),
-    ]);
-    endless.request.emit('data', new Uint8Array(64));
-
-    expect([endless.response.status, endless.request.isDestroyed]).toEqual([413, true]);
-    expect(
-      namesOf(events, 'message').map(([, bytes]) => {
-        return (bytes as number[])[1];
-      })
-    ).toEqual([ENVELOPE_KINDS.CANCEL, ENVELOPE_KINDS.CANCEL]);
-    await server.stop();
-  });
-
   test('lets a burial lapse, buries only the client’s call ids and so many of them, and answers a body still coming as its connection closes', async () => {
     const clock = createTestClock();
+    // a body's grace apart from a burial's, so the burials are counted alone
     const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
+      bodyGracePeriod: 6_000,
       clock,
       maximumWaitingExchanges: 2,
     });
@@ -2351,13 +1853,18 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
       fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
 
-      // one idle timer per connection as drawn; the one asking lost its own as its exchange came
+      // one idle timer per connection as drawn; the one asking lost its own as its exchange came,
+      // and its body's pace, armed at its head and again at its bytes, went once it was whole
       const delays = clock.armed.map(({ delay }) => {
         return delay;
       });
 
-      expect(delays).toEqual([2_000, 2_000, 1_000]);
-      expect(clock.cleared).toEqual([clock.armed[0]?.handle]);
+      expect(delays).toEqual([2_000, 2_000, BODY_GRACE_PERIOD, BODY_GRACE_PERIOD, 1_000]);
+      expect(clock.cleared).toEqual(
+        [0, 2, 3].map((index) => {
+          return clock.armed[index]?.handle;
+        })
+      );
 
       clock.tick(999);
 
@@ -2461,35 +1968,6 @@ test.describe('createHTTPTransportServer, its edges', () => {
     await server.stop();
   });
 
-  // spec 15.12.4
-  test('reads a body up to its limit exactly, declared or counted, refuses one declared past it before any of it, and gives back the bytes each held', async () => {
-    const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
-      bodyBytesBudget: 24,
-      maximumBodyBytes: 16,
-    });
-    const { connectionToken } = connectScripted();
-    const full = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 8 });
-    const declared = exchangeOf(connectionToken, { 'content-length': '16' });
-    const past = exchangeOf(connectionToken, { 'content-length': '17' });
-
-    // the one past its limit is refused as it comes; the one at it waits for its body
-    expect([declared.response.status, past.response.status]).toEqual([undefined, 413]);
-
-    fake.feed(declared.request, [full]);
-
-    // counted, with no length declared: its 16 bytes, once the first 16 were given back
-    const counted = exchangeOf(connectionToken, { 'transfer-encoding': 'chunked' });
-
-    fake.feed(counted.request, [
-      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
-      new Uint8Array(8),
-    ]);
-
-    expect([declared.response.status, counted.response.status]).toEqual([200, 200]);
-    expect(namesOf(events, 'message')).toHaveLength(2);
-    await server.stop();
-  });
-
   test('bounds its connections all together, whichever address each comes from', async () => {
     const { connectScripted, fake, server } = await startScripted({ maximumConnections: 1 });
 
@@ -2589,11 +2067,17 @@ test.describe('createHTTPTransportServer, its edges', () => {
     });
     const { connectionToken: foreverToken } = forever.connectScripted();
     const asking = forever.exchangeOf(foreverToken);
-    const { armed: armedForever } = timersBy(foreverClock, () => {
+    const { armed: armedForever, cleared } = timersBy(foreverClock, () => {
       forever.fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     });
 
-    expect([asking.response.status, armedForever]).toEqual([200, []]);
+    // its body's pace alone was armed, and went once its body was whole
+    expect([
+      asking.response.status,
+      armedForever.filter(({ handle }) => {
+        return !cleared.includes(handle);
+      }),
+    ]).toEqual([200, []]);
     await forever.server.stop();
   });
 
@@ -2620,50 +2104,6 @@ test.describe('createHTTPTransportServer, its edges', () => {
     ).toEqual([
       [404, REFUSALS.CONNECTION_UNKNOWN, undefined],
       [404, REFUSALS.CONNECTION_UNKNOWN, 'close'],
-    ]);
-    await server.stop();
-  });
-
-  test('answers a request an answer comes for as its body still comes, at once, never handing it on', async () => {
-    const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
-    const { connectionHandle, connectionToken } = connectScripted();
-    const coming = exchangeOf(connectionToken, { 'content-length': '16' });
-    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1, extra: 8 });
-    const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
-
-    coming.request.emit('data', request.subarray(0, 12));
-    await server.send({ data: answer }, connectionHandle);
-
-    expect([coming.response.status, [...(coming.response.body ?? [])]]).toEqual([200, [...answer]]);
-
-    // the rest of it changes nothing: it is never handed on
-    fake.feed(coming.request, [request.subarray(12)]);
-
-    expect(namesOf(events, 'message')).toEqual([]);
-    await server.stop();
-  });
-
-  test('tells a header given empty from one absent: an empty token is malformed, an empty origin or encoding refused, an empty listen none', async () => {
-    const { connectScripted, fake, server } = await startScripted();
-    const { connectionToken } = connectScripted();
-    const statusOf = (headers: Record<string, string>) => {
-      const { response } = fake.exchange({
-        headers: { 'content-type': BEAD_MEDIA_TYPE, ...headers },
-      });
-
-      return [response.status, response.headers?.[REFUSAL_HEADER]];
-    };
-
-    expect([
-      statusOf({ [CONNECTION_TOKEN_HEADER]: '' }),
-      statusOf({ origin: '' }),
-      statusOf({ [CONNECTION_TOKEN_HEADER]: connectionToken, 'content-encoding': '' }),
-      statusOf({ [LISTEN_HEADER]: '' }),
-    ]).toEqual([
-      [400, REFUSALS.MALFORMED],
-      [403, REFUSALS.ORIGIN],
-      [415, REFUSALS.TYPE],
-      [400, REFUSALS.MALFORMED],
     ]);
     await server.stop();
   });
@@ -2890,78 +2330,6 @@ test.describe('createHTTPTransportServer, listening', () => {
     await server.stop();
   });
 
-  // spec 15.6, 15.9
-  test('reads a listen’s counts from bead-after and bead-wait, a field given as several lines joined, and refuses 400 a listen without bead-after, whatever its target holds', async () => {
-    const clock = createTestClock();
-    const { connectScripted, fake, listenOf, server } = await startScripted({
-      clock,
-      inactivityTimeout: Infinity,
-    });
-    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
-    const notification = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
-    const statusOf = (exchange: ReturnType<typeof listenOf>) => {
-      return [exchange.response.status, exchange.response.headers?.[REFUSAL_HEADER]];
-    };
-    const at = (url: string, counts: Record<string, string>) => {
-      return fake.exchange({
-        headers: { [CONNECTION_TOKEN_HEADER]: connectionToken, ...counts },
-        method: 'GET',
-        url,
-      });
-    };
-
-    await server.send({ data: notification }, connectionHandle);
-
-    // Items of RFC 9651 whose bare item is an Integer of 0 or more, each field's lines joined
-    // before they are read: two lines are a list, which no Item is
-    expect([
-      statusOf(listenOf(connectionToken, { after: ['0', '0'], wait: '0' })),
-      statusOf(listenOf(connectionToken, { wait: ['0', '1'] })),
-      statusOf(listenOf(connectionToken, { after: '0, 0' })),
-      statusOf(listenOf(connectionToken, { after: '' })),
-      statusOf(listenOf(connectionToken, { after: '1.0' })),
-      statusOf(listenOf(connectionToken, { after: '"1"' })),
-      statusOf(listenOf(connectionToken, { after: '-1' })),
-      statusOf(listenOf(connectionToken, { after: '0', wait: '?1' })),
-      statusOf(listenOf(connectionToken, { after: '0;X=1' })),
-      // without bead-after, its counts in the query or not
-      statusOf(listenOf(connectionToken, { after: null, wait: '0' })),
-      statusOf(at('/bead?after=0&wait=0', {})),
-    ]).toEqual(
-      Array.from({ length: 11 }, () => {
-        return [400, REFUSALS.MALFORMED];
-      })
-    );
-
-    // with it, whatever its query: its parameters ignored, -0 read as 0
-    const brought = at('/bead?after=5&x=1', {
-      [AFTER_HEADER]: '-0;x=1',
-      [WAIT_HEADER]: '0;y="a;b"',
-    });
-
-    expect([
-      brought.response.status,
-      brought.response.headers?.[SEQUENCE_HEADER],
-      [...(brought.response.body ?? [])],
-    ]).toEqual([200, '1', batchOf(notification)]);
-
-    // a bead-wait left out is 0, answered at once; one given, held as long
-    const { armed } = timersBy(clock, () => {
-      expect(statusOf(at('/bead?', { [AFTER_HEADER]: '1' }))).toEqual([204, undefined]);
-    });
-    const held = timersBy(clock, () => {
-      at('/bead', { [AFTER_HEADER]: '1', [WAIT_HEADER]: '500' });
-    });
-
-    expect([
-      armed,
-      held.armed.map(({ delay }) => {
-        return delay;
-      }),
-    ]).toEqual([[], [500]]);
-    await server.stop();
-  });
-
   test('stamps a connection’s activity as an exchange of an envelope or a listen begins, never at its connect nor at a listen refused', async () => {
     const clock = createTestClock(1_000_250);
     const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({ clock });
@@ -3018,27 +2386,33 @@ test.describe('createHTTPTransportServer, listening', () => {
           listenOf(connectionToken, { wait: 'soon' }),
           listenOf(connectionToken, { after: '1' }),
         ].map(({ response }) => {
-          return response.status;
+          return [response.status, response.headers?.[REFUSAL_HEADER]];
         })
-      ).toEqual([409, 400, 400]);
+      ).toEqual([
+        [409, REFUSALS.LISTEN_UNDECLARED],
+        [400, REFUSALS.MALFORMED],
+        [400, REFUSALS.MALFORMED],
+      ]);
     });
 
     expect([told, refused]).toEqual([[], { armed: [], cleared: [] }]);
 
     // a second in the place of the first, which ends empty: each tells its own, the second first,
     // so a server's count never falls to none between them
-    listenOf(connectionToken, { wait: '20000' });
-    listenOf(connectionToken, { wait: '20000' });
+    const first = listenOf(connectionToken, { wait: '20000' });
+    const second = listenOf(connectionToken, { wait: '20000' });
 
     expect(told).toEqual([
       [true, connectionHandle],
       [true, connectionHandle],
       [false, connectionHandle],
     ]);
+    expect(first.response.status).toBe(204);
 
     // its connection closed: the listen it held ends untold
-    await server.close(connectionHandle);
+    await expect(server.close(connectionHandle)).resolves.toBe(true);
 
+    expect(second.response.status).toBe(404);
     expect(told).toHaveLength(3);
     await server.stop();
   });
@@ -3164,16 +2538,21 @@ test.describe('createHTTPTransportServer, listening', () => {
     listenOf(connectionToken, { wait: '20000' });
 
     const cancel = exchangeOf(connectionToken);
-    // a cancel, handed on and ended at once: the listen still holds the connection awake
-    const { armed } = timersBy(clock, () => {
+    // a cancel, handed on and ended at once: the listen still holds the connection awake, and
+    // its body's pace went once it was whole
+    const { armed, cleared } = timersBy(clock, () => {
       fake.feed(cancel.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 1 })]);
     });
 
     expect([
       cancel.response.status,
-      armed.map(({ delay }) => {
-        return delay;
-      }),
+      armed
+        .filter(({ handle }) => {
+          return !cleared.includes(handle);
+        })
+        .map(({ delay }) => {
+          return delay;
+        }),
     ]).toEqual([204, [BURIAL_MILLISECONDS]]);
     await server.stop();
   });
@@ -3300,318 +2679,6 @@ test.describe('createHTTPTransportServer, listening', () => {
       REFUSALS.CONNECTION_UNKNOWN,
     ]);
     await server.stop();
-  });
-});
-
-/**
- * What a request written raw as `head` is answered: its status and its mark, the fields its head
- * carries by their names in lower case, and the port it came from.
- */
-const rawAnswerOf = async (port: number, head: string) => {
-  const socket = connectTcp(port, host);
-  let text = '';
-  let isClosed = false;
-
-  socket.on('data', (chunk: Buffer) => {
-    text += chunk.toString('latin1');
-  });
-  socket.on('error', () => {});
-  socket.on('close', () => {
-    isClosed = true;
-  });
-  await once(socket, 'connect');
-
-  const { localPort } = socket;
-
-  socket.write(Buffer.from(head, 'latin1'));
-  await expect
-    .poll(() => {
-      return text.includes('\r\n\r\n') || isClosed;
-    })
-    .toBe(true);
-  socket.destroy();
-
-  const lines = text.split('\r\n\r\n')[0]?.split('\r\n').slice(1) ?? [];
-
-  return {
-    answer: [
-      Number(text.split(' ')[1]),
-      new RegExp(`${REFUSAL_HEADER}: (.*)\r\n`, 'iu').exec(text)?.[1] ?? null,
-    ],
-    fields: new Map(
-      lines.map((line) => {
-        const colon = line.indexOf(':');
-
-        return [line.slice(0, colon).toLowerCase(), line.slice(colon + 1).trim()];
-      })
-    ),
-    localPort,
-  };
-};
-
-/** A connect written raw, naming `authority`, with the field lines `fields` before its own. */
-const rawConnectOf = (authority: string, fields = '') => {
-  return (
-    `POST /bead HTTP/1.1\r\nHost: ${authority}\r\n${fields}` +
-    `Content-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
-  );
-};
-
-/** Each refusal `server` tells from now on. */
-const refusalsOf = (server: HTTPTransportServer) => {
-  const refusals: ITransportServerRefusal[] = [];
-
-  server.on('refusal', (refusal) => {
-    refusals.push(refusal);
-  });
-
-  return refusals;
-};
-
-/** A preflight from `origin` (Fetch §3.3.2): an `OPTIONS` naming the method it asks for, and its fields. */
-const preflight = (
-  url: string,
-  {
-    fields,
-    method,
-    origin = PAGE,
-  }: { fields?: string | undefined; method: string; origin?: string }
-) => {
-  return fetch(url, {
-    headers: {
-      'access-control-request-method': method,
-      origin,
-      ...(fields === undefined ? {} : { 'access-control-request-headers': fields }),
-    },
-    method: 'OPTIONS',
-  });
-};
-
-test.describe('createHTTPTransportServer, CORS', () => {
-  test.afterAll(async () => {
-    await tcpSocketsClosed();
-  });
-
-  // spec 15.6, 15.12
-  test('answers a preflight from an origin it names 204, naming it, the methods, Authorization, the fields it asks for in its lines joined and any other field, for 7200 seconds, and tells no refusal', async () => {
-    await using started = await startTransport({ origins: [PAGE] });
-    const { events, server, url } = started;
-    const refusals = refusalsOf(server);
-    // what a page asks before a connect, before a listen at the connection's one URL, and of a
-    // method the server does not take, which its browser refuses against the answer
-    const asked = [
-      'bead-listen,content-type,traceparent',
-      'bead-after,bead-connection-token,bead-wait',
-      undefined,
-    ];
-    const answers = [
-      await preflight(url, { fields: asked[0], method: 'POST' }),
-      await preflight(url, { fields: asked[1], method: 'GET' }),
-      await preflight(url, { method: 'PUT' }),
-    ];
-
-    for (const [index, answer] of answers.entries()) {
-      const expected = preflightAnswerOf(asked[index]);
-
-      expect([answer.status, fieldsOf(answer.headers, expected), await bytesOf(answer)]).toEqual([
-        204,
-        expected,
-        [],
-      ]);
-    }
-
-    // what it asks in two field lines, joined as one value (RFC 9110 §5.3), and nothing asked
-    // when the field is empty
-    const scripted = await startScripted({ origins: [PAGE] });
-    const preflightScripted = (lines: string[]) => {
-      return scripted.fake.exchange({
-        headers: {
-          'access-control-request-headers': lines,
-          'access-control-request-method': 'GET',
-          origin: PAGE,
-        },
-        method: 'OPTIONS',
-      }).response;
-    };
-
-    expect([
-      preflightScripted(['bead-after', 'bead-wait']).headers?.['access-control-allow-headers'],
-      preflightScripted(['']).headers?.['access-control-allow-headers'],
-    ]).toEqual(['authorization, bead-after, bead-wait, *', 'authorization, *']);
-    await scripted.server.stop();
-    // no refusal, and no connection drawn
-    expect(refusals).toEqual([]);
-    expect([namesOf(events, 'connection'), server.clients]).toEqual([[], []]);
-  });
-
-  // spec 15.4, 15.9, 15.12
-  test('names an origin it names on every answer it writes to it once that origin is judged, a batch and a refusal among them, and exposes every field', async () => {
-    await using started = await startTransport({ origins: [PAGE] });
-    const { events, server, url } = started;
-    const headers = { origin: PAGE };
-    const named: unknown[] = [];
-    const name = async (answered: Response | Promise<Response>) => {
-      const response = await answered;
-
-      named.push([response.status, fieldsOf(response.headers, NAMED_ANSWER)]);
-
-      return response;
-    };
-
-    // a connect that listens, its token read
-    const drawn = await name(post(url, { headers: { ...headers, [LISTEN_HEADER]: '?1' } }));
-    const connectionToken = drawn.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
-    const connectionHandle = server.clients.at(-1)
-      ?.connectionHandle as TransportServerConnectionHandle;
-
-    // a request with its Authorization, its head going as it is handed on, then answered
-    const request = post(url, {
-      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
-      connectionToken,
-      headers: { ...headers, authorization: BEARER },
-    });
-    const head = await name(request);
-
-    await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
-    await head.arrayBuffer();
-
-    // one answered as it is handed on, in one go
-    server.on('message', ({ data }) => {
-      if ((data as Uint8Array)[7] === 3) {
-        void server.send(
-          { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }) },
-          connectionHandle
-        );
-      }
-    });
-    await name(
-      post(url, {
-        body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
-        connectionToken,
-        headers,
-      })
-    );
-
-    // a batch
-    await server.send(
-      { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }) },
-      connectionHandle
-    );
-    await name(
-      fetch(url, {
-        headers: {
-          ...headers,
-          [AFTER_HEADER]: '0',
-          [CONNECTION_TOKEN_HEADER]: connectionToken,
-          [WAIT_HEADER]: '0',
-        },
-      })
-    );
-
-    // refusals once the origin is judged: an OPTIONS that is no preflight, a body of another type,
-    // a token that is none
-    const bare = await name(fetch(url, { headers, method: 'OPTIONS' }));
-    await name(
-      post(url, { connectionToken, headers: { ...headers, 'content-type': 'text/plain' } })
-    );
-    await name(post(url, { connectionToken: 'not-a-token', headers }));
-
-    // a DELETE, and an exchange after it
-    await name(
-      fetch(url, {
-        headers: { ...headers, [CONNECTION_TOKEN_HEADER]: connectionToken },
-        method: 'DELETE',
-      })
-    );
-    await name(post(url, { connectionToken, headers }));
-
-    expect(named).toEqual(
-      [201, 200, 200, 200, 405, 415, 400, 204, 404].map((status) => {
-        return [status, NAMED_ANSWER];
-      })
-    );
-    expect(bare.headers.get('allow')).toBe('GET, POST, DELETE');
-    expect(namesOf(events, 'message')).toHaveLength(2);
-  });
-
-  // spec 15.6, 15.12
-  test('names no origin to its own, to a request with none, to one it does not take, nor before the origin is judged, and varies every answer by Origin but HTTP’s own 400', async () => {
-    await using started = await startTransport({ origins: [PAGE] });
-    const { server, url } = started;
-    const refusals = refusalsOf(server);
-    const port = Number(new URL(url).port);
-    const authority = `${host}:${String(port)}`;
-    const answerOf = async (head: string) => {
-      const { answer, fields } = await rawAnswerOf(port, head);
-
-      return [
-        ...answer,
-        fieldsOf(
-          {
-            get: (field) => {
-              return fields.get(field);
-            },
-          },
-          UNNAMED_ANSWER
-        ),
-      ];
-    };
-    const unnamed = (status: number, reason: string | null) => {
-      return [status, reason, UNNAMED_ANSWER];
-    };
-
-    expect([
-      // its own origin, and none
-      await answerOf(rawConnectOf(authority, `Origin: http://${authority}\r\n`)),
-      await answerOf(rawConnectOf(authority)),
-      // a preflight from its own origin, and from none: no CORS request, so a method it does not take
-      await answerOf(
-        `OPTIONS /bead HTTP/1.1\r\nHost: ${authority}\r\nOrigin: http://${authority}\r\n` +
-          'Access-Control-Request-Method: POST\r\n\r\n'
-      ),
-      await answerOf(
-        `OPTIONS /bead HTTP/1.1\r\nHost: ${authority}\r\nAccess-Control-Request-Method: POST\r\n\r\n`
-      ),
-      // an origin it does not take
-      await answerOf(rawConnectOf(authority, 'Origin: https://elsewhere.test\r\n')),
-      // a page it names, before its origin is judged: by a host it does not take, at another path
-      await answerOf(
-        `OPTIONS /bead HTTP/1.1\r\nHost: rebind.example\r\nOrigin: ${PAGE}\r\n` +
-          'Access-Control-Request-Method: POST\r\n\r\n'
-      ),
-      await answerOf(
-        `OPTIONS /elsewhere HTTP/1.1\r\nHost: ${authority}\r\nOrigin: ${PAGE}\r\n` +
-          'Access-Control-Request-Method: POST\r\n\r\n'
-      ),
-    ]).toEqual([
-      unnamed(201, null),
-      unnamed(201, null),
-      unnamed(405, REFUSALS.METHOD),
-      unnamed(405, REFUSALS.METHOD),
-      unnamed(403, REFUSALS.ORIGIN),
-      unnamed(403, REFUSALS.HOST),
-      unnamed(404, REFUSALS.PATH),
-    ]);
-    expect(
-      refusals.map(({ reason }) => {
-        return reason;
-      })
-    ).toEqual([REFUSALS.METHOD, REFUSALS.METHOD, REFUSALS.ORIGIN, REFUSALS.HOST, REFUSALS.PATH]);
-
-    // HTTP's own 400, from a page it names: two hosts, and a field of an octet past ASCII
-    for (const fields of [`Host: ${authority}\r\n`, 'X-Other: café\r\n']) {
-      const { answer, fields: carried } = await rawAnswerOf(
-        port,
-        rawConnectOf(authority, `Origin: ${PAGE}\r\n${fields}`)
-      );
-
-      expect([
-        ...answer,
-        ...PATH_FIELDS.filter((field) => {
-          return carried.has(field);
-        }),
-      ]).toEqual([400, null]);
-    }
   });
 });
 
@@ -3815,64 +2882,6 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     expect(refusals).toEqual([]);
   });
 
-  test('answers 400 unmarked, with none of the path’s fields, a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
-    await using started = await startTransport({ origins: ['http://a.example'] });
-    const refusals = refusalsOf(started.server);
-    const port = Number(new URL(started.url).port);
-    const authority = `${host}:${String(port)}`;
-    // in Origin and in a field the transport never reads: an escape sequence, BEL, DEL, and an
-    // octet past ASCII, written as the one octet 0xE9; Node's parser answers the first three
-    const fields = [
-      'Origin: http://a.example\u001B[2J\r\n',
-      'X-Other: a\u0007b\r\n',
-      'Origin: http://a.example\u007F\r\n',
-      'Origin: http://café.example\r\n',
-      'X-Other: café\r\n',
-    ];
-    const answers: unknown[] = [];
-
-    // each from a page the server names besides, which none of them names
-    for (const field of fields) {
-      const { answer, fields: carried } = await rawAnswerOf(
-        port,
-        rawConnectOf(authority, `Origin: http://a.example\r\n${field}`)
-      );
-
-      answers.push([
-        ...answer,
-        ...PATH_FIELDS.filter((name) => {
-          return carried.has(name);
-        }),
-      ]);
-    }
-
-    expect(answers).toEqual(
-      fields.map(() => {
-        return [400, null];
-      })
-    );
-    expect(refusals).toEqual([]);
-    expect(namesOf(started.events, 'connection')).toEqual([]);
-
-    // a tab is taken, and the origin judged as any other
-    const tabbed = await rawAnswerOf(
-      port,
-      rawConnectOf(authority, 'Origin: http://a.example\tb\r\n')
-    );
-
-    expect(tabbed.answer).toEqual([403, REFUSALS.ORIGIN]);
-    expect(refusals).toEqual([
-      {
-        address: host,
-        authority,
-        origin: 'http://a.example\tb',
-        port: tabbed.localPort,
-        reason: REFUSALS.ORIGIN,
-        status: 403,
-      },
-    ]);
-  });
-
   test('refuses as it would though a refusal listener throws, the throw reported with no connection', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;
@@ -4005,6 +3014,11 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       ['::1', 1, [50_000, '::1']],
     ]);
     await server.stop();
+    expect(
+      fake.servers.map(({ closes }) => {
+        return closes;
+      })
+    ).toEqual([2, 2]);
 
     // eight draws at most, then the last error
     const held = createFakeHTTPServer();
@@ -4039,6 +3053,7 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       2,
       1,
     ]);
+    expect(given.servers[1]?.closes).toBe(1);
   });
 
   test('listens on 127.0.0.1 alone where the IPv6 loopback is absent, and reports 127.0.0.1', async () => {
@@ -4139,5 +3154,265 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
       ['0.0.0.0', false],
       ['::', false],
     ]);
+  });
+});
+
+// a notification's kind, which the transport reads no differently from any envelope of its own
+const NOTIFICATION = 0x13;
+
+test.describe('createHTTPTransportServer, its bounds', () => {
+  test('loses an answer whose client reads slower than minimumSendBytesPerSecond, its connection closed at both ends, and reports it', async () => {
+    const { connectScripted, events, exchangeOf, fake, server } = await startScripted({
+      minimumSendBytesPerSecond: 1_000,
+      sendGracePeriod: 200,
+    });
+    const { connectionHandle, connectionToken } = connectScripted();
+    const asking = exchangeOf(connectionToken);
+
+    fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
+    // * its client takes nothing of the answer: the platform's socket holds it, on any platform,
+    // which a loopback's buffers would hide where they take it all
+    asking.response.isFinishing = false;
+
+    const sending = server
+      .send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 92 }) }, connectionHandle)
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'close');
+      })
+      .toEqual([['close', false, connectionHandle]]);
+    expect(namesOf(events, 'error')).toEqual([
+      [
+        'error',
+        'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+        connectionHandle,
+      ],
+    ]);
+    // its exchange lost at its client's end, its connection gone at the server's
+    expect([asking.response.isDestroyed, await sending]).toEqual([true, expect.any(Error)]);
+
+    const after = exchangeOf(connectionToken);
+
+    fake.feed(after.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 })]);
+
+    expect([after.response.status, after.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
+    await server.stop();
+  });
+
+  test('drops a connection whose client reads its listen’s batch slower than minimumSendBytesPerSecond, and reports it', async () => {
+    const { connectScripted, events, listenOf, server } = await startScripted({
+      minimumSendBytesPerSecond: 1_000,
+      sendGracePeriod: 200,
+    });
+    const { connectionHandle, connectionToken } = connectScripted({ isListening: true });
+    const stalled = listenOf(connectionToken, { wait: '20000' });
+    const envelope = envelopeOf(NOTIFICATION, { callId: 2, extra: 40 });
+
+    // * its client takes nothing of the batch: the platform's socket holds it
+    stalled.response.isFinishing = false;
+    await server.send({ data: envelope }, connectionHandle);
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'close');
+      })
+      .toEqual([['close', false, connectionHandle]]);
+    expect(namesOf(events, 'error')).toEqual([
+      [
+        'error',
+        'the client fell behind: its answer was not taken by its deadline, at minimumSendBytesPerSecond 1000 past sendGracePeriod 200 ms',
+        connectionHandle,
+      ],
+    ]);
+    // its exchange lost at its client's end, its connection gone at the server's (spec 15.7)
+    expect(stalled.response.isDestroyed).toBe(true);
+
+    const next = listenOf(connectionToken, { after: '0', wait: '0' });
+
+    expect([next.response.status, next.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
+    await server.stop();
+  });
+
+  test('keeps an answer whose client takes it within its deadline, and times nothing once it is taken', async () => {
+    await using started = await startTransport({
+      minimumSendBytesPerSecond: 240,
+      sendGracePeriod: 200,
+    });
+    const { events, server, url } = started;
+    const { connectionHandle, connectionToken } = await connect(url, server);
+    const answered = post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken,
+    });
+
+    await expect
+      .poll(() => {
+        return namesOf(events, 'message').length;
+      })
+      .toBe(1);
+    await server.send(
+      { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1, extra: 1_048_576 }) },
+      connectionHandle
+    );
+
+    expect((await bytesOf(await answered)).length).toBe(1_048_584);
+
+    // past what its grace and its rate would have judged, nothing was dropped
+    await new Promise((resolve) => {
+      setTimeout(resolve, 1_200);
+    });
+
+    expect([namesOf(events, 'error'), namesOf(events, 'close')]).toEqual([[], []]);
+  });
+
+  test('reports an outbox that passes maximumOutboxBytes as it closes its connection', async () => {
+    const { connectScripted, events, server } = await startScripted({ maximumOutboxBytes: 64 });
+    const { connectionHandle } = connectScripted({ isListening: true });
+
+    await server.send(
+      { data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) },
+      connectionHandle
+    );
+    await server.send(
+      { data: envelopeOf(NOTIFICATION, { callId: 2, extra: 40 }) },
+      connectionHandle
+    );
+
+    expect(
+      events.filter(([name]) => {
+        return name === 'error' || name === 'close';
+      })
+    ).toEqual([
+      [
+        'error',
+        'the client fell behind: its outbox would pass maximumOutboxBytes, 64 bytes',
+        connectionHandle,
+      ],
+      ['close', false, connectionHandle],
+    ]);
+    await server.stop();
+  });
+
+  test('answers 408 a head that does not come whole within headersTimeout, at its address and its WebSocket’s, past it and within 2 seconds of it', async () => {
+    await using started = await startTransport({ headersTimeout: 500 });
+    const webSocket = createWSTransportServer({ headersTimeout: 500, WebSocketServer });
+    const { port: webSocketPort } = await webSocket.start({ address: host, findOpenPort: true });
+
+    try {
+      for (const [port, head] of [
+        [portOf(started.url), `POST /bead HTTP/1.1\r\nHost: ${host}\r\n`],
+        [webSocketPort, `GET / HTTP/1.1\r\nHost: ${host}\r\n`],
+      ] as const) {
+        const { read, socket } = await rawSocketOn(port);
+        const sentAt = Date.now();
+
+        socket.write(head);
+        await expect
+          .poll(
+            () => {
+              return read.text.includes('\r\n\r\n');
+            },
+            { timeout: 5_000 }
+          )
+          .toBe(true);
+
+        const tookFor = Date.now() - sentAt;
+
+        expect(read.text.split('\r\n')[0], head).toBe('HTTP/1.1 408 Request Timeout');
+        expect(read.text, head).not.toContain('bead-refusal');
+        expect(tookFor, head).toBeGreaterThanOrEqual(450);
+        expect(tookFor, head).toBeLessThan(500 + 1_000 + 500);
+        socket.destroy();
+      }
+    } finally {
+      await webSocket.stop();
+    }
+  });
+
+  test('sets headersTimeout, no requestTimeout and a connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second of its time', async () => {
+    const built: ReturnType<typeof createServer>[] = [];
+    const server = createHTTPTransportServer({
+      createServer: (listener) => {
+        const instance = createServer(listener);
+
+        built.push(instance);
+
+        return instance;
+      },
+      headersTimeout: 700,
+    });
+    const { port } = await server.start({ findOpenPort: true });
+
+    try {
+      // on localhost, one for each loopback
+      expect(
+        built.map((instance) => {
+          const { connectionsCheckingInterval, headersTimeout, requestTimeout } =
+            instance as IHeadBoundServerLike;
+
+          return [headersTimeout, requestTimeout, connectionsCheckingInterval];
+        })
+      ).toEqual([
+        [700, 0, 1_000],
+        [700, 0, 1_000],
+      ]);
+
+      const { read, socket } = await rawSocketOn(port);
+      const sentAt = Date.now();
+
+      socket.write(`POST /bead HTTP/1.1\r\nHost: ${host}\r\n`);
+      await expect
+        .poll(() => {
+          return read.text.includes('\r\n\r\n');
+        })
+        .toBe(true);
+
+      expect(read.text.split('\r\n')[0]).toBe('HTTP/1.1 408 Request Timeout');
+      expect(Date.now() - sentAt).toBeLessThan(700 + 1_000 + 500);
+      socket.destroy();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('refuses a headersTimeout, a sendGracePeriod, a bodyGracePeriod, a minimumSendBytesPerSecond or a minimumBodyBytesPerSecond it cannot hold, as it is built', () => {
+    for (const [options, refusal] of [
+      [
+        { headersTimeout: 0 },
+        'headersTimeout is a number of milliseconds from 1 to 2147483647, not 0',
+      ],
+      [
+        { sendGracePeriod: Infinity },
+        'sendGracePeriod is a number of milliseconds from 1 to 2147483647, not Infinity',
+      ],
+      [
+        { bodyGracePeriod: -1 },
+        'bodyGracePeriod is a number of milliseconds from 1 to 2147483647, not -1',
+      ],
+      [{ minimumSendBytesPerSecond: 1.5 }, 'minimumSendBytesPerSecond is a whole number, not 1.5'],
+      [
+        { minimumBodyBytesPerSecond: 0 },
+        'minimumBodyBytesPerSecond is a whole number above 0, not 0',
+      ],
+    ] as const) {
+      expect(() => {
+        return createHTTPTransportServer({
+          createServer: (listener) => {
+            return createServer(listener);
+          },
+          ...options,
+        });
+      }).toThrow(new ProgrammerError(refusal));
+    }
   });
 });

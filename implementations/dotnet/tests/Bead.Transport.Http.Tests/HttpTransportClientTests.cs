@@ -35,6 +35,12 @@ public sealed class HttpTransportClientTests
 
     private static readonly HttpTransportClientOptions NotListening = new() { IsListening = false };
 
+    // Fetch's redirect statuses: a 300 and a 304 are none
+    private static readonly int[] Redirects = [301, 302, 303, 307, 308];
+
+    // what passes an exchange on to a server, as a proxy would, and follows nothing
+    private static readonly HttpClient Forwarder = new(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+
     private static readonly IReadOnlyDictionary<string, string> Bead = new Dictionary<string, string>
     {
         ["content-type"] = HttpTransport.MediaType,
@@ -209,6 +215,91 @@ public sealed class HttpTransportClientTests
         {
             return call.Method == HttpMethod.Get;
         });
+    }
+
+    // a redirect to `target`, marked when told
+    private static Task<byte[]> RedirectOf(int status, (Raw Target, string? Mark) to)
+    {
+        var mark = to.Mark is { } refusal ? $"{HttpTransport.RefusalHeader}: {refusal}\r\n" : "";
+
+        return Task.FromResult(Encoding.ASCII.GetBytes($"HTTP/1.1 {status} Redirect\r\nLocation: http://{Host}:{to.Target.Port}/bead\r\n{mark}Content-Length: 0\r\nConnection: close\r\n\r\n"));
+    }
+
+    // what a server answers an exchange, written back whole, each on a connection of its own
+    private static async Task<byte[]> ForwardedTo(int port, (Asked Asked, CancellationToken Token) exchange)
+    {
+        var (asked, token) = exchange;
+        using var request = new HttpRequestMessage(new HttpMethod(asked.Method), $"http://{Host}:{port}{asked.Path}");
+
+        if (asked.Method == "POST")
+        {
+            request.Content = new ByteArrayContent(asked.Body);
+        }
+
+        foreach (var (name, value) in asked.Headers)
+        {
+            if (name.Equals("content-type", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Content?.Headers.TryAddWithoutValidation(name, value);
+            }
+            else if (!(name.Equals("host", StringComparison.OrdinalIgnoreCase) || name.Equals("content-length", StringComparison.OrdinalIgnoreCase) || name.Equals("connection", StringComparison.OrdinalIgnoreCase)))
+            {
+                request.Headers.TryAddWithoutValidation(name, value);
+            }
+        }
+
+        using var response = await Forwarder.SendAsync(request, token);
+        var body = await response.Content.ReadAsByteArrayAsync(token);
+        var head = new StringBuilder().Append(CultureInfo.InvariantCulture, $"HTTP/1.1 {(int)response.StatusCode} Forwarded\r\n");
+
+        foreach (var (name, values) in response.Headers.Concat(response.Content.Headers))
+        {
+            if (name is not ("Transfer-Encoding" or "Connection" or "Content-Length" or "Keep-Alive"))
+            {
+                foreach (var value in values)
+                {
+                    head.Append(CultureInfo.InvariantCulture, $"{name}: {value}\r\n");
+                }
+            }
+        }
+
+        head.Append(CultureInfo.InvariantCulture, $"Content-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+
+        return [.. Encoding.Latin1.GetBytes(head.ToString()), .. body];
+    }
+
+    // a place a redirect names, which answers what a following client asks it as a server would:
+    // a connection drawn, an answer to a send, a batch to a listen
+    private static Raw Elsewhere()
+    {
+        return new Raw((asked, _) =>
+        {
+            var isDrawn = asked.Headers.ContainsKey(HttpTransport.ConnectionTokenHeader);
+            var envelope = EnvelopeOf(EnvelopeKind.Result, (1, 0));
+            var (head, body) = (isDrawn, asked.Method) switch
+            {
+                (false, _) => ($"201 Created\r\n{HttpTransport.ConnectionTokenHeader}: {Token}\r\n{HttpTransport.ListenHeader}: ?1", Array.Empty<byte>()),
+                (true, "GET") => ($"200 OK\r\nContent-Type: {HttpTransport.BatchMediaType}\r\n{HttpTransport.SequenceHeader}: 1", BatchOf(envelope)),
+                (true, "POST") => ($"200 OK\r\nContent-Type: {HttpTransport.MediaType}", envelope),
+                _ => ("204 No Content", Array.Empty<byte>()),
+            };
+
+            return Task.FromResult<byte[]>([.. Encoding.ASCII.GetBytes($"HTTP/1.1 {head}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n"), .. body]);
+        });
+    }
+
+    // a client on its own handler, or the one given, and what it hears
+    private static (HttpTransportClient Client, Channel<byte[]> Heard) HearingClient(HttpTransportClientOptions options)
+    {
+        var client = new HttpTransportClient(options);
+        var heard = Channel.CreateUnbounded<byte[]>();
+
+        client.Message += (message) =>
+        {
+            heard.Writer.TryWrite(message.Bytes.ToArray());
+        };
+
+        return (client, heard);
     }
 
     // how long the client waited before it listened again past `made` calls: the clock moved a
@@ -748,7 +839,8 @@ public sealed class HttpTransportClientTests
                     }
                 }
             }
-            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException)
+            // ! a listener stopped between two accepts says it is not listening
+            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException || (stopped is InvalidOperationException && _stop.IsCancellationRequested))
             {
                 return;
             }
@@ -803,6 +895,218 @@ public sealed class HttpTransportClientTests
 
             await Task.WhenAll([.. pumps, _accepting]);
             _stop.Dispose();
+        }
+    }
+
+    /// <summary>One request a raw listener took: its method, its path, its fields and its body.</summary>
+    private sealed record Asked(string Method, string Path)
+    {
+        public required Dictionary<string, string> Headers { get; init; }
+
+        public byte[] Body { get; init; } = [];
+    }
+
+    /// <summary>
+    /// A raw listener of the tests' own, on a free port of the loopback: it reads one request on each
+    /// connection, keeps it, and writes back what its test answers, closing the connection, so each
+    /// exchange comes on a connection of its own.
+    /// </summary>
+    private sealed class Raw : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _stop = new();
+        private readonly List<Asked> _asked = [];
+        private readonly List<Task> _serving = [];
+        private readonly Func<Asked, CancellationToken, Task<byte[]>> _answer;
+        private readonly Task _accepting;
+
+        public Raw(Func<Asked, CancellationToken, Task<byte[]>> answer)
+        {
+            _answer = answer;
+            _listener.Start();
+            _accepting = Accept();
+        }
+
+        public int Port
+        {
+            get
+            {
+                return ((IPEndPoint)_listener.LocalEndpoint).Port;
+            }
+        }
+
+        // every request it took, in the order each came whole
+        public IReadOnlyList<Asked> Asked
+        {
+            get
+            {
+                lock (_asked)
+                {
+                    return [.. _asked];
+                }
+            }
+        }
+
+        // how many requests of a method it took
+        public int CountOf(string method)
+        {
+            return Asked.Count((asked) =>
+            {
+                return asked.Method == method;
+            });
+        }
+
+        private static async Task<Asked?> Read(NetworkStream stream, CancellationToken cancellationToken)
+        {
+            var taken = new List<byte>();
+            var buffer = new byte[8_192];
+            int end;
+
+            while ((end = Encoding.Latin1.GetString([.. taken]).IndexOf("\r\n\r\n", StringComparison.Ordinal)) < 0)
+            {
+                var count = await stream.ReadAsync(buffer, cancellationToken);
+
+                if (count == 0)
+                {
+                    return null;
+                }
+
+                taken.AddRange(buffer.AsSpan(0, count));
+            }
+
+            var lines = Encoding.Latin1.GetString([.. taken], 0, end).Split("\r\n");
+            var requestLine = lines[0].Split(' ');
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var line in lines.Skip(1))
+            {
+                var colon = line.IndexOf(':', StringComparison.Ordinal);
+
+                headers[line[..colon]] = line[(colon + 1)..].Trim();
+            }
+
+            var length = headers.TryGetValue("content-length", out var declared) ? int.Parse(declared, CultureInfo.InvariantCulture) : 0;
+            var body = taken.Skip(end + 4).ToList();
+
+            while (body.Count < length)
+            {
+                var count = await stream.ReadAsync(buffer, cancellationToken);
+
+                if (count == 0)
+                {
+                    return null;
+                }
+
+                body.AddRange(buffer.AsSpan(0, count));
+            }
+
+            return new Asked(requestLine[0], requestLine[1]) { Headers = headers, Body = [.. body] };
+        }
+
+        private async Task Accept()
+        {
+            try
+            {
+                while (true)
+                {
+                    var socket = await _listener.AcceptTcpClientAsync(_stop.Token);
+
+                    lock (_serving)
+                    {
+                        _serving.Add(Serve(socket));
+                    }
+                }
+            }
+            // ! a listener stopped between two accepts says it is not listening
+            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException || (stopped is InvalidOperationException && _stop.IsCancellationRequested))
+            {
+                return;
+            }
+        }
+
+        private async Task Serve(TcpClient socket)
+        {
+            using (socket)
+            {
+                try
+                {
+                    var stream = socket.GetStream();
+
+                    if (await Read(stream, _stop.Token) is not { } asked)
+                    {
+                        return;
+                    }
+
+                    lock (_asked)
+                    {
+                        _asked.Add(asked);
+                    }
+
+                    await stream.WriteAsync(await _answer(asked, _stop.Token), _stop.Token);
+                    socket.Client.Shutdown(SocketShutdown.Send);
+                }
+                catch (Exception ended) when (ended is IOException or OperationCanceledException or ObjectDisposedException or SocketException or HttpRequestException)
+                {
+                    return;
+                }
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _stop.CancelAsync();
+            _listener.Stop();
+
+            Task[] serving;
+
+            lock (_serving)
+            {
+                serving = [.. _serving];
+            }
+
+            await Task.WhenAll([.. serving, _accepting]);
+            _stop.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A handler of the tests' own that follows a redirect all the same, as a platform's does: a 301,
+    /// a 302 or a 303 turns a <c>POST</c> into a <c>GET</c> with no body, a 307 or a 308 keeps it,
+    /// and the request moves in place to where the redirect names, its <c>Authorization</c> dropped.
+    /// </summary>
+    private sealed class Following : DelegatingHandler
+    {
+        public Following()
+        {
+        }
+
+        public Following(HttpMessageHandler inner)
+            : base(inner)
+        {
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            var status = (int)response.StatusCode;
+
+            if (!Redirects.Contains(status) || response.Headers.Location is not { } location)
+            {
+                return response;
+            }
+
+            response.Dispose();
+
+            if (status < 307 && request.Method == HttpMethod.Post)
+            {
+                request.Method = HttpMethod.Get;
+                request.Content = null;
+            }
+
+            request.Headers.Authorization = null;
+            request.RequestUri = new Uri(request.RequestUri!, location);
+
+            return await base.SendAsync(request, cancellationToken);
         }
     }
 
@@ -1617,6 +1921,294 @@ public sealed class HttpTransportClientTests
     public void Marks_its_refusals_as_the_server_does()
     {
         Assert.Equal(("bead-refusal", "connection-unknown"), (HttpTransport.RefusalHeader, HttpRefusals.ConnectionUnknown));
+    }
+
+    // redirects, spec 15.6: a raw listener answers an exchange with a redirect to a second, the
+    // target, which keeps every request; a server stands behind the first where an exchange must
+    // reach one
+
+    [Fact]
+    public async Task Fails_its_connect_on_a_redirect_301_302_303_307_or_308_naming_its_status_its_target_hearing_nothing()
+    {
+        await using var target = Elsewhere();
+        var failures = new List<(string, ReadyState)>();
+
+        // its status alone, a mark it carries unread
+        foreach (var (status, mark) in Redirects.SelectMany((status) =>
+        {
+            return new (int, string?)[] { (status, null), (status, HttpRefusals.Busy) };
+        }))
+        {
+            await using var origin = new Raw((_, _) =>
+            {
+                return RedirectOf(status, (target, mark));
+            });
+            await using var client = new HttpTransportClient();
+
+            var thrown = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            {
+                return client.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+            });
+
+            failures.Add((thrown.Message, client.ReadyState));
+        }
+
+        Assert.Equal(
+            Redirects.SelectMany((status) =>
+            {
+                return Enumerable.Repeat(($"the server drew no connection: {status}", ReadyState.Closed), 2);
+            }),
+            failures);
+        Assert.Empty(target.Asked);
+    }
+
+    [Fact]
+    public async Task Counts_a_send_answered_with_a_redirect_301_302_303_307_or_308_lost_its_target_hearing_nothing()
+    {
+        await using var started = await Started.Start();
+        await using var target = Elsewhere();
+
+        foreach (var status in Redirects)
+        {
+            // the connect and the release reach the server; the send is redirected
+            await using var origin = new Raw((asked, token) =>
+            {
+                return asked.Method == "POST" && asked.Headers.ContainsKey(HttpTransport.ConnectionTokenHeader)
+                    ? RedirectOf(status, (target, null))
+                    : ForwardedTo(started.Port, (asked, token));
+            });
+            var (client, heard) = HearingClient(NotListening);
+
+            await using (client)
+            {
+                var closes = ClosesOf(client);
+
+                await client.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+
+                var connectionHandle = await Next(started.Connections);
+
+                // resolved: whether the server had it is not known
+                await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+
+                Assert.Equal((false, false), await Next(closes));
+                Assert.Equal(ReadyState.Closed, client.ReadyState);
+                // released: its DELETE reached the server, which ended the connection
+                Assert.Equal(connectionHandle, (await Next(started.Closes)).ConnectionHandle);
+                Assert.Equal(1, origin.CountOf("DELETE"));
+                Assert.True(heard.Reader.Count == 0);
+            }
+        }
+
+        Assert.Empty(target.Asked);
+    }
+
+    // the second wait is drawn between 0.5 and 1 s, borne on the real clock
+    [Fact]
+    public async Task Listens_again_after_a_listen_answered_with_a_redirect_its_target_hearing_nothing()
+    {
+        await using var started = await Started.Start();
+        await using var target = Elsewhere();
+        var listens = 0;
+
+        // the first listen answered 302, the next 307, then each handed to the server
+        await using var origin = new Raw((asked, token) =>
+        {
+            if (asked.Method == "GET")
+            {
+                switch (Interlocked.Increment(ref listens))
+                {
+                    case 1:
+                        return RedirectOf(302, (target, null));
+                    case 2:
+                        return RedirectOf(307, (target, null));
+                }
+            }
+
+            return ForwardedTo(started.Port, (asked, token));
+        });
+        var (client, heard) = HearingClient(new HttpTransportClientOptions());
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+
+        await using (client)
+        {
+            await client.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+
+            var connectionHandle = await Next(started.Connections);
+            var sending = started.Server.Send(new TransportMessage(envelope, false), connectionHandle);
+
+            Assert.Equal(envelope, await Next(heard));
+            await sending.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Open, client.ReadyState);
+            Assert.True(origin.CountOf("GET") >= 3);
+            await client.CloseConnection().WaitAsync(Patience, Cancelled);
+        }
+
+        Assert.Empty(target.Asked);
+    }
+
+    [Fact]
+    public async Task Leaves_a_redirect_s_bead_refusal_unread_a_send_so_answered_is_lost_and_a_listen_listened_again()
+    {
+        await using var started = await Started.Start();
+        await using var target = Elsewhere();
+
+        // a send so answered: resolved, never rejected, and its connection released, never let go
+        // of untold
+        await using (var origin = new Raw((asked, token) =>
+        {
+            return asked.Method == "POST" && asked.Headers.ContainsKey(HttpTransport.ConnectionTokenHeader)
+                ? RedirectOf(307, (target, HttpRefusals.ConnectionUnknown))
+                : ForwardedTo(started.Port, (asked, token));
+        }))
+        {
+            await using var sender = new HttpTransportClient(NotListening);
+            var closes = ClosesOf(sender);
+
+            await sender.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+
+            var connectionHandle = await Next(started.Connections);
+
+            await sender.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((false, false), await Next(closes));
+            Assert.Equal(connectionHandle, (await Next(started.Closes)).ConnectionHandle);
+            Assert.Equal(1, origin.CountOf("DELETE"));
+        }
+
+        // a listen so answered: listened again at once, its connection kept
+        var listens = 0;
+
+        await using (var origin = new Raw((asked, token) =>
+        {
+            return asked.Method == "GET" && Interlocked.Increment(ref listens) == 1
+                ? RedirectOf(307, (target, HttpRefusals.ConnectionUnknown))
+                : ForwardedTo(started.Port, (asked, token));
+        }))
+        {
+            var (listener, heard) = HearingClient(new HttpTransportClientOptions());
+            var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+
+            await using (listener)
+            {
+                await listener.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+
+                var connectionHandle = await Next(started.Connections);
+                var sending = started.Server.Send(new TransportMessage(envelope, false), connectionHandle);
+
+                Assert.Equal(envelope, await Next(heard));
+                await sending.WaitAsync(Patience, Cancelled);
+                Assert.Equal(ReadyState.Open, listener.ReadyState);
+                await listener.CloseConnection().WaitAsync(Patience, Cancelled);
+            }
+        }
+
+        Assert.Empty(target.Asked);
+    }
+
+    [Fact]
+    public async Task Catches_a_redirect_followed_all_the_same_its_connect_fails_and_a_send_or_a_listen_loses_its_connection()
+    {
+        await using var started = await Started.Start();
+
+        // a 302 turns its POST into a GET, a 307 keeps it
+        foreach (var status in new[] { 302, 307 })
+        {
+            await using var target = Elsewhere();
+            using var following = new Following(new SocketsHttpHandler { AllowAutoRedirect = false });
+
+            // its connect: what the target drew is none of its own, and nothing is released
+            await using (var origin = new Raw((_, _) =>
+            {
+                return RedirectOf(status, (target, null));
+            }))
+            {
+                await using var connecting = new HttpTransportClient(NotListening with { Handler = following });
+
+                Assert.Equal("the server drew no connection: a redirect followed", (await Assert.ThrowsAsync<HttpRequestException>(() =>
+                {
+                    return connecting.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                })).Message);
+                Assert.Equal(ReadyState.Closed, connecting.ReadyState);
+                Assert.Equal([status == 302 ? "GET" : "POST"], target.Asked.Select((asked) =>
+                {
+                    return asked.Method;
+                }));
+            }
+
+            // a send and a listen: their connection lost, released at the origin, nothing the target
+            // answered heard
+            foreach (var isListening in new[] { false, true })
+            {
+                var redirected = 0;
+
+                await using var origin = new Raw((asked, token) =>
+                {
+                    var isExchange = asked.Method == (isListening ? "GET" : "POST") && asked.Headers.ContainsKey(HttpTransport.ConnectionTokenHeader);
+
+                    return isExchange && Interlocked.Increment(ref redirected) == 1
+                        ? RedirectOf(status, (target, null))
+                        : ForwardedTo(started.Port, (asked, token));
+                });
+                var (client, heard) = HearingClient(new HttpTransportClientOptions { Handler = following, IsListening = isListening });
+
+                await using (client)
+                {
+                    var closes = ClosesOf(client);
+
+                    await client.Connect(new HttpConnectOptions { Host = Host, Port = origin.Port }, Cancelled);
+
+                    var connectionHandle = await Next(started.Connections);
+
+                    if (!isListening)
+                    {
+                        await client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
+                    }
+
+                    Assert.Equal((false, false), await Next(closes));
+                    Assert.Equal(connectionHandle, (await Next(started.Closes)).ConnectionHandle);
+                    Assert.Equal((1, 1), (redirected, origin.CountOf("DELETE")));
+                    Assert.True(heard.Reader.Count == 0);
+                }
+            }
+
+            // the connect, then the send and the listen it followed, the target asked of each once
+            Assert.Equal(3, target.Asked.Count);
+            Assert.Equal(0, target.CountOf("DELETE"));
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_given_handler_that_would_follow_a_redirect_AllowAutoRedirect_named_before_any_exchange()
+    {
+        // the platform's own, as each comes or innermost of handlers that delegate to it
+        using var sockets = new SocketsHttpHandler();
+        using var client = new HttpClientHandler();
+        using var wrapped = new Following(new Following(new SocketsHttpHandler()));
+
+        foreach (var handler in new HttpMessageHandler[] { sockets, client, wrapped })
+        {
+            var refused = Assert.Throws<ArgumentException>(() =>
+            {
+                return new HttpTransportClient(new HttpTransportClientOptions { Handler = handler });
+            });
+
+            Assert.Contains("AllowAutoRedirect", refused.Message, StringComparison.Ordinal);
+            Assert.Equal("options", refused.ParamName);
+        }
+
+        // one that follows none, and one whose following cannot be read, which its answers are judged by
+        using var notSockets = new SocketsHttpHandler { AllowAutoRedirect = false };
+        using var notClient = new HttpClientHandler { AllowAutoRedirect = false };
+        using var notWrapped = new Following(new SocketsHttpHandler { AllowAutoRedirect = false });
+        using var unwrapped = new Following();
+        using var fetch = new Fetch();
+
+        foreach (var handler in new HttpMessageHandler[] { notSockets, notClient, notWrapped, unwrapped, fetch })
+        {
+            await using var taken = new HttpTransportClient(new HttpTransportClientOptions { Handler = handler });
+
+            Assert.Equal(ReadyState.Uninitialized, taken.ReadyState);
+        }
     }
 
     // listening

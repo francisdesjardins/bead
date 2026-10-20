@@ -2,8 +2,8 @@ namespace Bead.Tests;
 
 /// <summary>
 /// <see cref="CallSession"/>'s functions, which both sides of a router share: what
-/// CREDENTIAL_UNSUPPORTED names, the connection's session none and OPAQUE resolve to, and the
-/// credential a call of a side's own presents.
+/// CREDENTIAL_UNSUPPORTED names, the connection's session none and OPAQUE resolve to, the header a
+/// procedure is handed, and the credential a call of a side's own presents.
 /// </summary>
 public sealed class CallSessionTests
 {
@@ -42,6 +42,28 @@ public sealed class CallSessionTests
     }
 
     [Fact]
+    public void HandedHeaderOf_keeps_of_a_JWT_its_scheme_alone_in_a_copy_and_hands_any_other_header_as_it_came()
+    {
+        var header = new RequestHeader { CallId = 1, ProcedureId = 1, ServiceId = 2 };
+        var jwt = header with { Credential = Credential.Jwt("a.b.c") };
+        var handed = CallSession.HandedHeaderOf(jwt);
+
+        Assert.Equal(header with { Credential = Credential.SchemeOf(CredentialScheme.Jwt) }, handed);
+        Assert.Null(handed.Credential?.Token);
+
+        // the header as it came keeps its token, for its verifier; one made already is made to itself
+        Assert.Equal("a.b.c", jwt.Credential?.Token);
+        Assert.Same(handed, CallSession.HandedHeaderOf(handed));
+
+        foreach (var credential in new Credential?[] { null, Credential.Opaque(Token), Credential.Elsewhere() })
+        {
+            var other = header with { Credential = credential };
+
+            Assert.Same(other, CallSession.HandedHeaderOf(other));
+        }
+    }
+
+    [Fact]
     public void PresentedCredentialOf_presents_none_unless_asked_OPAQUE_with_the_token_learned_and_fails_a_call_that_asks_before_any_session_SESSION_REQUIRED()
     {
         Assert.Equal((null, null, null), CallSession.PresentedCredentialOf(null, Token));
@@ -64,6 +86,14 @@ public sealed class CallSessionTests
         Assert.Equal(
             (Credential.Elsewhere(), "Interop sub=ada", null),
             CallSession.PresentedCredentialOf(Credential.Elsewhere("Interop sub=ada"), null));
+
+        foreach (var refused in new[] { Credential.Jwt(""), Credential.Elsewhere(), Credential.Of((CredentialScheme)4, [1]) })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                CallSession.AssertPresentable(refused);
+            });
+        }
     }
 
     [Fact]

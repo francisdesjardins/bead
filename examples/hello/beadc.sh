@@ -24,7 +24,7 @@ fi
 
 set -euo pipefail
 
-image="${BEADC_IMAGE:-ghcr.io/francisdesjardins/beadc:0.5.0}"
+image="${BEADC_IMAGE:-ghcr.io/francisdesjardins/beadc:0.6.0}"
 engine="${BEADC_ENGINE:-docker}"
 
 # ! a line feed alone, as beadc.ps1 writes it
@@ -224,8 +224,8 @@ run=("$engine" run --rm --init ${interactive[@]+"${interactive[@]}"} --network n
   "${user[@]}" --mount "type=bind,\"source=$source\",target=/work" --workdir "/work$relative"
   "$image" "$@")
 
-# * the archive piped as git writes it, into the image's /tmp and nowhere on the host; the exit the
-# engine's, git's ended by a pipe the engine closed. A git archive that fails midway leaves beadc a
+# * the archive piped as git writes it, extracted under the project's .beadc/ where a beadc.yaml is
+# read, else in the image's /tmp; the exit the engine's, git's ended by a pipe the engine closed. A git archive that fails midway leaves beadc a
 # truncated archive, which it refuses
 set +e
 if [ "$refs" -eq 1 ]; then

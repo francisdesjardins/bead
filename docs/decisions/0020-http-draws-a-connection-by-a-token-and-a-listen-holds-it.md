@@ -4,8 +4,12 @@
 - **Scope**: the protocol, and every implementation's HTTP transport: the HTTP part of section 15 of
   [`spec/spec.md`](../../spec/spec.md). What every transport owes is
   [0001](0001-the-envelope-sits-at-fixed-offsets.md)'s, a connection's timeouts
-  [0012](0012-a-listen-held-is-not-silence.md)'s, and the credential a transport carries
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s.
+  [0012](0012-a-listen-held-is-not-silence.md)'s, the credential a transport carries
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, and the redirects a client follows
+  none of, 15.6's,
+  [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)'s;
+  the bounds on a request's head and body and the pace of its answers, 15.12's,
+  [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)'s.
 
 ## Context
 

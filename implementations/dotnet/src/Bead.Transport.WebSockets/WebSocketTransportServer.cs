@@ -119,6 +119,64 @@ public sealed record WebSocketTransportServerOptions
     /// wrote, so a server so reachable names its proxies instead.
     /// </summary>
     public int UnnamedProxies { get; init; }
+
+    /// <summary>
+    /// The connections it holds at once, an upgrade taking its place as it is judged, before its
+    /// handshake completes: 10,000 by default; past them, an upgrade is refused 503, <c>busy</c>
+    /// (spec 15.2, step 8). A whole number above 0; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public int MaximumConnections { get; init; } = 10_000;
+
+    /// <summary>
+    /// The connections one address holds at once, the client's address read as
+    /// <see cref="TrustedProxies"/> says: 64 by default; past them, an upgrade is refused 503,
+    /// <c>busy</c> (spec 15.2, step 8; 15.12). Behind a proxy it neither names nor counts, every
+    /// client is the proxy's address, and the 65th is refused. A whole number above 0; any other is
+    /// an <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public int MaximumConnectionsPerAddress { get; init; } = 64;
+
+    /// <summary>
+    /// The slowest a client may take what waits for its socket, in bytes a second, once
+    /// <see cref="SendGracePeriod"/> passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>
+    /// (spec 15.12). Each envelope of <i>S</i> bytes moves the connection's deadline to the later of
+    /// now plus the longer of the grace and <i>S</i> at this rate, and the deadline before plus
+    /// <i>S</i> at this rate; a socket that still holds anything past it, checked each second, drops
+    /// the connection, its close unclean, reported through
+    /// <see cref="WebSocketTransportServer.Error"/> naming the bound. 0 holds none, on a network the
+    /// application trusts; below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is
+    /// built. On the real clock, as what it bounds is the platform's socket.
+    /// </summary>
+    public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
+
+    /// <summary>
+    /// The least time an envelope is given to be taken by its socket: 5 seconds by default; from 1
+    /// to 2³¹ − 1 milliseconds, rounded to the nearest whole one; zero and infinite are refused (spec
+    /// 15.12). On the real clock.
+    /// </summary>
+    public TimeSpan SendGracePeriod { get; init; } = ServerBounds.SendGracePeriod;
+
+    /// <summary>
+    /// What waits for a client's socket at most, in bytes: an envelope that would take it past this
+    /// drops the connection, its close unclean, reported through
+    /// <see cref="WebSocketTransportServer.Error"/> naming the bound (spec 15.12). A backstop above
+    /// what a peer that keeps every rule can be owed at once — the answers to the calls it has
+    /// answered, the server's commands to it, the transfers it receives, two envelopes of the
+    /// server's own — which a server's facade draws from its router's limits; a transport built
+    /// alone takes the default limits', 184,551,424. A whole number above 0; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public long? MaximumUnsentBytes { get; init; }
+
+    /// <summary>
+    /// How long an upgrade's head may take to come whole: 30 seconds by default, Kestrel's
+    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, on its heartbeat, past
+    /// it and within 2 seconds of it (spec 15.12). From 1 to 2³¹ − 1 milliseconds, rounded to the
+    /// nearest whole one; zero and infinite are refused. On the real clock, as the platform's parser
+    /// holds it.
+    /// </summary>
+    public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
 }
 
 /// <summary>Where a transport server listens.</summary>
@@ -157,8 +215,8 @@ public sealed record WebSocketTransportStartOptions
 /// and starts again once Closed. A request it does not upgrade it refuses in the order spec 15.2
 /// states, each refusal of its own marked as <see cref="WebSocketRefusals"/> names it: a host not
 /// taken, 403; a method but GET or HEAD, 405; a request that asks no WebSocket, or a version but
-/// 13, 426; a malformed upgrade, 400; an origin not taken, 403; and, once its stop began, one it
-/// would take, 503, busy. An upgrade that carries no <c>Origin</c> carries its <c>Authorization</c>,
+/// 13, 426; a malformed upgrade, 400; an origin not taken, 403; and, past its connections in all
+/// or of its address, or once its stop began, one it would take, 503, busy. An upgrade that carries no <c>Origin</c> carries its <c>Authorization</c>,
 /// trimmed, beside every envelope of its connection, which a request presenting
 /// <see cref="CredentialScheme.Elsewhere"/> stands for (spec 15.2); one that carries an
 /// <c>Origin</c>, a page's, carries none; nothing is carried toward a client.
@@ -183,6 +241,12 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // how its events are told: what a listener throws is reported through Error, with its connection
     private readonly ListenerGuard _listeners;
 
+    // the places its connections hold, in all and by address, each taken as its upgrade is judged and
+    // given back as its connection ends; touched under the lock
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, int> _perAddress = [];
+    private int _places;
+
     /// <summary>
     /// A transport server, not yet listening, its heartbeat and close timeout held: one no timer
     /// holds is an <see cref="ArgumentOutOfRangeException"/>; an entry of its hosts, origins or
@@ -192,6 +256,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     {
         var given = options ?? new WebSocketTransportServerOptions();
 
+        ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumConnections), given.MaximumConnections));
+        ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumConnectionsPerAddress), given.MaximumConnectionsPerAddress));
+        ServerBounds.AssertCountOrNone((nameof(WebSocketTransportServerOptions.MinimumSendBytesPerSecond), given.MinimumSendBytesPerSecond));
+        ServerBounds.AssertCount((nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), given.MaximumUnsentBytes ?? 1));
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(WebSocketTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(WebSocketTransportServerOptions.Origins));
         _proxyTrust = Bead.TrustedProxies.TrustOf(
@@ -201,6 +269,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         {
             Heartbeat = WebSocketConnection.AssertHeartbeat(given.Heartbeat, nameof(WebSocketTransportServerOptions.Heartbeat)),
             CloseTimeout = WebSocketConnection.AssertCloseTimeout(given.CloseTimeout, nameof(WebSocketTransportServerOptions.CloseTimeout)),
+
+            // ! never refused: what waits for a socket, and a head, bounded by nothing would hold
+            // their socket for ever (spec 15.12)
+            SendGracePeriod = Clocks.AssertHeldFinite(
+                (nameof(WebSocketTransportServerOptions.SendGracePeriod), nameof(WebSocketTransportServerOptions.SendGracePeriod)),
+                given.SendGracePeriod),
+            HeadersTimeout = Clocks.AssertHeldFinite(
+                (nameof(WebSocketTransportServerOptions.HeadersTimeout), nameof(WebSocketTransportServerOptions.HeadersTimeout)),
+                given.HeadersTimeout),
         };
         _clock = _options.Clock ?? TimeProvider.System;
         _isSecure = _options.Secure ?? false;
@@ -269,6 +346,18 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
+    /// <summary>
+    /// What waits for a client's socket at most: the option given, or what a peer that keeps every
+    /// rule can be owed at once under the default limits, which a transport built alone takes.
+    /// </summary>
+    internal long MaximumUnsentBytes
+    {
+        get
+        {
+            return _options.MaximumUnsentBytes ?? UnsentBytesOf(RouterLimits.Default);
+        }
+    }
+
     /// <summary>Where it is in its life: Uninitialized until its first start.</summary>
     public ReadyState ReadyState
     {
@@ -315,14 +404,43 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     }
 
     /// <summary>
-    /// What it holds: the connections, counted, and their handles — never to leave the process —
-    /// which a server sets its own layers against.
+    /// What it holds, at the ceilings it has: the connections, counted, and the connections the
+    /// busiest address holds, which its health warns on before a proxy it was not told of is refused
+    /// <c>busy</c>; and their handles — never to leave the process — which a server sets its own
+    /// layers against.
     /// </summary>
     public Gauges Gauges()
     {
         var connectionHandles = _connections.Keys;
+        long largest;
 
-        return Bead.Gauges.Of(new Dictionary<string, long> { ["connections"] = connectionHandles.Count }, connectionHandles);
+        lock (_gate)
+        {
+            largest = _perAddress.Values.DefaultIfEmpty().Max();
+        }
+
+        var unsent = _connections.Values.Select((held) =>
+        {
+            return held.Connection.UnsentBytes;
+        }).ToList();
+
+        return Bead.Gauges.Of(
+            new Dictionary<string, long>
+            {
+                ["connections"] = connectionHandles.Count,
+                ["largestAddressConnections"] = largest,
+                ["largestUnsentBytes"] = unsent.DefaultIfEmpty().Max(),
+                ["unsentBytes"] = unsent.Sum(),
+            },
+            connectionHandles) with
+        {
+            Ceilings = new Dictionary<string, long>
+            {
+                ["connections"] = _options.MaximumConnections,
+                ["largestAddressConnections"] = _options.MaximumConnectionsPerAddress,
+                ["largestUnsentBytes"] = MaximumUnsentBytes,
+            },
+        };
     }
 
     /// <summary>
@@ -402,6 +520,11 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 // * an origin server MUST take an absolute-form target's authority over its Host (RFC
                 // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
                 kestrel.AllowHostHeaderOverride = true;
+
+                // * a head is the platform's parser's, which no Bead code sees until it is whole:
+                // answered 408 on Kestrel's heartbeat, which arms its deadline a heartbeat late, a
+                // connection's first head 1 to 2 seconds past its time (spec 15.12)
+                kestrel.Limits.RequestHeadersTimeout = _options.HeadersTimeout;
             });
             application = builder.Build();
             Built?.Invoke(application);
@@ -536,6 +659,55 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
+    /// <summary>
+    /// What a peer that keeps every rule can be owed at once on a connection under
+    /// <paramref name="limits"/> (spec 15.12): the answers to the calls it has answered, each of a
+    /// chunk, the server's own commands to it, as many, the transfers it receives, each a window, and
+    /// two envelopes of the server's own besides, as an HTTP outbox holds.
+    /// </summary>
+    internal static long UnsentBytesOf(RouterLimits limits)
+    {
+        return (2L * limits.MaximumAnsweringCalls * limits.ChunkBytes) + ((long)limits.MaximumTransfers * limits.WindowBytes) + (2L * limits.MaximumEnvelopeBytes);
+    }
+
+
+    // * a place taken as an upgrade is judged, before its handshake completes, under the lock, so
+    // upgrades that cross take no more places than are left; none past either bound, nor once a stop
+    // began (spec 15.2, step 8)
+    private bool TakePlace(string address)
+    {
+        lock (_gate)
+        {
+            if (_life.IsStopping || _places >= _options.MaximumConnections || _perAddress.GetValueOrDefault(address) >= _options.MaximumConnectionsPerAddress)
+            {
+                return false;
+            }
+
+            _places += 1;
+            _perAddress[address] = _perAddress.GetValueOrDefault(address) + 1;
+
+            return true;
+        }
+    }
+
+    // a place given back, as its upgrade failed or its connection ended
+    private void GivePlaceBack(string address)
+    {
+        lock (_gate)
+        {
+            _places -= 1;
+
+            if (_perAddress[address] == 1)
+            {
+                _perAddress.Remove(address);
+            }
+            else
+            {
+                _perAddress[address] -= 1;
+            }
+        }
+    }
+
     // the client's address, in its one form: the socket's, walked past each proxy it trusts through
     // the upgrade's X-Forwarded-For, its lines joined by commas, from the right
     private string? AddressOf(HttpContext context)
@@ -610,12 +782,30 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             return;
         }
 
-        if (_life.IsStopping)
+        var address = AddressOf(context);
+        var ip = address ?? "";
+
+        if (!TakePlace(ip))
         {
             Refuse(context, WebSocketHandshake.Busy);
 
             return;
         }
+
+        try
+        {
+            await Upgrade(context, (address, ip));
+        }
+        finally
+        {
+            GivePlaceBack(ip);
+        }
+    }
+
+    // an upgrade judged and given its place: its connection, until its socket closes
+    private async Task Upgrade(HttpContext context, (string? Address, string Ip) client)
+    {
+        var (address, ip) = client;
 
         // ! an upgrade that carries an Origin is a page's, whose browser writes its own
         // authentication on it as it sends its cookies (Fetch, credentials mode include): it carries
@@ -624,7 +814,6 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var headers = context.Request.Headers;
         var credential = headers.Origin.Count == 0 ? HostsAndOrigins.CredentialOf(headers.Authorization) : null;
         var accepted = await context.WebSockets.AcceptWebSocketAsync();
-        var ip = AddressOf(context) ?? "";
         var port = context.Connection.RemotePort;
 
         // * the handle drawn as the connection is taken, by the rank it came at: the client's
@@ -633,7 +822,23 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         var arrival = Interlocked.Increment(ref _arrivals);
         var drawnHandle = $"type={TransportTypes.WebSocket};ip={ip};port={port};ordinal={arrival}";
         var (socket, connectionHandle) = Accepted?.Invoke(accepted, drawnHandle) ?? (accepted, drawnHandle);
-        var connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
+        var connection = new WebSocketConnection(socket, new WebSocketConnection.Bounds
+        {
+            MaximumMessageBytes = MaximumMessageBytes,
+            CloseTimeout = _options.CloseTimeout,
+            Pace = new WebSocketConnection.Pacing
+            {
+                MinimumSendBytesPerSecond = _options.MinimumSendBytesPerSecond,
+                SendGracePeriod = _options.SendGracePeriod,
+                MaximumUnsentBytes = MaximumUnsentBytes,
+                Dropped = (bound) =>
+                {
+                    // * reported before its close, naming the bound it is dropped behind (RFC 6455
+                    // §7.1.7, "SHOULD log")
+                    Error?.Invoke(new IOException($"{connectionHandle} is dropped behind its {bound}"), connectionHandle);
+                },
+            },
+        });
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = new Held
         {
@@ -665,12 +870,17 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
             await connection.Read((message) =>
             {
                 held.Client = held.Client with { LastActivity = _clock.GetUtcNow() };
-                _listeners.Tell(Message, (message with { Credential = credential }, connectionHandle));
+                // * each envelope with its credential, and the address and port of its connection (spec 15.1)
+                _listeners.Tell(Message, (message with { Credential = credential, Address = address, Port = port }, connectionHandle));
             });
         }
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)
         {
-            Error?.Invoke(reason, connectionHandle);
+            // a socket dropped behind a bound was reported as it was: its abort says nothing more
+            if (!connection.IsDropped)
+            {
+                Error?.Invoke(reason, connectionHandle);
+            }
         }
         finally
         {

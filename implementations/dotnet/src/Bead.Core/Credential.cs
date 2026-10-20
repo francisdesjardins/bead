@@ -49,7 +49,8 @@ public readonly record struct Credential
 
     /// <summary>
     /// A JWT's token, for <see cref="CredentialScheme.Jwt"/>, a character a byte; none for any other
-    /// scheme, and in a header traced or thrown, which keeps a credential's scheme alone.
+    /// scheme, and in a header traced or thrown, or handed to a procedure or an application's
+    /// admission, which keeps a credential's scheme alone (spec 13.1).
     /// </summary>
     public string? Token { get; private init; }
 
@@ -82,7 +83,8 @@ public readonly record struct Credential
 
     /// <summary>
     /// <see cref="CredentialScheme.Elsewhere"/> as a header carries it: the block says the credential
-    /// is its transport's, and holds nothing.
+    /// is its transport's, and holds nothing. A call's options take <see cref="Elsewhere(string)"/>:
+    /// one that presents this, nothing to carry, is an <see cref="ArgumentException"/> (spec 13.4).
     /// </summary>
     public static Credential Elsewhere()
     {
@@ -120,7 +122,7 @@ public readonly record struct Credential
 
     /// <summary>
     /// A credential's scheme alone, its bytes and its token left out: what a header traced or thrown
-    /// carries in place of its credential.
+    /// carries in place of its credential, and a procedure's header in place of its JWT.
     /// </summary>
     internal static Credential SchemeOf(CredentialScheme scheme)
     {

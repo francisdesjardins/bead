@@ -231,4 +231,7 @@ public static class LimitDefaults
 
     /// <summary>A chunk's envelope, its header included, in bytes.</summary>
     public const int ChunkBytes = 1_048_576;
+
+    /// <summary>The calls a connection's peer has a side answer at once.</summary>
+    public const int MaximumAnsweringCalls = 64;
 }

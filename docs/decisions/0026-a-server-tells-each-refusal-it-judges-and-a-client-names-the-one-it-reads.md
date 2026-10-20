@@ -10,7 +10,8 @@
   guard a listener is called within is
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s;
   what a transport carries of a credential is
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s.
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s; an access a server's router
+  refuses, told, [0034](0034-a-server-tells-each-access-it-refuses-never-the-credential.md)'s.
 
 ## Context
 
@@ -94,11 +95,14 @@ The options weighed:
 and `TransportServerRefusal`: a request it refuses as it arrives, in 15.6's order, the bounds' and a
 stop's 503 among them, a token's 400 and its 404 when no connection holds it; or a body it refuses
 as it comes; each marked. It never tells the 404 `connection-unknown` that ends an exchange or a
-listen it had taken as their connection closes, which `close` tells, nor HTTP's own unmarked 400. One
-writer per side holds the line: the TypeScript side's `finish` tells, `endWith` and `answer` never;
-the C# side's `Finish` tells, `EndWith` never, a held listen ended as its connection goes written
-through `EndWith` as every other close's 404 is. At a WebSocket's address every refusal is an
-upgrade's as it arrives, so each is told.
+listen it had taken as their connection closes, which `close` tells, nor what HTTP answers of its
+own, unmarked: its 400, and its 408 to a head that does not come whole within `headersTimeout`,
+which the platform's parser writes before the transport reads anything of the request
+([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). One writer per side holds the line: the
+TypeScript side's `finish` tells, `endWith` and `answer` never; the C# side's `Finish` tells,
+`EndWith` never, a held listen ended as its connection goes written through `EndWith` as every other
+close's 404 is. At a WebSocket's address every refusal is an upgrade's as it arrives, so each is
+told.
 
 **It carries six members**, named alike on both sides: `address`, the client's as 15.12 states it,
 the one `clients` reports; `authority`, the request's as it came, its port included, `""` for an
@@ -173,7 +177,7 @@ refusal is no call.
 **The gate.** `spec/transports.json`, played by both sides; twins by the same sentence
 ([0004](0004-one-behaviour-in-every-language.md)) for what no step reaches: each HTTP transport
 server's
-`tells each refusal it judges of its own, its status, its reason, the request's authority and origin and the client's address and port, and nothing of HTTP's own`
+`tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own`
 and its `tells no refusal of the 404 that ends an exchange or a listen as its connection closes, …`;
 each WebSocket transport server's sentence at its address; each side's field predicate,
 `isVisibleField` and `IsVisibleField`, over one table; each transport server's

@@ -14,6 +14,9 @@
     "demo/**/*",
     "devtools/**/*",
     "interop/**/*",
+    // the fuzz targets, which import nothing of Jazzer.js: type-checked with the code they read,
+    // though Jazzer.js is installed apart, by hand (tools/fuzz/package.json)
+    "tools/fuzz/*.ts",
     "playwright.browser.config.ts",
     "playwright.config.ts",
     "playwright.devtools.config.ts"

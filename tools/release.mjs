@@ -16,7 +16,8 @@
 // gate as a release, spec/check.py and the root's format check, naming one whose tool is absent;
 // on a hotfix, which starts from main, takes every waiver out of CI's `beadc breaking` step, each
 // moot since the release main holds; and lists what it owes by hand: the CHANGELOG's line on a
-// document's new tag, and each of decision 0006's gates owed that names the release.
+// document's new tag, each of decision 0006's gates owed that names the release, the documents
+// brought to it, and both benches' reports, compared with the last release's.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v… and debugging-v… at the commit v<version> tags, for each document whose version no
@@ -51,9 +52,8 @@ import {
   successorsOf,
 } from './check-versions.mjs';
 
-// the root's formatter, from the TypeScript side's install, and the files `prepare` writes by hand
+// the root's formatter, from the TypeScript side's install, which the root's format check runs
 const OXFMT = 'implementations/typescript/node_modules/oxfmt/bin/oxfmt';
-const FORMATTED = [CHANGELOG, 'spec/spec.md', 'spec/debugging.md', 'spec/interop-service.json'];
 
 // ── Texts ─────────────────────────────────────────────────────────────────────
 
@@ -274,6 +274,11 @@ export const GATES = 'docs/decisions/0006-a-rule-has-its-gate.md';
 
 // the records' index: a tree that keeps it owes its documents brought to each release
 export const RECORDS = 'docs/decisions/README.md';
+
+// the benches' comparison: a tree that keeps it owes each release both benches' reports, kept in
+// REPORTS, which git ignores, and compared with the last release's, made on the same machine
+export const BENCH = 'tools/bench-compare.mjs';
+export const REPORTS = '.bench';
 
 // a line that runs `beadc breaking`, read whole
 const BREAKING = /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/;
@@ -596,14 +601,10 @@ export const prepare = (root, options = {}) => {
   } else {
     log(`skipped: spec/check.py (no jsonschema for ${python}); CI's spec job holds it`);
   }
+  // ! the root's own check, which holds the CHANGELOG up to its first released section alone: a
+  // released section stays as its tag shipped it, whatever a newer formatter would lay out
   if (existsSync(join(root, OXFMT))) {
-    run(process.execPath, [
-      OXFMT,
-      '-c',
-      'implementations/typescript/.oxfmtrc.json',
-      '--check',
-      ...FORMATTED,
-    ]);
+    run(process.execPath, ['tools/check-format.mjs']);
   } else {
     log(`skipped: the root's format check (no ${OXFMT}); CI's typescript job holds it`);
   }
@@ -629,6 +630,14 @@ export const prepare = (root, options = {}) => {
   if (existsSync(join(root, RECORDS))) {
     log(
       `owed by hand: the documents brought to ${product}, by the bead-release-documents workflow (.claude/workflows/README.md)`
+    );
+  }
+  if (existsSync(join(root, BENCH))) {
+    const kept = `${REPORTS}/v${product}-typescript.json and -csharp.json`;
+    log(
+      last === null
+        ? `owed by hand: both benches run, their reports kept as ${kept} (README.md, "Measurement")`
+        : `owed by hand: both benches run, their reports kept as ${kept}, each compared with ${last.name}'s on the machine that made them (README.md, "Measurement")`
     );
   }
   if (first) {

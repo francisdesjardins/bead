@@ -82,7 +82,7 @@ public sealed record ElsewhereSession
 }
 
 /// <summary>
-/// What a side resolves a request's credential with, by its scheme (spec 9.2, step 5): a
+/// What a side resolves a request's credential with, by its scheme (spec 9.2, step 6): a
 /// <see cref="CredentialScheme.Jwt"/>'s keys, its audience and its key set, and an
 /// <see cref="CredentialScheme.Elsewhere"/>'s verifier. The side builds its JWT verifier from them,
 /// as data, on the clock it runs on, and takes the schemes they give: <see cref="CredentialScheme.Jwt"/>

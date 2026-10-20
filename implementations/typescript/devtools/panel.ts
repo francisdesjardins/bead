@@ -39,6 +39,7 @@ import { type DetailTab, detailOf } from './views/detail';
 import { make, noteOf } from './views/dom';
 import { metricsViewOf } from './views/metrics';
 import { stateViewOf } from './views/state';
+import { fitThreadLabels } from './views/thread';
 import { timelineViewOf } from './views/timeline';
 import { type IExchange, wireViewOf } from './views/wire';
 import { bytesOfContent, isBeadType, readBody } from './wire';
@@ -46,6 +47,12 @@ import { bytesOfContent, isBeadType, readBody } from './wire';
 // types
 
 type View = 'calls' | 'metrics' | 'state' | 'timeline' | 'wire';
+
+/** Where the detail sits: as the panel's shape says, right of the list, or under it. */
+type Layout = (typeof LAYOUTS)[number];
+
+/** Where the detail sits once `auto` is read. */
+type Placement = Exclude<Layout, 'auto'>;
 
 // constants
 
@@ -61,6 +68,33 @@ const RECONNECT_MILLISECONDS = 1_000;
 /** How long a word the panel says, "Copied" say, stays. */
 const TOAST_MILLISECONDS = 1_600;
 
+/** The detail's layouts, as DevTools' Elements panel offers its own. */
+const LAYOUTS = Object.freeze(['auto', 'right', 'bottom'] as const);
+
+/** The split's width past which `auto` puts the detail beside the list, as the Elements panel's. */
+const AUTO_RIGHT_WIDTH = 680;
+
+/** The list's share of the split, in percent: by default, and a key's step. */
+const SHARE = Object.freeze({ default: 60, step: 5 });
+
+/** The calls a list over its detail keeps in sight, however tight the panel. */
+const LIST_ROWS = 8;
+
+/** The least each side of the split keeps, in pixels, where what is drawn asks no more. */
+const SIDES = Object.freeze({
+  bottom: Object.freeze({ detail: 160, list: 240 }),
+  right: Object.freeze({ detail: 260, list: 240 }),
+});
+
+/** What the panel's page keeps, under its own keys: its layout, and a share for each placement. */
+const KEPT = Object.freeze({
+  layout: 'bead-devtools-layout',
+  share: Object.freeze({
+    bottom: 'bead-devtools-share-bottom',
+    right: 'bead-devtools-share-right',
+  }),
+});
+
 // helpers
 
 const elementOf = (id: string): HTMLElement => {
@@ -71,6 +105,38 @@ const elementOf = (id: string): HTMLElement => {
   }
 
   return element;
+};
+
+/** What the panel's page keeps under `key`, or nothing where its storage is absent or refuses. */
+const readKept = (key: string): string | null => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+/** Keeps `value` under `key`; a storage that refuses leaves the choice to this page alone. */
+const keep = (key: string, value: string): void => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // the choice holds until the panel closes
+  }
+};
+
+const layoutOf = (kept: string | null): Layout => {
+  return (
+    LAYOUTS.find((layout) => {
+      return layout === kept;
+    }) ?? 'auto'
+  );
+};
+
+const shareOf = (kept: string | null): number => {
+  const share = kept === null ? Number.NaN : Number(kept);
+
+  return Number.isFinite(share) && share > 0 && share < 100 ? share : SHARE.default;
 };
 
 const isTyping = (target: EventTarget | null): boolean => {
@@ -88,17 +154,22 @@ export const startPanel = (host: IPanelHost): void => {
   const shown = {
     calls: elementOf('calls'),
     callsTable: elementOf('calls-table'),
+    callsView: elementOf('calls-view'),
     clear: elementOf('clear') as HTMLButtonElement,
     detail: elementOf('detail'),
+    detailTabs: elementOf('detail-tabs'),
     empty: elementOf('empty'),
     envelopes: elementOf('envelopes'),
     envelopesTable: elementOf('envelopes-table'),
     export: elementOf('export') as HTMLButtonElement,
     filter: elementOf('filter') as HTMLInputElement,
+    filterHelp: elementOf('filter-help'),
+    filterHelpButton: elementOf('filter-help-button') as HTMLButtonElement,
     filterState: elementOf('filter-state'),
     footer: elementOf('footer'),
     import: elementOf('import') as HTMLButtonElement,
     importFile: elementOf('import-file') as HTMLInputElement,
+    layout: elementOf('layout') as HTMLSelectElement,
     list: elementOf('list'),
     menu: elementOf('menu'),
     metrics: elementOf('metrics'),
@@ -106,6 +177,7 @@ export const startPanel = (host: IPanelHost): void => {
     range: elementOf('range'),
     record: elementOf('record') as HTMLButtonElement,
     source: elementOf('source') as HTMLSelectElement,
+    splitter: elementOf('splitter'),
     state: elementOf('state'),
     status: elementOf('status'),
     timeline: elementOf('timeline'),
@@ -136,6 +208,114 @@ export const startPanel = (host: IPanelHost): void => {
   };
   let port: IHostPort | undefined;
   let isDrawing = false;
+  let envelopeAt: number | undefined;
+
+  // the detail's place and the split, kept by the panel's page
+  const split = {
+    layout: layoutOf(readKept(KEPT.layout)),
+    shares: {
+      bottom: shareOf(readKept(KEPT.share.bottom)),
+      right: shareOf(readKept(KEPT.share.right)),
+    } satisfies Record<Placement, number>,
+  };
+  // the share Enter restores, by placement, once it has sent the detail to its least
+  const restored: Record<Placement, number | undefined> = { bottom: undefined, right: undefined };
+
+  const placementOf = (): Placement => {
+    if (split.layout === 'auto') {
+      // * DevTools' Elements panel's rule: its sidebar beside a split wider than 680 px, else under
+      const width = shown.callsView.getBoundingClientRect().width || innerWidth;
+
+      return width > AUTO_RIGHT_WIDTH ? 'right' : 'bottom';
+    }
+
+    return split.layout;
+  };
+
+  /** What each side keeps: the detail its whole tab bar, the list its rows, as they are drawn. */
+  const floorsOf = (placement: Placement): { detail: number; list: number } => {
+    const sides = SIDES[placement];
+
+    if (placement === 'right') {
+      // ! read to the fraction: offsets round, and a bar a pixel short of its tabs scrolls
+      const last = shown.detailTabs.lastElementChild;
+      const bar =
+        last instanceof HTMLElement
+          ? last.getBoundingClientRect().right -
+            shown.detailTabs.getBoundingClientRect().left +
+            Number.parseFloat(getComputedStyle(shown.detailTabs).paddingRight)
+          : 0;
+
+      return { detail: Math.max(sides.detail, Math.ceil(bar)), list: sides.list };
+    }
+
+    const table = shown.list.querySelector<HTMLElement>('table:not([hidden])');
+    const bar = shown.list.querySelector<HTMLElement>('.list-bar')?.offsetHeight ?? 0;
+    const head = table?.querySelector<HTMLElement>('thead')?.offsetHeight ?? 0;
+    const row = table?.querySelector<HTMLElement>('tbody tr')?.offsetHeight ?? 0;
+
+    return {
+      detail: sides.detail,
+      list: Math.max(sides.list, Math.ceil(bar + head + LIST_ROWS * row)),
+    };
+  };
+
+  /** The list's least and greatest share, in percent: the list keeps its least first. */
+  const limitsOf = (placement: Placement): { max: number; min: number } => {
+    const box = shown.callsView.getBoundingClientRect();
+    const size = (placement === 'right' ? box.width : box.height) - 1;
+    const floors = floorsOf(placement);
+    const min = Math.min(100, Math.ceil((floors.list / size) * 1_000) / 10);
+
+    if (size <= floors.list + floors.detail) {
+      return { max: min, min };
+    }
+
+    return { max: Math.floor((1 - floors.detail / size) * 1_000) / 10, min };
+  };
+
+  const shareShown = (placement: Placement): number => {
+    const { max, min } = limitsOf(placement);
+
+    return Math.min(max, Math.max(min, split.shares[placement]));
+  };
+
+  const layOut = (): void => {
+    shown.layout.value = split.layout;
+
+    if (shown.callsView.hidden) {
+      return;
+    }
+
+    const placement = placementOf();
+    const { max, min } = limitsOf(placement);
+    const share = shareShown(placement);
+    const tracks = `minmax(0, ${String(share)}fr) 1px minmax(0, ${String(100 - share)}fr)`;
+
+    shown.callsView.dataset['layout'] = placement;
+    shown.callsView.style.gridTemplate =
+      placement === 'right' ? `minmax(0, 1fr) / ${tracks}` : `${tracks} / minmax(0, 1fr)`;
+    shown.splitter.setAttribute(
+      'aria-orientation',
+      placement === 'right' ? 'vertical' : 'horizontal'
+    );
+    shown.splitter.setAttribute('aria-valuemin', String(min));
+    shown.splitter.setAttribute('aria-valuemax', String(max));
+    shown.splitter.setAttribute('aria-valuenow', String(share));
+  };
+
+  const moveSplit = (value: number, { isKept }: { isKept: boolean }): void => {
+    const placement = placementOf();
+    const { max, min } = limitsOf(placement);
+
+    split.shares[placement] = Math.round(Math.min(max, Math.max(min, value)) * 10) / 10;
+
+    if (isKept) {
+      keep(KEPT.share[placement], String(split.shares[placement]));
+    }
+
+    layOut();
+  };
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
   const sideOf = (source: number): string | undefined => {
@@ -393,6 +573,7 @@ export const startPanel = (host: IPanelHost): void => {
             }),
           isAllClients,
           nameOf,
+          selected: state.selected,
         })
       );
     }
@@ -421,8 +602,13 @@ export const startPanel = (host: IPanelHost): void => {
 
   const drawDetail = (): void => {
     for (const tab of document.querySelectorAll<HTMLElement>('[data-detail]')) {
-      tab.setAttribute('aria-selected', String(tab.dataset['detail'] === state.detailTab));
+      const isSelected = tab.dataset['detail'] === state.detailTab;
+
+      tab.setAttribute('aria-selected', String(isSelected));
+      tab.tabIndex = isSelected ? 0 : -1;
     }
+
+    shown.detail.setAttribute('aria-labelledby', `${state.detailTab}-tab`);
 
     const call = selectedCall();
 
@@ -450,6 +636,7 @@ export const startPanel = (host: IPanelHost): void => {
         tab: state.detailTab,
       })
     );
+    fitThreadLabels(shown.detail);
   };
 
   const drawFooter = (): void => {
@@ -501,7 +688,10 @@ export const startPanel = (host: IPanelHost): void => {
       }
 
       for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
-        tab.setAttribute('aria-selected', String(tab.dataset['tab'] === state.view));
+        const isSelected = tab.dataset['tab'] === state.view;
+
+        tab.setAttribute('aria-selected', String(isSelected));
+        tab.tabIndex = isSelected ? 0 : -1;
       }
 
       shown.record.setAttribute('aria-pressed', String(state.isRecording));
@@ -525,6 +715,7 @@ export const startPanel = (host: IPanelHost): void => {
       });
 
       if (state.view === 'calls') {
+        layOut();
         drawCalls();
       } else if (state.view === 'state') {
         // a cursor being moved keeps its place: it redraws what it reads itself
@@ -964,7 +1155,155 @@ export const startPanel = (host: IPanelHost): void => {
   };
 
   // the panel follows DevTools' theme, not the system's
-  document.documentElement.dataset['theme'] = host.theme;
+  document.documentElement.dataset['colorScheme'] = host.theme;
+
+  const closeFilterHelp = (): void => {
+    shown.filterHelp.hidden = true;
+    shown.filterHelpButton.setAttribute('aria-expanded', 'false');
+  };
+
+  // * the help is WAI-ARIA APG's Disclosure: the `?` shows and hides it, and says which in
+  // `aria-expanded`; it closes too as focus leaves the field and the help
+  shown.filterHelpButton.addEventListener('click', () => {
+    if (!shown.filterHelp.hidden) {
+      closeFilterHelp();
+
+      return;
+    }
+
+    shown.filterHelp.hidden = false;
+    shown.filterHelpButton.setAttribute('aria-expanded', 'true');
+
+    const button = shown.filterHelpButton.getBoundingClientRect();
+    const help = shown.filterHelp.getBoundingClientRect();
+
+    shown.filterHelp.style.left = `${String(Math.max(12, Math.min(button.right - help.width, innerWidth - help.width - 12)))}px`;
+    shown.filterHelp.style.top = `${String(Math.max(12, Math.min(button.bottom + 12, innerHeight - help.height - 12)))}px`;
+  });
+  window.addEventListener('resize', closeFilterHelp);
+
+  for (const part of [shown.filterHelpButton.parentElement, shown.filterHelp]) {
+    part?.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget;
+      const isWithin =
+        next instanceof Node &&
+        (shown.filterHelp.contains(next) ||
+          shown.filterHelpButton.parentElement?.contains(next) === true);
+
+      if (!isWithin) {
+        closeFilterHelp();
+      }
+    });
+  }
+
+  shown.layout.addEventListener('change', () => {
+    split.layout = layoutOf(shown.layout.value);
+    keep(KEPT.layout, split.layout);
+    layOut();
+  });
+  window.addEventListener('resize', layOut);
+
+  // * the splitter is WAI-ARIA APG's Window Splitter, the list its primary pane: a separator
+  // whose value is the list's share, moved by its arrows, sent to its limits by Home and End.
+  // Its Enter collapses the list to its least, and restores the share it had
+  shown.splitter.addEventListener('keydown', (event) => {
+    const placement = placementOf();
+    const { max, min } = limitsOf(placement);
+    const now = shareShown(placement);
+    const [less, more] =
+      placement === 'right' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+    const isCollapsed = now <= min;
+    const next =
+      event.key === less
+        ? now - SHARE.step
+        : event.key === more
+          ? now + SHARE.step
+          : event.key === 'Home'
+            ? min
+            : event.key === 'End'
+              ? max
+              : event.key === 'Enter'
+                ? isCollapsed
+                  ? (restored[placement] ?? SHARE.default)
+                  : min
+                : undefined;
+
+    if (next !== undefined) {
+      event.preventDefault();
+      restored[placement] = event.key === 'Enter' && !isCollapsed ? now : undefined;
+      moveSplit(next, { isKept: true });
+    }
+  });
+
+  shown.splitter.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    shown.splitter.setPointerCapture(event.pointerId);
+    shown.splitter.classList.add('is-dragging');
+  });
+
+  shown.splitter.addEventListener('pointermove', (event) => {
+    if (!shown.splitter.hasPointerCapture(event.pointerId)) {
+      return;
+    }
+
+    const box = shown.callsView.getBoundingClientRect();
+
+    moveSplit(
+      placementOf() === 'right'
+        ? ((event.clientX - box.left) / box.width) * 100
+        : ((event.clientY - box.top) / box.height) * 100,
+      { isKept: false }
+    );
+  });
+
+  shown.splitter.addEventListener('lostpointercapture', () => {
+    shown.splitter.classList.remove('is-dragging');
+    keep(KEPT.share[placementOf()], String(split.shares[placementOf()]));
+  });
+
+  // * each tab bar is WAI-ARIA APG's Tabs, a tab shown as it is focused: ←, →, Home and End move
+  // along the bar, which keeps one tab stop
+  for (const nav of document.querySelectorAll<HTMLElement>('[role="tablist"]')) {
+    // a bar narrower than its tabs scrolls within itself: a tab focused comes whole into sight,
+    // which focus alone leaves to a tab out of sight entirely
+    nav.addEventListener('focusin', (event) => {
+      if (event.target instanceof HTMLElement && event.target.getAttribute('role') === 'tab') {
+        event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      }
+    });
+    nav.addEventListener('keydown', (event) => {
+      const tabs = [...nav.querySelectorAll<HTMLElement>('[role="tab"]')];
+      const index = tabs.findIndex((tab) => {
+        return tab === document.activeElement;
+      });
+
+      if (index < 0) {
+        return;
+      }
+
+      const next =
+        event.key === 'ArrowRight'
+          ? (index + 1) % tabs.length
+          : event.key === 'ArrowLeft'
+            ? (index + tabs.length - 1) % tabs.length
+            : event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? tabs.length - 1
+                : undefined;
+
+      if (next !== undefined) {
+        event.preventDefault();
+
+        // ! the tab stop moves now, not at the next drawing: a Tab pressed before it leaves the bar
+        tabs.forEach((tab, at) => {
+          tab.tabIndex = at === next ? 0 : -1;
+        });
+        tabs[next]?.click();
+        tabs[next]?.focus();
+      }
+    });
+  }
 
   for (const tab of document.querySelectorAll<HTMLElement>('[data-tab]')) {
     tab.addEventListener('click', () => {
@@ -1046,11 +1385,41 @@ export const startPanel = (host: IPanelHost): void => {
 
   shown.envelopes.addEventListener('click', (event) => {
     const call = callOfRow(event.target);
+    const row = event.target instanceof Element ? event.target.closest('tr') : null;
 
     if (call !== undefined) {
+      envelopeAt = row === null ? undefined : [...shown.envelopes.children].indexOf(row);
       select(call.key);
     }
   });
+
+  /** In the Envelopes mode, the arrows step from the row shown to the next of another call. */
+  const stepEnvelopes = (step: number): void => {
+    const rows = [...shown.envelopes.querySelectorAll<HTMLElement>('tr[data-key]')];
+    const isOfSelected = (row: HTMLElement | undefined): boolean => {
+      return row !== undefined && Number(row.dataset['key']) === state.selected;
+    };
+    const from =
+      envelopeAt !== undefined && isOfSelected(rows[envelopeAt])
+        ? envelopeAt
+        : rows.findIndex(isOfSelected);
+
+    for (let at = from + step; at >= 0 && at < rows.length; at += step) {
+      const row = rows[at];
+
+      if (row !== undefined && !isOfSelected(row)) {
+        envelopeAt = at;
+        select(Number(row.dataset['key']));
+        requestAnimationFrame(() => {
+          shown.envelopes
+            .querySelectorAll('tr[data-key]')
+            [at]?.scrollIntoView({ block: 'nearest' });
+        });
+
+        return;
+      }
+    }
+  };
 
   shown.calls.addEventListener('contextmenu', (event) => {
     const call = callOfRow(event.target);
@@ -1069,7 +1438,10 @@ export const startPanel = (host: IPanelHost): void => {
     });
     const call = selectedCall();
 
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && state.mode === 'envelopes') {
+      event.preventDefault();
+      stepEnvelopes(event.key === 'ArrowDown' ? 1 : -1);
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
 
       const next =
@@ -1120,6 +1492,14 @@ export const startPanel = (host: IPanelHost): void => {
 
   document.addEventListener('pointerdown', (event) => {
     if (
+      event.target instanceof Node &&
+      !shown.filterHelp.contains(event.target) &&
+      !shown.filterHelpButton.contains(event.target)
+    ) {
+      closeFilterHelp();
+    }
+
+    if (
       !shown.menu.hidden &&
       !(event.target instanceof Node && shown.menu.contains(event.target))
     ) {
@@ -1130,7 +1510,19 @@ export const startPanel = (host: IPanelHost): void => {
   document.addEventListener('keydown', (event) => {
     const isModified = event.ctrlKey || event.metaKey;
 
-    if (isModified && event.key.toLowerCase() === 'e') {
+    if (event.key === 'Escape' && !shown.filterHelp.hidden) {
+      // * this Escape closes the help alone: the filter keeps its words, and its focus
+      event.preventDefault();
+
+      if (
+        document.activeElement === shown.filterHelpButton ||
+        shown.filterHelp.contains(document.activeElement)
+      ) {
+        shown.filterHelpButton.focus();
+      }
+
+      closeFilterHelp();
+    } else if (isModified && event.key.toLowerCase() === 'e') {
       event.preventDefault();
       toggleRecording();
     } else if (isModified && event.key.toLowerCase() === 'l') {
@@ -1138,6 +1530,7 @@ export const startPanel = (host: IPanelHost): void => {
       clear();
     } else if (event.key === '/' && !isTyping(event.target)) {
       event.preventDefault();
+      closeFilterHelp();
       shown.filter.focus();
     }
   });

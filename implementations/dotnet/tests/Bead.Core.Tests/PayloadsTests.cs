@@ -172,6 +172,21 @@ public sealed class PayloadsTests
     }
 
     [Fact]
+    public void Writes_a_string_as_written_when_it_holds_no_escape_and_is_UTF_8_and_from_its_characters_otherwise()
+    {
+        // * the first as its bytes are, the second its escapes read; the third holds a byte that is
+        // not UTF-8, which .NET's reader takes, and is refused as its characters are read
+        using var document = JsonDocument.Parse(Convert.FromHexString("5b22c3a93c7f222c225c75303034315c7530303365222c22ff225d"));
+
+        Assert.Equal("22C3A93C7F22", Convert.ToHexString(Payloads.WriteJson(document.RootElement[0]).Span));
+        Assert.Equal("22413E22", Convert.ToHexString(Payloads.WriteJson(document.RootElement[1]).Span));
+        Assert.Equal("a json value holds a surrogate alone", RefusalOf(() =>
+        {
+            return Payloads.WriteJson(document.RootElement[2]);
+        }));
+    }
+
+    [Fact]
     public void Is_given_by_JsonSerializer_no_NaN_and_no_infinity_and_a_surrogate_alone_as_U_FFFD_before_it_writes()
     {
         // * what the support matrix's row says of this side: its type holds no number JSON has not,

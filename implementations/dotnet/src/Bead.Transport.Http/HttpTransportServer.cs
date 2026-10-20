@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -65,8 +64,56 @@ public sealed record HttpTransportServerOptions
     /// <summary>The connections one address holds at once: 64 by default.</summary>
     public int MaximumConnectionsPerAddress { get; init; } = 64;
 
-    /// <summary>The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the connection closes.</summary>
+    /// <summary>
+    /// The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the
+    /// connection closes, reported through <see cref="HttpTransportServer.Error"/> (spec 15.9).
+    /// </summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
+
+    /// <summary>
+    /// The slowest a client may take an answer, or a listen's batch, in bytes a second, once
+    /// <see cref="SendGracePeriod"/> passed: 240 by default, Kestrel's <c>MinResponseDataRate</c>,
+    /// which this replaces (spec 15.12). Each answer of <i>S</i> bytes is given the longer of the grace
+    /// and <i>S</i> at this rate; one its socket still holds past that is lost, its connection closed
+    /// at both ends and reported through <see cref="HttpTransportServer.Error"/>, naming the bound
+    /// (spec 15.7). 0 holds none, on a network the application trusts; below 0 is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real clock, as what
+    /// it bounds is the platform's socket.
+    /// </summary>
+    public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
+
+    /// <summary>
+    /// The least time an answer is given to be taken by its socket: 5 seconds by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
+    /// infinite are refused (spec 15.12). On the real clock.
+    /// </summary>
+    public TimeSpan SendGracePeriod { get; init; } = ServerBounds.SendGracePeriod;
+
+    /// <summary>
+    /// How long a request's head may take to come whole: 30 seconds by default, Kestrel's
+    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, on its heartbeat, past
+    /// it and within 2 seconds of it (spec 15.12). From 1 to <see cref="Clocks.LongestTimer"/>
+    /// milliseconds, rounded to the nearest whole one; zero and infinite are refused. On the real
+    /// clock, as the platform's parser holds it.
+    /// </summary>
+    public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
+
+    /// <summary>
+    /// The slowest a body may come, in bytes a second, once <see cref="BodyGracePeriod"/> passed since
+    /// its head: 240 by default, Kestrel's <c>MinRequestBodyDataRate</c>, which this replaces. One
+    /// that has brought <i>R</i> bytes, and none more, by its head plus the longer of the grace and
+    /// <i>R</i> at this rate is refused 408, <c>too-slow</c>, its socket closed in stages and its
+    /// connection kept (spec 15.12). A whole number above 0; any other is an
+    /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
+    /// </summary>
+    public int MinimumBodyBytesPerSecond { get; init; } = ServerBounds.MinimumBodyBytesPerSecond;
+
+    /// <summary>
+    /// How long a body comes before its rate is held: 5 seconds by default; from 1 to
+    /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
+    /// infinite are refused (spec 15.12). On the server's clock.
+    /// </summary>
+    public TimeSpan BodyGracePeriod { get; init; } = ServerBounds.BodyGracePeriod;
 
     /// <summary>
     /// The longest a listen waits for something to bring back: 30 seconds by default, under an
@@ -75,8 +122,25 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public TimeSpan MaximumWait { get; init; } = TimeSpan.FromSeconds(30);
 
+    private readonly int _maximumWaitingExchanges = LimitDefaults.MaximumAnsweringCalls;
+
     /// <summary>The requests one connection has waiting at once: 64 by default; the exchanges under way on it, twice that.</summary>
-    public int MaximumWaitingExchanges { get; init; } = 64;
+    public int MaximumWaitingExchanges
+    {
+        get
+        {
+            return _maximumWaitingExchanges;
+        }
+        init
+        {
+            _maximumWaitingExchanges = value;
+            IsMaximumWaitingExchangesGiven = true;
+        }
+    }
+
+    // whether MaximumWaitingExchanges was given, its default 64 among what may be, so the HTTP server
+    // takes its router's number for none given alone
+    internal bool IsMaximumWaitingExchangesGiven { get; private init; }
 
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
@@ -201,14 +265,10 @@ public sealed record HttpTransportStartOptions
 /// is kept under one lock, and its events are raised outside it, each listener within a guard: what
 /// one throws is reported through <see cref="Error"/>, and changes nothing the transport does.
 /// </remarks>
-public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
+public sealed partial class HttpTransportServer : IServerTransport, IAsyncDisposable
 {
     private const int TokenBytes = 16;
     private const int LengthBytes = 4;
-    private const int ReadBytes = 65_536;
-
-    // the error a stream of a malformed request is reset with over HTTP/2 (RFC 9113 §7)
-    private const int ProtocolError = 0x1;
 
     // what a cancel that came before its request buries that call id for: the least a requester
     // reserves one for
@@ -219,10 +279,13 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // and a client that does not read holds the stop back no longer than this
     private static readonly TimeSpan EndsGrace = TimeSpan.FromSeconds(1);
 
+    private const int LingerReadBytes = 65_536;
+
     private static readonly End Nothing = new(StatusCodes.Status204NoContent);
     private static readonly End Malformed = new(StatusCodes.Status400BadRequest, HttpRefusals.Malformed);
     private static readonly End Unknown = new(StatusCodes.Status404NotFound, HttpRefusals.ConnectionUnknown);
-    private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy, new Dictionary<string, string> { ["retry-after"] = "1" });
+    private static readonly End TooSlow = new(StatusCodes.Status408RequestTimeout, HttpRefusals.TooSlow);
+    private static readonly End Busy = new(StatusCodes.Status503ServiceUnavailable, HttpRefusals.Busy) { Headers = new Dictionary<string, string> { ["retry-after"] = "1" } };
 
     private readonly HttpTransportServerOptions _options;
     private readonly TimeProvider _clock;
@@ -246,6 +309,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
     // how its events are told: what a listener throws is reported through Error, with its connection
     private readonly ListenerGuard _listeners;
+    private readonly HttpRequestExchange<Drawn> _exchange;
 
     // whether its connections are secure: as its application says what stands in front of it, or,
     // when it says nothing, under TLS, wherever it listens, or bound to the loopback as it starts
@@ -279,12 +343,63 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         var maximumWait = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.MaximumWait), nameof(HttpTransportServerOptions.MaximumWait)), given.MaximumWait);
 
         AssertWhole((nameof(HttpTransportServerOptions.MaximumWaitingExchanges), given.MaximumWaitingExchanges));
-        _options = given with { ExchangeTimeout = exchangeTimeout, InactivityTimeout = inactivityTimeout, MaximumWait = maximumWait };
+        AssertWhole((nameof(HttpTransportServerOptions.MinimumBodyBytesPerSecond), given.MinimumBodyBytesPerSecond));
+
+        ServerBounds.AssertCountOrNone((nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond), given.MinimumSendBytesPerSecond));
+
+        // ! never refused: a head, a body or an answer bounded by nothing would hold its socket for
+        // ever (spec 15.12)
+        var sendGracePeriod = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.SendGracePeriod), nameof(HttpTransportServerOptions.SendGracePeriod)), given.SendGracePeriod);
+        var headersTimeout = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.HeadersTimeout), nameof(HttpTransportServerOptions.HeadersTimeout)), given.HeadersTimeout);
+        var bodyGracePeriod = Clocks.AssertHeldFinite((nameof(HttpTransportServerOptions.BodyGracePeriod), nameof(HttpTransportServerOptions.BodyGracePeriod)), given.BodyGracePeriod);
+
+        _options = given with
+        {
+            ExchangeTimeout = exchangeTimeout,
+            InactivityTimeout = inactivityTimeout,
+            MaximumWait = maximumWait,
+            SendGracePeriod = sendGracePeriod,
+            HeadersTimeout = headersTimeout,
+            BodyGracePeriod = bodyGracePeriod,
+        };
         _isSecure = _options.Secure ?? _options.Certificate is not null;
         _clock = _options.Clock ?? TimeProvider.System;
         _listeners = new ListenerGuard((reason, connectionHandle) =>
         {
             Error?.Invoke(reason, connectionHandle ?? "");
+        });
+        _exchange = new HttpRequestExchange<Drawn>(new HttpRequestExchange<Drawn>.Port
+        {
+            BeginExchange = BeginExchange,
+            EndExchange = EndExchange,
+            ChargeBody = ChargeBody,
+            ReleaseBody = ReleaseBody,
+            Classify = Classify,
+            FinishBody = FinishBody,
+            BeginHandOff = BeginHandOff,
+            WaitAfterHandOff = WaitAfterHandOff,
+            Finish = Finish,
+            EndEarly = EndEarly,
+            Lose = Lose,
+            Cancel = Cancel,
+            Message = (message, connection) =>
+            {
+                _listeners.Tell(Message, (message, connection.ConnectionHandle));
+            },
+            AddressOf = AddressOf,
+            Drop = Drop,
+            Answering = () =>
+            {
+                return Answering;
+            },
+        }, new HttpRequestExchange<Drawn>.Bounds
+        {
+            MaximumBodyBytes = _options.MaximumBodyBytes,
+            MinimumBodyBytesPerSecond = _options.MinimumBodyBytesPerSecond,
+            BodyGracePeriod = _options.BodyGracePeriod,
+            MinimumSendBytesPerSecond = _options.MinimumSendBytesPerSecond,
+            SendGracePeriod = _options.SendGracePeriod,
+            Clock = _clock,
         });
     }
 
@@ -316,6 +431,16 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     /// failure, as the TypeScript side's can be: Kestrel tells a failure of its own only to its logs.
     /// </summary>
     public event Action<Exception, string>? Error;
+
+    /// <summary>Each application a start builds, as it is built: the tests' way to read what it set on Kestrel.</summary>
+    internal event Action<WebApplication>? Built;
+
+    /// <summary>
+    /// What each connection Kestrel takes goes through before its exchanges: the tests' way to stall
+    /// a socket's writes, as a client that stops reading stalls them where its platform's buffers
+    /// fill, which a platform that takes every write never does.
+    /// </summary>
+    internal Func<Microsoft.AspNetCore.Connections.ConnectionDelegate, Microsoft.AspNetCore.Connections.ConnectionDelegate>? Connecting { get; init; }
 
     /// <summary>
     /// Each listen, its connection found by its token, before it is held: the tests' way to close
@@ -515,12 +640,26 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 // 9112 §3.2.2), where Kestrel refuses 400 a Host that differs from it by default
                 kestrel.AllowHostHeaderOverride = true;
 
-                // the transport counts each body against its own limit and budget
+                // the transport counts each body against its own limit and budget, and holds it to
+                // its own rate, as each answer to its own pace (spec 15.12): Kestrel's would abort
+                // unreported, its bound unnamed, and answer a body it failed 200
                 kestrel.Limits.MaxRequestBodySize = null;
+                kestrel.Limits.MinRequestBodyDataRate = null;
+                kestrel.Limits.MinResponseDataRate = null;
+
+                // * a head is the platform's parser's, which no Bead code sees until it is whole:
+                // answered 408 on Kestrel's heartbeat, which arms its deadline a heartbeat late, a
+                // connection's first head 1 to 2 seconds past its time (spec 15.12)
+                kestrel.Limits.RequestHeadersTimeout = _options.HeadersTimeout;
                 foreach (var address in listening.Addresses)
                 {
                     kestrel.Listen(address, listening.Port, (listen) =>
                     {
+                        if (Connecting is { } connecting)
+                        {
+                            listen.Use(connecting);
+                        }
+
                         if (_options.Certificate is { } certificate)
                         {
                             listen.Protocols = HttpProtocols.Http1AndHttp2;
@@ -530,6 +669,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 }
             });
             application = builder.Build();
+            Built?.Invoke(application);
             application.Run(Exchanging);
             await application.StartAsync(cancellationToken);
 
@@ -662,9 +802,10 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             }
         }
 
+        // * reported, naming its bound, as it closes: its client fell behind (spec 15.9)
         if (overflowing is not null)
         {
-            CloseDrawn(overflowing, false);
+            Drop((overflowing, nameof(HttpTransportServerOptions.MaximumOutboxBytes)));
         }
 
         // its body still coming: its answer goes now, and it is never handed on
@@ -682,76 +823,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // a whole number above 0
     private static void AssertWhole((string Name, long Value) bound)
     {
-        if (bound.Value < 1)
-        {
-            throw new ArgumentOutOfRangeException(bound.Name, $"{bound.Name} is a whole number above 0, not {bound.Value}");
-        }
-    }
-
-    // whether the request says it has a body: a length above 0, or a transfer coding, as its headers
-    // say it and as the TypeScript side reads them — never whether HTTP/2's end of stream has come
-    // in yet, which an empty body's last frame races
-    private static bool HasBody(HttpContext context)
-    {
-        return context.Request.ContentLength is > 0 || context.Request.Headers.ContainsKey(HeaderNames.TransferEncoding);
-    }
-
-    // a body of Bead's media type, parameters aside, sent as it is
-    private static bool IsBeadBody(HttpRequest request)
-    {
-        var types = request.Headers.ContentType;
-        var type = (types.Count == 0 ? null : types[0])?.Split(';')[0].Trim().ToLowerInvariant();
-        var encoding = HeaderOf(request, HeaderNames.ContentEncoding)?.Trim().ToLowerInvariant();
-
-        return type == HttpTransport.MediaType && encoding is null or "identity";
-    }
-
-    // whether a connect says its client listens: an Item whose bare item is a Boolean, its
-    // parameters ignored (RFC 9651 §2.3), absent being ?0; anything else is none
-    private static bool? ListeningOf(HttpRequest request)
-    {
-        return StructuredFields.ParseItem(HeaderOf(request, HttpTransport.ListenHeader) ?? "?0")?.BareItem as bool?;
-    }
-
-    // a CORS preflight's answer from an origin the server lists, whatever method it asks for: the
-    // browser judges its request against it (Fetch §4.8). Authorization is named, since no wildcard
-    // covers it; then the names the preflight asks, its lines joined by ", " (RFC 9110 §5.3), since
-    // a browser may cache a name where it caches no wildcard; then `*`, a wildcard for a request
-    // without credentials (Fetch §3.3.4), which every request to the server is. No Vary names what
-    // it asked: no cache stores an answer to OPTIONS (RFC 9110 §9.3.7)
-    private static End PreflightOf(HttpRequest request)
-    {
-        // ! joined by ", " here, as Node joins them: StringValues.ToString() joins by ","
-        var asked = string.Join(", ", request.Headers.AccessControlRequestHeaders.AsEnumerable());
-        string[] allowed = asked.Length == 0 ? ["authorization", "*"] : ["authorization", asked, "*"];
-
-        return new End(StatusCodes.Status204NoContent, null, new Dictionary<string, string>
-        {
-            ["access-control-allow-methods"] = "GET, POST, DELETE",
-            ["access-control-allow-headers"] = string.Join(", ", allowed),
-            ["access-control-max-age"] = "7200",
-        });
-    }
-
-    // a header as the request gives it, given twice as one; none when absent, which is not empty
-    private static string? HeaderOf(HttpRequest request, string name)
-    {
-        var values = request.Headers[name];
-
-        return values.Count == 0 ? null : values.ToString();
-    }
-
-    // a count a listen gives in its field (spec 15.9): an Item whose bare item is an Integer of 0 or
-    // more, its parameters ignored (RFC 9651 §2.3), its lines joined, so two lines never parse.
-    // Absent, it is 0, or none where it is required; anything else is none
-    private static long? CountOf(HttpRequest request, string name, CountOptions? options = null)
-    {
-        if (HeaderOf(request, name) is not { } value)
-        {
-            return options is { IsRequired: true } ? null : 0;
-        }
-
-        return StructuredFields.ParseItem(value)?.BareItem is long count and >= 0 ? count : null;
+        ServerBounds.AssertCount(bound);
     }
 
     // a token as the server draws it: 22 characters of base64url
@@ -768,19 +840,19 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     // the transport judges (spec 15.1)
     private async Task Finish(HttpContext context, End end)
     {
-        if (!context.Response.HasStarted && end.Status >= 400 && HasBody(context))
+        if (!context.Response.HasStarted && end.Status >= 400 && HttpServerFields.HasBody(context))
         {
-            CloseBehind(context);
+            HttpServerFields.CloseBehind(context);
         }
 
-        await EndWith(context, end);
+        await HttpServerFields.EndWith(context, end);
 
         // * built only when a listener listens
         if (end.Reason is { } reason && Refusal is { } listeners)
         {
             var refusal = new TransportServerRefusal(
                 AddressOf(context),
-                AuthorityOf(context),
+                HttpServerFields.AuthorityOf(context),
                 HostsAndOrigins.OriginOf(context.Request.Headers.Origin),
                 context.Connection.RemotePort,
                 reason,
@@ -788,96 +860,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
             _listeners.Tell(listeners, refusal);
         }
-    }
-
-    // the authority a request names, as it came (spec 15.12): an HTTP/1 request's absolute-form
-    // target's, else its Host's; none when it names none
-    private static string? AuthorityOf(HttpContext context)
-    {
-        return HostsAndOrigins.AuthorityOf(context.Request.Headers.Host, TargetAuthorityOf(context));
-    }
-
-    // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
-    // over HTTP/2, whose :authority Kestrel has put in the Host
-    private static string? TargetAuthorityOf(HttpContext context)
-    {
-        var request = context.Request;
-        var isHttp1 = HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
-
-        return isHttp1 ? HostsAndOrigins.TargetAuthorityOf(context.Features.Get<IHttpRequestFeature>()?.RawTarget) : null;
-    }
-
-    // whether every field value of a request is one a server reads (spec 15.12): visible ASCII, SP
-    // and HTAB alone, neither SP nor HTAB at either end
-    private static bool HasVisibleFields(HttpRequest request)
-    {
-        return request.Headers.All((field) =>
-        {
-            return field.Value.All((value) =>
-            {
-                return HostsAndOrigins.IsVisibleField(value ?? "");
-            });
-        });
-    }
-
-    // closes an HTTP/1 socket behind its exchange, whose body is not read: what follows would read as
-    // the next request
-    private static void CloseBehind(HttpContext context)
-    {
-        if (!HttpProtocol.IsHttp2(context.Request.Protocol) && !HttpProtocol.IsHttp3(context.Request.Protocol))
-        {
-            context.Response.Headers.Connection = "close";
-        }
-    }
-
-    // writes an exchange's end, once: its status and headers, marked when it is a refusal
-    // ! never told: the 404 of a connection that closes is 15.7's close, told by Close, never a
-    // refusal; Finish tells what the transport judges
-    private static async Task EndWith(HttpContext context, End end)
-    {
-        var response = context.Response;
-
-        if (!response.HasStarted)
-        {
-            response.StatusCode = end.Status;
-            StampOf(response);
-
-            foreach (var (name, value) in end.Headers ?? new Dictionary<string, string>())
-            {
-                response.Headers[name] = value;
-            }
-
-            if (end.Reason is { } reason)
-            {
-                response.Headers[HttpTransport.RefusalHeader] = reason;
-            }
-        }
-
-        await response.CompleteAsync();
-    }
-
-    // what every response on the path carries: never stored, never sniffed, and which one a request
-    // gets turns on its Origin (RFC 9110 §12.5.5)
-    private static void StampOf(HttpResponse response)
-    {
-        response.Headers.CacheControl = "no-store";
-        response.Headers.XContentTypeOptions = "nosniff";
-        response.Headers.Vary = "Origin";
-    }
-
-    // what HTTP refuses of its own, as Kestrel answers it: 400, unmarked, none of the path's fields,
-    // its socket closed behind it, nothing told (spec 15.12)
-    private static async Task RefuseMalformed(HttpContext context)
-    {
-        var response = context.Response;
-
-        if (!response.HasStarted)
-        {
-            response.StatusCode = StatusCodes.Status400BadRequest;
-            response.Headers.Connection = "close";
-        }
-
-        await response.CompleteAsync();
     }
 
     // a stop: every connection closed, as lost, then the port freed
@@ -956,7 +938,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // its own origin by the very Host * did not check
         var own = HostsAndOrigins.OwnAuthorityOf(exchange.Authority, _options.Hosts);
 
-        return HostsAndOrigins.IsTakenOrigin(HeaderOf(exchange.Request, HeaderNames.Origin), (own, _options.Origins));
+        return HostsAndOrigins.IsTakenOrigin(HttpServerFields.HeaderOf(exchange.Request, HeaderNames.Origin), (own, _options.Origins));
     }
 
     // an exchange: what it is, as its method, its path, its host, its origin and its token say
@@ -981,6 +963,94 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 _exchanging.Remove(exchange);
             }
         }
+
+        await Linger(context);
+    }
+
+    // ! an answer written before its body is whole closes its socket in stages, its write side
+    // first (RFC 9112 §9.6): what still comes is read and dropped until its client closes or 2
+    // seconds pass, on the real clock, since what it waits on is the network's, so a reset never
+    // erases an answer its client has not read yet. A body read whole ends at once
+    private static async Task Linger(HttpContext context)
+    {
+        if (!HttpServerFields.IsLingering(context))
+        {
+            return;
+        }
+
+        using var lingering = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        var dropped = new byte[LingerReadBytes];
+
+        lingering.CancelAfter(ServerBounds.Linger);
+
+        try
+        {
+            while (await context.Request.Body.ReadAsync(dropped, lingering.Token) > 0)
+            {
+                // dropped
+            }
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException or InvalidOperationException or Microsoft.AspNetCore.Http.BadHttpRequestException)
+        {
+            // its client gone, its 2 seconds passed, or its body no more to read
+        }
+    }
+
+    // * an answer's bytes written at its pace (spec 15.12): given the longer of its grace and its
+    // bytes at the rate, judged each second on the real clock, since what it bounds is the
+    // platform's socket; its socket still holding them past that, its exchange is aborted, and
+    // true. A rate of 0 holds none. Kestrel drops a write to a client gone without a word, before
+    // its abort is told: a flush that finds nothing reading says the answer never went out whole,
+    // an IOException
+    private static async Task<bool> WritePaced(HttpContext context, (ReadOnlyMemory<byte> Bytes, (int BytesPerSecond, TimeSpan Grace) Pace) answer)
+    {
+        var (bytes, (bytesPerSecond, grace)) = answer;
+        var isLate = false;
+        long unsent = bytes.Length;
+
+        void Late()
+        {
+            Volatile.Write(ref isLate, true);
+            context.Abort();
+        }
+
+        long Unsent()
+        {
+            return Interlocked.Read(ref unsent);
+        }
+
+        var pace = new SendPace((Late, Unsent), new SendPaceOptions { MinimumSendBytesPerSecond = bytesPerSecond, SendGracePeriod = grace });
+
+        pace.Hand(bytes.Length);
+
+        try
+        {
+            await context.Response.Body.WriteAsync(bytes, context.RequestAborted);
+
+            if ((await context.Response.BodyWriter.FlushAsync(context.RequestAborted)).IsCompleted)
+            {
+                throw new IOException("the exchange closed before its answer went out");
+            }
+        }
+        catch (Exception reason) when (Volatile.Read(ref isLate) && reason is IOException or OperationCanceledException)
+        {
+            return true;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref unsent, 0);
+            pace.Stop();
+        }
+
+        return Volatile.Read(ref isLate);
+    }
+
+    // a connection dropped behind a bound of its own, reported naming it before its close (spec
+    // 15.9, 15.12): its exchange lost, as an answer that could not be written is (spec 15.7)
+    private void Drop((Drawn Connection, string Bound) dropped)
+    {
+        Error?.Invoke(new IOException($"{dropped.Connection.ConnectionHandle} is dropped behind its {dropped.Bound}"), dropped.Connection.ConnectionHandle);
+        CloseDrawn(dropped.Connection, false);
     }
 
     private async Task Exchange(HttpContext context)
@@ -992,16 +1062,14 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // them, and takes a control character, or a value with a space or a tab at either end over
         // HTTP/2 (RFC 9113 §8.2.1), which this refuses as HTTP refuses a malformed field — over
         // HTTP/2 by resetting the stream, PROTOCOL_ERROR, as Kestrel resets one of its own
-        if (!HasVisibleFields(request))
+        if (!HttpServerFields.HasVisibleFields(request))
         {
-            if (HttpProtocol.IsHttp2(request.Protocol) && context.Features.Get<IHttpResetFeature>() is { } reset)
+            if (HttpServerFields.ResetMalformedFields(context))
             {
-                reset.Reset(ProtocolError);
-
                 return;
             }
 
-            await RefuseMalformed(context);
+            await HttpServerFields.RefuseAsHttp(context, StatusCodes.Status400BadRequest);
 
             return;
         }
@@ -1011,11 +1079,11 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // Kestrel has put HTTP/2's :authority in the Host; an absolute-form target's it reads
         // through a Uri, which lowers its case and drops a default or an empty port and a userinfo,
         // so it is read from the target as it came, and judged as HTTP judges a Host
-        var targetAuthority = TargetAuthorityOf(context);
+        var targetAuthority = HttpServerFields.TargetAuthorityOf(context);
 
         if (targetAuthority is not null && !HostsAndOrigins.IsAuthority(targetAuthority))
         {
-            await RefuseMalformed(context);
+            await HttpServerFields.RefuseAsHttp(context, StatusCodes.Status400BadRequest);
 
             return;
         }
@@ -1043,7 +1111,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        var origin = HeaderOf(request, HeaderNames.Origin);
+        var origin = HttpServerFields.HeaderOf(request, HeaderNames.Origin);
         var isListed = HostsAndOrigins.IsListedOrigin(origin, _options.Origins);
 
         // * every answer a page Origins names can read carries it, a refusal's too, which its client
@@ -1058,23 +1126,23 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         // a preflight is no refusal, so EndWith, never Finish: nothing told, no connection drawn
         if (isListed && HttpMethods.IsOptions(request.Method) && request.Headers.ContainsKey(HeaderNames.AccessControlRequestMethod))
         {
-            await EndWith(context, PreflightOf(request));
+            await HttpServerFields.EndWith(context, HttpServerFields.PreflightOf(request));
 
             return;
         }
 
         if (!HttpMethods.IsGet(request.Method) && !HttpMethods.IsPost(request.Method) && !HttpMethods.IsDelete(request.Method))
         {
-            await Finish(context, new End(StatusCodes.Status405MethodNotAllowed, HttpRefusals.Method, new Dictionary<string, string> { ["allow"] = "GET, POST, DELETE" }));
+            await Finish(context, new End(StatusCodes.Status405MethodNotAllowed, HttpRefusals.Method) { Headers = new Dictionary<string, string> { ["allow"] = "GET, POST, DELETE" } });
 
             return;
         }
 
-        var connectionToken = HeaderOf(request, HttpTransport.ConnectionTokenHeader);
+        var connectionToken = HttpServerFields.HeaderOf(request, HttpTransport.ConnectionTokenHeader);
 
         if (connectionToken is null && HttpMethods.IsPost(request.Method))
         {
-            await (IsBeadBody(request) ? Connect(context) : Finish(context, new End(StatusCodes.Status415UnsupportedMediaType, HttpRefusals.Type)));
+            await (HttpServerFields.IsBeadBody(request) ? Connect(context) : Finish(context, new End(StatusCodes.Status415UnsupportedMediaType, HttpRefusals.Type)));
 
             return;
         }
@@ -1124,17 +1192,17 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             return;
         }
 
-        await (IsBeadBody(request) ? Receive(context, connection) : Finish(context, new End(StatusCodes.Status415UnsupportedMediaType, HttpRefusals.Type)));
+        await (HttpServerFields.IsBeadBody(request) ? Receive(context, connection) : Finish(context, new End(StatusCodes.Status415UnsupportedMediaType, HttpRefusals.Type)));
     }
 
     // a connect: a connection drawn, registered before its client has its token
     private async Task Connect(HttpContext context)
     {
         var address = AddressOf(context);
-        var isListening = ListeningOf(context.Request);
+        var isListening = HttpServerFields.ListeningOf(context.Request);
 
         // a connect carries no body, and says whether it listens in the one way
-        if (HasBody(context) || address is null || isListening is not { } listens)
+        if (HttpServerFields.HasBody(context) || address is null || isListening is not { } listens)
         {
             await Finish(context, Malformed);
 
@@ -1182,30 +1250,20 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             headers[HttpTransport.ListenHeader] = "?1";
         }
 
-        await Finish(context, new End(StatusCodes.Status201Created, null, headers));
+        await Finish(context, new End(StatusCodes.Status201Created) { Headers = headers });
     }
 
-    // one envelope: read into one buffer, its prefix checked from its first 8 bytes, then handed on;
-    // a request waits for its answer
-    private async Task Receive(HttpContext context, Drawn connection)
+    // one envelope of a connection drawn, received by the exchange
+    private Task Receive(HttpContext context, Drawn connection)
     {
-        // ! a field that is no list is not combined (RFC 9110 §5.3): two are refused before either
-        // could be taken for the other
-        if (context.Request.Headers.Authorization.Count > 1)
-        {
-            await Finish(context, Malformed);
+        return _exchange.Receive(context, connection);
+    }
 
-            return;
-        }
-
-        if (context.Request.ContentLength > _options.MaximumBodyBytes)
-        {
-            await Finish(context, new End(StatusCodes.Status413PayloadTooLarge, HttpRefusals.TooLarge));
-
-            return;
-        }
-
-        var waiting = new Waiting { Reading = context.Request.BodyReader };
+    // an exchange under way on its connection, its idle timer stopped; none past the bound on what
+    // one connection has under way
+    private Waiting? BeginExchange(Drawn connection, PipeReader reading)
+    {
+        Waiting? waiting = new() { Reading = reading };
 
         lock (_gate)
         {
@@ -1223,152 +1281,27 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             }
         }
 
-        if (waiting is null)
+        return waiting;
+    }
+
+    // an exchange done, both its request and its response: its connection rests once it has none
+    private void EndExchange(Drawn connection)
+    {
+        lock (_gate)
         {
-            await Finish(context, new End(StatusCodes.Status429TooManyRequests, HttpRefusals.Busy));
+            connection.Open -= 1;
 
-            return;
-        }
-
-        // closed before the transport ended it: lost, as a dropped socket's frames are
-        using var lost = context.RequestAborted.Register(() =>
-        {
-            Lose((connection, waiting));
-        });
-
-        try
-        {
-            var (envelope, end) = await BodyOf(context, (connection, waiting));
-
-            // handed on; or ended as it came — answered, by an answer no request handed on was owed,
-            // or its connection closed — and so never handed on
-            if (end is null)
+            if (_drawn.GetValueOrDefault(connection.ConnectionHandle) == connection)
             {
-                // its body still coming, which is not read on: its socket closes behind its end
-                if (waiting.Reading is not null)
-                {
-                    CloseBehind(context);
-                }
-
-                end = envelope is { } bytes ? await Hand(context, (connection, waiting, bytes)) : await Reply(context, waiting);
-            }
-
-            if (end is not null)
-            {
-                EndEarly((connection, waiting));
-
-                // told its connection is gone, and nothing more: what it read whole keeps its socket
-                await (end == Unknown ? EndWith(context, end) : Finish(context, end));
-            }
-        }
-        catch (Exception reason) when (reason is IOException or OperationCanceledException or Microsoft.AspNetCore.Http.BadHttpRequestException)
-        {
-            // the client went: lost, as its abort says — which may have resumed this exchange, and
-            // ended its registration, before that one ran
-            Lose((connection, waiting));
-        }
-        finally
-        {
-            waiting.Written.TrySetException(new IOException("the exchange closed before its answer went out"));
-
-            lock (_gate)
-            {
-                connection.Open -= 1;
-
-                if (_drawn.GetValueOrDefault(connection.ConnectionHandle) == connection)
-                {
-                    Rest(connection);
-                }
+                Rest(connection);
             }
         }
     }
 
-    // the body, read whole and counted against the limit and the budget as it comes; or how its
-    // exchange ends early, no more of it read
-    private async Task<(byte[]? Envelope, End? End)> BodyOf(HttpContext context, (Drawn Connection, Waiting Waiting) call)
+    // a body read whole: whether its connection is gone, and whether its exchange ended as it came
+    private (bool IsGone, bool IsEnded) FinishBody((Drawn Connection, Waiting Waiting) call)
     {
         var (connection, waiting) = call;
-        var declared = context.Request.ContentLength;
-        var body = new byte[(int)Math.Min(declared ?? ReadBytes, ReadBytes)];
-        var read = new byte[ReadBytes];
-        var length = 0;
-        long charged = 0;
-        var isClassified = false;
-
-        try
-        {
-            while (true)
-            {
-                int count;
-
-                try
-                {
-                    count = await context.Request.Body.ReadAsync(read, context.RequestAborted);
-                }
-                catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
-                {
-                    // its read ended as it waited under its call id, its body still coming: its
-                    // connection closed, or its answer came; its client learns it at once
-                    return (null, null);
-                }
-
-                if (count == 0)
-                {
-                    break;
-                }
-
-                bool isOverBudget;
-
-                lock (_gate)
-                {
-                    _bodyBytes += count;
-                    charged += count;
-                    isOverBudget = _bodyBytes > _options.BodyBytesBudget;
-                }
-
-                // past the limit, it is refused, and then no more of it is read
-                if (charged > _options.MaximumBodyBytes)
-                {
-                    return (null, new End(StatusCodes.Status413PayloadTooLarge, HttpRefusals.TooLarge));
-                }
-
-                if (isOverBudget)
-                {
-                    return (null, Busy);
-                }
-
-                // a cancel came for it while it came: read to its end, and dropped
-                if (waiting.IsCancelled)
-                {
-                    continue;
-                }
-
-                if (length + count > body.Length)
-                {
-                    Array.Resize(ref body, Math.Min(Math.Max(length + count, 2 * body.Length), _options.MaximumBodyBytes));
-                }
-
-                read.AsSpan(0, count).CopyTo(body.AsSpan(length));
-                length += count;
-
-                if (!isClassified && length >= HttpTransport.PrefixBytes)
-                {
-                    isClassified = true;
-
-                    if (Classify(body.AsSpan(0, HttpTransport.PrefixBytes), (connection, waiting)) is { } refused)
-                    {
-                        return (null, refused);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            lock (_gate)
-            {
-                _bodyBytes -= charged;
-            }
-        }
 
         lock (_gate)
         {
@@ -1379,23 +1312,78 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             {
                 waiting.IsEnded = true;
 
-                return (null, Unknown);
+                return (true, true);
             }
 
             // answered while its body came: never handed on
             if (waiting.IsEnded)
             {
-                return (null, null);
+                return (false, true);
             }
         }
 
-        if (waiting.Prefix is null)
+        return (false, false);
+    }
+
+    // a request about to go on to the router: whether it was answered first, and handed on when not
+    private bool BeginHandOff(Waiting waiting)
+    {
+        bool isAnswered;
+
+        lock (_gate)
         {
-            return (null, Malformed);
+            isAnswered = waiting.IsEnded;
+            waiting.IsDelivered = !isAnswered;
         }
 
-        // its cancel came first, or while it came: dropped, and ended empty
-        return waiting.IsCancelled ? (null, Nothing) : (body.AsSpan(0, length).ToArray(), null);
+        return isAnswered;
+    }
+
+    // a request handed on: whether it still waits for its answer, its timer armed when it does
+    private bool WaitAfterHandOff((Drawn Connection, Waiting Waiting, uint CallId) call)
+    {
+        var (connection, waiting, callId) = call;
+        bool isWaiting;
+
+        lock (_gate)
+        {
+            // still waiting — not answered as it came — it waits for its answer no longer than it may
+            isWaiting = connection.Waiting.GetValueOrDefault(callId) == waiting;
+
+            if (isWaiting && _options.ExchangeTimeout != Timeout.InfiniteTimeSpan)
+            {
+                waiting.Timer = _clock.CreateTimer(
+                    (_) =>
+                    {
+                        CloseDrawn(connection, false);
+                    },
+                    null,
+                    _options.ExchangeTimeout,
+                    Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        return isWaiting;
+    }
+
+    // bytes of body charged against the server's budget: whether it is now past it
+    private bool ChargeBody(int count)
+    {
+        lock (_gate)
+        {
+            _bodyBytes += count;
+
+            return _bodyBytes > _options.BodyBytesBudget;
+        }
+    }
+
+    // bytes of body given back to the server's budget
+    private void ReleaseBody(long charged)
+    {
+        lock (_gate)
+        {
+            _bodyBytes -= charged;
+        }
     }
 
     // what the first 8 bytes say: a request waits under its call id from now on; or how the
@@ -1449,147 +1437,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
             return null;
         }
-    }
-
-    // an envelope whole, handed on: a request waits for its answer, its head going now so its client
-    // knows the router has it; a cancel ends the exchange of its call, or buries its call id; any
-    // other ends empty
-    private async Task<End?> Hand(HttpContext context, (Drawn Connection, Waiting Waiting, byte[] Envelope) call)
-    {
-        var (connection, waiting, envelope) = call;
-        var (callId, kind) = waiting.Prefix!.Value;
-
-        if (kind != EnvelopeKind.Request)
-        {
-            _listeners.Tell(Message, (new TransportMessage(envelope, false), connection.ConnectionHandle));
-
-            if (kind == EnvelopeKind.Cancel)
-            {
-                Cancel((connection, callId));
-            }
-
-            return Nothing;
-        }
-
-        bool isAnswered;
-
-        lock (_gate)
-        {
-            isAnswered = waiting.IsEnded;
-            waiting.IsDelivered = !isAnswered;
-        }
-
-        if (isAnswered)
-        {
-            return await Reply(context, waiting);
-        }
-
-        // a request is handed on with the credential its exchange carried; no other envelope is
-        _listeners.Tell(Message, (new TransportMessage(envelope, false) { Credential = HostsAndOrigins.CredentialOf(context.Request.Headers.Authorization) }, connection.ConnectionHandle));
-
-        bool isWaiting;
-
-        lock (_gate)
-        {
-            // still waiting — not answered as it came — it waits for its answer no longer than it may
-            isWaiting = connection.Waiting.GetValueOrDefault(callId) == waiting;
-
-            if (isWaiting && _options.ExchangeTimeout != Timeout.InfiniteTimeSpan)
-            {
-                waiting.Timer = _clock.CreateTimer(
-                    (_) =>
-                    {
-                        CloseDrawn(connection, false);
-                    },
-                    null,
-                    _options.ExchangeTimeout,
-                    Timeout.InfiniteTimeSpan);
-            }
-        }
-
-        if (isWaiting)
-        {
-            await SendHead(context);
-        }
-
-        return await Reply(context, waiting);
-    }
-
-    // a request's head, a 200 of Bead's type, which says the router has it: once, before its answer
-    private static async Task SendHead(HttpContext context)
-    {
-        if (!context.Response.HasStarted)
-        {
-            context.Response.StatusCode = StatusCodes.Status200OK;
-            StampOf(context.Response);
-            context.Response.ContentType = HttpTransport.MediaType;
-            await context.Response.StartAsync(context.RequestAborted);
-            await context.Response.Body.FlushAsync(context.RequestAborted);
-        }
-    }
-
-    // a request's answer, once it comes: written, or how its exchange ends instead — its connection
-    // gone once its request was handed on, its head goes before its exchange is cut: a request
-    // handed on ran, which no refusal may deny
-    private async Task<End?> Reply(HttpContext context, Waiting waiting)
-    {
-        var ending = await waiting.Ended.Task.WaitAsync(context.RequestAborted);
-
-        if (ending.IsGone)
-        {
-            if (ending.IsDelivered)
-            {
-                await SendHead(context);
-            }
-
-            if (context.Response.HasStarted)
-            {
-                context.Abort();
-
-                return null;
-            }
-
-            return Unknown;
-        }
-
-        if (ending.End is { } end)
-        {
-            return end;
-        }
-
-        if (Answering is { } answering)
-        {
-            await answering(context.RequestAborted);
-        }
-
-        try
-        {
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status200OK;
-                StampOf(context.Response);
-                context.Response.ContentType = HttpTransport.MediaType;
-                context.Response.ContentLength = ending.Bytes.Length;
-            }
-
-            await context.Response.Body.WriteAsync(ending.Bytes, context.RequestAborted);
-
-            // Kestrel drops a write to a client gone without a word, before its abort is told: a
-            // flush that finds nothing reading says the answer never went out whole
-            if ((await context.Response.BodyWriter.FlushAsync(context.RequestAborted)).IsCompleted)
-            {
-                throw new IOException("the exchange closed before its answer went out");
-            }
-
-            await context.Response.CompleteAsync();
-            waiting.Written.TrySetResult();
-        }
-        catch (Exception reason) when (reason is IOException or OperationCanceledException)
-        {
-            waiting.Written.TrySetException(new IOException("the exchange closed before its answer went out", reason));
-        }
-
-        return null;
     }
 
     // a cancel is never answered: the exchange of its call ends empty — a 200 with no body once its
@@ -1685,14 +1532,14 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
     }
 
     // a listen: what it acknowledges goes, and it brings back what is left — at once, or once
-    // something comes within its wait. One listen at a time: a second ends the first, which brings
-    // back nothing, and takes its place. A listen lost closes nothing: what it carried comes again.
+    // something comes within its wait. One listen at a time: a second ends the first, empty, and
+    // takes its place. A listen its client loses closes nothing: what it carried comes again.
     private async Task Hold(HttpContext context, Drawn connection)
     {
         Holding?.Invoke(connection.ConnectionHandle);
 
-        var after = CountOf(context.Request, HttpTransport.AfterHeader, new CountOptions { IsRequired = true });
-        var wait = CountOf(context.Request, HttpTransport.WaitHeader);
+        var after = HttpServerFields.CountOf(context.Request, HttpTransport.AfterHeader, new CountOptions { IsRequired = true });
+        var wait = HttpServerFields.CountOf(context.Request, HttpTransport.WaitHeader);
         var listening = new Listening(connection);
         End? refused = null;
 
@@ -1707,7 +1554,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
             {
                 refused = new End(StatusCodes.Status409Conflict, HttpRefusals.ListenUndeclared);
             }
-            else if (HasBody(context) || after is null || wait is null || after > connection.Sequence)
+            else if (HttpServerFields.HasBody(context) || after is null || wait is null || after > connection.Sequence)
             {
                 refused = Malformed;
             }
@@ -1727,6 +1574,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
 
                 if (connection.Listen is { } replaced)
                 {
+                    replaced.Replacer = listening;
                     Answer(replaced, Nothing);
                 }
 
@@ -1762,6 +1610,7 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         try
         {
             _listeners.Tell(Listen, (true, connection.ConnectionHandle));
+            listening.Told.TrySetResult();
 
             var ending = await listening.Ended.Task.WaitAsync(context.RequestAborted);
 
@@ -1770,22 +1619,31 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 var response = context.Response;
 
                 response.StatusCode = StatusCodes.Status200OK;
-                StampOf(response);
+                HttpServerFields.StampOf(response);
                 response.ContentType = HttpTransport.BatchMediaType;
                 response.ContentLength = ending.Bytes.Length;
                 response.Headers[HttpTransport.SequenceHeader] = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                await response.Body.WriteAsync(ending.Bytes, context.RequestAborted);
+
+                // ! at its pace: past it, an answer that could not be written, its exchange lost, its
+                // connection dropped at both ends, reported (spec 15.7, 15.12)
+                if (await WritePaced(context, (ending.Bytes, (_options.MinimumSendBytesPerSecond, _options.SendGracePeriod))))
+                {
+                    Drop((connection, nameof(HttpTransportServerOptions.MinimumSendBytesPerSecond)));
+
+                    return;
+                }
+
                 await response.CompleteAsync();
             }
             else
             {
                 // ! a listen ended as its connection closes is 15.7's close, never told
-                await (ending.IsGone ? EndWith(context, Unknown) : Finish(context, ending.End ?? Nothing));
+                await (ending.IsGone ? HttpServerFields.EndWith(context, Unknown) : Finish(context, ending.End ?? Nothing));
             }
         }
         catch (Exception reason) when (reason is IOException or OperationCanceledException)
         {
-            // a listen lost closes nothing: what it carried comes again to the next
+            // a listen its client loses closes nothing: what it carried comes again to the next
         }
         finally
         {
@@ -1807,6 +1665,13 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
                 {
                     Rest(connection);
                 }
+            }
+
+            // ! a listen another replaced tells its end once its replacer told it is held, as one
+            // thread tells them: so a count of the listens held never falls to 0 as one takes over
+            if (listening.Replacer is { } replacer)
+            {
+                await replacer.Told.Task;
             }
 
             if (isDrawn)
@@ -1970,61 +1835,6 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
     }
 
-    // how the transport ends an exchange of its own: its status, the refusal it is marked with, and
-    // its headers
-    private sealed record End(int Status, string? Reason = null, IReadOnlyDictionary<string, string>? Headers = null);
-
-    // how a listen's count is read: whether its field is required, or 0 when left out
-    private sealed record CountOptions
-    {
-        public bool IsRequired { get; init; }
-    }
-
-    // what an exchange waiting on the transport ends with: an answer's envelope or a listen's batch,
-    // the number of a batch's first, an end of the transport's own, or its connection gone — after
-    // its request was handed on, or before
-    private sealed record Ending
-    {
-        public ReadOnlyMemory<byte> Bytes { get; init; }
-
-        public long? Sequence { get; init; }
-
-        public End? End { get; init; }
-
-        public bool IsGone { get; init; }
-
-        // its request went on to the router before its connection went: its head goes, then its
-        // exchange is cut
-        public bool IsDelivered { get; init; }
-    }
-
-    // an exchange of an envelope, from its first 8 bytes to its end; touched under the lock
-    private sealed class Waiting
-    {
-        // what its first 8 bytes said, once they came
-        public (uint CallId, EnvelopeKind Kind)? Prefix { get; set; }
-
-        // a cancel came for it while its body was still coming: it is read to its end, then 204
-        public bool IsCancelled { get; set; }
-
-        // its request went on to the router, which owes it an answer
-        public bool IsDelivered { get; set; }
-
-        // the transport ended it — an answer, a 204, a refusal, its connection closed — so its close is no loss
-        public bool IsEnded { get; set; }
-
-        // ends its connection, as lost, once its request waited past the exchange timeout
-        public ITimer? Timer { get; set; }
-
-        // what reads its body, while it still comes: its connection's close ends the read
-        public PipeReader? Reading { get; set; }
-
-        public TaskCompletionSource<Ending> Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        // its answer, once written: what its send settles on
-        public TaskCompletionSource Written { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    }
-
     // a listen held until something comes for it, or its wait is over; touched under the lock
     private sealed class Listening(Drawn connection)
     {
@@ -2033,6 +1843,12 @@ public sealed class HttpTransportServer : IServerTransport, IAsyncDisposable
         public ITimer? Timer { get; set; }
 
         public TaskCompletionSource<Ending> Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // the listen that took its place, set under the lock as it does
+        public Listening? Replacer { get; set; }
+
+        // done once its own start is told
+        public TaskCompletionSource Told { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     // a connection's own state, which nothing outside the transport reaches; touched under the lock

@@ -27,6 +27,12 @@ export interface ICredentialRequest {
    */
   audience?: string | readonly string[] | undefined;
   credential: Credential;
+  /**
+   * Hears why a credential that does not hold was refused, in the one word an access refused tells
+   * (spec 13.12): for a `JWT`, the step of section 13.8 that refused it; for an `ELSEWHERE`,
+   * `verifier` when its verifier made no session of it, `end` when its end had come as it settled.
+   */
+  onRefused?: ((reason: string) => void) | undefined;
   transportCredential?: string | undefined;
 }
 
@@ -608,12 +614,20 @@ export const createCredentialResolver = (
 
   const resolveJwt = async (
     token: string,
-    request: { audiences: string | readonly string[]; signal: AbortSignal }
+    {
+      onRefused,
+      ...request
+    }: {
+      audiences: string | readonly string[];
+      onRefused: ((reason: string) => void) | undefined;
+      signal: AbortSignal;
+    }
   ): Promise<ICallSession | undefined> => {
     const verdict = await verdictOf(token, request);
 
+    // refused by the step of section 13.8 that refused it, which an access refused tells
     if (!verdict.holds) {
-      return undefined;
+      return (onRefused?.(verdict.reason), undefined);
     }
 
     const { claims, end, identifier } = verdict;
@@ -628,12 +642,15 @@ export const createCredentialResolver = (
   // ! a verifier that throws as it is asked fails as one that rejects: this function is async
   const resolveElsewhere = async (
     carried: string,
-    signal: AbortSignal
+    {
+      onRefused,
+      signal,
+    }: { onRefused: ((reason: string) => void) | undefined; signal: AbortSignal }
   ): Promise<ICallSession | undefined> => {
     const session: unknown = await verify?.(carried, signal);
 
     if (session === undefined) {
-      return undefined;
+      return (onRefused?.('verifier'), undefined);
     }
 
     const { data, end, id } = (session ?? {}) as { data?: unknown; end?: unknown; id?: unknown };
@@ -657,7 +674,7 @@ export const createCredentialResolver = (
 
     // the wall clock read as the verifier settles: a session whose end it reached does not hold
     if (held !== undefined && wallNow() >= held) {
-      return undefined;
+      return (onRefused?.('end'), undefined);
     }
 
     return Object.freeze({
@@ -674,13 +691,17 @@ export const createCredentialResolver = (
     ]),
     takesJwt,
 
-    resolve: ({ audience: given, credential, transportCredential }, signal) => {
+    resolve: ({ audience: given, credential, onRefused, transportCredential }, signal) => {
       if (credential.scheme === CredentialScheme.JWT && 'token' in credential) {
-        return resolveJwt(credential.token, { audiences: given ?? audience ?? [], signal });
+        return resolveJwt(credential.token, {
+          audiences: given ?? audience ?? [],
+          onRefused,
+          signal,
+        });
       }
 
       if (credential.scheme === CredentialScheme.ELSEWHERE && transportCredential !== undefined) {
-        return resolveElsewhere(transportCredential, signal);
+        return resolveElsewhere(transportCredential, { onRefused, signal });
       }
 
       return Promise.resolve(undefined);
