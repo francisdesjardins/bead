@@ -753,7 +753,7 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Traces_what_goes_out_and_what_comes_in_without_its_credential_its_scheme_alone()
     {
-        var token = SessionToken.FromBytes(PatternOf(16));
+        var token = SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray());
         var server = new Peer(RouterSide.Server) { Session = token };
         var resolver = server.Resolve();
 
@@ -771,6 +771,28 @@ public sealed partial class RouterCoreTests
             }));
         Assert.Null(((RequestHeader)server.Traces[0].Envelope.Header).Credential!.Value.Token);
         Assert.Equal(token, ((FailureHeader)server.Sent[0].Header).Credential!.Value.SessionToken);
+
+        var announced = new Peer(RouterSide.Server) { Session = token };
+        using var announcedCore = announced.Core;
+        announced.Resolve();
+        await announcedCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)));
+        await announced.Deliver(new Envelope { Header = RequestOf(3) with { Credential = Credential.Jwt("a.b.c") } });
+        Assert.Equal(
+            new (DebugDirection, IEnvelopeHeader)[] {
+                (DebugDirection.Tx, new ResultHeader { CallId = 1, Credential = Credential.Opaque() }),
+                (DebugDirection.Rx, RequestOf(3) with { Credential = Credential.SchemeOf(CredentialScheme.Jwt) }),
+                (DebugDirection.Tx, new FailureHeader { CallId = 3 }),
+            }, announced.Traces.Select((trace) => { return (trace.Direction, trace.Envelope.Header); }));
+        Assert.Equal(token, ((ResultHeader)announced.Sent[0].Header).Credential!.Value.SessionToken);
+        foreach (var peer in new[] { server, announced })
+        {
+            var serialized = System.Text.Json.JsonSerializer.Serialize(peer.Traces.Select((trace) =>
+            {
+                return new { trace.Direction, trace.Envelope.ConnectionHandle, Header = System.Text.Json.JsonSerializer.SerializeToElement(trace.Envelope.Header, trace.Envelope.Header.GetType()) };
+            }));
+            Assert.DoesNotContain(token.ToString(), serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("a.b.c", serialized, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
