@@ -41,9 +41,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   any of its calls is counted.
 - The README says why nothing is published before 1.0.0: the wire, the names and the API change
   freely until then, with no deprecation cycle.
-- The DevTools panel reads larger, on penumbra's type scale and spacing under a skin of DevTools'
-  own colours: its controls and tabs are of one look in both themes, and its bar holds on one line
-  on a wide panel. Its tabs move on the arrow keys, Home and End, its filter's syntax opens from a
+- The DevTools panel reads at DevTools' own density, penumbra's type scale set to 12 px under a
+  skin of DevTools' own colours: its controls and their groups stand 22 px, its record and clear
+  icons are drawn centred, its controls and tabs are of one look in both themes, and its bar holds
+  on one line on a wide panel. Its tabs move on the arrow keys, Home and End, its filter's syntax opens from a
   `?` beside it, and an exchange's labels stop short of the next lane, whole in a tooltip.
 - The `json` codec reads and writes a large payload in a fraction of the time, its output the
   same: the C# side writes a string that holds no escape as its bytes, and the TypeScript side

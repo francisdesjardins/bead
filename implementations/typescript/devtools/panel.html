@@ -19,6 +19,13 @@
         /* the small radius step matches four-pixel furniture corners */
         --app-radius-sm: 4px;
 
+        /* DevTools' own type scale: 12 px for controls, rows and tabs, 11 px for what is secondary;
+           penumbra's steps keep their names at a panel's density */
+        --app-text-sm: 0.6875rem;
+        --app-text-md: 0.75rem;
+        --app-text-base: 0.8125rem;
+        --app-text-lg: 0.9375rem;
+
         --app-flame: #0b6e5a;
         --app-flame-wash: rgb(11 110 90 / 0.1);
         --app-accent: #0b6e5a;
@@ -45,7 +52,9 @@
         --syntax-string: #925b12;
         --list-bar-height: calc(var(--app-space-8) + var(--app-space-1));
         /* the compact DevTools control floor is independent of text padding */
-        --control-height: 26px;
+        --control-height: 22px;
+        /* a button inside a group: the control's height less the group's two hairlines and insets */
+        --segment-height: calc(var(--control-height) - 4px);
         --menu-row-height: calc(var(--app-space-6) + var(--app-space-1));
         color-scheme: light;
       }
@@ -107,7 +116,8 @@
       input,
       button {
         min-height: var(--control-height);
-        padding: var(--app-space-1) var(--app-space-2);
+        /* the control's height centres its line: no padding above or below adds to it */
+        padding: 0 var(--app-space-2);
         /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-control-border);
         border-radius: var(--app-radius);
@@ -121,7 +131,7 @@
       select {
         /* a content-width floor keeps this label or plot readable before it scrolls */
         min-width: 112px;
-        padding: var(--app-space-1) var(--app-space-8) var(--app-space-1) var(--app-space-2);
+        padding: 0 var(--app-space-8) 0 var(--app-space-2);
         appearance: none;
         background-image:
           linear-gradient(45deg, transparent 50%, var(--app-text-secondary) 50%),
@@ -267,11 +277,17 @@
 
       #record,
       #clear {
-        min-width: var(--control-height);
-        padding-right: var(--app-space-2);
-        padding-left: var(--app-space-2);
-        font-size: var(--app-text-base);
-        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--control-height);
+        padding: 0;
+      }
+
+      .icon {
+        /* the icons' drawing size, centred in a control's square */
+        width: 14px;
+        height: 14px;
       }
 
       #record[aria-pressed='true'] {
@@ -307,7 +323,9 @@
         display: inline-flex;
         flex-wrap: wrap;
         gap: var(--app-space-1);
-        padding: var(--app-space-1);
+        /* a one-pixel inset keeps a pressed button's edge inside the group's, the group a control's
+           height */
+        padding: 1px;
         /* a one-pixel hairline separates the surfaces */
         border: 1px solid var(--app-divider);
         border-radius: var(--app-radius-md);
@@ -315,6 +333,8 @@
       }
 
       .group button {
+        min-height: var(--segment-height);
+        line-height: var(--app-lh-tight);
         border-color: transparent;
         background: transparent;
       }
@@ -1269,8 +1289,6 @@
 
       #layout {
         min-width: 0;
-        min-height: var(--app-space-6);
-        padding-block: 0;
         font-size: var(--app-text-sm);
       }
 
@@ -1542,9 +1560,16 @@
         aria-pressed="true"
         title="Record, or pause (Ctrl+E)"
       >
-        ●
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="4.5" fill="currentColor" />
+        </svg>
       </button>
-      <button type="button" id="clear" title="Clear (Ctrl+L)" aria-label="Clear">⊘</button>
+      <button type="button" id="clear" title="Clear (Ctrl+L)" aria-label="Clear">
+        <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.75" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path d="M3.9 12.1 12.1 3.9" stroke="currentColor" stroke-width="1.5" />
+        </svg>
+      </button>
       <select id="source" aria-label="Client">
         <option value="all">All clients</option>
       </select>
