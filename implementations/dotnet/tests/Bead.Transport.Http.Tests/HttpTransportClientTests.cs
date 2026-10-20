@@ -839,7 +839,8 @@ public sealed class HttpTransportClientTests
                     }
                 }
             }
-            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException)
+            // ! a listener stopped between two accepts says it is not listening
+            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException || (stopped is InvalidOperationException && _stop.IsCancellationRequested))
             {
                 return;
             }
@@ -1016,7 +1017,8 @@ public sealed class HttpTransportClientTests
                     }
                 }
             }
-            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException)
+            // ! a listener stopped between two accepts says it is not listening
+            catch (Exception stopped) when (stopped is OperationCanceledException or ObjectDisposedException or SocketException || (stopped is InvalidOperationException && _stop.IsCancellationRequested))
             {
                 return;
             }
