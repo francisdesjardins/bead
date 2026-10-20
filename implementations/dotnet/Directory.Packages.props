@@ -8,6 +8,7 @@
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.11.0" />
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.12.0" />
     <PackageVersion Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.12.1" />
+    <PackageVersion Include="SharpFuzz" Version="2.3.0" />
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
 </Project>

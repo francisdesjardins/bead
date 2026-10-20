@@ -300,6 +300,8 @@
     // protobuf's conformance testee, read with the code generated into it at run time alone:
     // `tools/protobuf-conformance.mjs` type-checks it then
     "tools/protobuf-conformance/**",
+    // the bundles of the fuzz targets, which tools/fuzz.mjs at the root writes for Jazzer.js
+    "tools/fuzz/.build/**",
     ".yarn/**"
   ]
 }

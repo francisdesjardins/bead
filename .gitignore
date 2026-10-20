@@ -37,6 +37,17 @@ tools/protobuf-conformance/.work/
 implementations/typescript/tools/protobuf-conformance/generated/
 implementations/dotnet/tools/Bead.ProtobufConformance/Generated/
 
+# What tools/fuzz.mjs keeps on each machine: each side's corpora, grown from the seeds it writes,
+# its findings, the TypeScript side's bundles and its install of Jazzer.js's state, and the C#
+# side's fuzzer and instrumenter, fetched by their pin, with the build they instrument
+implementations/typescript/tools/fuzz/corpus/
+implementations/typescript/tools/fuzz/findings/
+implementations/typescript/tools/fuzz/.build/
+implementations/typescript/tools/fuzz/.yarn/
+implementations/dotnet/tools/Bead.Fuzz/corpus/
+implementations/dotnet/tools/Bead.Fuzz/findings/
+implementations/dotnet/tools/Bead.Fuzz/.fuzzer/
+
 # The benches' reports a release keeps, each its machine's, compared with the next release's there
 /.bench/
 
