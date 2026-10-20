@@ -186,7 +186,53 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task A_credential_whose_resolution_throws_or_rejects_or_promises_for_none_or_OPAQUE_is_answered_PROCEDURE_FAILED_and_reported_a_JWT_s_in_a_later_turn()
     {
+        // NONE and OPAQUE fail in this turn; both JWT failures follow in arrival order
+        var mirrored = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
+        using var mirroredCore = mirrored.Core;
+        var mirroredResolver = mirrored.Resolve();
+        var broken = new InvalidOperationException("no verifier answers");
+        var pending = new TaskCompletionSource<CallSession?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        mirrored.Resolution = (request, _) =>
+        {
+            if (request.Header.CallId is 1 or 7)
+            {
+                throw broken;
+            }
+
+            return request.Header.CallId == 3
+                ? ValueTask.FromException<CallSession?>(broken)
+                : new ValueTask<CallSession?>(pending.Task);
+        };
+        mirrored.Loop.Post(() =>
+        {
+            mirroredCore.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(1) }), Handle);
+            mirroredCore.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(3) with { Credential = Credential.Jwt("a.b.c") } }), Handle);
+            mirroredCore.Receive(EnvelopeCodec.WriteEnvelope(new Envelope { Header = RequestOf(7) with { Credential = Credential.Jwt("a.b.c") } }), Handle);
+            mirroredCore.Receive(EnvelopeCodec.WriteEnvelope(new Envelope
+            {
+                Header = RequestOf(5) with { Credential = Credential.Opaque(SessionToken.FromBytes(Enumerable.Repeat((byte)1, 16).ToArray())) },
+            }), Handle);
+        });
+        await mirrored.Settle();
+        Assert.Equal(
+            [(1u, ProtocolCode.ProcedureFailed, ""), (5u, ProtocolCode.ProcedureFailed, ""),
+                (3u, ProtocolCode.ProcedureFailed, ""), (7u, ProtocolCode.ProcedureFailed, "")],
+            RefusalsOf(mirrored.Sent));
+        Assert.Equal(["broken", nameof(InvalidOperationException), "broken", "broken"], mirrored.Reports.Select((reason) =>
+        {
+            return ReferenceEquals(reason, broken) ? "broken" : reason.GetType().Name;
+        }));
+        Assert.Equal([Handle, Handle, Handle, Handle], mirrored.ReportedOn);
+        Assert.Equal(0, mirroredResolver.Admitted);
+        pending.SetResult(new CallSession { Data = "ada" });
+        await mirrored.Settle();
+        Assert.Equal(4, mirrored.Sent.Count);
+        Assert.Equal(4, mirrored.Reports.Count);
+        Assert.Equal(0, mirroredResolver.Admitted);
+
         var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
+        using var serverCore = server.Core;
         var resolver = server.Resolve();
         var thrown = new InvalidOperationException("the key set cannot be reached");
         var faulted = new InvalidOperationException("the verifier broke");
@@ -224,12 +270,35 @@ public sealed partial class RouterCoreTests
             RefusalsOf(server.Sent));
         Assert.IsType<InvalidOperationException>(server.Reports[0]);
         Assert.Equal([thrown, faulted], server.Reports[1..]);
+        Assert.Equal([Handle, Handle, Handle], server.ReportedOn);
 
         // what the one that waited settles with is dropped
         waiting.SetResult(new CallSession());
         await server.Settle();
         Assert.Equal(3, server.Sent.Count);
+        Assert.Equal(3, server.Reports.Count);
         Assert.Equal(0, resolver.Admitted);
+
+        // a NONE resolution that waits fails before its result is available too
+        var none = new Peer(RouterSide.Server);
+        using var noneCore = none.Core;
+        var noneResolver = none.Resolve();
+        var unresolved = new TaskCompletionSource<CallSession?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        none.Resolution = (_, _) =>
+        {
+            return new ValueTask<CallSession?>(unresolved.Task);
+        };
+        await none.Deliver(new Envelope { Header = RequestOf(1) });
+        Assert.Equal([(1u, ProtocolCode.ProcedureFailed, "")], RefusalsOf(none.Sent));
+        Assert.IsType<InvalidOperationException>(Assert.Single(none.Reports));
+        Assert.Equal([Handle], none.ReportedOn);
+        Assert.Equal(0, noneResolver.Admitted);
+        unresolved.SetResult(new CallSession { Data = "ada" });
+        await none.Settle();
+        Assert.Single(none.Sent);
+        Assert.Single(none.Reports);
+        Assert.Equal(0, noneResolver.Admitted);
     }
 
     [Fact]
@@ -419,6 +488,14 @@ public sealed partial class RouterCoreTests
             {
                 return props.Header.CallId == 3;
             }).Session);
+        Assert.All(resolverAdmitted, (request) =>
+        {
+            Assert.Same(session, request.Session);
+        });
+        Assert.All(resolver.Requests, (request) =>
+        {
+            Assert.Same(session, request.Session);
+        });
 
         // a destination's handler, its admission and its call: a JWT's token whole, and what its
         // transport carried for an ELSEWHERE alone
@@ -440,7 +517,16 @@ public sealed partial class RouterCoreTests
             {
                 return handed.CallId;
             }));
+        Assert.All(handlerAdmitted, (request) =>
+        {
+            Assert.Null(request.Session);
+        });
+        Assert.All(handler.Requests, (request) =>
+        {
+            Assert.Null(request.Session);
+        });
         Assert.Empty(server.Reports);
+        Assert.Empty(server.Sent);
     }
 
     // spec 13.1: the C# side's surface, by reflection, which the TypeScript side's twin holds by its
