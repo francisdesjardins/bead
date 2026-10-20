@@ -7140,7 +7140,7 @@
       ]
     },
     {
-      "name": "a message past the side's own limit closes its connection with 1009",
+      "name": "a message past the side's own limit fails its connection with 1009",
       "clauses": [
         "15.3",
         "12.2.1"
