@@ -89,11 +89,13 @@ test('applies measure thresholds and identity overrides before the default', () 
   }, /matches no/);
 });
 
-test('handles zero and signed heap deltas without hiding changes', () => {
+test('handles zero baselines and rejects negative allocation counts', () => {
   assert.equal(compare(report([0]), report([0]))[0].change, 0);
   assert.equal(compare(report([0]), report([1]), thresholdsOf(['25%']))[0].failed, true);
   const options = { name: 'call.memory', unit: 'B/call' };
-  assert.equal(compare(report([-10], options), report([-5], options))[0].change, 50);
+  assert.throws(() => {
+    validate(report([-10], options));
+  }, /statistics/);
 });
 
 test('validates even-run medians, finite samples, counts and statistics', () => {

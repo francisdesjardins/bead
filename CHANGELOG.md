@@ -9,6 +9,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The benches measure HTTP and WebSocket, cross-language calls, notifications and allocation over
+  repeated runs; `tools/bench-compare.mjs` compares their reports.
 - `implementations/typescript/tools/bench.mjs` and `implementations/dotnet/tools/Bead.Benchmarks`: the
   same four layers measured on each side in the same units, the envelope codec, the `json` payload
   codec, an echo over a WebSocket on the loopback and a transfer of 20 MiB, by hand (README,

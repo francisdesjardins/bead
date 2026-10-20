@@ -58,9 +58,9 @@ internal static class Program
 
         public void Record(string name, double value, Dimensions? dimensions = null)
         {
-            if (!double.IsFinite(value))
+            if (!double.IsFinite(value) || value < 0)
             {
-                throw new InvalidOperationException($"non-finite measurement: {name}");
+                throw new InvalidOperationException($"non-finite or negative measurement: {name}");
             }
 
             var key = (name, dimensions ?? new Dimensions());
@@ -331,6 +331,8 @@ internal static class Program
         var sent = 0;
         var sending = true;
         var gate = new Lock();
+        using var room = new SemaphoreSlim(Concurrency, Concurrency);
+        using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(options.Seconds + 30.0));
         var drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var registration = await notification.Register(JsonSerializer.SerializeToElement<object?>(null), (timestamp) =>
         {
@@ -344,21 +346,32 @@ internal static class Program
                 }
             }
 
+            room.Release();
             return Task.CompletedTask;
         })();
         var clock = Stopwatch.StartNew();
         var due = 0.0;
-        // A scheduled 1 ms cadence, a window of 32, and no replacement key: each value must arrive.
-        while (clock.Elapsed.TotalSeconds < options.Seconds)
+        var end = options.Seconds * 1_000.0;
+        // * A late wake-up catches up to every due value; at most 32 await their handlers.
+        while (due < end)
         {
-            lock (gate)
+            while (due < end && due <= clock.Elapsed.TotalMilliseconds)
             {
-                sent++;
+                await room.WaitAsync(patience.Token);
+                lock (gate)
+                {
+                    sent++;
+                }
+
+                await resolver.Notify(JsonSerializer.SerializeToElement(Stopwatch.GetTimestamp()));
+                due += 1;
             }
 
-            await resolver.Notify(JsonSerializer.SerializeToElement(Stopwatch.GetTimestamp()));
-            due += 1;
-            await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(0, due - clock.Elapsed.TotalMilliseconds)));
+            var pause = due - clock.Elapsed.TotalMilliseconds;
+            if (due < end && pause > 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(Math.Ceiling(pause)), patience.Token);
+            }
         }
 
         lock (gate)
@@ -370,7 +383,7 @@ internal static class Program
             }
         }
 
-        await drained.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        await drained.Task.WaitAsync(patience.Token);
         var elapsedSeconds = clock.Elapsed.TotalSeconds;
         durations.Sort();
         var row = new Dimensions { Transport = options.Transport };
@@ -579,7 +592,7 @@ internal static class Program
                 {
                     Method = "gc-total-allocated-bytes",
                     Scope = "local: client and server; interop: client process only",
-                    Limitations = "Process-wide managed bytes allocated per call, including transient allocations and background work. Excludes native allocations and the remote server. Not comparable to V8 live heap deltas.",
+                    Limitations = "Process-wide managed heap bytes allocated per call, including transient allocations and background work. Excludes native allocations and the remote server.",
                 },
                 Transfer = "20 MiB JSON echo; websocket: chunks; http: whole envelope, 32 MiB limit; MiB/s counts both directions",
                 Interop = "calls only; normal interop server launcher, Release configuration",

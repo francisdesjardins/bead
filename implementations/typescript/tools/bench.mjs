@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { getHeapStatistics } from 'node:v8';
+import { GCProfiler, getHeapStatistics } from 'node:v8';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const REPO = fileURLToPath(new URL('../../..', import.meta.url));
@@ -38,10 +38,6 @@ for (let at = 0; at < args.length; at++) {
   }
 }
 
-if (typeof globalThis.gc !== 'function') {
-  throw new Error('memory measurement requires node --expose-gc');
-}
-
 const entry = `
   export { WebSocket, WebSocketServer } from 'ws';
   export { createWSClient } from './src/client/ws-client.ts';
@@ -63,8 +59,8 @@ const measures = new Map();
 const record = (name, value, dimensions = {}) => {
   const { scenario = 'local', transport = 'none', sizeBytes = 0, unit = 'us' } = dimensions;
   const id = `${scenario}.${transport}.${sizeBytes}.${name}`;
-  if (!Number.isFinite(value)) {
-    throw new Error(`non-finite measurement: ${id}`);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`non-finite or negative measurement: ${id}`);
   }
   if (!measures.has(id)) {
     measures.set(id, {
@@ -215,14 +211,34 @@ const calls = async (connection, dimensions) => {
       record(`call.p${share * 100}`, percentile(durations, share), row);
     }
 
-    // V8's post-GC live heap delta is signed. It is not a count of transient allocations.
-    globalThis.gc();
-    const heapBefore = getHeapStatistics().used_heap_size;
-    for (let index = 0; index < MEMORY_CALLS; index++) {
-      await call();
+    // * Account for reclaimed bytes as well as live heap growth, including transient objects.
+    globalThis.gc?.();
+    const profiler = new GCProfiler();
+    let heapBefore;
+    let heapAfter;
+    let statistics;
+
+    profiler.start();
+    try {
+      heapBefore = getHeapStatistics().used_heap_size;
+      for (let index = 0; index < MEMORY_CALLS; index++) {
+        await call();
+      }
+      heapAfter = getHeapStatistics().used_heap_size;
+    } finally {
+      ({ statistics } = profiler.stop());
     }
-    globalThis.gc();
-    record('call.memory', (getHeapStatistics().used_heap_size - heapBefore) / MEMORY_CALLS, {
+
+    let allocated = heapAfter - heapBefore;
+    for (const collection of statistics) {
+      const before = collection.beforeGC?.heapStatistics?.usedHeapSize;
+      const after = collection.afterGC?.heapStatistics?.usedHeapSize;
+      if (!Number.isFinite(before) || !Number.isFinite(after)) {
+        throw new Error('GCProfiler requires beforeGC/afterGC.heapStatistics.usedHeapSize');
+      }
+      allocated += before - after;
+    }
+    record('call.memory', allocated / MEMORY_CALLS, {
       ...row,
       unit: 'B/call',
     });
@@ -256,36 +272,51 @@ const notifications = async (connection, reader, { transport }) => {
   const durations = [];
   let sent = 0;
   const drained = Promise.withResolvers();
+  let room = Promise.withResolvers();
   let sending = true;
+  const patience = new AbortController();
+  const expired = delay(options.seconds * 1_000 + 30_000, undefined, {
+    signal: patience.signal,
+    ref: false,
+  }).then(() => {
+    throw new Error('notifications exceed their cadence and 30 second drain');
+  });
+  expired.catch(() => {});
   const registration = await connection.client.services.getNotification(procedure, {
     serializer,
     window: CONCURRENCY,
   })(null, (timestamp) => {
     durations.push((performance.now() - timestamp) * 1_000);
+    room.resolve();
+    room = Promise.withResolvers();
     if (!sending && durations.length === sent) {
       drained.resolve();
     }
   })();
   try {
     const started = performance.now();
+    const end = started + options.seconds * 1_000;
     let due = started;
-    // A scheduled 1 ms cadence, a window of 32, and no replacement key: each value must arrive.
-    while (performance.now() - started < options.seconds * 1_000) {
-      sent++;
-      await resolver.notify(performance.now());
-      due += 1;
-      await delay(Math.max(0, due - performance.now()));
+    // * A late wake-up catches up to every due value; at most 32 await their handlers.
+    while (due < end) {
+      while (due < end && due <= performance.now()) {
+        while (sent - durations.length >= CONCURRENCY) {
+          await Promise.race([room.promise, expired]);
+        }
+        sent++;
+        await resolver.notify(performance.now());
+        due += 1;
+      }
+      const pause = due - performance.now();
+      if (due < end && pause > 0) {
+        await delay(pause, undefined, { signal: patience.signal });
+      }
     }
     sending = false;
     if (durations.length === sent) {
       drained.resolve();
     }
-    await Promise.race([
-      drained.promise,
-      delay(30_000, undefined, { ref: false }).then(() => {
-        throw new Error('notifications do not drain within 30 seconds');
-      }),
-    ]);
+    await Promise.race([drained.promise, expired]);
     const elapsed = performance.now() - started;
     durations.sort((a, b) => {
       return a - b;
@@ -299,6 +330,7 @@ const notifications = async (connection, reader, { transport }) => {
       unit: 'notifications/s',
     });
   } finally {
+    patience.abort();
     await registration.unregister();
   }
 };
@@ -423,10 +455,10 @@ try {
       notificationWindow: CONCURRENCY,
       memoryCalls: MEMORY_CALLS,
       memory: {
-        method: 'v8-live-heap-delta',
+        method: 'v8-gc-accounted-allocations',
         scope: 'local: client and server; interop: client process only',
         limitations:
-          'Signed post-GC used_heap_size delta per call; retained V8 heap only. Excludes transient allocations, external buffers, native allocations and the remote server. It is not total bytes allocated.',
+          'Process-wide V8 heap bytes allocated per call: used_heap_size growth plus bytes reclaimed in GCProfiler collections. Includes transient allocations and background work. Excludes external ArrayBuffer backing stores, native allocations and the remote server.',
       },
       transfer:
         '20 MiB JSON echo; websocket: chunks; http: whole envelope, 32 MiB limit; MiB/s counts both directions',

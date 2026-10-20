@@ -94,7 +94,7 @@ export const validate = (report) => {
       !close(row.min, sorted[0]) ||
       !close(row.max, sorted.at(-1)) ||
       !close(row.median, median) ||
-      (row.name !== 'call.memory' && row.min < 0)
+      row.min < 0
     ) {
       fail(`statistics disagree with samples: ${row.id}`);
     }
@@ -190,7 +190,7 @@ export const main = (args) => {
     );
     if (reports[0].method.memory.method !== reports[1].method.memory.method) {
       console.log(
-        `Memory methods differ: ${reports[0].method.memory.method} -> ${reports[1].method.memory.method}; their byte values measure different quantities.`
+        `Allocation counters: ${reports[0].method.memory.method} -> ${reports[1].method.memory.method}; each report states its heap scope and exclusions.`
       );
     }
     console.log(

@@ -379,24 +379,29 @@ Every call measure runs with client and server in the same process (`local`) and
 language's interop server in a child process (`interop`), on each transport. The report's `side`
 names its client: `typescript` calls C# in `interop`, and `csharp` calls TypeScript. Codecs,
 notifications and large echoes run locally. The notification producer targets a 1 ms cadence,
-uses a credit window of 32 and gives every value its own place, with no replacement key. Its
-monotonic timestamp is taken immediately before notify; latency includes serialization, scheduling,
-transport and decoding. Timer resolution and load affect the cadence achieved. Every notification
-must reach the handler before the drain's 30 s deadline.
+uses a credit window of 32 and gives every value its own place, with no replacement key. At each
+wake-up it sends every value whose deadline passes, catching up after a late timer; at most 32
+values await their handlers. It sleeps until the next deadline when caught up. Each value's
+monotonic timestamp is taken immediately before its own notify; latency includes serialization,
+scheduling, transport and decoding. Every due notification reaches the handler within the timed
+phase plus a 30 s drain allowance. Throughput records the achieved rate, including drain time.
 
 A WebSocket carries the 20 MiB echo as protocol transfer chunks. HTTP carries each payload in one
 whole envelope, with a 32 MiB envelope and payload limit on both endpoints; HTTP supports no
 protocol transfer chunks. The large-echo rows compare the cost of moving the same application
 payload through each transport's supported framing.
 
-C# counts `GC.GetTotalAllocatedBytes(true)` around 2,000 calls: process-wide managed allocations,
-including transient allocations and unrelated background work. Node requires `--expose-gc` and
-reads V8's `used_heap_size` after a full GC at each end of the same loop. The signed difference per
-call estimates retained V8 heap growth; it does **not** count total allocated bytes, transient
-objects collected during the loop, external buffers or native allocations. Negative values reflect
-heap reclamation. Both methods include client and server in `local`, and only the client process
-in `interop`; neither counts the remote server. The two memory methods measure different
-quantities, so their byte values do not support an allocation comparison across runtimes.
+Both sides count bytes allocated on their managed heap around 2,000 calls, process-wide, including
+transient objects and unrelated background work. C# uses `GC.GetTotalAllocatedBytes(true)`. Node
+uses `v8.GCProfiler`, with `used_heap_size` readings just inside its start/stop interval:
+`allocated = usedEnd - usedStart + sum(beforeGC.heapStatistics.usedHeapSize - afterGC.heapStatistics.usedHeapSize)`.
+The sum counts bytes reclaimed by every collection, so transient allocations count too. The
+profiler's camelCase fields and the heap reading's snake_case field carry those names on Node
+24.9. `--expose-gc` is optional: it allows a full GC before profiling, reducing garbage carried
+into the interval. The calculation requires no explicit GC. A negative or non-finite allocation
+value fails the run. Both counters include client and server in `local`, and only the client
+process in `interop`. Neither counts the remote server or native allocations; V8 also excludes
+external buffers such as `ArrayBuffer` backing stores. The reports state each counter and scope.
 
 Both JSON reports use `bead-bench/1`:
 
