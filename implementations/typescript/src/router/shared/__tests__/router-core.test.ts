@@ -599,7 +599,8 @@ test.describe('createRouterCore', () => {
 
     test('settles a call with an answer of this layout that does not read, and never with one of another', async () => {
       const { port, reported, sent } = createPort();
-      using core = createRouterCore(port);
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock });
       const first = core.request(new Uint8Array(0), {
         connectionHandle: 'a',
         options,
@@ -629,7 +630,9 @@ test.describe('createRouterCore', () => {
         procedureAddress: { procedureId: echo.procedureId, serviceId: echo.serviceId },
         side: 'server',
       });
+      clock.tick(50);
       await expect(second).rejects.toBeInstanceOf(TimeoutError);
+      await expect(second).rejects.toMatchObject({ timeout: 50 });
       // the peer, which may hold either call still, is told of each
       expect(answersOf(sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 2],
@@ -642,6 +645,40 @@ test.describe('createRouterCore', () => {
         [ProtocolCode.LAYOUT_UNSUPPORTED, 'a'],
         [ProtocolCode.LAYOUT_UNSUPPORTED, 'a'],
         [ProtocolCode.ENVELOPE_MALFORMED, 'b'],
+      ]);
+
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port);
+      const asked = clientCore.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: echo,
+      });
+      let isSettled = false;
+
+      void settledOf(asked).then(() => {
+        isSettled = true;
+      });
+
+      clientCore.receive(fromHexadecimal('A2 11 00 02  00 00 00 01'), 'a');
+      await sleep(0);
+      expect(isSettled).toBe(false);
+      expect(codesOf(client.reported)).toEqual([[ProtocolCode.LAYOUT_UNSUPPORTED, 'a']]);
+      clientCore.receive(fromHexadecimal('A1 12 00 02  00 00 00 01  00'), 'a');
+      await expect(asked).rejects.toMatchObject({
+        code: ProtocolCode.ENVELOPE_MALFORMED,
+        origin: 'local',
+        procedureAddress: { procedureId: echo.procedureId, serviceId: echo.serviceId },
+        side: 'client',
+      });
+      clientCore.receive(fromHexadecimal('A1 12 00 02  00 00 00 01  00'), 'b');
+      expect(codesOf(client.reported)).toEqual([
+        [ProtocolCode.LAYOUT_UNSUPPORTED, 'a'],
+        [ProtocolCode.ENVELOPE_MALFORMED, 'b'],
+      ]);
+      expect(answersOf(client.sent)).toEqual([
+        ['a', EnvelopeKind.REQUEST, 1],
+        ['a', EnvelopeKind.CANCEL, 1],
       ]);
     });
 
@@ -739,7 +776,7 @@ test.describe('createRouterCore', () => {
     });
 
     test('lets a resolver that fails after it answered take nothing from the call holding its call id now', async () => {
-      const { port, reported } = createPort();
+      const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
       const seen: number[] = [];
       const failing = Promise.withResolvers<void>();
@@ -770,6 +807,35 @@ test.describe('createRouterCore', () => {
       expect(seen).toEqual([5, 5]);
       expect(codesOf(reported)).toEqual([
         ['late', 'a'],
+        [ProtocolCode.ENVELOPE_MALFORMED, 'a'],
+      ]);
+      expect(answersOf(sent)).toEqual([['a', 'result', 5, []]]);
+      holding.resolve();
+
+      const before = createPort();
+      using earlier = createRouterCore(before.port);
+      const broken = new Error('the resolver broke after its answer');
+      const requests: number[] = [];
+
+      earlier.registerResolver(
+        Object.assign(async (props: IRequestResolverProps<Handle>) => {
+          requests.push(props.header.callId);
+          if (props.payload[0] === 1) {
+            await earlier.respond({ payload: Uint8Array.of(1) }, props);
+            throw broken;
+          }
+        }, echo)
+      );
+      earlier.receive(requestOf(1, { payload: Uint8Array.of(1) }), 'a');
+      await sleep(0);
+      expect(before.reported).toEqual([[broken, 'a']]);
+      expect(answersOf(before.sent)).toEqual([['a', 'result', 1, [1]]]);
+      earlier.receive(requestOf(1, { payload: Uint8Array.of(2) }), 'a');
+      earlier.receive(requestOf(1, { payload: Uint8Array.of(3) }), 'a');
+      await sleep(0);
+      expect(requests).toEqual([1, 1]);
+      expect(codesOf(before.reported)).toEqual([
+        [broken.message, 'a'],
         [ProtocolCode.ENVELOPE_MALFORMED, 'a'],
       ]);
     });
@@ -1166,6 +1232,84 @@ test.describe('createRouterCore', () => {
         ['broken', 'a'],
       ]);
       expect(admitted).toEqual([]);
+
+      const thrown = new Error('the key set cannot be reached');
+      const faulted = new Error('the verifier broke');
+      const waiting = Promise.withResolvers<ICallSession>();
+      const legacy = createPort({
+        credentialSchemes: [CredentialScheme.OPAQUE, CredentialScheme.JWT],
+        sessionOf: ({ header }) => {
+          if (header.callId === 1) {
+            throw thrown;
+          }
+          return header.callId === 3 ? Promise.reject(faulted) : waiting.promise;
+        },
+      });
+      using legacyCore = createRouterCore(legacy.port);
+      let admissions = 0;
+
+      legacyCore.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: () => {
+            admissions += 1;
+            return undefined;
+          },
+        })
+      );
+      legacyCore.receive(requestOf(1, { credential: JWT, payload: Uint8Array.of(1) }), 'a');
+      legacyCore.receive(requestOf(3, { credential: JWT, payload: Uint8Array.of(1) }), 'a');
+      legacyCore.receive(requestOf(5, { credential: OPAQUE, payload: Uint8Array.of(1) }), 'a');
+      await sleep(0);
+      expect(answersOf(legacy.sent)).toEqual([
+        ['a', 'failure', 5, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+        ['a', 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
+      ]);
+      expect(legacy.reported[0]).toEqual([expect.any(ProgrammerError), 'a']);
+      expect(legacy.reported.slice(1)).toEqual([
+        [thrown, 'a'],
+        [faulted, 'a'],
+      ]);
+      expect(
+        [...sent, ...legacy.sent].map(({ envelope }) => {
+          return envelope?.kind === EnvelopeKind.FAILURE ? envelope.failure.detail : undefined;
+        })
+      ).toEqual(['', '', '', '', '', '', '']);
+      waiting.resolve(SESSION);
+      await sleep(0);
+      expect(legacy.sent).toHaveLength(3);
+      expect(legacy.reported).toHaveLength(3);
+      expect(admissions).toBe(0);
+
+      // a NONE resolution that waits fails before its result is available too
+      const unresolved = Promise.withResolvers<ICallSession>();
+      const none = createPort({
+        sessionOf: () => {
+          return unresolved.promise;
+        },
+      });
+      using noneCore = createRouterCore(none.port);
+      let noneAdmissions = 0;
+
+      noneCore.registerResolver(
+        Object.assign(resolverOf(echo), {
+          admit: () => {
+            noneAdmissions += 1;
+            return undefined;
+          },
+        })
+      );
+      noneCore.receive(requestOf(1), 'a');
+      await sleep(0);
+      expect(answersOf(none.sent)).toEqual([['a', 'failure', 1, ProtocolCode.PROCEDURE_FAILED]]);
+      expect(none.reported).toEqual([[expect.any(ProgrammerError), 'a']]);
+      expect(none.sent[0]?.envelope).toMatchObject({ failure: { detail: '' } });
+      expect(noneAdmissions).toBe(0);
+      unresolved.resolve(SESSION);
+      await sleep(0);
+      expect(none.sent).toHaveLength(1);
+      expect(none.reported).toHaveLength(1);
+      expect(noneAdmissions).toBe(0);
     });
 
     test('whose resolution rejects with a CapacityError is answered CAPACITY_EXCEEDED, its message for detail, and reported nowhere; a FailureError of that code stays PROCEDURE_FAILED, reported', async () => {
@@ -2207,6 +2351,7 @@ test.describe('createRouterCore', () => {
     expect(core.isDisposed).toBe(false);
 
     core[Symbol.dispose]();
+    expect(piecesOf(sent)).toEqual([[EnvelopeKind.REQUEST, 2, undefined, 0]]);
     sent.length = 0;
 
     expect(core.isDisposed).toBe(true);
@@ -2243,6 +2388,45 @@ test.describe('createRouterCore', () => {
       )
     ).rejects.toBeInstanceOf(DisconnectError);
     expect(sent).toEqual([]);
+
+    const client = createPort({ failures: CLIENT_FAILURES });
+    const clientCore = createRouterCore(client.port);
+    const asked = clientCore.request(Uint8Array.of(1), {
+      connectionHandle: 'a',
+      options: { timeout: 5_000 },
+      procedure: echo,
+    });
+
+    expect(clientCore.isDisposed).toBe(false);
+    clientCore[Symbol.dispose]();
+    expect(clientCore.isDisposed).toBe(true);
+    await expect(asked).rejects.toThrow(
+      new DisconnectError('the router was disposed before the answer')
+    );
+    await expect(
+      clientCore.respond(
+        { payload: Uint8Array.of(1) },
+        {
+          connectionHandle: 'a',
+          header: headerOf(2),
+        }
+      )
+    ).rejects.toBeInstanceOf(DisconnectError);
+    await expect(
+      clientCore.send(
+        {
+          header: { callId: 2, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: Uint8Array.of(1),
+        },
+        'a'
+      )
+    ).rejects.toBeInstanceOf(DisconnectError);
+    clientCore.cancel({ callId: 3, connectionHandle: 'a' });
+    await sleep(0);
+    expect(answersOf(client.sent)).toEqual([['a', EnvelopeKind.REQUEST, 1]]);
+    expect(client.reported).toEqual([]);
+    expect(clientCore.gauges().counts['reservedCallIds']).toBe(0);
   });
 
   test.describe('the transfers it receives', () => {

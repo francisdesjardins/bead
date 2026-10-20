@@ -327,7 +327,51 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Settles_a_call_with_an_answer_of_this_layout_that_does_not_read_and_never_with_one_of_another()
     {
+        var server = new Peer(RouterSide.Server, RouterLimits.Default);
+        using var serverCore = server.Core;
+        var first = serverCore.Request(ReadOnlyMemory<byte>.Empty, CallOf("a", (Echo, TimeSpan.FromSeconds(1))));
+        var second = serverCore.Request(ReadOnlyMemory<byte>.Empty, CallOf("a", (Echo, TimeSpan.FromMilliseconds(50))));
+        var tooLarge = new byte[16_778_241];
+
+        Vectors.FromHexadecimal("A2 11 00 02  00 00 00 04").CopyTo(tooLarge, 0);
+        serverCore.Receive(tooLarge, "a");
+        await server.Settle();
+        await server.Deliver("A2 11 00 02  00 00 00 04", "a");
+        await server.Deliver("A2 12 00 02  00 00 00 04  00 13 00 00", "a");
+        await server.Deliver("A1 12 00 02  00 00 00 02  00 13 00", "b");
+        await server.Deliver("A1 12 00 02  00 00 00 02  00 13 00", "a");
+
+        var malformed = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return first.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(
+            ((ushort)ProtocolCode.EnvelopeMalformed, FailureOrigin.Local, RouterSide.Server, Echo.Address),
+            (malformed.Code, malformed.Origin, malformed.Side, malformed.ProcedureAddress));
+        await server.Advance(TimeSpan.FromMilliseconds(50));
+        Assert.True(second.IsCompleted);
+
+        var timedOut = await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return second.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal("no answer came in 50 milliseconds", timedOut.Message);
+        Assert.Equal(
+            [(EnvelopeKind.Request, 2u), (EnvelopeKind.Request, 4u), (EnvelopeKind.Cancel, 2u), (EnvelopeKind.Cancel, 4u)],
+            server.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.Kind, envelope.Header.CallId);
+            }));
+        Assert.Equal(
+            [(ushort)ProtocolCode.EnvelopeTooLarge, (ushort)ProtocolCode.LayoutUnsupported,
+                (ushort)ProtocolCode.LayoutUnsupported, (ushort)ProtocolCode.EnvelopeMalformed],
+            server.Reports.Select(CodeOf));
+        Assert.Equal(["a", "a", "a", "b"], server.ReportedOn);
+
         var client = new Peer(RouterSide.Client);
+        using var clientCore = client.Core;
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await client.Settle();
@@ -344,11 +388,20 @@ public sealed partial class RouterCoreTests
         });
 
         Assert.Equal((FailureOrigin.Local, Echo.Address), (ended.Origin, ended.ProcedureAddress));
+        Assert.Equal(((ushort)ProtocolCode.EnvelopeMalformed, RouterSide.Client), (ended.Code, ended.Side));
         Assert.IsType<CancelHeader>(client.Sent[^1].Header);
 
         // on another connection, it answers no call
         await client.Deliver("A1 12 00 02  00 00 00 01 | 00", "other");
         Assert.Equal(2, client.Reports.Count);
+        Assert.Equal([(ushort)ProtocolCode.LayoutUnsupported, (ushort)ProtocolCode.EnvelopeMalformed], client.Reports.Select(CodeOf));
+        Assert.Equal([Handle, "other"], client.ReportedOn);
+        Assert.Equal(
+            [(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u)],
+            client.Sent.Select((envelope) =>
+            {
+                return (envelope.Header.Kind, envelope.Header.CallId);
+            }));
     }
 
     [Fact]
@@ -429,7 +482,46 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Lets_a_resolver_that_fails_after_it_answered_take_nothing_from_the_call_holding_its_call_id_now()
     {
+        var crossing = new Peer(RouterSide.Server);
+        using var crossingCore = crossing.Core;
+        var heldResolver = crossing.Resolve();
+        var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var late = new InvalidOperationException("late");
+
+        heldResolver.Handling = async (props) =>
+        {
+            if (heldResolver.Requests.Count == 1)
+            {
+                await crossingCore.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(props.ConnectionHandle, props.Header));
+                await failing.Task;
+            }
+            else
+            {
+                await holding.Task;
+            }
+        };
+        await crossing.Deliver(new Envelope { Header = RequestOf(5) });
+        await crossing.Deliver(new Envelope { Header = RequestOf(5) });
+        Assert.Equal(2, heldResolver.Requests.Count);
+        failing.SetException(late);
+        await crossing.Settle();
+        await crossing.Deliver(new Envelope { Header = RequestOf(5) });
+        Assert.Equal([5u, 5u], heldResolver.Requests.Select((props) =>
+        {
+            return props.Header.CallId;
+        }));
+        Assert.Same(late, crossing.Reports[0]);
+        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, CodeOf(crossing.Reports[1]));
+        Assert.Equal(2, crossing.Reports.Count);
+        Assert.Equal([Handle, Handle], crossing.ReportedOn);
+        Assert.Equal(5u, Assert.IsType<ResultHeader>(Assert.Single(crossing.Sent).Header).CallId);
+        Assert.Empty(crossing.Sent[0].Payload.ToArray());
+        holding.SetResult();
+        await crossing.Settle();
+
         var server = new Peer(RouterSide.Server);
+        using var serverCore = server.Core;
         var resolver = server.Resolve();
         var broken = new InvalidOperationException("the resolver broke after its answer");
 
@@ -445,12 +537,15 @@ public sealed partial class RouterCoreTests
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
         Assert.Same(broken, Assert.Single(server.Reports));
         Assert.IsType<ResultHeader>(Assert.Single(server.Sent).Header);
+        Assert.Equal(new byte[] { 1 }, server.Sent[0].Payload.ToArray());
 
         // the call after it on its call id stays open: the same call id again is refused
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 3 } });
         Assert.Equal(2, resolver.Requests.Count);
         Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, CodeOf(server.Reports[^1]));
+        Assert.Equal(2, server.Reports.Count);
+        Assert.Equal([Handle, Handle], server.ReportedOn);
     }
 
     [Fact]
@@ -661,6 +756,57 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Once_disposed_rejects_what_waits_and_sends_nothing_more()
     {
+        var server = new Peer(RouterSide.Server);
+        var incoming = server.Resolve();
+        var answering = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? lateAnswer = null;
+
+        incoming.Handling = async (props) =>
+        {
+            await answering.Task;
+            lateAnswer = server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(props.ConnectionHandle, props.Header));
+        };
+
+        var waiting = server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
+
+        await server.Deliver(new Envelope { Header = RequestOf(5) });
+        Assert.False(server.Core.IsDisposed);
+        server.Core.Dispose();
+        await server.Settle();
+        Assert.True(server.Core.IsDisposed);
+        Assert.Equal(2u, Assert.IsType<RequestHeader>(Assert.Single(server.Sent).Header).CallId);
+        server.Sent.Clear();
+        Assert.Equal("the router was disposed before the answer", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return waiting.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        })).Message);
+        answering.SetResult();
+        await server.Settle();
+        Assert.NotNull(lateAnswer);
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return lateAnswer.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        server.Core.Cancel(new CallAddress(2, Handle));
+        await server.Settle();
+        Assert.Empty(server.Reports);
+        Assert.Equal(0, server.Core.Gauges().Counts["reservedCallIds"]);
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return server.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1)).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return server.Core.Respond(RouterAnswer.OfPayload(ReadOnlyMemory<byte>.Empty), new AnswerTarget(Handle, RequestOf(1)))
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 } }, Handle)
+                .WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+        Assert.Empty(server.Sent);
+
         var client = new Peer(RouterSide.Client);
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
@@ -684,6 +830,8 @@ public sealed partial class RouterCoreTests
         client.Core.Cancel(new CallAddress(3, Handle));
         await client.Settle();
         Assert.Single(client.Sent);
+        Assert.Empty(client.Reports);
+        Assert.Equal(0, client.Core.Gauges().Counts["reservedCallIds"]);
     }
 
     [Fact]
