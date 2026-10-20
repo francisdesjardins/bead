@@ -18,7 +18,7 @@ import {
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   TRANSPORT_WS,
 } from '../shared/constants';
-import { assertHeld, assertHeldFinite } from '../shared/clock';
+import { assertHeld, assertHeldFinite, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import { GenericError } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
@@ -186,12 +186,17 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
 /**
  * A transport server over WebSocket connections.
  *
- * A text message is delivered as a `string` and a binary one per `binaryType`. A protocol error on a
- * connection emits `error` with its handle, then that connection's `close`; a peer that drops
- * without its closing handshake, its TCP connection ended or reset, emits no `error`: its unclean
- * `close` tells it. Each connection is pinged every `heartbeat`, and dropped when it left a ping
- * unanswered: a peer gone without a word — a network cut, a machine asleep — ends in a `close`
- * rather than never.
+ * A text message is delivered as a `string` and a binary one per `binaryType`. `error` tells, with
+ * a connection's handle (spec 15.1): a protocol error on it; a bound it is dropped behind, or a
+ * message past `maxPayload`, the spec's `maximumMessageBytes`, it is failed with 1009 for, each a
+ * {@link GenericError} naming the bound in the spec's spelling and its value, the 1009's keeping
+ * `ws`'s own error as its `cause`; each told once, as its connection ends, its close begun, before
+ * its unclean `close`, so a listener that throws keeps nothing open; and what a listener of its
+ * events threw, as it threw. A peer that drops without its closing handshake, its TCP connection
+ * ended or reset, emits no `error`: its unclean `close` tells it; nor does a peer its heartbeat
+ * drops, nor its own drop of a peer that never answered a close within `closeTimeout`. Each
+ * connection is pinged every `heartbeat`, and dropped when it left a ping unanswered: a peer gone
+ * without a word — a network cut, a machine asleep — ends in a `close` rather than never.
  *
  * An upgrade that carries no `Origin` carries one credential, its `Authorization`, as it came,
  * whole, its surrounding whitespace removed, none when empty or absent: every message of its
@@ -211,7 +216,9 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * `unnamedProxies` counts, the upgrade's `X-Forwarded-For` entry the walk reaches, as the HTTP
  * transport reads it (spec 15.12), else its socket's. It listens on `localhost` by default, both
  * loopbacks on one port. Each message is an envelope at most by default,
- * {@link MAXIMUM_MESSAGE_BYTES}, and `ws` closes a connection that sends a larger one with 1009.
+ * {@link MAXIMUM_MESSAGE_BYTES}, and `ws` fails a connection that sends a larger one with 1009:
+ * it reads on to the peer's close, or to `closeTimeout`, which it is given, and drops it then,
+ * reading nothing of the answer, so its close is unclean whatever the peer answers (spec 15.3).
  *
  * @example
  * const server = createWSTransportServer({ WebSocketServer });
@@ -308,18 +315,25 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         return true;
       };
 
-      // a connection behind its bounds is dropped, its close unclean, and reported first, naming
-      // the bound, so an operator tells it from a network that failed (RFC 6455 §7.1.7)
+      // what went wrong on each connection, its first alone, told as it closes: `ws` emits at most
+      // one error a socket, and a drop ends it
+      const failures = new WeakMap<IServerSocketLike, Error>();
+
+      const fail = (socket: IServerSocketLike, error: Error): void => {
+        if (!failures.has(socket)) {
+          failures.set(socket, error);
+        }
+      };
+
+      // ! a connection behind its bounds is dropped, its close unclean, then reported as it closes,
+      // naming the bound, so an operator tells it from a network that failed (RFC 6455 §7.1.7),
+      // and a listener that throws keeps it open no longer
       const drop = (
         { connectionHandle, socket }: ITransportServerClientAware<IServerSocketLike>,
         why: string
       ): void => {
         paces.get(socket)?.stop();
-        server.emit(
-          ERROR_EVENT,
-          new GenericError(`the client fell behind: ${why}`),
-          connectionHandle
-        );
+        fail(socket, new GenericError(`${connectionHandle} is dropped: ${why}`));
         socket.terminate();
       };
 
@@ -555,21 +569,38 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
           beating.answer();
         });
 
-        // a connection the registry no longer holds, which a stop cleared, tells no close of its own
+        // * its end: its one error, then its close, unclean once it failed, told even when a listener
+        // of `error` throws, which is Node's (spec 15.1); a stop's clear tells none
         socket.on(CLOSE_EVENT, (code) => {
           beating.stop();
           paces.get(socket)?.stop();
 
-          if (connections.get(connectionHandle) !== connection) {
-            return;
-          }
+          const failure = failures.get(socket);
 
-          connections.delete(connectionHandle);
-          tell(CLOSE_EVENT, [code === 1000, connectionHandle]);
+          try {
+            if (failure !== undefined) {
+              server.emit(ERROR_EVENT, failure, connectionHandle);
+            }
+          } finally {
+            if (connections.get(connectionHandle) === connection) {
+              connections.delete(connectionHandle);
+              tell(CLOSE_EVENT, [code === 1000 && failure === undefined, connectionHandle]);
+            }
+          }
         });
 
+        // ! `ws` fails the connection before it emits its error, and reads nothing more: a message
+        // past its bound is told as Bead's own, naming the bound and its value (spec 15.3)
         socket.on(ERROR_EVENT, (error) => {
-          server.emit(ERROR_EVENT, error, connectionHandle);
+          fail(
+            socket,
+            (error as NodeJS.ErrnoException).code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'
+              ? new GenericError(
+                  `${connectionHandle} is closed with 1009: a message past its maximumMessageBytes, ${String(maxPayload)} bytes`,
+                  { cause: error }
+                )
+              : error
+          );
         });
 
         socket.on(MESSAGE_EVENT, (data, isBinary) => {
@@ -639,7 +670,14 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
               );
               const listener: IListener = {
                 http,
-                instance: new WebSocketServer({ maxPayload, server: http }),
+                // ! its own close timer, which `ws` arms on every close, its 1009 among them: the
+                // transport's, so a peer that never answers is dropped after one bound; for
+                // `Infinity`, the longest a timer holds, which Node would take for 1 ms
+                instance: new WebSocketServer({
+                  closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
+                  maxPayload,
+                  server: http,
+                }),
                 stopServing: () => {
                   isServing = false;
                 },

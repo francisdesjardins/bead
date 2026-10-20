@@ -1464,11 +1464,39 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // what a server tells of a connection, in order, from the events a test listens to
+    private static (string Name, string ConnectionHandle)[] NamesOf(IEnumerable<(string Name, Exception? Reason, string ConnectionHandle)> events)
+    {
+        return [.. events.Select((told) =>
+        {
+            return (told.Name, told.ConnectionHandle);
+        })];
+    }
+
+    // what the server tells of its connections from now on: each error, and each close, clean or not
+    private ConcurrentQueue<(string Name, Exception? Reason, string ConnectionHandle)> Told()
+    {
+        var events = new ConcurrentQueue<(string Name, Exception? Reason, string ConnectionHandle)>();
+
+        _server.Error += (reason, connectionHandle) =>
+        {
+            events.Enqueue(("error", reason, connectionHandle));
+        };
+        _server.Close += (wasClean, connectionHandle) =>
+        {
+            events.Enqueue((wasClean ? "clean close" : "close", null, connectionHandle));
+        };
+
+        return events;
+    }
+
+    // spec 15.3
     [Fact]
-    public async Task Closes_with_1009_a_message_past_its_bound()
+    public async Task Fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_maximumMessageBytes_then_an_unclean_close_even_when_the_peer_answers_1000()
     {
         await Start(new WebSocketTransportServerOptions { MaximumMessageBytes = 64 });
 
+        var told = Told();
         var (client, connectionHandle) = await Connect();
 
         using (client)
@@ -1477,12 +1505,115 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             var (result, _) = await ReceiveOf(client);
 
-            Assert.Equal(WebSocketMessageType.Close, result.MessageType);
-            Assert.Equal(WebSocketCloseStatus.MessageTooBig, result.CloseStatus);
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.MessageTooBig), (result.MessageType, result.CloseStatus));
+            // ! the peer answers 1000, which the server does not read: the close is its own 1009's
             await client.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
-            Assert.Equal(connectionHandle, (await Next(_closes)).ConnectionHandle);
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+            // ! the fixture's close listener runs before this one: wait for this one's
+            await Until(() =>
+            {
+                return told.Count == 2;
+            });
+
+            Assert.Equal([("error", connectionHandle), ("close", connectionHandle)], NamesOf(told));
+            Assert.Equal(
+                $"{connectionHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes",
+                Assert.IsType<InvalidDataException>(told.First().Reason).Message);
             Assert.True(_messages.Reader.Count == 0);
         }
+    }
+
+    // spec 15.3
+    [Fact]
+    public async Task Fails_with_1009_a_peer_that_never_answers_telling_one_error_then_an_unclean_close_once_its_close_timeout_passed()
+    {
+        await Start(new WebSocketTransportServerOptions { MaximumMessageBytes = 64, CloseTimeout = TimeSpan.FromMilliseconds(200) });
+
+        var told = Told();
+        var (client, connectionHandle) = await Connect();
+
+        using (client)
+        {
+            var watch = Stopwatch.StartNew();
+
+            // it reads nothing more, so it never answers the 1009: dropped at the close timeout, 2 s
+            // well past the 200 ms asked, and well before the 5 s a close timeout left at its default
+            // would take
+            await client.SendAsync(new byte[100], WebSocketMessageType.Binary, true, Cancelled);
+
+            Assert.Equal((false, connectionHandle), await Next(_closes, TimeSpan.FromSeconds(2)));
+            Assert.True(watch.Elapsed >= TimeSpan.FromMilliseconds(150), $"closed after {watch.Elapsed}");
+            await Until(() =>
+            {
+                return told.Count == 2;
+            });
+
+            Assert.Equal([("error", connectionHandle), ("close", connectionHandle)], NamesOf(told));
+            Assert.Equal(
+                $"{connectionHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes",
+                Assert.IsType<InvalidDataException>(told.First().Reason).Message);
+        }
+    }
+
+    // spec 15.1
+    [Fact]
+    public async Task Closes_with_1009_and_drops_behind_maximumUnsentBytes_a_connection_whose_error_listener_throws_telling_its_close_all_the_same()
+    {
+        PausedWebSocket? paused = null;
+
+        await Start(new WebSocketTransportServer(new WebSocketTransportServerOptions { Heartbeat = Timeout.InfiniteTimeSpan, MaximumMessageBytes = 64, MaximumUnsentBytes = 65_536 })
+        {
+            Accepted = (socket, connectionHandle) =>
+            {
+                paused = new PausedWebSocket(socket);
+
+                return (paused, connectionHandle);
+            },
+        });
+
+        var reported = new ConcurrentQueue<string>();
+
+        _server.Error += (reason, _) =>
+        {
+            reported.Enqueue(reason.Message);
+
+            throw new InvalidOperationException("an error listener that throws");
+        };
+
+        var (tooBig, tooBigHandle) = await Connect();
+
+        using (tooBig)
+        {
+            await tooBig.SendAsync(new byte[100], WebSocketMessageType.Binary, true, Cancelled);
+
+            var (result, _) = await ReceiveOf(tooBig);
+
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.MessageTooBig), (result.MessageType, result.CloseStatus));
+            await tooBig.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            Assert.Equal((false, tooBigHandle), await Next(_closes));
+        }
+
+        var (behind, behindHandle) = await Connect();
+
+        using (behind)
+        {
+            paused!.Pause();
+
+            for (var sent = 0; sent < 8 && _server.ConnectionHandles.Contains(behindHandle); sent += 1)
+            {
+                _ = _server.Send(new TransportMessage(new byte[16_384], false), behindHandle);
+            }
+
+            Assert.Equal((false, behindHandle), await Next(_closes));
+        }
+
+        Assert.Equal(
+            [
+                $"{tooBigHandle} is closed with 1009: a message past its maximumMessageBytes, 64 bytes",
+                $"{behindHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes",
+            ],
+            reported);
+        Assert.Empty(_server.ConnectionHandles);
     }
 
     [Fact]
@@ -1510,10 +1641,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Drops_a_connection_that_never_answers_its_close_once_the_timeout_passed()
+    public async Task Drops_a_connection_that_never_answers_its_close_once_the_timeout_passed_telling_no_error()
     {
         await Start(new WebSocketTransportServerOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) });
 
+        var told = Told();
         var (client, connectionHandle) = await Connect();
 
         using (client)
@@ -1523,6 +1655,13 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             await _server.CloseConnection(connectionHandle).WaitAsync(TimeSpan.FromSeconds(2), Cancelled);
 
             Assert.Equal((false, connectionHandle), await Next(_closes, TimeSpan.FromSeconds(2)));
+            await Until(() =>
+            {
+                return !told.IsEmpty;
+            });
+
+            // its own abort, past its close timeout, is no error on the connection
+            Assert.Equal([("close", connectionHandle)], NamesOf(told));
         }
     }
 
@@ -2566,6 +2705,23 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
+    // docs/support.md, "A WebSocket server's close"
+    [Fact]
+    public async Task Tells_a_close_from_its_peer_with_no_status_code_as_its_platform_reads_it_clean_on_NET_which_reads_it_as_1000_unclean_on_ws_which_reads_1005()
+    {
+        var (tcp, status) = await Upgraded(UpgradeRequest());
+        var connectionHandle = await Next(_connections);
+
+        using (tcp)
+        {
+            Assert.Equal(101, status);
+            // a close frame with no body, masked as a client's is (RFC 6455 §5.2, §5.5.1)
+            await tcp.GetStream().WriteAsync(new byte[] { 0x88, 0x80, 0x01, 0x02, 0x03, 0x04 }, Cancelled);
+
+            Assert.Equal((true, connectionHandle), await Next(_closes));
+        }
+    }
+
     [Fact]
     public async Task Raises_connection_before_a_frame_that_arrived_with_the_upgrade_request()
     {
@@ -2852,6 +3008,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromSeconds(1) });
 
         // the first reads nothing, so it answers no ping; the second, always reading, answers each
+        var told = Told();
         var (silent, silentHandle) = await Connect();
         var (answering, answeringHandle) = await Connect();
 
@@ -2867,6 +3024,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal([answeringHandle], _server.ConnectionHandles);
             Assert.True(_closes.Reader.Count == 0);
             Assert.False(reading.IsCompleted);
+            // a peer the heartbeat dropped, gone without a word, is no error on its connection
+            Assert.Equal([("close", silentHandle)], NamesOf(told));
         }
     }
 
@@ -3099,7 +3258,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal(16, _server.Gauges().Counts["largestUnsentBytes"]);
             Assert.Equal((false, connectionHandle), await Next(_closes));
             Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
-            Assert.Contains(nameof(WebSocketTransportServerOptions.MinimumSendBytesPerSecond), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+            Assert.Equal(
+                $"{connectionHandle} is dropped: what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond 240 past sendGracePeriod 200 ms",
+                Assert.IsType<IOException>(Assert.Single(reported).Reason).Message);
             Assert.Empty(_server.ConnectionHandles);
         }
     }
@@ -3149,7 +3310,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             });
             Assert.Equal(65_536, samples.Max());
             Assert.Equal(connectionHandle, Assert.Single(reported).ConnectionHandle);
-            Assert.Contains(nameof(WebSocketTransportServerOptions.MaximumUnsentBytes), Assert.Single(reported).Reason.Message, StringComparison.Ordinal);
+            Assert.Equal(
+                $"{connectionHandle} is dropped: what waits for its socket would pass maximumUnsentBytes, 65536 bytes",
+                Assert.IsType<IOException>(Assert.Single(reported).Reason).Message);
         }
     }
 
