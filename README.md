@@ -342,19 +342,91 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 ## Measurement
 
-Each side measures the same four layers in the same units, run by hand on a quiet machine:
+Both sides measure the same four layers on the loopback. Run each bench separately on a quiet
+machine, with Node, the TypeScript dependencies and .NET installed. Both benches start the other
+side's interop server as the interop tests do: `interop/serve.ts` for TypeScript, and
+`dotnet run -c Release --project interop/Bead.Interop.Server` for C#. The server reports its
+WebSocket and HTTP ports and serves until its standard input closes. A launch failure fails the
+bench; every reported measure has every requested run.
 
-- `node implementations/typescript/tools/bench.mjs [--seconds 3] [--json]`;
-- `dotnet run -c Release --project implementations/dotnet/tools/Bead.Benchmarks -- --seconds 3`.
+From the root:
 
-The envelope codec, a request written and read back, and the `json` payload codec, a string
-encoded and decoded, at payloads of 0 B, 1 KiB and 64 KiB, in nanoseconds a round trip. A call:
-the interop service's `echo` of a JSON string over a WebSocket on the loopback, through each side's
-`json` codec, its latency one call at a time (p50, p95 and p99, in microseconds) and its throughput
-32 calls at a time, and on the C# side the bytes it allocates; a transfer, the same echo of 20 MiB,
-past one envelope. A number is its machine's, run's and runtime's: it compares one side with the
-other and a run with the same machine's earlier one, never one machine with another. A run of 3
-seconds warms the C# side's first payload less than one of 10.
+```sh
+node --expose-gc implementations/typescript/tools/bench.mjs --runs 3 --seconds 3 --json > typescript.json
+dotnet build -c Release implementations/dotnet/tools/Bead.Benchmarks
+dotnet run -c Release --no-build --project implementations/dotnet/tools/Bead.Benchmarks -- --runs 3 --seconds 3 --json > csharp.json
+node tools/bench-compare.mjs typescript.json csharp.json
+```
+
+`--runs` defaults to 3; `--seconds` defaults to 3 and bounds each timed phase of each run. Both
+require positive integers. Each codec warms for 5,000 round trips, each call payload for 500 calls,
+and each large echo for one call. Longer phases give the runtimes more time to warm. Without
+`--json`, the report prints its environment and method, then each measure's median, minimum and
+maximum. Progress goes to stderr; JSON alone goes to stdout.
+
+| Layer         | Measure                                                    | Unit and scope                                                                     |
+| ------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                     |
+| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                          |
+| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP and WebSocket            |
+| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                     |
+| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes |
+| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                |
+| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                |
+| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                             |
+
+Every call measure runs with client and server in the same process (`local`) and with the other
+language's interop server in a child process (`interop`), on each transport. The report's `side`
+names its client: `typescript` calls C# in `interop`, and `csharp` calls TypeScript. Codecs,
+notifications and large echoes run locally. The notification producer targets a 1 ms cadence,
+uses a credit window of 32 and gives every value its own place, with no replacement key. Its
+monotonic timestamp is taken immediately before notify; latency includes serialization, scheduling,
+transport and decoding. Timer resolution and load affect the cadence achieved. Every notification
+must reach the handler before the drain's 30 s deadline.
+
+A WebSocket carries the 20 MiB echo as protocol transfer chunks. HTTP carries each payload in one
+whole envelope, with a 32 MiB envelope and payload limit on both endpoints; HTTP supports no
+protocol transfer chunks. The large-echo rows compare the cost of moving the same application
+payload through each transport's supported framing.
+
+C# counts `GC.GetTotalAllocatedBytes(true)` around 2,000 calls: process-wide managed allocations,
+including transient allocations and unrelated background work. Node requires `--expose-gc` and
+reads V8's `used_heap_size` after a full GC at each end of the same loop. The signed difference per
+call estimates retained V8 heap growth; it does **not** count total allocated bytes, transient
+objects collected during the loop, external buffers or native allocations. Negative values reflect
+heap reclamation. Both methods include client and server in `local`, and only the client process
+in `interop`; neither counts the remote server. The two memory methods measure different
+quantities, so their byte values do not support an allocation comparison across runtimes.
+
+Both JSON reports use `bead-bench/1`:
+
+- `side`: `typescript` or `csharp`;
+- `environment`: CPU model and logical count, OS platform/release/architecture, Node and V8
+  versions, .NET version information, and the measured Git commit;
+- `method`: runs, seconds per phase, concurrency, notification interval/window, memory call count,
+  the memory method/scope/limitations, and the large-echo and interop scopes;
+- `measures`: rows with `id`, `name`, `scenario`, `transport`, `sizeBytes`, `unit`, `direction`, raw
+  `samples` in run order, and their `median`, `min` and `max`. An even run count averages the two
+  central samples. The ID is `<scenario>.<transport>.<sizeBytes>.<name>`; codecs use transport
+  `none`. Latency, codec time and memory use direction `lower`; throughputs use `higher`.
+
+The comparison matches IDs, checks units, directions, samples and statistics, and requires the
+same measurement set. It prints the candidate median's change relative to the baseline median's
+absolute value: positive means a larger value. A zero baseline gives an unbounded change unless
+both values are zero. It also identifies different memory methods. Every number belongs to its
+machine, runtime, method and run; compare on the same machine and inspect the spread.
+
+```sh
+node tools/bench-compare.mjs baseline.json candidate.json --threshold 25%
+node tools/bench-compare.mjs baseline.json candidate.json --threshold 25% --threshold call.p99=15% --threshold local.http.1024.call.p99=10%
+```
+
+A threshold tests regression: an increase for `lower`, a decrease for `higher`. An exact ID takes
+precedence over a measure name, which takes precedence over the default percentage. Repeat
+`--threshold` for distinct selectors. Equality passes; a regression strictly past its threshold
+exits 1. Without thresholds the tool prints a comparison and exits 0; invalid reports, incompatible
+measurement sets and selectors that match nothing exit 2. These commands run by hand; CI has no
+performance guard.
 
 ## Support
 

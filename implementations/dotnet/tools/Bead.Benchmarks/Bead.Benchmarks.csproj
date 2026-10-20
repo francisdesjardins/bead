@@ -1,8 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The C# side's measurement, the TypeScript side's tools/bench.mjs in the same units: the
-       envelope codec, the json payload codec, a call over a WebSocket on the loopback and a
-       transfer. It stays outside Bead.slnx, run
-       by hand with `dotnet run -c Release`, and builds under this side's gates all the same. -->
+  <!-- Loopback measurements, in the TypeScript bench's units, outside Bead.slnx. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Bead.Benchmarks</RootNamespace>
@@ -11,6 +8,7 @@
 
   <ItemGroup>
     <Compile Include="../../tests/Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
+    <ProjectReference Include="../../src/Bead.Transport.Http/Bead.Transport.Http.csproj" />
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
   </ItemGroup>
