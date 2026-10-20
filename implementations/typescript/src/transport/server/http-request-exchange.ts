@@ -252,7 +252,8 @@ export const createHTTPRequestExchange = <Connection>(
             endEarly({ reason: REFUSALS.TOO_SLOW, status: 408 });
           }
         },
-        Math.max(0, due - clock.performance.now())
+        // ! a millisecond at least, counted whole: Bead arms no timer for less (decision 0011)
+        Math.max(1, Math.ceil(due - clock.performance.now()))
       );
       // a browser's timer has no `unref`
       (slow as { unref?: () => unknown }).unref?.();
