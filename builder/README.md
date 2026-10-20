@@ -34,7 +34,7 @@ node src/cli.ts blueprint --check ../spec/interop-blueprint.json
 
 | Script               | What it runs                                                                                                                                                                                                                                                                                        |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `yarn type-check`    | TypeScript 7 over `src/`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them, against `@bufbuild/protobuf`'s pin and its floor                                                                                |
+| `yarn type-check`    | TypeScript 7 over `src/` and the fuzz target, `tools/fuzz/blueprint.ts`, under the TypeScript side's strictness and Node's module system, `nodenext`; then over the target's goldens, as a consumer compiles them, against `@bufbuild/protobuf`'s pin and its floor                                 |
 | `yarn lint`          | oxlint, type-aware, the TypeScript side's lint surface by reference                                                                                                                                                                                                                                 |
 | `yarn format:check`  | oxfmt, the TypeScript side's options, copied                                                                                                                                                                                                                                                        |
 | `yarn buf:lint`      | `buf lint` over [`buf.yaml`](buf.yaml)'s modules: `proto/`, `test/fixtures/` and `test/messages/`                                                                                                                                                                                                   |
@@ -57,6 +57,11 @@ yarn install --immutable
 
 An upgrade moves both projects in one change: the descriptor in both `package.json`, then each
 lock, the builder's resolution set again to the TypeScript side's locked version.
+
+**The blueprint reader is fuzzed by hand**, guided by coverage, from
+[`tools/fuzz/`](tools/fuzz/blueprint.ts), a Yarn project of its own that `yarn install` there
+installs, so neither this project's install nor CI fetches Jazzer.js; the root's `tools/fuzz.mjs`
+seeds, bundles and runs it ([the root README](../README.md#fuzzing), Fuzzing).
 
 **protoc is pinned by [`protoc.json`](protoc.json)**: its version, 36.2, the oldest Google.Protobuf
 the C# it writes runs on, 3.36.2, the runtime its release pairs it with, and each release archive's

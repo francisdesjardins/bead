@@ -158,6 +158,8 @@ public sealed class WebSocketHandshakeTests
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,,chat"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Protocol: bead,"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 5"]),
+        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: abc"]),
+        (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Content-Length: 0", "Content-Length: 5"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Transfer-Encoding: chunked"]),
         (400, WebSocketRefusals.Malformed, "GET / HTTP/1.1", ["Sec-WebSocket-Key: dGVzdA==", "Origin: https://elsewhere.test"]),
 

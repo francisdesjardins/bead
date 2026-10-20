@@ -43,6 +43,8 @@
     // a consumer's every use of what the goldens mark, which the target's test lints apart with
     // `typescript/no-deprecated` alone, each report the one its line is meant to get
     "test/consumer/**",
+    // the bundle of the fuzz target, which tools/fuzz.mjs at the root writes for Jazzer.js
+    "tools/fuzz/.build/**",
     ".yarn/**"
   ]
 }

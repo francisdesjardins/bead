@@ -443,16 +443,25 @@ fixed.
 
 ## Fuzzing
 
-Both sides fuzz the same four parsers, guided by coverage, each fed raw bytes: `envelope`, the
+Both sides fuzz the same six parsers, guided by coverage, each fed raw bytes: `envelope`, the
 envelope reader, header and body, and a failure's record; `payload-codecs`, the `json` and `text`
 codecs' readers, what they read written back; `http-fields`, the HTTP transport's field parsers,
 an Item of RFC 9651 for the `Bead-*` fields, `Authorization`, `X-Forwarded-For`, the target and its
 `Host`, and `Origin`, the first byte picking the field; `debug-filter`, the `debug` filter's
-parser and the patterns of the filter it returns. A target lets its parser's documented refusal
-pass; any other exception, an input past 1 s, or memory past 256 MiB of its own is a finding. The
-TypeScript side runs [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) over
+parser and the patterns of the filter it returns; `jwt`, the JWT verifier of section 13.8, over a
+token one octet a character, as the header carries it, verified as it came and again signed with
+the HS256 key it may name, under the keys, audiences and clock of `spec/vectors.json`'s verdicts;
+`ws-handshake`, the WebSocket transport's judgement of an upgrade before its 101 (spec 15.2), the
+first byte picking the whole head, its request line or one field of RFC 6455's handshake that the
+rest replaces. The TypeScript side fuzzes a seventh, `blueprint`, beadc's blueprint reader, its
+JSON, its schema and its rules, and its form written back and read again; beadc has no C# side, so
+it has no twin. A target lets its parser's documented refusal pass; any other exception, an input
+past 1 s, or memory past 256 MiB of its own is a finding. The TypeScript side runs
+[Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js) over
 `implementations/typescript/tools/fuzz/`, a Yarn project of its own, installed by hand, which
-neither the package's install nor CI fetches. The C# side runs
+neither the package's install nor CI fetches; `blueprint` runs from `builder/tools/fuzz/`, beadc's
+alike, since beadc's code imports its own `.ts` files as Node runs them, which the TypeScript
+side's type-check refuses. The C# side runs
 [SharpFuzz](https://github.com/Metalnem/sharpfuzz) and libFuzzer for Windows,
 [libfuzzer-dotnet](https://github.com/Metalnem/libfuzzer-dotnet), over
 `implementations/dotnet/tools/Bead.Fuzz`, whose fuzzer `tools/fuzz/fuzzer.json` pins by its release
@@ -462,6 +471,7 @@ From the root, once, then after every change to what a target reads:
 
 ```sh
 (cd implementations/typescript/tools/fuzz && yarn install)
+(cd builder/tools/fuzz && yarn install)
 node tools/fuzz.mjs fetch
 node tools/fuzz.mjs seed
 node tools/fuzz.mjs build typescript
@@ -470,15 +480,19 @@ node tools/fuzz.mjs build csharp
 
 `fetch` writes the fuzzer and SharpFuzz's instrumenter into `Bead.Fuzz/.fuzzer/`; `seed` writes the
 bytes of `spec/vectors.json`, `conversations.json`, `transports.json`, `codecs.json` and
-`debug-filters.json` into each side's `corpus/<target>/`; `build csharp` publishes `Bead.Fuzz` and
-instruments its copy of `Bead.Core`. Then, for ten minutes:
+`debug-filters.json` into each side's `corpus/<target>/`, and the repository's blueprints, with
+each case of `builder/test/blueprints/` applied to the interop's, into `builder/tools/fuzz/`'s;
+`build typescript` bundles both folders' targets with the TypeScript side's esbuild, so it wants
+`yarn install` done in `implementations/typescript` and in `builder`; `build csharp` publishes
+`Bead.Fuzz` and instruments its copies of `Bead.Core` and `Bead.Transport.WebSockets`. Then, for
+ten minutes:
 
 ```sh
 node tools/fuzz.mjs run typescript envelope -- -max_total_time=600
 node tools/fuzz.mjs run csharp envelope -- -max_total_time=600
 ```
 
-A run grows its side's `corpus/<target>/` and writes a finding to `findings/<target>/`, as
+A run grows its target's `corpus/<target>/` and writes a finding to `findings/<target>/`, as
 `crash-`, `timeout-` or `oom-` and the input's SHA-1; git ignores both folders. The run prints the
 finding's exception and its stack. Given files in place of the corpus, a run reads each once, on
 either side, so a finding replays on its own side and on the other:
@@ -489,7 +503,8 @@ node tools/fuzz.mjs run typescript http-fields implementations/dotnet/tools/Bead
 node tools/fuzz.mjs run csharp http-fields <finding> -- -minimize_crash=1 -runs=10000
 ```
 
-On the C# side, libFuzzer's `cov` counts its own driver's edges; Bead.Core's coverage is its `ft`.
+On the C# side, libFuzzer's `cov` counts its own driver's edges; the instrumented assemblies'
+coverage is its `ft`.
 Node and Jazzer.js hold about 220 MiB before the first input, so the TypeScript side's process limit
 is 512 MiB; the C# side's runtime holds its managed heap to 256 MiB. A finding becomes a case of the
 side's envelope fuzz test, or of its parser's own test file, its input in hexadecimal.
