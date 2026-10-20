@@ -54,10 +54,18 @@ test.describe('createRouterCore', () => {
       const { port } = createPort();
 
       for (const [limits, rule] of [
+        [{ windowBytes: 0 }, /^windowBytes is a whole number above 0, not 0$/],
+        [{ maximumTransfers: -1 }, /^maximumTransfers is a whole number, not -1$/],
+        [{ maximumDetailBytes: -1 }, /^maximumDetailBytes is a whole number, not -1$/],
         [{ chunkBytes: 63, maximumEnvelopeBytes: 63 }, /an envelope is 64 bytes at least/],
         [{ chunkBytes: 63 }, /a chunk's envelope is 64 bytes at least/],
+        [{ chunkBytes: 1_024, maximumEnvelopeBytes: 1_023 }, /and an envelope at most/],
         [{ chunkBytes: 2_049, maximumEnvelopeBytes: 2_048 }, /and an envelope at most/],
         [{ windowBytes: 2 * 1_048_576 - 1 }, /a window holds two chunks at least/],
+        [
+          { bufferedBytesBudget: LIMIT_DEFAULTS.maximumPayloadBytes - 1 },
+          /a payload fits in the budget/,
+        ],
         [{ maximumPayloadBytes: 268_435_457 }, /a payload fits in the budget/],
       ] as const) {
         expect(() => {
@@ -72,6 +80,17 @@ test.describe('createRouterCore', () => {
             chunkBytes: 64,
             maximumEnvelopeBytes: 64,
             maximumPayloadBytes: 268_435_456,
+            transferInactivityTimeout: 2 ** 31 - 1,
+            windowBytes: 128,
+          },
+        });
+        using _withoutTransfers = createRouterCore(port, {
+          limits: {
+            bufferedBytesBudget: LIMIT_DEFAULTS.maximumPayloadBytes,
+            chunkBytes: 64,
+            maximumDetailBytes: 0,
+            maximumEnvelopeBytes: 64,
+            maximumTransfers: 0,
             transferInactivityTimeout: 2 ** 31 - 1,
             windowBytes: 128,
           },
