@@ -17,6 +17,8 @@
          the defaults gate reads the bound a server takes when told none -->
     <InternalsVisibleTo Include="Bead.Transport.WebSockets.Tests" />
     <InternalsVisibleTo Include="Bead.Transport.Http.Tests" />
+    <!-- the fuzz target judges an upgrade as the server does, before its 101 -->
+    <InternalsVisibleTo Include="Bead.Fuzz" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15,7 +15,7 @@
     <InternalsVisibleTo Include="Bead.Transport.WebSockets" />
     <!-- the interop service holds a duration a payload gives as every place of this side does -->
     <InternalsVisibleTo Include="Bead.Interop" />
-    <!-- the fuzz targets read the HTTP fields where the transports' parsers are: here -->
+    <!-- the fuzz targets read the parsers held here, the transports' fields and the JWT verifier among them -->
     <InternalsVisibleTo Include="Bead.Fuzz" />
   </ItemGroup>
 

@@ -13,6 +13,12 @@
     "lib": ["ES2024"],
     "types": ["node"]
   },
-  "include": ["src/**/*", "playwright.config.ts"],
+  "include": [
+    "src/**/*",
+    // the fuzz target, which imports nothing of Jazzer.js: type-checked with the code it reads,
+    // though Jazzer.js is installed apart, by hand (tools/fuzz/package.json)
+    "tools/fuzz/*.ts",
+    "playwright.config.ts"
+  ],
   "exclude": ["node_modules"]
 }

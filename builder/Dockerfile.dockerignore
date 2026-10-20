@@ -13,3 +13,8 @@
 builder/.protoc
 builder/.yarn/*
 !builder/.yarn/releases
+# what tools/fuzz.mjs at the root writes beside the blueprint's fuzz target, by hand
+builder/tools/fuzz/corpus
+builder/tools/fuzz/findings
+builder/tools/fuzz/.build
+builder/tools/fuzz/.yarn

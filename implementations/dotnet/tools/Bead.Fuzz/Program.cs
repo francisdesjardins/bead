@@ -5,7 +5,7 @@ using Bead.Fuzz;
 // its child, once SharpFuzz has instrumented Bead.Core beside it: tools/fuzz.mjs at the root does
 // both, and says how to read what it finds.
 
-IFuzzTarget[] targets = [new EnvelopeTarget(), new PayloadCodecsTarget(), new HttpFieldsTarget(), new DebugFilterTarget()];
+IFuzzTarget[] targets = [new EnvelopeTarget(), new PayloadCodecsTarget(), new HttpFieldsTarget(), new DebugFilterTarget(), new JwtTarget(), new WsHandshakeTarget()];
 var target = targets.FirstOrDefault((each) =>
 {
     return args.Length > 0 && each.Name == args[0];
