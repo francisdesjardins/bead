@@ -3298,8 +3298,18 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await wire.Write($"GET /else HTTP/1.1\r\nHost: {Host}\r\n\r\n");
         await wire.Read();
 
+        // the timers still armed: its body's pace, armed while its body came apart from its head,
+        // went once it was whole
+        var armed = _time.Armed.Skip(before).Where((timer) =>
+        {
+            return !timer.IsCleared;
+        }).Select((timer) =>
+        {
+            return timer.Delay;
+        });
+
         Assert.Equal(204, cancel.Status);
-        Assert.Equal([Burial], DelaysSince(before));
+        Assert.Equal([Burial], armed);
         Assert.False(held.IsCompleted);
     }
 
