@@ -2621,6 +2621,7 @@ test.describe('createRouterCore', () => {
 
       await expect(asking).rejects.toMatchObject({
         code: ProtocolCode.CHUNK_INVALID,
+        origin: 'local',
         side: 'server',
       });
       expect(answersOf(sent)).toEqual([
@@ -2638,6 +2639,83 @@ test.describe('createRouterCore', () => {
         [ProtocolCode.ENVELOPE_MALFORMED, 'a'],
         [ProtocolCode.CHUNK_INVALID, 'a'],
       ]);
+      expect(
+        seen.map(({ header, payload: bytes }) => {
+          return [header.callId, header.total, bytes];
+        })
+      ).toEqual([[3, 60, payload.subarray(0, 60)]]);
+
+      // a chunk whose offset is above the largest safe integer does not read either
+      const unreadableOf = (callId: number) => {
+        return fromHexadecimal(
+          `A1 14 40 04  00 00 00 0${String(callId)}  00 20 00 00 00 00 00 00  01`
+        );
+      };
+      const client = createPort({ failures: CLIENT_FAILURES });
+      using clientCore = createRouterCore(client.port, { limits });
+      const asked = clientCore.request(Uint8Array.of(1), {
+        connectionHandle: 'a',
+        options: { timeout: 5_000 },
+        procedure: echo,
+      });
+
+      await sleep(0);
+      clientCore.receive(resultOpeningOf(1, { payload: patternOf(32), total: 300 }), 'a');
+      clientCore.receive(unreadableOf(1), 'a');
+      await expect(asked).rejects.toMatchObject({
+        code: ProtocolCode.CHUNK_INVALID,
+        origin: 'local',
+        side: 'client',
+      });
+      expect(answersOf(client.sent)).toEqual([
+        ['a', EnvelopeKind.REQUEST, 1],
+        ['a', 'credit', 1, 160],
+        ['a', EnvelopeKind.CANCEL, 1],
+      ]);
+
+      clientCore.receive(unreadableOf(1), 'a');
+      expect(client.reported).toEqual([]);
+      clientCore.receive(unreadableOf(5), 'a');
+      expect(codesOf(client.reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+
+      const server = createPort();
+      using serverCore = createRouterCore(server.port, { limits });
+      const received: IRequestResolverProps<Handle>[] = [];
+      const whole = patternOf(100);
+
+      serverCore.registerResolver(resolverOf(echo, received));
+      serverCore.receive(requestOf(1, { payload: whole.subarray(0, 44), total: 100 }), 'a');
+      serverCore.receive(
+        chunkOf(1, { offset: 44, payload: whole.subarray(44, 92), total: 100 }),
+        'a'
+      );
+      serverCore.receive(chunkOf(1, { offset: 92, payload: whole.subarray(92), total: 100 }), 'a');
+      serverCore.receive(unreadableOf(1), 'a');
+      expect(codesOf(server.reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+      serverCore.receive(requestOf(3, { payload: whole.subarray(0, 44), total: 100 }), 'a');
+      serverCore.receive(
+        chunkOf(3, { offset: 44, payload: whole.subarray(44, 64), total: 100 }),
+        'a'
+      );
+      serverCore.receive(unreadableOf(3), 'a');
+      expect(codesOf(server.reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+      serverCore.receive(unreadableOf(5), 'a');
+      await sleep(0);
+
+      expect(codesOf(server.reported)).toEqual([
+        [ProtocolCode.ENVELOPE_MALFORMED, 'a'],
+        [ProtocolCode.ENVELOPE_MALFORMED, 'a'],
+      ]);
+      expect(answersOf(server.sent)).toEqual([
+        ['a', 'credit', 1, 100],
+        ['a', 'credit', 3, 100],
+        ['a', 'failure', 3, ProtocolCode.CHUNK_INVALID],
+      ]);
+      expect(
+        received.map(({ header, payload: bytes }) => {
+          return [header.callId, bytes];
+        })
+      ).toEqual([[1, whole]]);
     });
 
     test('end a transfer nothing comes for: a request’s with a failure, a result’s with a timeout', async () => {
@@ -2911,25 +2989,40 @@ test.describe('createRouterCore', () => {
     });
 
     test('stop a result the peer cancels, and send nothing more of it, whatever credit comes', async () => {
-      const answering = createAnswering();
-      using core = answering.core;
-      const { reported, seen, sent } = answering;
+      for (const [total, initialCredit] of [
+        [100, undefined],
+        [150, 80],
+      ] as const) {
+        const answering = createAnswering();
+        using core = answering.core;
+        const { reported, seen, sent } = answering;
 
-      core.receive(requestOf(1), 'a');
+        core.receive(
+          requestOf(1, { payload: total === 100 ? Uint8Array.of(1) : new Uint8Array(0) }),
+          'a'
+        );
 
-      const responding = answerOf(answering, { payload: patternOf(150) });
+        const responding = answerOf(answering, { payload: patternOf(total) });
 
-      core.receive(creditOf(1, 80), 'a');
-      core.receive(cancelOf(1), 'a');
-      core.receive(creditOf(1, 150), 'a');
+        if (initialCredit !== undefined) {
+          core.receive(creditOf(1, initialCredit), 'a');
+        }
+        core.receive(cancelOf(1), 'a');
+        core.receive(creditOf(1, total), 'a');
 
-      await expect(responding).rejects.toBeInstanceOf(CancelError);
-      expect(seen[0]?.signal.aborted).toBe(true);
-      expect(piecesOf(sent)).toEqual([
-        [EnvelopeKind.RESULT, 1, 150, 28],
-        [EnvelopeKind.CHUNK, 1, 28, 48],
-      ]);
-      expect(reported).toEqual([]);
+        await expect(responding).rejects.toBeInstanceOf(CancelError);
+        expect(seen[0]?.signal.aborted).toBe(true);
+        expect(piecesOf(sent)).toEqual([
+          [EnvelopeKind.RESULT, 1, total, 28],
+          ...(initialCredit === undefined ? [] : [[EnvelopeKind.CHUNK, 1, 28, 48]]),
+        ]);
+        expect(payloadOf(sent, 1)).toEqual(
+          new Uint8Array(total).map((_, index) => {
+            return index < (initialCredit === undefined ? 28 : 76) ? (index * 7 + 3) % 256 : 0;
+          })
+        );
+        expect(reported).toEqual([]);
+      }
     });
 
     test('keep a result going that its resolver failed behind, a second answer going nowhere, until the peer cancels it', async () => {

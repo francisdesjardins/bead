@@ -395,21 +395,54 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Stops_a_result_the_peer_cancels_and_sends_nothing_more_of_it_whatever_credit_comes()
     {
-        var server = new Peer(RouterSide.Server);
-        var resolver = server.Resolve();
-
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-
-        var answered = resolver.Answer(0, PatternOf(100));
-
-        await server.Settle();
-        await server.Deliver(new Envelope { Header = new CancelHeader { CallId = 1 } });
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        foreach (var (total, initialCredit) in new (int Total, int? InitialCredit)[] { (100, null), (150, 80) })
         {
-            return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        await server.Deliver(CreditOf(1, 100));
-        Assert.Empty(ChunksOf(server.Sent));
+            var server = new Peer(RouterSide.Server, Chunked with
+            {
+                BufferedBytesBudget = 1_024,
+                MaximumEnvelopeBytes = 64,
+                MaximumPayloadBytes = 1_024,
+                TransferInactivityTimeout = TimeSpan.FromSeconds(30),
+            });
+            using var core = server.Core;
+            var resolver = server.Resolve();
+
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = total == 100 ? new byte[] { 1 } : ReadOnlyMemory<byte>.Empty });
+
+            var payload = Enumerable.Range(0, total).Select((index) =>
+            {
+                return (byte)(((index * 7) + 3) % 256);
+            }).ToArray();
+            var answered = resolver.Answer(0, payload);
+
+            await server.Settle();
+            if (initialCredit is { } credit)
+            {
+                await server.Deliver(CreditOf(1, credit));
+            }
+            await server.Deliver(new Envelope { Header = new CancelHeader { CallId = 1 } });
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+            Assert.True(answered.IsCanceled);
+            Assert.True(Assert.Single(resolver.Requests).Signal.IsCancellationRequested);
+            await server.Deliver(CreditOf(1, total));
+            Assert.Equal(new ResultHeader { CallId = 1, Total = total }, server.Sent[0].Header);
+            Assert.Equal(payload[..28], server.Sent[0].Payload.ToArray());
+            if (initialCredit is null)
+            {
+                Assert.Single(server.Sent);
+                Assert.Empty(ChunksOf(server.Sent));
+            }
+            else
+            {
+                Assert.Equal(2, server.Sent.Count);
+                Assert.Equal([(28L, false)], ChunksOf(server.Sent));
+                Assert.Equal(payload[28..76], server.Sent[1].Payload.ToArray());
+            }
+            Assert.Empty(server.Reports);
+        }
     }
 
     [Fact]
@@ -534,14 +567,88 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Ends_the_transfer_a_chunk_that_does_not_read_was_for_but_where_it_is_late_or_its_payload_whole()
     {
-        // an offset of 2⁵³, past what a 64-bit field holds
+        static byte[] BytesOf(int length)
+        {
+            return Enumerable.Range(0, length).Select((index) =>
+            {
+                return (byte)(((index * 7) + 3) % 256);
+            }).ToArray();
+        }
+
+        static (EnvelopeKind Kind, uint CallId, long Value)[] TrafficOf(Peer peer)
+        {
+            return [.. peer.Sent.Select((envelope) =>
+            {
+                var value = envelope.Header is CreditHeader credit ? credit.CreditEnd : envelope.Failure?.Code ?? 0;
+
+                return (envelope.Header.Kind, envelope.Header.CallId, value);
+            })];
+        }
+
+        var limits = Chunked with
+        {
+            BufferedBytesBudget = 1_024,
+            MaximumEnvelopeBytes = 64,
+            MaximumPayloadBytes = 1_024,
+            TransferInactivityTimeout = TimeSpan.FromSeconds(30),
+        };
+        var simultaneous = new Peer(RouterSide.Server, limits);
+        using var simultaneousCore = simultaneous.Core;
+        var resolver = simultaneous.Resolve();
+        var bytes = BytesOf(200);
+        var asking = simultaneous.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
+
+        await simultaneous.Settle();
+        await simultaneous.Deliver(RequestOpeningOf(1, (bytes, 40)));
+        await simultaneous.Deliver(ResultOpeningOf(2, (bytes, 32)));
+        await simultaneous.Deliver(RequestOpeningOf(3, (bytes[..60], 40)));
+        await simultaneous.Deliver(ChunkOf(3, (bytes[..60], 40, 20)));
+
+        foreach (var callId in new[] { 1, 1, 2, 2, 3, 5 })
+        {
+            await simultaneous.Deliver($"A1 14 00 04  00 00 00 0{callId}  00 00 00 00 00 00 00 00");
+        }
+
+        await simultaneous.Deliver("A1 15 00 04  00 00 00 01  00 00 00 00 00 00 00 08  01");
+        await simultaneous.Deliver(new Envelope
+        {
+            Header = new ChunkHeader { CallId = 3, IsLast = false, Offset = 50 },
+            Payload = new byte[20],
+        });
+        await resolver.Answer(0, new byte[] { 9 });
+
+        var broken = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
+        });
+
+        Assert.Equal(((ushort)ProtocolCode.ChunkInvalid, RouterSide.Server), (broken.Code, broken.Side));
+        Assert.Equal(FailureOrigin.Local, broken.Origin);
+        Assert.Equal(
+            [(EnvelopeKind.Request, 2u, 0L), (EnvelopeKind.Credit, 1u, 168L), (EnvelopeKind.Credit, 2u, 160L),
+                (EnvelopeKind.Credit, 3u, 60L), (EnvelopeKind.Failure, 1u, (long)ProtocolCode.ChunkInvalid),
+                (EnvelopeKind.Cancel, 2u, 0L), (EnvelopeKind.Result, 3u, 0L)],
+            TrafficOf(simultaneous));
+        Assert.Equal(new byte[] { 9 }, simultaneous.Sent[^1].Payload.ToArray());
+        Assert.Equal(
+            [(ushort)ProtocolCode.EnvelopeMalformed, (ushort)ProtocolCode.EnvelopeMalformed,
+                (ushort)ProtocolCode.EnvelopeMalformed, (ushort)ProtocolCode.ChunkInvalid],
+            simultaneous.Reports.Select(CodeOf));
+        Assert.Equal([Handle, Handle, Handle, Handle], simultaneous.ReportedOn);
+        var dispatched = Assert.Single(resolver.Requests);
+
+        Assert.Equal((3u, 60L), (dispatched.Header.CallId, dispatched.Header.Total));
+        Assert.Equal(bytes[..60], dispatched.Payload.ToArray());
+
+        // an offset of 2⁵³, above the largest safe integer
         const string Unreadable = "A1 14 40 04  00 00 00 01  00 20 00 00 00 00 00 00 | 01";
 
-        var client = new Peer(RouterSide.Client);
+        var client = new Peer(RouterSide.Client, limits);
+        using var clientCore = client.Core;
         var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
 
         await client.Settle();
-        await client.Deliver(ResultOpeningOf(1, (PatternOf(300), 32)));
+        await client.Deliver(ResultOpeningOf(1, (BytesOf(300), 32)));
         await client.Deliver(Unreadable);
 
         var invalid = await Assert.ThrowsAsync<FailureException>(() =>
@@ -550,19 +657,26 @@ public sealed partial class RouterCoreTests
         });
 
         Assert.Equal(((ushort)ProtocolCode.ChunkInvalid, FailureOrigin.Local), (invalid.Code, invalid.Origin));
+        Assert.Equal(RouterSide.Client, invalid.Side);
         Assert.IsType<CancelHeader>(client.Sent[^1].Header);
+        Assert.Equal(
+            [(EnvelopeKind.Request, 1u, 0L), (EnvelopeKind.Credit, 1u, 160L), (EnvelopeKind.Cancel, 1u, 0L)],
+            TrafficOf(client));
 
         // late, on its call id reserved; on a call id of its own it never opened, reported
         await client.Deliver(Unreadable);
         Assert.Empty(client.Reports);
         await client.Deliver("A1 14 40 04  00 00 00 05  00 20 00 00 00 00 00 00 | 01");
         Assert.Single(client.Reports);
+        Assert.Equal([(ushort)ProtocolCode.EnvelopeMalformed], client.Reports.Select(CodeOf));
+        Assert.Equal([Handle], client.ReportedOn);
 
         // on a call whose payload came whole: reported; on one abandoned: dropped; on none: reported
-        var server = new Peer(RouterSide.Server);
-        var payload = PatternOf(100);
+        var server = new Peer(RouterSide.Server, limits);
+        using var serverCore = server.Core;
+        var payload = BytesOf(100);
 
-        server.Resolve();
+        var received = server.Resolve();
         await server.Deliver(RequestOpeningOf(1, (payload, 44)));
         await server.Deliver(ChunkOf(1, (payload, 44, 48)));
         await server.Deliver(ChunkOf(1, (payload, 92, 8)));
@@ -574,6 +688,13 @@ public sealed partial class RouterCoreTests
         Assert.Single(server.Reports);
         await server.Deliver("A1 14 40 04  00 00 00 05  00 20 00 00 00 00 00 00 | 01");
         Assert.Equal(2, server.Reports.Count);
+        Assert.Equal([(ushort)ProtocolCode.EnvelopeMalformed, (ushort)ProtocolCode.EnvelopeMalformed], server.Reports.Select(CodeOf));
+        Assert.Equal([Handle, Handle], server.ReportedOn);
+        Assert.Equal(
+            [(EnvelopeKind.Credit, 1u, 100L), (EnvelopeKind.Credit, 3u, 100L), (EnvelopeKind.Failure, 3u, (long)ProtocolCode.ChunkInvalid)],
+            TrafficOf(server));
+        Assert.Equal(1u, Assert.Single(received.Requests).Header.CallId);
+        Assert.Equal(payload, received.Requests[0].Payload.ToArray());
     }
 
     [Fact]
