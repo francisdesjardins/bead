@@ -950,7 +950,9 @@ test.describe('createServiceManager', () => {
         expect(() => {
           return manager.getNotification(paced, { serializer, window: 1 });
         }).toThrow(
-          new ProgrammerError(`2/${String(pacedId)} is already a notification with window 4, not 1`)
+          new ProgrammerError(
+            `2/${String(pacedId)} is already a notification with window 4, not window 1`
+          )
         );
         expect(() => {
           return manager.getNotification(paced, { serializer });
@@ -966,7 +968,7 @@ test.describe('createServiceManager', () => {
           return manager.getNotification(unpacedProcedure, { serializer, window: 1 });
         }).toThrow(
           new ProgrammerError(
-            `2/${String(unpacedId)} is already a notification with window undefined, not 1`
+            `2/${String(unpacedId)} is already a notification with no window, not window 1`
           )
         );
       }
