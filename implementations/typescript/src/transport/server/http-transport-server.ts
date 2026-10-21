@@ -59,6 +59,7 @@ import { createHTTPRequestExchange, type IExchange } from './http-request-exchan
 import {
   authorityNamedBy,
   countOf,
+  closingOf,
   endClosing,
   endWith,
   ENVELOPE_KINDS,
@@ -1305,6 +1306,7 @@ export const createHTTPTransportServer = (
             if (!response.headersSent) {
               response.writeHead(200, {
                 ...RESPONSE_HEADERS,
+                ...closingOf(exchange),
                 'content-length': String(bytes.length),
                 'content-type': BEAD_MEDIA_TYPE,
               });
