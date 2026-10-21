@@ -1,4 +1,5 @@
 using Bead.Tests;
+using Bead.Transcoding.Http;
 using Bead.Transport.WebSockets;
 
 namespace Bead.Transport.Http.Tests;
@@ -93,14 +94,17 @@ public sealed partial class DurationsTests
         ["httpTransportServer.sendGracePeriod"] = (nameof(HttpTransportServerOptions.SendGracePeriod), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.SendGracePeriod), SendGracePeriodByHttpOptions),
+            ["gateway"] = new(nameof(HttpGatewayOptions.SendGracePeriod), SendGracePeriodByGateway),
         }),
         ["httpTransportServer.headersTimeout"] = (nameof(HttpTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.HeadersTimeout), HeadersTimeoutByHttpOptions),
+            ["gateway"] = new(nameof(HttpGatewayOptions.HeadersTimeout), HeadersTimeoutByGateway),
         }),
         ["httpTransportServer.bodyGracePeriod"] = (nameof(HttpTransportServerOptions.BodyGracePeriod), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
+            ["gateway"] = new(nameof(HttpGatewayOptions.BodyGracePeriod), BodyGracePeriodByGateway),
         }),
         ["httpTransport.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
         {
@@ -142,6 +146,14 @@ public sealed partial class DurationsTests
         ["webSocketTransportServer.headersTimeout"] = (nameof(WebSocketTransportServerOptions.HeadersTimeout), new()
         {
             ["options"] = new(nameof(WebSocketTransportServerOptions.HeadersTimeout), HeadersTimeoutByWebSocketOptions),
+        }),
+        ["gateway.timeout"] = (nameof(HttpGatewayOptions.Timeout), new()
+        {
+            ["options"] = new(nameof(HttpGatewayOptions.Timeout), TimeoutByGateway),
+        }),
+        ["gateway.heartbeat"] = (nameof(HttpGatewayOptions.Heartbeat), new()
+        {
+            ["options"] = new(nameof(HttpGatewayOptions.Heartbeat), HeartbeatByGateway),
         }),
     };
 

@@ -1,0 +1,39 @@
+{
+  "earlier": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "rules": [
+          {
+            "method": "POST",
+            "template": "/v1/echo",
+            "body": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "rules": [
+          {
+            "method": "POST",
+            "template": "/v2/echo",
+            "body": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "HTTP_ROUTE_NO_DELETE",
+      "pointer": "/services/0/procedures/0/http",
+      "subject": "service:1/procedure:1"
+    }
+  ]
+}

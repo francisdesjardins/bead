@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/any.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request that holds an Any.
+message Request {
+  google.protobuf.Any detail = 1;
+}
+
+// A result.
+message Response {
+  string name = 1;
+}
+
+// A request that holds an Any.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+  // Writes.
+  rpc Put(Request) returns (Response) {
+    option (bead.procedure) = {id: 1};
+  }
+}

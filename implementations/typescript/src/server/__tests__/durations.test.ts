@@ -6,6 +6,7 @@
 
 // dependencies
 
+import { EventEmitter } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test } from '@playwright/test';
@@ -13,6 +14,7 @@ import { createRelay } from '../../router/server/relay';
 import { createSessionManager } from '../../router/server/session-manager';
 import type { RelayTarget } from '../../router/server/types';
 import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
+import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import { createRouterCore } from '../../router/shared/router-core';
 import { createServiceManager } from '../../router/shared/service-manager';
 import type {
@@ -76,6 +78,8 @@ import {
   timersBy,
   type TestClock,
 } from '../../transport/shared/__tests__/fixtures';
+import { requestOf } from '../../service/descriptors';
+import { createHTTPGateway, type IHTTPGatewayOptions } from '../../transcoding/http-gateway';
 import { createServer } from '../server';
 import type { IServerTransportLike } from '../types';
 
@@ -1300,6 +1304,131 @@ const reconnectionOf = (as: 'function' | 'number'): Way => {
   };
 };
 
+/** A route of a gateway, its request and its result bytes as they are, at `/api/Durations/raw`. */
+const RAW_ROUTE = Object.freeze({
+  failures: {},
+  procedure: requestOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 1, procedureName: 'raw', serviceId: 9, serviceRevision: 1 },
+    request: PAYLOAD_CODECS.raw,
+    result: PAYLOAD_CODECS.raw,
+  }),
+  request: 'raw',
+  result: 'raw',
+  routes: [{ body: '*', method: 'POST', template: '/api/Durations/raw' }],
+} as const);
+
+/**
+ * A gateway of `options`, on the test's clock, whose in-memory server draws each connection and
+ * answers nothing; none built, refused, nothing moved.
+ */
+const buildGateway = (options: Partial<IHTTPGatewayOptions>) => {
+  return attempt(() => {
+    return createHTTPGateway({
+      routes: [RAW_ROUTE],
+      transport: {
+        accept: () => {
+          return Promise.resolve({ close: () => {}, receive: () => {} });
+        },
+      },
+      ...options,
+    });
+  });
+};
+
+/** A request of the gateway's `POST`, declaring `length` bytes, which `body` brings or none does. */
+const exchangeOfGateway = (
+  listener: ReturnType<typeof createHTTPGateway>['listener'],
+  { body, length }: { body?: Uint8Array; length: number }
+): EventEmitter => {
+  const request = Object.assign(new EventEmitter(), {
+    complete: false,
+    destroy: () => {},
+    headers: {
+      'content-length': String(length),
+      'content-type': 'application/octet-stream',
+      host: '127.0.0.1',
+    },
+    httpVersion: '1.1',
+    httpVersionMajor: 1,
+    method: 'POST',
+    rawHeaders: [
+      'host',
+      '127.0.0.1',
+      'content-type',
+      'application/octet-stream',
+      'content-length',
+      String(length),
+    ],
+    socket: { remoteAddress: '127.0.0.1', remotePort: 50_001 },
+    url: '/api/Durations/raw',
+  });
+  const response = Object.assign(new EventEmitter(), {
+    destroy: () => {},
+    end: () => {},
+    flushHeaders: () => {},
+    headersSent: false,
+    setHeader: () => {},
+    writableFinished: false,
+    write: () => {
+      return true;
+    },
+    writeHead: () => {},
+  });
+
+  listener(request, response);
+
+  if (body !== undefined) {
+    request.emit('data', body);
+    request.emit('end');
+  }
+
+  return request;
+};
+
+// a gateway's option `name`, as it is built
+const ofGateway = (name: 'headersTimeout' | 'heartbeat' | 'sendGracePeriod'): Way => {
+  return (given) => {
+    const building = buildGateway(optionOf(name, given));
+
+    return Promise.resolve('refusal' in building ? { moved: [], refusal: building.refusal } : {});
+  };
+};
+
+// a gateway's POST declaring a body that has not come: its body's pace, armed at its head
+const bodyGraceOfGateway: Way = (given) => {
+  const clock = createTestClock();
+  const building = buildGateway({ clock, ...optionOf('bodyGracePeriod', given) });
+
+  if ('refusal' in building) {
+    return Promise.resolve({ moved: [], refusal: building.refusal });
+  }
+
+  exchangeOfGateway(building.built.listener, { length: 100 });
+
+  return Promise.resolve({ held: dueOf(delaysOn(clock)) });
+};
+
+// a gateway's call, its body whole, its server answering never: the call's timeout, armed as it goes
+const timeoutOfGateway: Way = async (given) => {
+  const clock = createTestClock();
+  const building = buildGateway({ clock, ...optionOf('timeout', given) });
+
+  if ('refusal' in building) {
+    return { moved: [], refusal: building.refusal };
+  }
+
+  exchangeOfGateway(building.built.listener, { body: Uint8Array.of(1), length: 1 });
+
+  // the connection drawn and the request handed on, each in a later turn
+  for (let turn = 0; turn < 20; turn += 1) {
+    await new Promise(setImmediate);
+  }
+
+  return { held: dueOf(delaysOn(clock)) };
+};
+
 // what a way reports of an outcome the file holds, but a refusal
 const reportOf = ({ held, outcome }: IDurationOutcome): IReport => {
   switch (outcome) {
@@ -1384,15 +1513,23 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'httpTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',
-    ways: { options: ofHTTPServer('sendGracePeriod') },
+    ways: { gateway: ofGateway('sendGracePeriod'), options: ofHTTPServer('sendGracePeriod') },
   },
   'httpTransportServer.headersTimeout': {
     phrase: 'headersTimeout',
-    ways: { options: ofHTTPServer('headersTimeout') },
+    ways: { gateway: ofGateway('headersTimeout'), options: ofHTTPServer('headersTimeout') },
   },
   'httpTransportServer.bodyGracePeriod': {
     phrase: 'bodyGracePeriod',
-    ways: { options: bodyGraceOfOptions },
+    ways: { gateway: bodyGraceOfGateway, options: bodyGraceOfOptions },
+  },
+  'gateway.timeout': {
+    phrase: 'timeout',
+    ways: { options: timeoutOfGateway },
+  },
+  'gateway.heartbeat': {
+    phrase: 'heartbeat',
+    ways: { options: ofGateway('heartbeat') },
   },
   'httpTransport.inactivityTimeout': {
     phrase: 'inactivityTimeout',

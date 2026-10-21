@@ -37,10 +37,17 @@
           }
         },
         "messages": {
-          "description": "The messages a binding names, and under the feature validate those a request's rules reach, by full name, each with the file that declares it: what a target imports, and under validate the fields that hold a rule or lead to one.",
+          "description": "The messages a binding names, every message a field of one reaches, and under the feature validate those a request's rules reach, by full name, each with the file that declares it: what a target imports, each message's fields, which a route binds and a document describes, and under validate the fields that hold a rule or lead to one.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/message"
+          }
+        },
+        "enums": {
+          "description": "The enums the fields of its messages name, by full name: each value by its name and number, in their declaration's order, an alias among them, so that a writer names a number by the value declared first for it (decision 0037). A well-known enum, google.protobuf.NullValue, is named by its full name alone.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/enum"
           }
         }
       }
@@ -130,11 +137,18 @@
           "description": "The path, among its files, of the file that declares it.",
           "$ref": "#/$defs/protoPath"
         },
+        "fields": {
+          "description": "Its fields, by number; left out of a well-known type, and of a blueprint an earlier beadc wrote.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldEntry"
+          }
+        },
         "rules": {
           "$ref": "#/$defs/messageRules"
         }
       },
-      "description": "A message, and under the feature validate its rules (decision 0035)."
+      "description": "A message: its fields, each by its name, number, JSON name and type, which a route binds and a document describes (decision 0037), and under the feature validate its rules (decision 0035). A well-known type of google/protobuf/, whose JSON is its own form, carries no fields."
     },
     "service": {
       "type": "object",
@@ -282,6 +296,9 @@
           "minimum": 1,
           "maximum": 2147483647
         },
+        "http": {
+          "$ref": "#/$defs/http"
+        },
         "description": {
           "$ref": "#/$defs/description"
         },
@@ -331,6 +348,48 @@
       "else": {
         "not": {
           "required": ["message"]
+        }
+      }
+    },
+    "http": {
+      "description": "What its method's options say of it over HTTP, the .proto's words resolved (decision 0037): its idempotency_level, left out for IDEMPOTENCY_UNKNOWN, and its google.api.http rules, each of its additional_bindings a rule of its own, in their order. Its default routes are no member: a builder derives them.",
+      "type": "object",
+      "required": ["rules"],
+      "additionalProperties": false,
+      "properties": {
+        "idempotencyLevel": {
+          "description": "descriptor.proto's MethodOptions.idempotency_level, by its value's name",
+          "enum": ["NO_SIDE_EFFECTS", "IDEMPOTENT"]
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/httpRule"
+          }
+        }
+      }
+    },
+    "httpRule": {
+      "description": "A google.api.http rule (http.proto): its pattern's method, in upper case, its path template, and its body and its response_body where it names them.",
+      "type": "object",
+      "required": ["method", "template"],
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": ["GET", "PUT", "POST", "DELETE", "PATCH"]
+        },
+        "template": {
+          "description": "Its path template, as http.proto's grammar writes one, which HTTP_RULE_TEMPLATE holds it to.",
+          "type": "string"
+        },
+        "body": {
+          "description": "*, the request whole, or the name of a top-level field of it; left out for no body.",
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z_][A-Za-z0-9_]*)(?![\\s\\S])"
+        },
+        "responseBody": {
+          "description": "The name of a top-level field of its result, whose JSON is the response body.",
+          "$ref": "#/$defs/protoName"
         }
       }
     },
@@ -1437,6 +1496,66 @@
         }
       }
     },
+    "fieldEntry": {
+      "description": "A field of a message: its name, number and JSON name, its type, its label, a map's key's scalar beside it, whether it tracks presence, its oneof, and what its leading comment and its deprecated option say.",
+      "type": "object",
+      "required": ["fieldName", "fieldNumber", "jsonName", "type", "presence"],
+      "additionalProperties": false,
+      "properties": {
+        "fieldName": {
+          "$ref": "#/$defs/protoName"
+        },
+        "fieldNumber": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 536870911
+        },
+        "jsonName": {
+          "description": "Its JSON name, as protoc gives it, or its json_name option.",
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "$ref": "#/$defs/fieldType"
+        },
+        "label": {
+          "enum": ["repeated", "map"]
+        },
+        "key": {
+          "$ref": "#/$defs/scalar"
+        },
+        "presence": {
+          "enum": ["explicit", "implicit"]
+        },
+        "oneof": {
+          "description": "The oneof it is a member of, a synthetic one never.",
+          "$ref": "#/$defs/protoName"
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "deprecated": {
+          "description": "Its deprecated option, where it is true.",
+          "const": true
+        }
+      },
+      "if": {
+        "required": ["label"],
+        "properties": {
+          "label": {
+            "const": "map"
+          }
+        }
+      },
+      "then": {
+        "required": ["key"]
+      },
+      "else": {
+        "not": {
+          "required": ["key"]
+        }
+      }
+    },
     "messageRules": {
       "description": "Under the feature validate (decision 0035): its fields' rules, by number; its own (buf.validate.message); each oneof's (buf.validate.oneof), by its index.",
       "type": "object",
@@ -1498,6 +1617,41 @@
                     "type": "boolean"
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "enum": {
+      "description": "An enum a field names, with the file that declares it, and its values.",
+      "type": "object",
+      "required": ["fullName", "file", "values"],
+      "additionalProperties": false,
+      "properties": {
+        "fullName": {
+          "$ref": "#/$defs/fullName"
+        },
+        "file": {
+          "description": "The path, among its files, of the file that declares it.",
+          "$ref": "#/$defs/protoPath"
+        },
+        "values": {
+          "description": "Its values in their declaration's order, an alias among them.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "number"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/protoName"
+              },
+              "number": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
               }
             }
           }

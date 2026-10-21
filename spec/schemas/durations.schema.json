@@ -75,7 +75,13 @@
           "type": "string",
           "minLength": 1
         },
-        "clauses": { "$ref": "common.schema.json#/$defs/clauses" },
+        "clauses": {
+          "description": "The units a place checks, of spec/spec.md, or of spec/transcoding.md behind transcoding:, each for what the place observes of it.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/unit" }
+        },
         "kind": {
           "description": "delay, a wait before an act, which takes 0 as at once; timeout, any other, which is never 0.",
           "enum": ["delay", "timeout"]
@@ -216,9 +222,9 @@
       ]
     },
     "unit": {
-      "description": "A unit of spec/spec.md, as clauses cites one.",
+      "description": "A unit of spec/spec.md, as clauses cites one, or of spec/transcoding.md behind transcoding:, which a gateway's places cite.",
       "type": "string",
-      "pattern": "^[1-9][0-9]*\\.[1-9][0-9]*(\\.[1-9][0-9]*)?$"
+      "pattern": "^(transcoding:)?[1-9][0-9]*\\.[1-9][0-9]*(\\.[1-9][0-9]*)?$"
     }
   }
 }

@@ -10,12 +10,14 @@ import { expect, test } from '@playwright/test';
 
 import { compile } from '../../compile.ts';
 import { type IDiagnostic, InputError } from '../../diagnostics.ts';
-import { displayOf, OPTIONS_FILE, VALIDATE_FILE } from '../../roots.ts';
+import { BEADC_FILES, displayOf, OPTIONS_FILE } from '../../roots.ts';
 import { Category } from '../../rules.ts';
 import { breaking, waiversOf } from '../breaking.ts';
 import {
   BUF_CATEGORY,
   BUF_EXCEPTED,
+  BUF_JSON_CATEGORY,
+  BUF_JSON_RULES,
   BUF_RULES,
   BUF_RULES_RUN,
   bufConfigOf,
@@ -121,7 +123,7 @@ test('bead/options.proto and an import dropped are never compared', () => {
 
   for (const category of Object.values(Category)) {
     expect(bufConfigOf(category)).toMatchObject({
-      breaking: { ignore: [OPTIONS_FILE, VALIDATE_FILE] },
+      breaking: { ignore: [...BEADC_FILES] },
     });
 
     const found = bufFindings(toBinary(FileDescriptorSetSchema, current), {
@@ -142,21 +144,37 @@ test('bead/options.proto and an import dropped are never compared', () => {
   }
 });
 
-test("BUF_RULES_RUN is what each category's use runs, at buf's pin", () => {
+test("BUF_RULES_RUN is what each category's use runs, at buf's pin, WIRE_JSON's beside WIRE's", () => {
   const listed = bufRules();
+  const ofCategory = (name: string): string[] => {
+    return listed
+      .filter((rule) => {
+        return !rule.deprecated && rule.categories.includes(name);
+      })
+      .map((rule) => {
+        return rule.id;
+      });
+  };
 
   for (const category of Object.values(Category)) {
     expect([...BUF_RULES_RUN[category]].sort(), category).toEqual(
-      listed
-        .filter((rule) => {
-          return !rule.deprecated && rule.categories.includes(BUF_CATEGORY[category]);
-        })
-        .map((rule) => {
-          return rule.id;
-        })
-        .sort()
+      [
+        ...new Set([
+          ...ofCategory(BUF_CATEGORY[category]),
+          ...(category === Category.WIRE ? BUF_JSON_RULES : []),
+        ]),
+      ].sort()
     );
   }
+
+  // * the category HTTP's: buf's WIRE_JSON beyond its WIRE
+  expect([...BUF_JSON_RULES].sort()).toEqual(
+    ofCategory(BUF_JSON_CATEGORY)
+      .filter((rule) => {
+        return !ofCategory('WIRE').includes(rule);
+      })
+      .sort()
+  );
 });
 
 test("a buf: waiver waives under its file or its folder, as buf's ignore_only matches one, and names a rule its category runs", () => {

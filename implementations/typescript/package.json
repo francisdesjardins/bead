@@ -2,7 +2,7 @@
   "name": "@francisdesjardins/bead",
   "version": "0.6.0",
   "private": true,
-  "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP, a Web Worker and an in-memory transport, each a client and a server, a server's transports joined into one, a client and a server router with the service, session and notification managers, and the client and server over them.",
+  "description": "Bead, the binary wire protocol, on the TypeScript side: a WebSocket, an HTTP, a Web Worker and an in-memory transport, each a client and a server, a server's transports joined into one, a client and a server router with the service, session and notification managers, the client and server over them, and a gateway that answers a service's procedures over HTTP and JSON.",
   "license": "Apache-2.0",
   "author": "Francis Desjardins <francis.desjardins@gmail.com>",
   "repository": {
@@ -14,6 +14,7 @@
   "exports": {
     "./client": "./src/client/client.ts",
     "./http-client": "./src/client/http-client.ts",
+    "./http-gateway": "./src/transcoding/http-gateway.ts",
     "./http-server": "./src/server/http-server.ts",
     "./http-transport-client": "./src/transport/client/http-transport-client.ts",
     "./http-transport-server": "./src/transport/server/http-transport-server.ts",
@@ -28,6 +29,7 @@
     "./service-manager": "./src/router/shared/service-manager.ts",
     "./session-manager": "./src/router/server/session-manager.ts",
     "./server": "./src/server/server.ts",
+    "./transcoding": "./src/transcoding/transcoding.ts",
     "./transport-client": "./src/transport/client/transport-client.ts",
     "./transport-server": "./src/transport/server/transport-server.ts",
     "./worker-client": "./src/client/worker-client.ts",

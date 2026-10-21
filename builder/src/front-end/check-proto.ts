@@ -28,6 +28,7 @@ import {
   procedureOptionsOf,
   serviceOptionsOf,
 } from './options.ts';
+import { checkHttp } from './http.ts';
 import { checkRules } from './rules.ts';
 
 // constants
@@ -367,6 +368,9 @@ export const checkProto = (
   if (options.rules !== false) {
     diagnostics.push(...checkRules(input));
   }
+
+  // * google.api.http: what the .proto's fields judge of its rules (decision 0037)
+  diagnostics.push(...checkHttp(input));
 
   return diagnostics;
 };

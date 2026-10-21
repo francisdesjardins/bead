@@ -6,6 +6,8 @@ import { expect, test } from '@playwright/test';
 
 import { hasPinnedProtoc } from '../../../__tests__/pinned.ts';
 import { checkRoots } from '../../../check.ts';
+import { hasError } from '../../../diagnostics.ts';
+import { documentOf } from '../../../openapi/document.ts';
 import { checkValue, type IBlueprint } from '../../../model/blueprint.ts';
 import { applyPatch, blueprintCases } from '../../../model/__tests__/patch.ts';
 import { csharpPathOf, generateCSharpMessages, protocPin } from '../../../protoc.ts';
@@ -30,6 +32,13 @@ const FIXTURES = fileURLToPath(new URL('../../../../test/fixtures/', import.meta
 const MESSAGES = fileURLToPath(new URL('../../../../test/messages/', import.meta.url));
 const COMMENTS_PROTO = 'bead/comments/v1/comments.proto';
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
+// spec/transcoding.proto's output with http: true, a golden folder of its own
+const SPEC = fileURLToPath(new URL('../../../../../spec/', import.meta.url));
+const TRANSCODING_PROTO = 'transcoding.proto';
+const HTTP_GOLDEN = 'transcoding/';
+const DOCUMENT_GOLDEN = fileURLToPath(
+  new URL('../../../../test/golden/transcoding.openapi.json', import.meta.url)
+);
 
 // what the root's beadc.yaml asks of the C# side's interop
 const INTEROP_OPTIONS: ICSharpOptions = { namespace: 'Bead.Interop', messages: Messages.GENERATE };
@@ -150,7 +159,11 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   ).toEqual(
     filesUnder(GOLDEN)
       .filter((name) => {
-        return name.endsWith('.cs') && (protoc || name.endsWith('Bead.cs'));
+        return (
+          name.endsWith('.cs') &&
+          !name.startsWith(HTTP_GOLDEN) &&
+          (protoc || name.endsWith('Bead.cs'))
+        );
       })
       .sort()
   );
@@ -162,6 +175,76 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   }
 });
 
+test("writes spec/transcoding.proto's output with http: true as its goldens byte for byte: its route table, the document a UTF-8 literal of beadc's own bytes", () => {
+  const checked = checkRoots([SPEC], { files: [TRANSCODING_PROTO] });
+
+  expect(hasError(checked.diagnostics)).toBe(false);
+
+  if (checked.blueprint === undefined || checked.set === undefined) {
+    throw new Error('spec/transcoding.proto: no blueprint');
+  }
+
+  const protoc = hasPinnedProtoc() || process.env['BEADC_PROTOC_REQUIRED'] === '1';
+  const document = readFileSync(DOCUMENT_GOLDEN, 'utf8');
+  const input: ITargetInput = {
+    blueprint: checked.blueprint,
+    set: checked.set,
+    sources: { proto: new Map([[TRANSCODING_PROTO, '../spec/transcoding.proto']]) },
+  };
+  // ! Bead's options' classes are the messages fixture's golden already: the C# side builds every
+  // golden in one assembly, where a second copy of a class is an error
+  const written = [
+    ...(protoc ? generateCSharpMessages(checked.set, { blueprint: checked.blueprint }) : []),
+    ...csharpTarget.generate(input, {
+      ...DEFAULTS,
+      http: { prefix: '/api', document, problemTypes: 'https://example.com/problems/' },
+    }),
+  ].filter((file) => {
+    return !file.name.startsWith('Bead/Protobuf/');
+  });
+
+  expect(documentOf(checked.blueprint, { prefix: '/api' })).toBe(document);
+
+  if (process.env['BEADC_WRITE_GOLDEN'] === '1') {
+    for (const file of written) {
+      mkdirSync(dirname(join(GOLDEN, HTTP_GOLDEN, file.name)), { recursive: true });
+      writeFileSync(join(GOLDEN, HTTP_GOLDEN, file.name), file.content);
+    }
+  }
+
+  expect(
+    written
+      .map((file) => {
+        return file.name;
+      })
+      .sort()
+  ).toEqual(
+    filesUnder(join(GOLDEN, HTTP_GOLDEN))
+      .filter((name) => {
+        return protoc || name.endsWith('Bead.cs') || name.endsWith('BeadHttp.cs');
+      })
+      .sort()
+  );
+
+  for (const file of written) {
+    expect(file.content, file.name).toBe(
+      today(
+        readFileSync(join(GOLDEN, HTTP_GOLDEN, file.name), 'utf8'),
+        checked.blueprint.specVersion
+      )
+    );
+  }
+
+  // * the document a literal whose escapes are JSON's: its text, read back, is beadc's bytes
+  const table = contentOf(written, 'Bead/Transcoding/V1/BeadHttp.cs');
+  const literal = /^ {12}return (".*")u8;$/mu.exec(table)?.[1] ?? '""';
+
+  expect(JSON.parse(literal)).toBe(document);
+  expect(table).toContain(
+    'private const bool Supported = global::Bead.GeneratedCode.SupportsVersion5;'
+  );
+});
+
 test("the goldens' .editorconfig is implementations/dotnet's, byte for byte", () => {
   expect(readFileSync(join(GOLDEN, '.editorconfig'), 'utf8')).toBe(
     readFileSync(EDITORCONFIG, 'utf8')
@@ -169,10 +252,14 @@ test("the goldens' .editorconfig is implementations/dotnet's, byte for byte", ()
 });
 
 test("an accepted case's output differs from the interop's by its patch alone: SPEC_VERSION_NEWER's header, NOTIFICATION_RESULT's codec and the types it writes", () => {
+  // * an HTTP member writes no line of a service's file: a route table's, under http: true
   const accepted = blueprintCases().filter((each) => {
-    return each.findings.every((finding) => {
-      return RULES[finding.rule as keyof typeof RULES].severity === Severity.WARNING;
-    });
+    return (
+      !each.rule.startsWith('HTTP_') &&
+      each.findings.every((finding) => {
+        return RULES[finding.rule as keyof typeof RULES].severity === Severity.WARNING;
+      })
+    );
   });
   const lines = contentOf(
     csharpTarget.generate(interopInput(), INTEROP_OPTIONS),

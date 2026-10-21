@@ -79,8 +79,9 @@ test("lists a message's fields by number, those that lead to a rule and those it
     ['pairs', { message: 'bead.validations.v1.Pair' }, true],
     ['deep', { message: 'bead.validations.v1.Nested' }, true],
   ]);
-  // * a result's message is listed, as a binding names it, and carries no rules
+  // * a result's message is listed, as a binding names it, its fields, none, and no rules
   expect(messages.get('bead.validations.v1.Taken')).toEqual({
+    fields: [],
     file: 'validations.proto',
     fullName: 'bead.validations.v1.Taken',
   });

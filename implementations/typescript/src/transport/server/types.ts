@@ -23,6 +23,7 @@ import type {
   IWorkerMessageEventLike,
   IWorkerPortLike,
 } from '../shared/types';
+import type { IHTTPPolicyOption } from './http-policy';
 import type { IHeadBoundServerLike, ILingeringSocketLike } from './server-bounds';
 
 // interfaces
@@ -659,7 +660,11 @@ export interface IHTTPServerLike extends IHeadBoundServerLike {
   on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown;
 }
 
-export interface IHTTPTransportServerOptions extends ITransportServerOptions {
+/**
+ * An HTTP transport server's options: its members one by one, or a policy of them (spec 15.12),
+ * which `httpPolicyOf` builds and a gateway takes too, its members given once, there or here.
+ */
+export interface IHTTPTransportServerOptions extends ITransportServerOptions, IHTTPPolicyOption {
   /**
    * The bytes of body the exchanges under way may hold together, counted as they come; past them,
    * an exchange is refused 503. Defaults to {@link BODY_BYTES_BUDGET}.

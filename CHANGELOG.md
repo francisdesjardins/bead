@@ -36,6 +36,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transports, each handle its own transport's (spec 15.14, decision 0036).
 - Each side's bench measures calls in memory, and `exchange.*`: a connection drawn, called once and
   closed, as a gateway draws one per HTTP exchange.
+- HTTP/JSON transcoding, on both sides: a gateway that answers each procedure's
+  `POST /api/<Service>/<procedure>`, `GET` there for one marked `NO_SIDE_EFFECTS`, and each
+  `google.api.http` rule as written, one route a path by the peers' precedence, one Bead connection
+  per exchange through the in-memory transport into the application's own server, joined;
+  protobuf's JSON mapping read and written by Bead's own mapping, one form on both sides, the binary
+  payload its stock library's; failures as `application/problem+json`, a status by where its code
+  arose, `PAYLOAD_INVALID` 422 with its violations; notifications as Server-Sent Events at the
+  reader's pace, each event an id, a reconnection answered 204 (`spec/transcoding.md` 0.1.0,
+  decision 0037).
+- beadc reads `google.api.http` and `idempotency_level` into the blueprint's routes and messages'
+  shapes, under no feature, and writes one OpenAPI 3.1.1 document a blueprint, embedded byte for byte
+  with a route table in each output with `http: true`; its rules `HTTP_*`; `beadc breaking`'s
+  category `HTTP`, held under `WIRE` and `API` wherever a blueprint states a route, buf's
+  `WIRE_JSON` among it.
+- `spec/transcoding.md`, the transcoding's companion, its units in `spec/transcoding-units.txt`,
+  which `spec/check.py` holds as it holds the spec's; `spec/transcoding.proto` and
+  `spec/transcoding.json`, written by `spec/generators/make_transcoding.py`, which reads and writes
+  every body beside protobuf's own Python library, pinned in `spec/requirements.txt`, and names each
+  edge where it parts.
+- `spec/durations.json`'s places `gateway.timeout` and `gateway.heartbeat`, and the way `gateway` of
+  `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
+  `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites
+  `transcoding.md`'s units, `transcoding:9.2`.
 
 ### Changed
 
@@ -63,6 +86,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   what it carries beside an envelope.
 - `spec/durations.json`'s `transportClient.connectTimeout` gains the way `memory`, the in-memory
   client's connect.
+- Generated code that writes a route table names `GENERATED_CODE_SUPPORTS_VERSION_5`,
+  `GeneratedCode.SupportsVersion5`; the runtimes carry 4 and 5, so a project that generates no route
+  table regenerates nothing.
+- The HTTP transport's options take one policy object of hosts, origins, proxies and bounds, which a
+  gateway takes too.
+- Decision 0008's axis carries the transcoding's companion beside the debugging one: its file repeats
+  its `transcodingVersion`, and a release whose transcoding moved tags `transcoding-v`;
+  `tools/release.mjs prepare` takes `--transcoding <move>`, and `tools/check-versions.mjs` holds its
+  version and its tag.
+- Decision 0022 states that a member the blueprint adds under no feature is a minor of
+  `bead-blueprint/1`, which every older reader refuses by its closed schema, and that `requires`
+  names what a target must play.
 - The C# side's `IServerTransport` names the type its handles begin with, `Type`, which a join
   reads, and a connect refused before anything goes is a `ConnectException`, as the TypeScript
   side's `ConnectError`.
@@ -84,7 +119,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransport.inactivityTimeout`, by two ways, `client` and `server`, where
   `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
   outcomes apart: two owners share a place where the spec names one option for both and every
-  column of the file agrees (decision 0014). The file holds 25 places, by 38 ways.
+  column of the file agrees (decision 0014). The file holds 27 places, by 43 ways.
 
 ### Fixed
 

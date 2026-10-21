@@ -12,8 +12,10 @@ modules:
       use: [STANDARD]
       # bead/options.proto's package is `bead`, as protobuf's own options name none
       except: [PACKAGE_VERSION_SUFFIX]
-      # protovalidate's validate.proto, vendored at v1.2.2 as Buf publishes it, is Buf's to lint
-      ignore: [proto/buf/validate/validate.proto]
+      # protovalidate's validate.proto, vendored at v1.2.2 as Buf publishes it, is Buf's to lint, and
+      # googleapis' google/api/http.proto and annotations.proto, vendored as Google publishes them,
+      # Google's
+      ignore: [proto/buf/validate/validate.proto, proto/google/api]
   - path: test/fixtures
     lint:
       use: [STANDARD]

@@ -1,0 +1,12 @@
+[
+  {
+    "rule": "HTTP_BINDING_NATIVE",
+    "line": 23,
+    "column": 12
+  },
+  {
+    "rule": "HTTP_BINDING_NATIVE",
+    "line": 26,
+    "column": 7
+  }
+]

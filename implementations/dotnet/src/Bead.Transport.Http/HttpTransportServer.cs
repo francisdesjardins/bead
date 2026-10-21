@@ -214,6 +214,44 @@ public sealed record HttpTransportServerOptions
     /// stop's grace bounds the platform's own, on the real clock.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// The policy every listener of its application judges by (decision 0037): its hosts, its
+    /// origins, its proxies and its bounds, given once to this transport and a gateway alike, each
+    /// member it gives taken in place of this record's of its name, which it leaves at its default.
+    /// A member given in it and beside it is an <see cref="ArgumentException"/>; none, this
+    /// record's members alone.
+    /// </summary>
+    public HttpPolicy? Policy { get; init; }
+
+    // the policy's members in place of this record's, where it is given: one given in it and beside
+    // it refused, so that a listener never takes one value of two in silence
+    internal HttpTransportServerOptions PolicyApplied()
+    {
+        if (Policy is not { } policy)
+        {
+            return this;
+        }
+
+        var defaults = new HttpTransportServerOptions();
+
+        return this with
+        {
+            Hosts = HttpPolicy.Taken(nameof(Hosts), (Hosts, defaults.Hosts, policy.Hosts)),
+            Origins = HttpPolicy.Taken(nameof(Origins), (Origins, defaults.Origins, policy.Origins)) ?? [],
+            TrustedProxies = HttpPolicy.Taken(nameof(TrustedProxies), (TrustedProxies, defaults.TrustedProxies, policy.TrustedProxies)),
+            UnnamedProxies = HttpPolicy.Taken(nameof(UnnamedProxies), (UnnamedProxies, defaults.UnnamedProxies, policy.UnnamedProxies)),
+            BodyBytesBudget = HttpPolicy.Taken(nameof(BodyBytesBudget), (BodyBytesBudget, defaults.BodyBytesBudget, policy.BodyBytesBudget)),
+            MaximumBodyBytes = HttpPolicy.Taken(nameof(MaximumBodyBytes), (MaximumBodyBytes, defaults.MaximumBodyBytes, policy.MaximumBodyBytes)),
+            HeadersTimeout = HttpPolicy.Taken(nameof(HeadersTimeout), (HeadersTimeout, defaults.HeadersTimeout, policy.HeadersTimeout)),
+            MinimumBodyBytesPerSecond = HttpPolicy.Taken(nameof(MinimumBodyBytesPerSecond), (MinimumBodyBytesPerSecond, defaults.MinimumBodyBytesPerSecond, policy.MinimumBodyBytesPerSecond)),
+            BodyGracePeriod = HttpPolicy.Taken(nameof(BodyGracePeriod), (BodyGracePeriod, defaults.BodyGracePeriod, policy.BodyGracePeriod)),
+            MinimumSendBytesPerSecond = HttpPolicy.Taken(nameof(MinimumSendBytesPerSecond), (MinimumSendBytesPerSecond, defaults.MinimumSendBytesPerSecond, policy.MinimumSendBytesPerSecond)),
+            SendGracePeriod = HttpPolicy.Taken(nameof(SendGracePeriod), (SendGracePeriod, defaults.SendGracePeriod, policy.SendGracePeriod)),
+            MaximumConnections = HttpPolicy.Taken(nameof(MaximumConnections), (MaximumConnections, defaults.MaximumConnections, policy.MaximumConnections)),
+            MaximumConnectionsPerAddress = HttpPolicy.Taken(nameof(MaximumConnectionsPerAddress), (MaximumConnectionsPerAddress, defaults.MaximumConnectionsPerAddress, policy.MaximumConnectionsPerAddress)),
+        };
+    }
 }
 
 /// <summary>Where an HTTP transport server listens.</summary>
@@ -327,7 +365,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
-        var given = options ?? new HttpTransportServerOptions();
+        var given = (options ?? new HttpTransportServerOptions()).PolicyApplied();
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));

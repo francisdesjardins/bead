@@ -46,14 +46,9 @@ not hold:
   ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport, and a
   relay that carries a subscription, which a page across a broker needs
   ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
-- **HTTP/JSON transcoding**, which takes a call from HTTP and JSON as gRPC's transcoding does: its
-  calls through the in-memory transport into the application's own server, joined
-  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)), the
-  credential it carries ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), the routes a
-  service's name scopes
-  ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)),
-  and one OpenAPI document written from the blueprint for every language
-  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
+- **HTTP/JSON transcoding's generated HTTP client**, over `fetch` and `HttpClient`, calling the
+  default routes and reading a stream from `fetch`, and the interop's gateways, each side's document
+  fetched by the other's client and compared byte for byte ([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md));
 - **the transports' client part** of the conformance, with the outcomes the spec names for a
   client's call ([0004](0004-one-behaviour-in-every-language.md)), the bound on a WebSocket client's
   close ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)) and the defaults of a
@@ -100,7 +95,12 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
 - **an opt-in that hands a procedure its call's bearer credential**, a `JWT`'s token or what its
   transport carried beside an `ELSEWHERE`, both schemes at once, to the procedure that asks alone,
   as RFC 8693's token exchange or a call on its user's behalf needs
-  ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)).
+  ([0010](0010-a-request-presents-a-credential-of-a-scheme.md));
+- what [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md) keeps ahead of HTTP/JSON transcoding: a gateway apart from its server, over a real
+  transport, which a pool of connections would spare a handshake an exchange; a `raw` body streamed
+  as a transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events;
+  `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`; and an application
+  failure's own status, an option of its enum value's, at the options' v1 freeze.
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.
@@ -126,11 +126,12 @@ table.
 
 ### Services and their names
 
-| #                                                                                               | Decision                                                                                                               | Status   |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                     | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made | accepted |
-| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md) | A service's procedures are typed descriptors, served and called through one layer in each runtime                      | accepted |
-| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)    | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone            | accepted |
+| #                                                                                                          | Decision                                                                                                                | Status   |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)                                | Ids are for life, a procedure's name takes one ASCII form, and every side refuses a declaration off them as it is made  | accepted |
+| [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)            | A service's procedures are typed descriptors, served and called through one layer in each runtime                       | accepted |
+| [0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md)               | A `.proto` becomes one checked blueprint, and each language's server and client are generated from it alone             | accepted |
+| [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md) | A procedure is also an HTTP route, which a gateway answers as one more client of its server, one connection an exchange | accepted |
 
 ### Transports and relays
 
@@ -190,7 +191,7 @@ table.
 
 ## Writing one
 
-The next decision is 0037. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0038. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

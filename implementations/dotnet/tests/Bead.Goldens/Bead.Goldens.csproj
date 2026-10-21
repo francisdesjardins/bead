@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The C# target's goldens, builder/test/golden/csharp, built as a consumer builds them: under
-       this side's gates, against Bead.Core, Bead.Protobuf and Google.Protobuf, their code style the
-       copy of this side's .editorconfig beside them, which a builder test holds equal to it. -->
+       this side's gates, against Bead.Core, Bead.Protobuf, Bead.Transcoding and Google.Protobuf,
+       their code style the copy of this side's .editorconfig beside them, which a builder test
+       holds equal to it. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
@@ -9,6 +10,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
     <ProjectReference Include="../../src/Bead.Protobuf/Bead.Protobuf.csproj" />
+    <!-- the route table of an output with http: true, transcoding/BeadHttp.cs -->
+    <ProjectReference Include="../../src/Bead.Transcoding/Bead.Transcoding.csproj" />
     <PackageReference Include="Google.Protobuf" />
   </ItemGroup>
 

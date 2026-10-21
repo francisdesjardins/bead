@@ -1,0 +1,416 @@
+// The messages and the service spec/transcoding.json plays a gateway against, written with its entries by
+// spec/generators/make_transcoding.py: regenerate, never edit (spec/transcoding.md, decision 0037).
+syntax = "proto3";
+
+package bead.transcoding.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/field_mask.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// What a gateway answers, each procedure by its default routes and its rules.
+service TranscodingService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+    failures: "TranscodingFailure"
+  };
+
+  // Answers its request.
+  rpc Echo(Everything) returns (Everything) {
+    option (bead.procedure) = {
+      id: 1
+    };
+  }
+
+  // Answers its request.
+  rpc EchoEdges(Edges) returns (Edges) {
+    option (bead.procedure) = {
+      id: 2
+    };
+  }
+
+  // Answers the book its name names: its title "A tale", its pages its revision.
+  rpc GetBook(GetBookRequest) returns (Book) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (bead.procedure) = {
+      id: 3
+    };
+    option (google.api.http) = {
+      get: "/v1/{name=shelves/*/books/*}"
+      additional_bindings {
+        get: "/v1/books/{name}"
+      }
+    };
+  }
+
+  // Answers its shelf's two books, a and b, titled A and B, and no page after.
+  rpc ListBooks(ListBooksRequest) returns (ListBooksResponse) {
+    option (bead.procedure) = {
+      id: 4
+    };
+    option (google.api.http) = {
+      get: "/v1/{parent=shelves/*}/books"
+      response_body: "books"
+    };
+  }
+
+  // Answers its request.
+  rpc UpdateBook(UpdateBookRequest) returns (UpdateBookRequest) {
+    option (bead.procedure) = {
+      id: 5
+    };
+    option (google.api.http) = {
+      patch: "/v1/{book.name=shelves/*/books/*}"
+      body: "book"
+    };
+  }
+
+  // Archives a book, and answers nothing.
+  rpc ArchiveBook(GetBookRequest) returns (google.protobuf.Empty) {
+    option (bead.procedure) = {
+      id: 6
+    };
+    option (google.api.http) = {
+      post: "/v1/{name=shelves/*/books/*}:archive"
+      body: "*"
+    };
+  }
+
+  // Answers one operation, its name its request's and "/a" after it, not done.
+  rpc ListOperations(ListOperationsRequest) returns (ListOperationsResponse) {
+    option (bead.procedure) = {
+      id: 7
+    };
+    option (google.api.http) = {
+      get: "/v1/{name=operations}"
+    };
+  }
+
+  // Answers the operation its name names, done.
+  rpc GetOperation(GetOperationRequest) returns (Operation) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (bead.procedure) = {
+      id: 8
+    };
+    option (google.api.http) = {
+      get: "/v1/{name=operations/**}"
+    };
+  }
+
+  // Answers nothing, once its rules took its request.
+  rpc Judge(Ruled) returns (google.protobuf.Empty) {
+    option (bead.procedure) = {
+      id: 9
+    };
+    option (google.api.http) = {
+      post: "/v1/ruled/{title}"
+      body: "*"
+    };
+  }
+
+  // Answers its from as its ticks, notifies each count down to 0, then ends with COUNTED.
+  rpc Ticks(TicksRequest) returns (TicksResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (bead.procedure) = {
+      id: 10
+      notifies: {message: "bead.transcoding.v1.Tick"}
+      failures: ["TRANSCODING_FAILURE_COUNTED"]
+    };
+  }
+
+  // Answers nothing, then notifies nothing, and ends its subscription never.
+  rpc Watch(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (bead.procedure) = {
+      id: 11
+      notifies: {message: "bead.transcoding.v1.Tick"}
+    };
+  }
+
+  // Answers its request.
+  rpc Raw(bead.Raw) returns (bead.Raw) {
+    option (bead.procedure) = {
+      id: 12
+    };
+  }
+
+  // Answers its request.
+  rpc Text(bead.Text) returns (bead.Text) {
+    option (bead.procedure) = {
+      id: 13
+    };
+  }
+
+  // Answers its request.
+  rpc Json(bead.Json) returns (bead.Json) {
+    option (bead.procedure) = {
+      id: 14
+    };
+  }
+
+  // Fails with REFUSED, its detail its request's.
+  rpc Fail(FailRequest) returns (google.protobuf.Empty) {
+    option (bead.procedure) = {
+      id: 15
+      failures: ["TRANSCODING_FAILURE_REFUSED"]
+    };
+  }
+
+  // Answers its call's session's identifier.
+  rpc WhoAmI(google.protobuf.Empty) returns (WhoAmIResponse) {
+    option (bead.procedure) = {
+      id: 16
+      admission: {session: {}}
+    };
+  }
+
+  // Commands its caller, by answer, and answers the code the command failed with, or 0.
+  rpc Ask(google.protobuf.Empty) returns (AskResponse) {
+    option (bead.procedure) = {
+      id: 17
+    };
+  }
+
+  // A command its caller answers.
+  rpc Answer(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (bead.procedure) = {
+      id: 18
+      command: {}
+    };
+  }
+
+  // Answers never, and counts each of its calls that ends cancelled.
+  rpc Hang(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (bead.procedure) = {
+      id: 19
+    };
+  }
+
+  // Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.
+  rpc Cancels(CancelsRequest) returns (CancelsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+    option (bead.procedure) = {
+      id: 20
+    };
+  }
+}
+
+// A colour, by its number.
+enum Color {
+  COLOR_UNSPECIFIED = 0;
+  COLOR_RED = 1;
+  COLOR_GREEN = 2;
+}
+
+// An enum two of whose names number one value.
+enum Aliased {
+  option allow_alias = true;
+  ALIASED_UNSPECIFIED = 0;
+  ALIASED_FIRST = 1;
+  ALIASED_SECOND = 1;
+}
+
+// What the service's procedures answer instead.
+enum TranscodingFailure {
+  TRANSCODING_FAILURE_UNSPECIFIED = 0;
+  TRANSCODING_FAILURE_REFUSED = 1;
+  TRANSCODING_FAILURE_COUNTED = 2;
+}
+
+// A message the others hold.
+message Inner {
+  string name = 1;
+  int32 count = 2;
+}
+
+// Every kind of field protobuf's JSON mapping has a form for, in its numbers' order.
+message Everything {
+  double a_double = 1;
+  float a_float = 2;
+  int64 an_int64 = 3;
+  uint64 a_uint64 = 4;
+  int32 an_int32 = 5;
+  fixed64 a_fixed64 = 6;
+  bool a_bool = 7;
+  string a_string = 8;
+  bytes some_bytes = 9;
+  uint32 a_uint32 = 10;
+  sint64 a_sint64 = 11;
+  Color color = 12;
+  Inner inner = 13;
+  repeated int64 int64s = 14;
+  repeated Inner inners = 15;
+  map<string, int32> labels = 16;
+  map<int64, string> by_id = 17;
+  map<bool, string> flags = 18;
+  optional int32 maybe = 19;
+  oneof choice {
+    string choice_text = 20;
+    Inner choice_inner = 21;
+  }
+  google.protobuf.Timestamp at = 22;
+  google.protobuf.Duration took = 23;
+  google.protobuf.FieldMask mask = 24;
+  google.protobuf.Struct extra = 25;
+  google.protobuf.Value any_value = 26;
+  google.protobuf.Int64Value wrapped_int64 = 27;
+  google.protobuf.StringValue wrapped_string = 28;
+  google.protobuf.Empty nothing = 29;
+  string custom_named = 30 [json_name = "renamed"];
+  google.protobuf.ListValue list = 31;
+  google.protobuf.BoolValue wrapped_bool = 32;
+}
+
+// The edges of the mapping two stock libraries part on.
+message Edges {
+  google.protobuf.Timestamp at = 1;
+  google.protobuf.Duration took = 2;
+  google.protobuf.FieldMask mask = 3;
+  google.protobuf.Struct extra = 4;
+  google.protobuf.Value value = 5;
+  google.protobuf.Any any = 6;
+  google.protobuf.FloatValue wrapped_float = 7;
+  google.protobuf.Int64Value wrapped_int64 = 8;
+  google.protobuf.UInt64Value wrapped_uint64 = 9;
+  Aliased aliased = 10;
+  map<int64, string> by_int64 = 11;
+  map<int32, string> by_int32 = 12;
+  map<uint32, string> by_uint32 = 13;
+  repeated int32 ints = 14;
+  map<string, int32> labels = 15;
+  float a_float = 16;
+  double a_double = 17;
+  int32 an_int32 = 18;
+  uint32 a_uint32 = 19;
+  bytes some_bytes = 20;
+  google.protobuf.Empty nothing = 21;
+  Edges child = 22;
+  repeated Edges children = 23;
+  optional double maybe_double = 24;
+  int64 an_int64 = 25;
+  repeated google.protobuf.Timestamp stamps = 26;
+  oneof nullable {
+    google.protobuf.NullValue null_member = 27;
+    string text_member = 28;
+  }
+}
+
+// A book of http.proto's own examples.
+message Book {
+  string name = 1;
+  string title = 2;
+  int64 pages = 3;
+  Inner author = 4;
+}
+
+// Which book, by its resource name.
+message GetBookRequest {
+  string name = 1;
+  int64 revision = 2;
+  Inner sub = 3;
+  repeated string tags = 4;
+  google.protobuf.Timestamp at = 5;
+  Color color = 6;
+  bool flag = 7;
+  repeated Inner inners = 8;
+  map<string, int32> labels = 9;
+}
+
+// A shelf's books, a page at a time.
+message ListBooksRequest {
+  string parent = 1;
+  int32 page_size = 2;
+}
+
+// A page of books.
+message ListBooksResponse {
+  repeated Book books = 1;
+  string next_page_token = 2;
+}
+
+// A book and the fields of it to update (AIP-134).
+message UpdateBookRequest {
+  Book book = 1;
+  google.protobuf.FieldMask update_mask = 2;
+}
+
+// An operation of google.longrunning, by its name.
+message Operation {
+  string name = 1;
+  bool done = 2;
+}
+
+// Which operation.
+message GetOperationRequest {
+  string name = 1;
+}
+
+// Operations under a name.
+message ListOperationsRequest {
+  string name = 1;
+  string filter = 2;
+}
+
+// Operations.
+message ListOperationsResponse {
+  repeated Operation operations = 1;
+}
+
+// A request its rules judge: its from 10 at most, its title 3 characters at most.
+message Ruled {
+  int32 from = 1 [(buf.validate.field).int32.lte = 10];
+  string title = 2 [(buf.validate.field).string.max_len = 3];
+}
+
+// Where a count starts.
+message TicksRequest {
+  int32 from = 1;
+}
+
+// The ticks a count will notify.
+message TicksResponse {
+  int32 ticks = 1;
+}
+
+// One step of a count.
+message Tick {
+  int32 remaining = 1;
+}
+
+// The detail a failure answers with.
+message FailRequest {
+  string detail = 1;
+}
+
+// A call's session, by its identifier.
+message WhoAmIResponse {
+  string session = 1;
+}
+
+// The code a command failed with, 0 where it was answered.
+message AskResponse {
+  int32 code = 1;
+}
+
+// How many cancels to wait for.
+message CancelsRequest {
+  int32 at_least = 1;
+}
+
+// How many calls of hang ended cancelled.
+message CancelsResponse {
+  int32 count = 1;
+}

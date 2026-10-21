@@ -54,6 +54,7 @@ import {
   MINIMUM_SEND_BYTES_PER_SECOND,
   SEND_GRACE_PERIOD,
 } from './server-bounds';
+import { withPolicy } from './http-policy';
 import { clientAddressOf, trustedProxiesOf } from './trusted-proxies';
 import { createHTTPRequestExchange, type IExchange } from './http-request-exchange';
 import {
@@ -116,6 +117,8 @@ export type {
   IHTTPTransportServerOptions,
 } from './types';
 export { ENVELOPE_KINDS, ENVELOPE_PREFIX, REFUSALS } from './http-server-fields';
+export { HTTP_POLICY_MEMBERS, httpPolicyOf } from './http-policy';
+export type { IHTTPPolicy, IHTTPPolicyInit, IHTTPPolicyOption } from './http-policy';
 export {
   HEADERS_TIMEOUT,
   MAXIMUM_CONNECTIONS,
@@ -316,8 +319,10 @@ const unref = (timer: TimeoutId): void => {
  * const { port } = await server.start({ findOpenPort: true });
  */
 export const createHTTPTransportServer = (
-  options: IHTTPTransportServerOptions
+  given: IHTTPTransportServerOptions
 ): HTTPTransportServer => {
+  // * a policy's members in its place, each given once, there or beside it
+  const options = withPolicy(given);
   const {
     bodyBytesBudget = BODY_BYTES_BUDGET,
     bodyGracePeriod: givenBodyGracePeriod = BODY_GRACE_PERIOD,

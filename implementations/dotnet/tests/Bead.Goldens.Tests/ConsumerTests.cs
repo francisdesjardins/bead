@@ -59,8 +59,9 @@ public sealed partial class ConsumerTests
         {
             return CSharpSyntaxTree.ParseText(File.ReadAllText(path), parsing, path, cancellationToken: TestContext.Current.CancellationToken);
         }).Append(CSharpSyntaxTree.ParseText(ImplicitUsings, parsing, "GlobalUsings.g.cs", cancellationToken: TestContext.Current.CancellationToken));
-        // * what this program runs on, as a consumer's build references it: the framework, Bead.Core,
-        // Bead.Protobuf and Google.Protobuf among the platform's trusted assemblies
+        // * what this program runs on, as a consumer's build references it: the framework,
+        // Bead.Core, Bead.Protobuf, Bead.Transcoding and Google.Protobuf among the platform's
+        // trusted assemblies
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Select((path) =>

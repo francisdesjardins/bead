@@ -225,6 +225,9 @@
     // the root's `tools/check-validations.mjs` holds it to its generator, `tsconfig.validations.json`
     // types it
     "src/proto/__tests__/generated/**",
+    // what beadc generates for spec/transcoding.proto, committed as it writes it, its route table
+    // and its document among it: the root's `tools/check-transcoding.mjs` holds it to its generator
+    "src/transcoding/__tests__/generated/**",
     // protobuf's conformance testee, read with the code generated into it at run time alone:
     // `tools/protobuf-conformance.mjs` type-checks it then
     "tools/protobuf-conformance/**",

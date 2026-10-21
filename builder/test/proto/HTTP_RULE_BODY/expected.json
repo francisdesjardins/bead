@@ -1,0 +1,27 @@
+[
+  {
+    "rule": "HTTP_RULE_BODY",
+    "line": 35,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_BODY_DIFFERS",
+    "line": 36,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_BODY",
+    "line": 36,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_BODY_DIFFERS",
+    "line": 40,
+    "column": 7
+  },
+  {
+    "rule": "HTTP_RULE_BODY",
+    "line": 40,
+    "column": 7
+  }
+]

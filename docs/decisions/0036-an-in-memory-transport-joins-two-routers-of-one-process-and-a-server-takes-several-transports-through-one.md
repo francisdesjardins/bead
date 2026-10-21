@@ -10,8 +10,9 @@
   guard and a stop
   [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)'s,
   the credential a transport carries beside an envelope
-  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, and what HTTP/JSON transcoding
-  answers through them is ahead ([Where Bead goes](README.md#where-bead-goes)).
+  [0010](0010-a-request-presents-a-credential-of-a-scheme.md)'s, and what a gateway of HTTP/JSON
+  transcoding answers through them
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s.
 
 ## Context
 
@@ -159,8 +160,9 @@ The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-th
 xhigh effort, in the round of HTTP/JSON transcoding, whose draft held the in-memory transport and
 the join. The round met nine objections, each claim checked against the code, the texts it cites and
 the probes before it was answered: eight accepted, one in part, none refused. Its objection on the
-in-memory connection is this record's; the others bind HTTP/JSON transcoding, ahead
-([Where Bead goes](README.md#where-bead-goes)). The objection, with the answer that holds:
+in-memory connection is this record's; the others are
+[0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s.
+The objection, with the answer that holds:
 
 ### On the in-memory connection
 

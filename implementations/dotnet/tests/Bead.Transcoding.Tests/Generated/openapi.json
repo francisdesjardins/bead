@@ -1,0 +1,2934 @@
+{
+  "components": {
+    "schemas": {
+      "Problem": {
+        "description": "A failure, as RFC 9457 writes one (transcoding 7).",
+        "properties": {
+          "code": {
+            "description": "The code, as the wire carries it.",
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "protocol",
+              "application"
+            ]
+          },
+          "status": {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          "title": {
+            "description": "The code's name, or the status's phrase for about:blank.",
+            "type": "string"
+          },
+          "type": {
+            "description": "The problem's identity: a protocol code's tag: URI, an application failure's under the project's problem types, or about:blank.",
+            "format": "uri-reference",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "title",
+          "type"
+        ],
+        "type": "object"
+      },
+      "ValidationProblem": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Problem"
+          },
+          {
+            "properties": {
+              "errors": {
+                "items": {
+                  "properties": {
+                    "bounds": {},
+                    "detail": {
+                      "type": "string"
+                    },
+                    "fieldPath": {
+                      "type": "string"
+                    },
+                    "forKey": {
+                      "type": "boolean"
+                    },
+                    "parameter": {
+                      "description": "Its field, bound by a variable or a parameter of the query.",
+                      "type": "string"
+                    },
+                    "pointer": {
+                      "description": "Its field in the body, RFC 6901 §6's fragment by JSON names.",
+                      "type": "string"
+                    },
+                    "ruleId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "detail",
+                    "ruleId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "more": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "stopped": {
+                "const": true
+              }
+            },
+            "required": [
+              "errors"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "PAYLOAD_INVALID: the request its message's rules refused, each violation an error (decision 0035)."
+      },
+      "bead.transcoding.v1.Aliased": {
+        "anyOf": [
+          {
+            "enum": [
+              "ALIASED_UNSPECIFIED",
+              "ALIASED_FIRST",
+              "ALIASED_SECOND"
+            ],
+            "type": "string"
+          },
+          {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        ],
+        "description": "bead.transcoding.v1.Aliased, by the name of its value declared first for its number; a number where none names it. Bead's mapping reads any of its names, and its number."
+      },
+      "bead.transcoding.v1.AskResponse": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.AskResponse. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "code": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Book": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Book. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+          },
+          "name": {
+            "type": "string"
+          },
+          "pages": {
+            "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.CancelsRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.CancelsRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "atLeast": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.CancelsResponse": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.CancelsResponse. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "count": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Color": {
+        "anyOf": [
+          {
+            "enum": [
+              "COLOR_UNSPECIFIED",
+              "COLOR_RED",
+              "COLOR_GREEN"
+            ],
+            "type": "string"
+          },
+          {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        ],
+        "description": "bead.transcoding.v1.Color, by the name of its value declared first for its number; a number where none names it. Bead's mapping reads any of its names, and its number."
+      },
+      "bead.transcoding.v1.Edges": {
+        "additionalProperties": false,
+        "dependentSchemas": {
+          "nullMember": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "textMember"
+                  ]
+                }
+              ]
+            }
+          },
+          "textMember": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "nullMember"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "description": "bead.transcoding.v1.Edges. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "aDouble": {
+            "anyOf": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "enum": [
+                  "NaN",
+                  "Infinity",
+                  "-Infinity"
+                ]
+              }
+            ]
+          },
+          "aFloat": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 3.4028235677973366e+38,
+                "exclusiveMinimum": -3.4028235677973366e+38,
+                "format": "float",
+                "type": "number"
+              },
+              {
+                "enum": [
+                  "NaN",
+                  "Infinity",
+                  "-Infinity"
+                ]
+              }
+            ]
+          },
+          "aUint32": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "aliased": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Aliased"
+          },
+          "anInt32": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "anInt64": {
+            "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "any": {
+            "description": "A google.protobuf.Any: its @type, a URL whose last part names a message of the document's, then that message's members, or its value for a well-known type of a form of its own; {} the empty Any.",
+            "properties": {
+              "@type": {
+                "pattern": "/",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "at": {
+            "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+            "format": "date-time",
+            "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+            "type": "string"
+          },
+          "byInt32": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            },
+            "type": "object"
+          },
+          "byInt64": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            },
+            "type": "object"
+          },
+          "byUint32": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "pattern": "^(0|[1-9][0-9]*)$"
+            },
+            "type": "object"
+          },
+          "child": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Edges"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Edges"
+            },
+            "type": "array"
+          },
+          "extra": {
+            "description": "A google.protobuf.Struct: JSON itself.",
+            "type": "object"
+          },
+          "ints": {
+            "items": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "additionalProperties": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "mask": {
+            "description": "A google.protobuf.FieldMask: its paths in lowerCamelCase, by commas. A path whose snake case does not give it back is refused.",
+            "pattern": "^([a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*(,[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*)*)?$",
+            "type": "string"
+          },
+          "maybeDouble": {
+            "anyOf": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "enum": [
+                  "NaN",
+                  "Infinity",
+                  "-Infinity"
+                ]
+              }
+            ]
+          },
+          "nothing": {
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "nullMember": {
+            "type": "null"
+          },
+          "someBytes": {
+            "contentEncoding": "base64",
+            "pattern": "^(([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}(==)?|[A-Za-z0-9+/]{3}=?)?|([A-Za-z0-9_-]{4})*([A-Za-z0-9_-]{2}(==)?|[A-Za-z0-9_-]{3}=?)?)$",
+            "type": "string"
+          },
+          "stamps": {
+            "items": {
+              "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+              "format": "date-time",
+              "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "textMember": {
+            "type": "string"
+          },
+          "took": {
+            "description": "A google.protobuf.Duration: its seconds, then s. One past ±315,576,000,000 seconds is refused, which no pattern holds.",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]{1,9})?s$",
+            "type": "string"
+          },
+          "value": {
+            "description": "A google.protobuf.Value: any JSON value, a number finite."
+          },
+          "wrappedFloat": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 3.4028235677973366e+38,
+                "exclusiveMinimum": -3.4028235677973366e+38,
+                "format": "float",
+                "type": "number"
+              },
+              {
+                "enum": [
+                  "NaN",
+                  "Infinity",
+                  "-Infinity"
+                ]
+              }
+            ]
+          },
+          "wrappedInt64": {
+            "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "wrappedUint64": {
+            "description": "A 64-bit integer, uint64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "uint64",
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Everything": {
+        "additionalProperties": false,
+        "dependentSchemas": {
+          "choiceInner": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "choiceText"
+                  ]
+                }
+              ]
+            }
+          },
+          "choiceText": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "choiceInner"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "description": "bead.transcoding.v1.Everything. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "aBool": {
+            "type": "boolean"
+          },
+          "aDouble": {
+            "anyOf": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "enum": [
+                  "NaN",
+                  "Infinity",
+                  "-Infinity"
+                ]
+              }
+            ]
+          },
+          "aFixed64": {
+            "description": "A 64-bit integer, fixed64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "uint64",
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          },
+          "aFloat": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 3.4028235677973366e+38,
+                "exclusiveMinimum": -3.4028235677973366e+38,
+                "format": "float",
+                "type": "number"
+              },
+              {
+                "enum": [
+                  "NaN",
+                  "Infinity",
+                  "-Infinity"
+                ]
+              }
+            ]
+          },
+          "aSint64": {
+            "description": "A 64-bit integer, sint64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "aString": {
+            "type": "string"
+          },
+          "aUint32": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "aUint64": {
+            "description": "A 64-bit integer, uint64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "uint64",
+            "pattern": "^(0|[1-9][0-9]{0,19})$",
+            "type": "string"
+          },
+          "anInt32": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "anInt64": {
+            "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "anyValue": {
+            "description": "A google.protobuf.Value: any JSON value, a number finite."
+          },
+          "at": {
+            "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+            "format": "date-time",
+            "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+            "type": "string"
+          },
+          "byId": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            },
+            "type": "object"
+          },
+          "choiceInner": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+          },
+          "choiceText": {
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Color"
+          },
+          "extra": {
+            "description": "A google.protobuf.Struct: JSON itself.",
+            "type": "object"
+          },
+          "flags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "type": "object"
+          },
+          "inner": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+          },
+          "inners": {
+            "items": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+            },
+            "type": "array"
+          },
+          "int64s": {
+            "items": {
+              "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+              "format": "int64",
+              "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "additionalProperties": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "list": {
+            "description": "A google.protobuf.ListValue: a JSON array.",
+            "type": "array"
+          },
+          "mask": {
+            "description": "A google.protobuf.FieldMask: its paths in lowerCamelCase, by commas. A path whose snake case does not give it back is refused.",
+            "pattern": "^([a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*(,[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*)*)?$",
+            "type": "string"
+          },
+          "maybe": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "nothing": {
+            "additionalProperties": false,
+            "type": "object"
+          },
+          "renamed": {
+            "type": "string"
+          },
+          "someBytes": {
+            "contentEncoding": "base64",
+            "pattern": "^(([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}(==)?|[A-Za-z0-9+/]{3}=?)?|([A-Za-z0-9_-]{4})*([A-Za-z0-9_-]{2}(==)?|[A-Za-z0-9_-]{3}=?)?)$",
+            "type": "string"
+          },
+          "took": {
+            "description": "A google.protobuf.Duration: its seconds, then s. One past ±315,576,000,000 seconds is refused, which no pattern holds.",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]{1,9})?s$",
+            "type": "string"
+          },
+          "wrappedBool": {
+            "type": "boolean"
+          },
+          "wrappedInt64": {
+            "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "wrappedString": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.FailRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.FailRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.GetBookRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.GetBookRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "at": {
+            "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+            "format": "date-time",
+            "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+            "type": "string"
+          },
+          "color": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Color"
+          },
+          "flag": {
+            "type": "boolean"
+          },
+          "inners": {
+            "items": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+            },
+            "type": "array"
+          },
+          "labels": {
+            "additionalProperties": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "sub": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.GetOperationRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.GetOperationRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Inner": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Inner. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "count": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.ListBooksRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.ListBooksRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "pageSize": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "parent": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.ListBooksResponse": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.ListBooksResponse. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "books": {
+            "items": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Book"
+            },
+            "type": "array"
+          },
+          "nextPageToken": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.ListOperationsRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.ListOperationsRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "filter": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.ListOperationsResponse": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.ListOperationsResponse. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Operation"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Operation": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Operation. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "done": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Ruled": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Ruled. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "from": {
+            "allOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": -2147483648,
+                "type": "integer"
+              },
+              {
+                "maximum": 10
+              }
+            ]
+          },
+          "title": {
+            "allOf": [
+              {
+                "type": "string"
+              },
+              {
+                "maxLength": 3
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.Tick": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.Tick. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "remaining": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.TicksRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.TicksRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "from": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.TicksResponse": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.TicksResponse. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "ticks": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.UpdateBookRequest": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.UpdateBookRequest. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "book": {
+            "$ref": "#/components/schemas/bead.transcoding.v1.Book"
+          },
+          "updateMask": {
+            "description": "A google.protobuf.FieldMask: its paths in lowerCamelCase, by commas. A path whose snake case does not give it back is refused.",
+            "pattern": "^([a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*(,[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*)*)?$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "bead.transcoding.v1.WhoAmIResponse": {
+        "additionalProperties": false,
+        "description": "bead.transcoding.v1.WhoAmIResponse. Bead's mapping reads each field by its proto name too.",
+        "properties": {
+          "session": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "credential": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "title": "Transcoding",
+    "version": "Transcoding.1"
+  },
+  "jsonSchemaDialect": "https://spec.openapis.org/oas/3.1/dialect/base",
+  "openapi": "3.1.1",
+  "paths": {
+    "/api/Transcoding/archiveBook": {
+      "post": {
+        "description": "Archives a book, and answers nothing.",
+        "operationId": "Transcoding.archiveBook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.GetBookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Archives a book, and answers nothing.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "archiveBook",
+          "procedureId": 6,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/ask": {
+      "post": {
+        "description": "Commands its caller, by answer, and answers the code the command failed with, or 0.",
+        "operationId": "Transcoding.ask",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.AskResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Commands its caller, by answer, and answers the code the command failed with, or 0.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "ask",
+          "procedureId": 17,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/cancels": {
+      "get": {
+        "description": "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.",
+        "operationId": "Transcoding.cancels.get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "atLeast",
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.CancelsResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "cancels",
+          "procedureId": 20,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      },
+      "post": {
+        "description": "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.",
+        "operationId": "Transcoding.cancels",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.CancelsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.CancelsResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers how many of hang's calls ended cancelled, once they are at least its atLeast, or 1 second passed.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "cancels",
+          "procedureId": 20,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/echo": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.echo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.Everything"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Everything"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "echo",
+          "procedureId": 1,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/echoEdges": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.echoEdges",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.Edges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Edges"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "echoEdges",
+          "procedureId": 2,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/fail": {
+      "post": {
+        "description": "Fails with REFUSED, its detail its request's.",
+        "operationId": "Transcoding.fail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.FailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Fails with REFUSED, its detail its request's.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "fail",
+          "procedureId": 15,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/getBook": {
+      "post": {
+        "description": "Answers the book its name names: its title \"A tale\", its pages its revision.",
+        "operationId": "Transcoding.getBook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.GetBookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Book"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers the book its name names: its title \"A tale\", its pages its revision.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getBook",
+          "procedureId": 3,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/getOperation": {
+      "get": {
+        "description": "Answers the operation its name names, done.",
+        "operationId": "Transcoding.getOperation.get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Operation"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers the operation its name names, done.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getOperation",
+          "procedureId": 8,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      },
+      "post": {
+        "description": "Answers the operation its name names, done.",
+        "operationId": "Transcoding.getOperation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.GetOperationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Operation"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers the operation its name names, done.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getOperation",
+          "procedureId": 8,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/hang": {
+      "post": {
+        "description": "Answers never, and counts each of its calls that ends cancelled.",
+        "operationId": "Transcoding.hang",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers never, and counts each of its calls that ends cancelled.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "hang",
+          "procedureId": 19,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/json": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.json",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "A JSON value, the payload as it is (spec 17.5)."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "A JSON value, the payload as it is (spec 17.5)."
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "json",
+          "procedureId": 14,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/judge": {
+      "post": {
+        "description": "Answers nothing, once its rules took its request.",
+        "operationId": "Transcoding.judge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.Ruled"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            },
+            "description": "PAYLOAD_INVALID: its request's rules refused it."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers nothing, once its rules took its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "judge",
+          "procedureId": 9,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/listBooks": {
+      "post": {
+        "description": "Answers its shelf's two books, a and b, titled A and B, and no page after.",
+        "operationId": "Transcoding.listBooks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.ListBooksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.ListBooksResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its shelf's two books, a and b, titled A and B, and no page after.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "listBooks",
+          "procedureId": 4,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/listOperations": {
+      "post": {
+        "description": "Answers one operation, its name its request's and \"/a\" after it, not done.",
+        "operationId": "Transcoding.listOperations",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.ListOperationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.ListOperationsResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers one operation, its name its request's and \"/a\" after it, not done.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "listOperations",
+          "procedureId": 7,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/raw": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.raw",
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {}
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "raw",
+          "procedureId": 12,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/text": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.text",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "text",
+          "procedureId": 13,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/ticks": {
+      "get": {
+        "description": "Answers its from as its ticks, notifies each count down to 0, then ends with COUNTED.",
+        "operationId": "Transcoding.ticks.get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.TicksResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "x-bead-events": {
+                  "failure": {
+                    "$ref": "#/components/schemas/Problem"
+                  },
+                  "message": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Tick"
+                  },
+                  "result": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.TicksResponse"
+                  }
+                }
+              }
+            },
+            "description": "The result; with Accept: text/event-stream, the result, then each notification, then the failure that ends them (transcoding 8)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its from as its ticks, notifies each count down to 0, then ends with COUNTED.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "ticks",
+          "procedureId": 10,
+          "procedureKind": "notifies",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      },
+      "post": {
+        "description": "Answers its from as its ticks, notifies each count down to 0, then ends with COUNTED.",
+        "operationId": "Transcoding.ticks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.TicksRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.TicksResponse"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "x-bead-events": {
+                  "failure": {
+                    "$ref": "#/components/schemas/Problem"
+                  },
+                  "message": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Tick"
+                  },
+                  "result": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.TicksResponse"
+                  }
+                }
+              }
+            },
+            "description": "The result; with Accept: text/event-stream, the result, then each notification, then the failure that ends them (transcoding 8)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its from as its ticks, notifies each count down to 0, then ends with COUNTED.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "ticks",
+          "procedureId": 10,
+          "procedureKind": "notifies",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/updateBook": {
+      "post": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.updateBook",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/bead.transcoding.v1.UpdateBookRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.UpdateBookRequest"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "updateBook",
+          "procedureId": 5,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/watch": {
+      "post": {
+        "description": "Answers nothing, then notifies nothing, and ends its subscription never.",
+        "operationId": "Transcoding.watch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "x-bead-events": {
+                  "failure": {
+                    "$ref": "#/components/schemas/Problem"
+                  },
+                  "message": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Tick"
+                  },
+                  "result": {
+                    "additionalProperties": false,
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "description": "The result; with Accept: text/event-stream, the result, then each notification, then the failure that ends them (transcoding 8)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers nothing, then notifies nothing, and ends its subscription never.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "watch",
+          "procedureId": 11,
+          "procedureKind": "notifies",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/api/Transcoding/whoAmI": {
+      "post": {
+        "description": "Answers its call's session's identifier.",
+        "operationId": "Transcoding.whoAmI",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.WhoAmIResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "SESSION_REQUIRED: a call its admission needs a credential for.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "The gateway's challenge (RFC 6750 §3).",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its call's session's identifier.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "whoAmI",
+          "procedureId": 16,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/books/{name}": {
+      "get": {
+        "description": "Answers the book its name names: its title \"A tale\", its pages its revision.",
+        "operationId": "Transcoding.getBook.http1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "schema": {
+              "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+              "format": "int64",
+              "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sub.name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sub.count",
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "tags",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "schema": {
+              "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+              "format": "date-time",
+              "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Color"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flag",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Book"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers the book its name names: its title \"A tale\", its pages its revision.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getBook",
+          "procedureId": 3,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/operations": {
+      "get": {
+        "description": "Answers one operation, its name its request's and \"/a\" after it, not done.",
+        "operationId": "Transcoding.listOperations.http",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filter",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.ListOperationsResponse"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers one operation, its name its request's and \"/a\" after it, not done.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "listOperations",
+          "procedureId": 7,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/operations/{operations}": {
+      "get": {
+        "description": "Answers the operation its name names, done.",
+        "operationId": "Transcoding.getOperation.http",
+        "parameters": [
+          {
+            "description": "Zero or more segments, by /, of name, which this one parameter holds.",
+            "in": "path",
+            "name": "operations",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-segments": true,
+            "x-bead-variable": "name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Operation"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers the operation its name names, done.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getOperation",
+          "procedureId": 8,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/ruled/{title}": {
+      "post": {
+        "description": "Answers nothing, once its rules took its request.",
+        "operationId": "Transcoding.judge.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "title",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "bead.transcoding.v1.Ruled. Bead's mapping reads each field by its proto name too.",
+                "properties": {
+                  "from": {
+                    "maximum": 2147483647,
+                    "minimum": -2147483648,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            },
+            "description": "PAYLOAD_INVALID: its request's rules refused it."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers nothing, once its rules took its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "judge",
+          "procedureId": 9,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/shelves/{shelves}/books": {
+      "get": {
+        "description": "Answers its shelf's two books, a and b, titled A and B, and no page after.",
+        "operationId": "Transcoding.listBooks.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shelves",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "parent"
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Book"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its shelf's two books, a and b, titled A and B, and no page after.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "listBooks",
+          "procedureId": 4,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/shelves/{shelves}/books/{books}": {
+      "get": {
+        "description": "Answers the book its name names: its title \"A tale\", its pages its revision.",
+        "operationId": "Transcoding.getBook.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shelves",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "name"
+          },
+          {
+            "in": "path",
+            "name": "books",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "name"
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "schema": {
+              "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+              "format": "int64",
+              "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sub.name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sub.count",
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": -2147483648,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": true,
+            "in": "query",
+            "name": "tags",
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "at",
+            "schema": {
+              "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+              "format": "date-time",
+              "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "color",
+            "schema": {
+              "$ref": "#/components/schemas/bead.transcoding.v1.Color"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flag",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.Book"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers the book its name names: its title \"A tale\", its pages its revision.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "getBook",
+          "procedureId": 3,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      },
+      "patch": {
+        "description": "Answers its request.",
+        "operationId": "Transcoding.updateBook.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shelves",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "book.name"
+          },
+          {
+            "in": "path",
+            "name": "books",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "book.name"
+          },
+          {
+            "in": "query",
+            "name": "updateMask",
+            "schema": {
+              "description": "A google.protobuf.FieldMask: its paths in lowerCamelCase, by commas. A path whose snake case does not give it back is refused.",
+              "pattern": "^([a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*(,[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*)*)?$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "bead.transcoding.v1.Book. Bead's mapping reads each field by its proto name too.",
+                "properties": {
+                  "author": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+                  },
+                  "pages": {
+                    "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+                    "format": "int64",
+                    "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/bead.transcoding.v1.UpdateBookRequest"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Answers its request.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "updateBook",
+          "procedureId": 5,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    },
+    "/v1/shelves/{shelves}/books/{books}:archive": {
+      "post": {
+        "description": "Archives a book, and answers nothing.",
+        "operationId": "Transcoding.archiveBook.http",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "shelves",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "name"
+          },
+          {
+            "in": "path",
+            "name": "books",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "x-bead-variable": "name"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "bead.transcoding.v1.GetBookRequest. Bead's mapping reads each field by its proto name too.",
+                "properties": {
+                  "at": {
+                    "description": "A google.protobuf.Timestamp: RFC 3339's date-time, written in UTC with Z. A day past its month's end, and an instant outside 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, are refused, which no pattern holds.",
+                    "format": "date-time",
+                    "pattern": "^([1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[1-9])-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])$",
+                    "type": "string"
+                  },
+                  "color": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Color"
+                  },
+                  "flag": {
+                    "type": "boolean"
+                  },
+                  "inners": {
+                    "items": {
+                      "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+                    },
+                    "type": "array"
+                  },
+                  "labels": {
+                    "additionalProperties": {
+                      "maximum": 2147483647,
+                      "minimum": -2147483648,
+                      "type": "integer"
+                    },
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "revision": {
+                    "description": "A 64-bit integer, int64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+                    "format": "int64",
+                    "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+                    "type": "string"
+                  },
+                  "sub": {
+                    "$ref": "#/components/schemas/bead.transcoding.v1.Inner"
+                  },
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The result."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A failure (transcoding 7)."
+          }
+        },
+        "security": [
+          {},
+          {
+            "credential": []
+          }
+        ],
+        "summary": "Archives a book, and answers nothing.",
+        "tags": [
+          "Transcoding"
+        ],
+        "x-bead": {
+          "procedure": "archiveBook",
+          "procedureId": 6,
+          "procedureKind": "request",
+          "service": "Transcoding",
+          "serviceId": 1
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "What a gateway answers, each procedure by its default routes and its rules.",
+      "name": "Transcoding"
+    }
+  ]
+}

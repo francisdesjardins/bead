@@ -16,7 +16,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { bufDiagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
-import { displayOf } from './roots.ts';
+import { displayOf, holdsHttpCopy, HTTP_FOLDER } from './roots.ts';
 
 // constants
 
@@ -71,19 +71,28 @@ const moduleOf = (ancestor: string, folder: string): string => {
 };
 
 // buf's configuration and its folder: the options' root and `roots`, one module each, under the folder
-// that holds them all
+// that holds them all; beadc's `google/api` left out where a root's copy of it stands for it, since
+// buf refuses one file in two modules and takes only a folder out of one
 const workspaceOf = (
   roots: readonly string[]
-): { readonly ancestor: string; readonly modules: { path: string }[] } => {
+): {
+  readonly ancestor: string;
+  readonly modules: { path: string; excludes?: string[] }[];
+} => {
   const folders = [OPTIONS_ROOT, ...roots].map((folder) => {
     return resolve(folder);
   });
   const ancestor = ancestorOf(folders);
+  const copied = holdsHttpCopy(roots);
 
   return {
     ancestor,
-    modules: folders.map((folder) => {
-      return { path: moduleOf(ancestor, folder) };
+    modules: folders.map((folder, at) => {
+      const path = moduleOf(ancestor, folder);
+
+      return at === 0 && copied
+        ? { path, excludes: [path === '.' ? HTTP_FOLDER : `${path}/${HTTP_FOLDER}`] }
+        : { path };
     }),
   };
 };
