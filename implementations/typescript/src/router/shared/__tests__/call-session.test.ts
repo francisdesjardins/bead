@@ -37,6 +37,9 @@ test.describe('credentialSchemesDetailOf', () => {
         CredentialScheme.OPAQUE,
       ])
     ).toBe('OPAQUE, JWT, ELSEWHERE');
+    expect(credentialSchemesDetailOf([CredentialScheme.ELSEWHERE, CredentialScheme.OPAQUE])).toBe(
+      'OPAQUE, ELSEWHERE'
+    );
   });
 });
 
@@ -197,13 +200,14 @@ test.describe('uncarriedOf', () => {
           codeOf(credential, [undefined, true]),
           codeOf(credential, [one, true]),
           codeOf(credential, [every, false]),
+          codeOf(credential, [none, false]),
         ];
       })
     ).toEqual([
-      [undefined, undefined, undefined, undefined, undefined],
-      [undefined, undefined, undefined, undefined, undefined],
-      [undefined, undefined, undefined, undefined, unreachable],
-      [undefined, unreachable, unreachable, unreachable, unreachable],
+      [undefined, undefined, undefined, undefined, undefined, undefined],
+      [undefined, undefined, undefined, undefined, undefined, undefined],
+      [undefined, undefined, undefined, undefined, unreachable, unreachable],
+      [undefined, unreachable, unreachable, unreachable, unreachable, unreachable],
     ]);
     // the very bytes it carries go; its detail names the scheme alone, never the credential
     expect(
@@ -224,6 +228,18 @@ test.describe('uncarriedOf', () => {
     ).toBe(
       'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another'
     );
+    for (const credential of [jwt, elsewhere]) {
+      expect(
+        uncarriedOf(credential, {
+          carried: credential === elsewhere ? 'Interop sub=ada' : undefined,
+          carries: every,
+          failures: CLIENT_FAILURES,
+          isSecure: false,
+        })?.detail
+      ).toBe(
+        'its transport leaves the machine in the clear, which a bearer credential never crosses'
+      );
+    }
   });
 });
 
@@ -235,6 +251,9 @@ test.describe('sessionKeyOf', () => {
       sessionKeyOf({ issuer: 'https://b.example', scheme: CredentialScheme.JWT, sub: 'grace' }),
       sessionKeyOf({ issuer: 'https://a.example', scheme: CredentialScheme.JWT, sid: 'grace' }),
       sessionKeyOf({ id: 'grace', scheme: CredentialScheme.ELSEWHERE }),
+      sessionKeyOf({ issuer: 'https://a.example', scheme: CredentialScheme.JWT, sub: 'Grace' }),
+      sessionKeyOf({ id: 'é', scheme: CredentialScheme.ELSEWHERE }),
+      sessionKeyOf({ id: 'é', scheme: CredentialScheme.ELSEWHERE }),
     ];
 
     expect(new Set(keys).size).toBe(keys.length);
