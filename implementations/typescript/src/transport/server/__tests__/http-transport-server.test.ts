@@ -1916,6 +1916,25 @@ test.describe('createHTTPTransportServer, its edges', () => {
         securedBy({ address: '127.0.0.1', secure: true }),
       ])
     ).toEqual([true, false, true, false, false, true]);
+
+    for (const [secure, expected] of [
+      [undefined, false],
+      [true, true],
+      [false, false],
+    ] as const) {
+      const unbound = createHTTPTransportServer({
+        createServer: (listener) => {
+          return createServer(listener);
+        },
+        ...(secure === undefined ? {} : { secure }),
+      });
+
+      try {
+        expect(unbound.isSecure('type=HTTP;ip=192.0.2.9;ordinal=1')).toBe(expected);
+      } finally {
+        await unbound.stop();
+      }
+    }
   });
 
   test('listens on the port it was asked for, reports it when the server reports none, takes a late error as its own, and closes its sessions as it stops', async () => {
