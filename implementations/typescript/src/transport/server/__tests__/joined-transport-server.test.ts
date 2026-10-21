@@ -326,7 +326,7 @@ test.describe('joinTransports', () => {
       return joinTransports([createMemoryTransportServer(), createMemoryTransportServer()]);
     }).toThrow(
       new ProgrammerError(
-        'a join takes one transport of type MEMORY, whose handles another might draw too'
+        'a join takes one transport of each type: two are MEMORY, whose handles might be one'
       )
     );
     expect(() => {
@@ -340,7 +340,7 @@ test.describe('joinTransports', () => {
           scope: new MessageChannel().port1,
         }),
       ]);
-    }).toThrow(new ProgrammerError('the transports a join takes run on one clock'));
+    }).toThrow(new ProgrammerError("a join's transports run on one clock"));
 
     // one clock, or none named beside it, is the join's
     const joined = joinTransports([

@@ -79,7 +79,7 @@ const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | unde
   );
 
   if (clocks.size > 1) {
-    throw new ProgrammerError('the transports a join takes run on one clock');
+    throw new ProgrammerError("a join's transports run on one clock");
   }
 
   return clocks.values().next().value;
@@ -120,7 +120,7 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
   for (const transport of transports) {
     if (byType.has(transport.type)) {
       throw new ProgrammerError(
-        `a join takes one transport of type ${transport.type}, whose handles another might draw too`
+        `a join takes one transport of each type: two are ${transport.type}, whose handles might be one`
       );
     }
 

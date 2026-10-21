@@ -189,7 +189,9 @@ export const createMemoryTransportClient = ({
             }
 
             if (attempt.isClosedEarly) {
-              throw new ConnectError('the in-memory server closed the connection as it opened');
+              throw new ConnectError(
+                'the in-memory transport server closed the connection as it opened'
+              );
             }
           } catch (reason) {
             attempt.isGivenUp = true;

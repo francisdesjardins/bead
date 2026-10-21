@@ -147,7 +147,7 @@ test.describe('createMemoryTransportServer', () => {
 
     // before it listens, a connect fails before anything goes
     await expect(first.connect({})).rejects.toThrow(
-      new ConnectError('the in-memory server is not listening')
+      new ConnectError('the in-memory transport server is uninitialized, not open')
     );
     expect(first.isClosed()).toBe(true);
 
@@ -178,7 +178,9 @@ test.describe('createMemoryTransportServer', () => {
       true,
     ]);
     expect([first.isClosed(), second.isClosed()]).toEqual([true, true]);
-    await expect(first.connect({})).rejects.toBeInstanceOf(ConnectError);
+    await expect(first.connect({})).rejects.toThrow(
+      new ConnectError('the in-memory transport server is closed, not open')
+    );
     expect([server.clients, first.isClosed()]).toEqual([[], true]);
   });
 

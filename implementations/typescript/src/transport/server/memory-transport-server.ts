@@ -9,6 +9,7 @@ import {
   TRANSPORT_MEMORY,
 } from '../shared/constants';
 import { ConnectError, ProgrammerError } from '../shared/errors';
+import { getReadyStateName } from '../shared/ready-state';
 import { transferableOf } from '../shared/transferable';
 import type { IMemoryEndLike, IMemoryPeerLike, ITransportMessage } from '../shared/types';
 import { createTransportServer, generateHandle } from './transport-server';
@@ -58,7 +59,7 @@ export const createMemoryTransportServer = (
   // `accept` reaches the registry and `tell`, which only `define` is handed: replaced by it, which
   // `createTransportServer` calls before it returns
   let acceptOf = (_peer: IMemoryPeerLike): Promise<IMemoryEndLike> => {
-    return Promise.reject(new ConnectError('the in-memory server is not built'));
+    return Promise.reject(new ConnectError('the in-memory transport server is not built'));
   };
 
   const transport = createTransportServer<IMemoryPeerLike, undefined>(
@@ -90,7 +91,14 @@ export const createMemoryTransportServer = (
           // * a later turn than the connect, so its client's router is never entered from it
           queueMicrotask(() => {
             if (!server.isOpen()) {
-              return (reject(new ConnectError('the in-memory server is not listening')), undefined);
+              return (
+                reject(
+                  new ConnectError(
+                    `the in-memory transport server is ${getReadyStateName(server)}, not open`
+                  )
+                ),
+                undefined
+              );
             }
 
             const connectionHandle = generateHandle({

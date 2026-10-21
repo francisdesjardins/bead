@@ -65,7 +65,7 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
 
             if (!ReferenceEquals(transport.Clock, transports[0].Clock))
             {
-                throw new ArgumentException("a join's transports run on one clock, the stack's built on it", nameof(transports));
+                throw new ArgumentException("a join's transports run on one clock", nameof(transports));
             }
         }
 
