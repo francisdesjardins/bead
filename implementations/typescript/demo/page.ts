@@ -32,6 +32,8 @@ import {
 } from './procedures';
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
+import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
+import { mountSignUp } from './sign-up';
 import {
   answeredOf,
   type IAnswered,
@@ -94,10 +96,16 @@ const READ_NAMES = READS.map(({ procedureName }) => {
   return procedureName;
 });
 
-/** The demo's procedures by id, so an envelope, which carries none of their names, shows one. */
-const PROCEDURE_NAMES: Readonly<Record<number, string>> = Object.fromEntries(
-  Object.values(CALLS).map(({ procedure }) => {
-    return [procedure.procedureId, procedure.procedureName];
+/**
+ * The demo's procedures by their service and their id, the sign-up's among them, so an envelope,
+ * which carries none of their names, shows one.
+ */
+const PROCEDURE_NAMES: Readonly<Record<string, string>> = Object.fromEntries(
+  [...Object.values(CALLS), ...Object.values(SignUpProcedures)].map(({ procedure }) => {
+    return [
+      `${String(procedure.serviceId)}/${String(procedure.procedureId)}`,
+      procedure.procedureName,
+    ];
   })
 );
 
@@ -171,9 +179,9 @@ const envelopeLineOf = ({ direction, header }: IRouterDebugInfo): string => {
   ];
 
   if (header.kind === EnvelopeKind.REQUEST) {
-    parts.push(
-      `${PROCEDURE_NAMES[header.procedureId] ?? '?'} (${String(header.serviceId)}/${String(header.procedureId)})`
-    );
+    const address = `${String(header.serviceId)}/${String(header.procedureId)}`;
+
+    parts.push(`${PROCEDURE_NAMES[address] ?? '?'} (${address})`);
 
     if (header.opensSubscription === true) {
       parts.push(header.paced === true ? 'paced subscription' : 'subscription');
@@ -862,6 +870,9 @@ services.on('dropped', (procedure, failure) => {
 
 // a developer's own, to the console, as the `localStorage` of the page says, the reads aside
 watchDebug(client, { quiet: READS });
+
+// the sign-up, its request held to the rules of its .proto
+mountSignUp(client, { reasonOf });
 
 // an exposition opened is written at once, from its last text
 for (const details of [shown.clientExposition, shown.serverExposition]) {

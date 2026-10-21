@@ -1666,6 +1666,19 @@ five changes, once subscribed, shows the two ways to follow one: the counter's s
 as two notifications, the first and the latest; its signal, "it changed", comes five times, and the
 page merges it into two reads.
 
+A form signs up for a workshop through a service of its own, `SignUpService`, which beadc generates
+from the demo's `.proto`, [`demo/proto/demo/v1/sign_up.proto`](demo/proto/demo/v1/sign_up.proto),
+as [`demo/beadc.yaml`](demo/beadc.yaml) says, into `demo/gen/`: its request holds protovalidate's
+rules — a name of 1 to 63 characters in a DNS label's shape, 1 to 10 seats, an email or a phone,
+exactly one — which every server judges before its resolver, answering a request they refuse
+`PAYLOAD_INVALID` (spec 18). The page reads the detail with `violationsOf`: each violation under the
+field its path names, the field marked `aria-invalid` and described by it, the first focused, one of
+no field above the form. "Validate before sending" calls through a client side whose options say
+`validates`, which refuses the same request before anything goes on the wire. `yarn test:demo` runs
+the demo's tests, in a Playwright config of their own: its procedures in Node, a server and a client
+joined in memory, and the form in Chromium, against the static build `yarn playground:build:file`
+makes.
+
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server
 verifies it through its `credentials`, its key and its audience, so each call runs in its

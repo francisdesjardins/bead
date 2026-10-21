@@ -206,6 +206,108 @@
         background: var(--bad);
       }
 
+      /* ── the sign-up: a field a row, its violations under it ─────────────── */
+
+      .form {
+        display: grid;
+        gap: 9px;
+      }
+
+      .field {
+        display: grid;
+        gap: 3px;
+        min-width: 0;
+      }
+
+      .field label {
+        font-weight: 600;
+      }
+
+      .field input {
+        width: 100%;
+        min-height: 30px;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--raised);
+        color: var(--ink);
+        font: 13px var(--mono);
+      }
+
+      .field input:focus-visible,
+      .check input:focus-visible,
+      .unbound:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .field input[aria-invalid='true'] {
+        border-color: var(--bad);
+        background: var(--bad-soft);
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      /* a violation, under the input its path names, or above the form when it names none */
+      .violations {
+        display: grid;
+        gap: 2px;
+        padding: 0;
+        color: var(--bad);
+        font-size: 12px;
+        font-weight: 550;
+        list-style: none;
+        overflow-wrap: anywhere;
+      }
+
+      .violations li::before {
+        content: '✕ ';
+      }
+
+      .violations[hidden] {
+        display: none;
+      }
+
+      .unbound[hidden] {
+        display: none;
+      }
+
+      .unbound {
+        padding: 6px 9px;
+        border-radius: 8px;
+        background: var(--bad-soft);
+      }
+
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .check input {
+        width: 15px;
+        height: 15px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
+      #sign-up-status {
+        font-weight: 500;
+        overflow-wrap: anywhere;
+      }
+
+      /* a phone zooms into a field whose text is smaller than 16px */
+      @media (max-width: 600px) {
+        .field input {
+          font-size: 16px;
+        }
+      }
+
       /* ── the board: what to do, what stands, what went across ───────────── */
 
       .dashboard {
@@ -615,6 +717,90 @@
             <button type="button" data-action="fail">Procedure fails</button>
             <button type="button" data-action="ask">Server asks my time</button>
           </div>
+        </section>
+
+        <section class="card" aria-labelledby="sign-up-h">
+          <h2 id="sign-up-h">Payload rules</h2>
+          <p class="note">
+            A sign-up whose <code>.proto</code> holds protovalidate's rules, compiled by beadc: the
+            server judges each request before its resolver, and answers one they refuse
+            <code>PAYLOAD_INVALID</code>, each violation shown under its field.
+          </p>
+          <form id="sign-up" class="form" novalidate>
+            <div id="sign-up-unbound" class="unbound" tabindex="-1" role="alert" hidden>
+              <ul id="sign-up-unbound-list" class="violations"></ul>
+            </div>
+            <div class="field">
+              <label for="sign-up-name">Name</label>
+              <input
+                id="sign-up-name"
+                name="name"
+                autocomplete="username"
+                autocapitalize="none"
+                spellcheck="false"
+                aria-describedby="sign-up-name-hint"
+              />
+              <ul id="sign-up-name-messages" class="violations" hidden></ul>
+              <p id="sign-up-name-hint" class="hint">
+                1 to 63 characters: a lower-case letter, then letters, digits or hyphens
+              </p>
+            </div>
+            <div class="field">
+              <label for="sign-up-seats">Seats</label>
+              <input
+                id="sign-up-seats"
+                name="seats"
+                inputmode="numeric"
+                autocomplete="off"
+                aria-describedby="sign-up-seats-hint"
+              />
+              <ul id="sign-up-seats-messages" class="violations" hidden></ul>
+              <p id="sign-up-seats-hint" class="hint">From 1 to 10</p>
+            </div>
+            <div class="field">
+              <label for="sign-up-email">Email</label>
+              <input
+                id="sign-up-email"
+                name="email"
+                type="email"
+                autocomplete="email"
+                spellcheck="false"
+                aria-describedby="sign-up-email-hint"
+              />
+              <ul id="sign-up-email-messages" class="violations" hidden></ul>
+              <p id="sign-up-email-hint" class="hint">Or a phone: exactly one of the two</p>
+            </div>
+            <div class="field">
+              <label for="sign-up-phone">Phone</label>
+              <input
+                id="sign-up-phone"
+                name="phone"
+                type="tel"
+                autocomplete="tel"
+                aria-describedby="sign-up-phone-hint"
+              />
+              <ul id="sign-up-phone-messages" class="violations" hidden></ul>
+              <p id="sign-up-phone-hint" class="hint">E.164: a +, then 7 to 15 digits</p>
+            </div>
+            <label class="check">
+              <input
+                id="sign-up-validates"
+                type="checkbox"
+                aria-describedby="sign-up-validates-note"
+              />
+              Validate before sending
+            </label>
+            <p id="sign-up-validates-note" class="note">
+              The client judges the request by the same rules: a refusal fails at once, and nothing
+              goes on the wire.
+            </p>
+            <div class="buttons">
+              <button type="submit">Sign up</button>
+              <button type="button" id="sign-up-broken">Break several fields</button>
+              <button type="button" id="sign-up-valid">Fill a valid one</button>
+            </div>
+            <p id="sign-up-status" role="status">—</p>
+          </form>
         </section>
       </div>
 

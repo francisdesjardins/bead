@@ -128,6 +128,10 @@ jobs:
         run: $YARN playwright install --with-deps chromium
       - if: matrix.node == '26'
         run: $YARN test:devtools
+      # The demo's own tests on the current line: its procedures in Node, and its page, the static
+      # build above, in Chromium.
+      - if: matrix.node == '26'
+        run: $YARN test:demo
       # The root's own files, from the README to this CI, under the TypeScript side's formatter; the
       # tool holds their list. The conformance files are left to their generators.
       - name: Format of the root's files
@@ -206,7 +210,8 @@ jobs:
   # among them, whose blueprint is the spec's byte for byte in either line ending, and the goldens of
   # both targets, protoc's C# messages among them; then beadc itself over the interop's blueprint,
   # its rules and its form, then each side's interop to what beadc generates from the root's
-  # `beadc.yaml`, then, on Linux, `beadc breaking`, the interop's blueprint and `examples/hello`
+  # `beadc.yaml`, and the demo's sign-up service to what it generates from the demo's, then, on
+  # Linux, `beadc breaking`, the interop's blueprint and `examples/hello`
   # against the last release that carries one, from 0.3.0. On Windows, where buf and protoc are
   # other binaries, on the current line; on Linux, on the floor `engines.node` declares too. The C#
   # goldens build in the .NET job, which has the SDK. The wrappers, `beadc.sh` and `beadc.ps1`, are
@@ -309,6 +314,9 @@ jobs:
       - name: Each side's interop, what beadc generates from its blueprint
         working-directory: .
         run: node builder/src/cli.ts generate --check
+      - name: The demo's sign-up service, what beadc generates from its .proto
+        working-directory: implementations/typescript/demo
+        run: node ../../../builder/src/cli.ts generate --check
       - name: Each side's validators of spec/validations.proto, what beadc generates for it
         working-directory: .
         run: node tools/check-validations.mjs

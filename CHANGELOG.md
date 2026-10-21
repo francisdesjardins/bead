@@ -40,6 +40,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Overview tables its violations, a row each with its field, rule, words and bounds, then what the
   closing line counts, that its side stopped, or that the detail was cut; the Wire view sums one up
   on its line.
+- The demo's sign-up, a service beadc generates from the demo's own `.proto`, its request held to
+  protovalidate's rules: a refusal's violations each under its field, marked `aria-invalid` and
+  described by them, one of no field above the form, and "Validate before sending" refusing before
+  anything goes; `yarn test:demo` runs the demo's tests, and CI holds its generated code.
 
 ### Changed
 
