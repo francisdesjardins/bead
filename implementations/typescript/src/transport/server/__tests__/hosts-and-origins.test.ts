@@ -16,6 +16,7 @@ import {
   ORIGIN_REFUSAL,
   originOf,
   ownAuthorityOf,
+  requestTargetOf,
 } from '../hosts-and-origins';
 import { LISTENING_ADDRESSES, LISTENING_NAMES, NO_LISTENING_ADDRESSES } from './addresses';
 
@@ -35,6 +36,12 @@ const EVERY_SERVERS = [
   '[::1]',
   '[::1]:8443',
   '[2001:db8::7]:80',
+  'localhost:80',
+  'Bead.LocalHost:8443',
+  'a.b.localhost',
+  '.localhost',
+  '[2001:db8::7]',
+  '[::ffff:127.0.0.1]:8080',
 ];
 // and what a server takes only where it is listed: an empty host, none, a name that only looks
 // like one of those, a final dot, and what a platform's parser reads as an IPv4 address
@@ -52,6 +59,14 @@ const NO_SERVERS = [
   '127.0.0.1.example',
   '256.0.0.1',
   'xn--a',
+  'rebind.example:8080',
+  'localhost.:8080',
+  'bead-localhost',
+  'localhost.localhost.example',
+  '0x7f.0.0.1',
+  '2130706433',
+  '127.0.0.01',
+  '1.2.3.4.5',
 ];
 
 // the hosts given, and the rows they take and refuse, in any ASCII case, on any port
@@ -302,7 +317,7 @@ test.describe('hosts and origins', () => {
   });
 
   test('takes whatever its hosts localhost, the names under .localhost and IP literals, each by its host on any port, and no other host, nor an empty one, nor none, but under *', () => {
-    for (const hosts of [undefined, [], ['bead.test']]) {
+    for (const hosts of [undefined, [], ['bead.test'], ['xn--bad-bma.test', 'elsewhere.example']]) {
       expect(
         EVERY_SERVERS.filter((host) => {
           return isTakenHost(host, hosts);
@@ -563,6 +578,7 @@ test.describe('hosts and origins', () => {
 
     expect(isVisibleField(`a\t${visible.join('')}`)).toBe(true);
     expect(isVisibleField('')).toBe(true);
+    expect(isVisibleField('x \ty')).toBe(true);
     // a space or a tab at either end, which HTTP/2 calls malformed (RFC 9113 §8.2.1)
     expect(
       [' x', 'x ', '\tx', 'x\t', ' ', '\t', ' \t '].filter((value) => {
@@ -602,5 +618,11 @@ test.describe('hosts and origins', () => {
     expect(isTakenOrigin('http://key.test', { host: 'Key.test', origins: [] })).toBe(false);
     expect(isTakenOrigin('http://item.test', { host: 'İtem.test', origins: [] })).toBe(false);
     expect(isTakenOrigin('http://bead.io', { host: 'BEAD.ıO', origins: [] })).toBe(false);
+  });
+
+  test('refuses an absolute-form target without an authority or with an uppercase scheme', () => {
+    for (const target of ['http:///', 'HTTP://127.0.0.1/']) {
+      expect(requestTargetOf(target), target).toBeUndefined();
+    }
   });
 });

@@ -49,6 +49,10 @@ const PATH_FIELDS = [
 const NAMED_ANSWER = Object.freeze({
   'access-control-allow-credentials': null,
   'access-control-allow-methods': null,
+  'access-control-allow-headers': null,
+  'access-control-max-age': null,
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
   'access-control-allow-origin': PAGE,
   'access-control-expose-headers': '*',
   vary: 'Origin',
@@ -58,6 +62,10 @@ const NAMED_ANSWER = Object.freeze({
 const UNNAMED_ANSWER = Object.freeze({
   'access-control-allow-credentials': null,
   'access-control-allow-methods': null,
+  'access-control-allow-headers': null,
+  'access-control-max-age': null,
+  'cache-control': 'no-store',
+  'x-content-type-options': 'nosniff',
   'access-control-allow-origin': null,
   'access-control-expose-headers': null,
   vary: 'Origin',
@@ -195,6 +203,9 @@ test.describe('createHTTPTransportServer, its edges', () => {
         { ...bead, host: ['bead.example', 'bead.example'] },
         { url: 'http://bead.example/bead' }
       ),
+      statusOf({ ...bead, host: '' }),
+      statusOf(bead, { url: '/' }),
+      statusOf({ ...bead, host: 'rebound.example' }, { url: 'http://bead.example/bead' }),
     ]).toEqual([
       [201, undefined],
       [404, REFUSALS.PATH],
@@ -220,6 +231,9 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [400, undefined],
       [400, undefined],
       [400, undefined],
+      [403, REFUSALS.HOST],
+      [404, REFUSALS.PATH],
+      [201, undefined],
     ]);
 
     // HTTP/2's authority that is no host resets its stream, nothing written
@@ -247,6 +261,18 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect([response.status, absolute.response.status]).toEqual([403, 201]);
     expect(untargeted.response.headers?.[REFUSAL_HEADER]).toBe(REFUSALS.PATH);
     await server.stop();
+    await using started = await startTransport({ hosts: ['bead.example'] });
+    const port = Number(new URL(started.url).port);
+
+    for (const target of ['http:///', 'HTTP://127.0.0.1/']) {
+      const { answer } = await rawAnswerOf(
+        port,
+        `POST ${target} HTTP/1.1\r\nHost: bead.example\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
+      );
+
+      expect(answer, target).toEqual([400, null]);
+    }
+    expect(namesOf(started.events, 'connection')).toEqual([]);
   });
 
   test('tells a header given empty from one absent: an empty token is malformed, an empty origin or encoding refused, an empty listen none', async () => {
@@ -283,7 +309,13 @@ test.describe('createHTTPTransportServer, listening', () => {
   // spec 15.6, 15.9
   test('reads a listen’s counts from bead-after and bead-wait, a field given as several lines joined, and refuses 400 a listen without bead-after, whatever its target holds', async () => {
     const clock = createTestClock();
-    const { connectScripted, fake, listenOf, server } = await startScripted({
+    const {
+      connectScripted,
+      events: startedEvents,
+      fake,
+      listenOf,
+      server,
+    } = await startScripted({
       clock,
       inactivityTimeout: Infinity,
     });
@@ -335,12 +367,30 @@ test.describe('createHTTPTransportServer, listening', () => {
       [...(brought.response.body ?? [])],
     ]).toEqual([200, '1', batchOf(notification)]);
 
+    for (const url of ['/bead?after=5&x=1', '/bead?', '/bead']) {
+      const response = at(url, {
+        [AFTER_HEADER]: '0',
+        ...(url === '/bead' ? {} : { [WAIT_HEADER]: '0' }),
+      }).response;
+
+      expect([
+        response.status,
+        response.headers?.[SEQUENCE_HEADER],
+        [...(response.body ?? [])],
+      ]).toEqual([200, '1', batchOf(notification)]);
+    }
+    expect(statusOf(at('/bead', { [AFTER_HEADER]: '1;x=1', [WAIT_HEADER]: '0;y="a;b"' }))).toEqual([
+      204,
+      undefined,
+    ]);
+
     // a bead-wait left out is 0, answered at once; one given, held as long
     const { armed } = timersBy(clock, () => {
       expect(statusOf(at('/bead?', { [AFTER_HEADER]: '1' }))).toEqual([204, undefined]);
     });
+    let waiting: ReturnType<typeof at> | undefined;
     const held = timersBy(clock, () => {
-      at('/bead', { [AFTER_HEADER]: '1', [WAIT_HEADER]: '500' });
+      waiting = at('/bead', { [AFTER_HEADER]: '1', [WAIT_HEADER]: '500' });
     });
 
     expect([
@@ -349,6 +399,10 @@ test.describe('createHTTPTransportServer, listening', () => {
         return delay;
       }),
     ]).toEqual([[], [500]]);
+    expect(waiting?.response.status).toBeUndefined();
+    clock.tick(500);
+    expect(waiting?.response.status).toBe(204);
+    expect(namesOf(startedEvents, 'close')).toEqual([]);
     await server.stop();
   });
 });
@@ -435,10 +489,12 @@ test.describe('createHTTPTransportServer, CORS', () => {
     const { events, server, url } = started;
     const headers = { origin: PAGE };
     const named: unknown[] = [];
+    const reasons: (string | null)[] = [];
     const name = async (answered: Response | Promise<Response>) => {
       const response = await answered;
 
       named.push([response.status, fieldsOf(response.headers, NAMED_ANSWER)]);
+      reasons.push(response.headers.get(REFUSAL_HEADER));
 
       return response;
     };
@@ -458,7 +514,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
     const head = await name(request);
 
     await server.send({ data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 }) }, connectionHandle);
-    await head.arrayBuffer();
+    expect(await bytesOf(head)).toEqual([...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 })]);
 
     // one answered as it is handed on, in one go
     server.on('message', ({ data }) => {
@@ -469,9 +525,22 @@ test.describe('createHTTPTransportServer, CORS', () => {
         );
       }
     });
+    for (const authorization of [undefined, BEARER]) {
+      const response = await name(
+        post(url, {
+          body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
+          connectionToken,
+          headers: { ...headers, ...(authorization === undefined ? {} : { authorization }) },
+        })
+      );
+
+      expect(await bytesOf(response)).toEqual([
+        ...envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }),
+      ]);
+    }
     await name(
       post(url, {
-        body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3 }),
+        body: envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 5 }),
         connectionToken,
         headers,
       })
@@ -482,7 +551,7 @@ test.describe('createHTTPTransportServer, CORS', () => {
       { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }) },
       connectionHandle
     );
-    await name(
+    const batch = await name(
       fetch(url, {
         headers: {
           ...headers,
@@ -493,13 +562,44 @@ test.describe('createHTTPTransportServer, CORS', () => {
       })
     );
 
+    expect(batch.headers.get(SEQUENCE_HEADER)).toBe('1');
+    expect(await bytesOf(batch)).toEqual(
+      batchOf(envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 }))
+    );
+    const empty = await name(
+      fetch(url, {
+        headers: {
+          ...headers,
+          [AFTER_HEADER]: '1',
+          [CONNECTION_TOKEN_HEADER]: connectionToken,
+          [WAIT_HEADER]: '0',
+        },
+      })
+    );
+
+    expect(await bytesOf(empty)).toEqual([]);
+
     // refusals once the origin is judged: an OPTIONS that is no preflight, a body of another type,
     // a token that is none
     const bare = await name(fetch(url, { headers, method: 'OPTIONS' }));
     await name(
       post(url, { connectionToken, headers: { ...headers, 'content-type': 'text/plain' } })
     );
+    await name(
+      post(url, {
+        body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 7 }),
+        connectionToken,
+        headers: { ...headers, 'content-type': 'text/plain' },
+      })
+    );
+    await name(fetch(url, { headers, method: 'PUT' }));
     await name(post(url, { connectionToken: 'not-a-token', headers }));
+    await name(
+      fetch(url, {
+        headers: { ...headers, [CONNECTION_TOKEN_HEADER]: 'not a token' },
+        method: 'DELETE',
+      })
+    );
 
     // a DELETE, and an exchange after it
     await name(
@@ -509,14 +609,41 @@ test.describe('createHTTPTransportServer, CORS', () => {
       })
     );
     await name(post(url, { connectionToken, headers }));
-
-    expect(named).toEqual(
-      [201, 200, 200, 200, 405, 415, 400, 204, 404].map((status) => {
-        return [status, NAMED_ANSWER];
+    await name(
+      post(url, {
+        body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 9 }),
+        connectionToken,
+        headers,
       })
     );
+
+    expect(named).toEqual(
+      [201, 200, 200, 200, 204, 200, 204, 405, 415, 415, 405, 400, 400, 204, 404, 404].map(
+        (status) => {
+          return [status, NAMED_ANSWER];
+        }
+      )
+    );
+    expect(reasons).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      REFUSALS.METHOD,
+      REFUSALS.TYPE,
+      REFUSALS.TYPE,
+      REFUSALS.METHOD,
+      REFUSALS.MALFORMED,
+      REFUSALS.MALFORMED,
+      null,
+      REFUSALS.CONNECTION_UNKNOWN,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
     expect(bare.headers.get('allow')).toBe('GET, POST, DELETE');
-    expect(namesOf(events, 'message')).toHaveLength(2);
+    expect(namesOf(events, 'message')).toHaveLength(4);
   });
 
   // spec 15.6, 15.12
@@ -559,6 +686,9 @@ test.describe('createHTTPTransportServer, CORS', () => {
       ),
       // an origin it does not take
       await answerOf(rawConnectOf(authority, 'Origin: https://elsewhere.test\r\n')),
+      await answerOf(
+        `OPTIONS /bead HTTP/1.1\r\nHost: ${authority}\r\nOrigin: https://elsewhere.test\r\nAccess-Control-Request-Method: POST\r\n\r\n`
+      ),
       // a page it names, before its origin is judged: by a host it does not take, at another path
       await answerOf(
         `OPTIONS /bead HTTP/1.1\r\nHost: rebind.example\r\nOrigin: ${PAGE}\r\n` +
@@ -568,23 +698,34 @@ test.describe('createHTTPTransportServer, CORS', () => {
         `OPTIONS /elsewhere HTTP/1.1\r\nHost: ${authority}\r\nOrigin: ${PAGE}\r\n` +
           'Access-Control-Request-Method: POST\r\n\r\n'
       ),
+      await answerOf(rawConnectOf(authority, `${CONNECTION_TOKEN_HEADER}: short\r\n`)),
     ]).toEqual([
       unnamed(201, null),
       unnamed(201, null),
       unnamed(405, REFUSALS.METHOD),
       unnamed(405, REFUSALS.METHOD),
       unnamed(403, REFUSALS.ORIGIN),
+      unnamed(403, REFUSALS.ORIGIN),
       unnamed(403, REFUSALS.HOST),
       unnamed(404, REFUSALS.PATH),
+      unnamed(400, REFUSALS.MALFORMED),
     ]);
     expect(
       refusals.map(({ reason }) => {
         return reason;
       })
-    ).toEqual([REFUSALS.METHOD, REFUSALS.METHOD, REFUSALS.ORIGIN, REFUSALS.HOST, REFUSALS.PATH]);
+    ).toEqual([
+      REFUSALS.METHOD,
+      REFUSALS.METHOD,
+      REFUSALS.ORIGIN,
+      REFUSALS.ORIGIN,
+      REFUSALS.HOST,
+      REFUSALS.PATH,
+      REFUSALS.MALFORMED,
+    ]);
 
     // HTTP's own 400, from a page it names: two hosts, and a field of an octet past ASCII
-    for (const fields of [`Host: ${authority}\r\n`, 'X-Other: café\r\n']) {
+    for (const fields of [`Host: ${authority}\r\n`, 'X-Other: café\r\n', 'X-Other: a\u0007b\r\n']) {
       const { answer, fields: carried } = await rawAnswerOf(
         port,
         rawConnectOf(authority, `Origin: ${PAGE}\r\n${fields}`)
@@ -597,6 +738,18 @@ test.describe('createHTTPTransportServer, CORS', () => {
         }),
       ]).toEqual([400, null]);
     }
+    const malformed = await rawAnswerOf(
+      port,
+      `POST http://localhost:/bead HTTP/1.1\r\nHost: ${authority}\r\nOrigin: ${PAGE}\r\nContent-Type: ${BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n`
+    );
+
+    expect(malformed.answer).toEqual([400, null]);
+    expect(
+      PATH_FIELDS.filter((field) => {
+        return malformed.fields.has(field);
+      })
+    ).toEqual([]);
+    expect(refusals).toHaveLength(7);
   });
 });
 
