@@ -202,6 +202,53 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     expect(namesOf(events, 'message')).toEqual([]);
     await server.stop();
+    await using started = await startTransport();
+    const drawn = await connect(started.url, started.server);
+    const { read, socket } = await rawSocketOn(portOf(started.url));
+
+    try {
+      socket.write(postHeadOf(drawn.connectionToken, request.length));
+      socket.write(request.subarray(0, 12));
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['waitingExchanges'];
+        })
+        .toBe(1);
+      await started.server.send({ data: answer }, drawn.connectionHandle);
+      await expect
+        .poll(() => {
+          const end = read.text.indexOf('\r\n\r\n');
+
+          if (end < 0) {
+            return false;
+          }
+
+          return /transfer-encoding: chunked/iu.test(read.text.slice(0, end))
+            ? read.text.endsWith('\r\n0\r\n\r\n')
+            : read.text.length - end - 4 >= answer.length;
+        })
+        .toBe(true);
+      const end = read.text.indexOf('\r\n\r\n');
+      const head = read.text.slice(0, end);
+      const body = read.text.slice(end + 4);
+      const expected = Buffer.from(answer).toString('latin1');
+
+      expect(head).toMatch(/^HTTP\/1\.1 200/u);
+      expect(body).toBe(
+        /transfer-encoding: chunked/iu.test(head) ? `8\r\n${expected}\r\n0\r\n\r\n` : expected
+      );
+      expect(namesOf(started.events, 'message')).toEqual([]);
+      expect(head.toLowerCase()).toContain('\r\nconnection: close');
+      socket.write(request.subarray(12));
+      await expect
+        .poll(() => {
+          return read.isClosed;
+        })
+        .toBe(true);
+      expect(namesOf(started.events, 'message')).toEqual([]);
+    } finally {
+      socket.destroy();
+    }
   });
 });
 

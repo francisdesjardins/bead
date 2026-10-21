@@ -67,11 +67,8 @@ public sealed class HostsAndOriginsTests
     [
         "localhost",
         "LocalHost:8080",
-        "localhost:80",
         "bead.localhost",
-        "Bead.LocalHost:8443",
-        "a.b.localhost",
-        ".localhost",
+        "a.b.LOCALHOST:80",
         "127.0.0.1",
         "127.0.0.1:8080",
         "192.0.2.1:80",
@@ -79,6 +76,11 @@ public sealed class HostsAndOriginsTests
         "255.255.255.255",
         "[::1]",
         "[::1]:8443",
+        "[2001:db8::7]:80",
+        "localhost:80",
+        "Bead.LocalHost:8443",
+        "a.b.localhost",
+        ".localhost",
         "[2001:db8::7]",
         "[::ffff:127.0.0.1]:8080",
     ];
@@ -87,25 +89,27 @@ public sealed class HostsAndOriginsTests
     // address as no URL writes one, an empty host and none
     private static readonly string?[] NotTakenByEveryServer =
     [
+        null,
+        "",
+        ":8080",
         "elsewhere.test",
-        "rebind.example:8080",
         "localhost.",
-        "localhost.:8080",
         "localhost.example",
+        "localhost.example:8080",
         "notlocalhost",
-        "bead-localhost",
-        "localhost.localhost.example",
-        "127.0.0.1.example",
         "127.1",
         "0177.0.0.1",
+        "127.0.0.1.example",
+        "256.0.0.1",
+        "xn--a",
+        "rebind.example:8080",
+        "localhost.:8080",
+        "bead-localhost",
+        "localhost.localhost.example",
         "0x7f.0.0.1",
         "2130706433",
         "127.0.0.01",
-        "256.0.0.1",
         "1.2.3.4.5",
-        "",
-        ":8080",
-        null,
     ];
 
     // a Host's value HTTP takes (RFC 9110 §7.2), as 15.12's grammar narrows it: a name, an IPv4
@@ -272,19 +276,20 @@ public sealed class HostsAndOriginsTests
     [Fact]
     public void Takes_whatever_its_hosts_localhost_the_names_under_localhost_and_IP_literals_each_by_its_host_on_any_port_and_no_other_host_nor_an_empty_one_nor_none_but_under_a_star()
     {
-        string[]?[] every = [null, [], ["bead.test"], ["xn--bad-bma.test", "elsewhere.example"]];
-
-        Assert.All(every, (hosts) =>
+        foreach (var hosts in new string[]?[] { null, [], ["bead.test"], ["xn--bad-bma.test", "elsewhere.example"] })
         {
             Assert.All(TakenByEveryServer, (host) =>
             {
                 Assert.True(HostsAndOrigins.IsTakenHost(host, hosts), host);
             });
-        });
-        Assert.All(NotTakenByEveryServer, (host) =>
+            Assert.All(NotTakenByEveryServer, (host) =>
+            {
+                Assert.False(HostsAndOrigins.IsTakenHost(host, hosts), host);
+            });
+        }
+
+        Assert.All(TakenByEveryServer.Cast<string?>().Concat(NotTakenByEveryServer), (host) =>
         {
-            Assert.False(HostsAndOrigins.IsTakenHost(host, null), host);
-            Assert.False(HostsAndOrigins.IsTakenHost(host, []), host);
             Assert.True(HostsAndOrigins.IsTakenHost(host, ["*"]), host);
         });
         Assert.Equal(("host-refused", "origin-refused"), (HostsAndOrigins.HostRefusal, HostsAndOrigins.OriginRefusal));
@@ -473,13 +478,15 @@ public sealed class HostsAndOriginsTests
 
         // neither SP nor HTAB at either end (RFC 9113 §8.2.1)
         Assert.Equal(
-            [false, false, false, false, false, true],
+            [false, false, false, false, false, false, false, true],
             [
                 HostsAndOrigins.IsVisibleField(" x"),
+                HostsAndOrigins.IsVisibleField("x "),
                 HostsAndOrigins.IsVisibleField("x\t"),
                 HostsAndOrigins.IsVisibleField("\tx"),
                 HostsAndOrigins.IsVisibleField(" "),
                 HostsAndOrigins.IsVisibleField("\t"),
+                HostsAndOrigins.IsVisibleField(" \t "),
                 HostsAndOrigins.IsVisibleField("x \ty"),
             ]);
         Assert.DoesNotContain(others, (character) =>
@@ -578,4 +585,14 @@ public sealed class HostsAndOriginsTests
         Assert.False(HostsAndOrigins.IsTakenOrigin("http://item.test", ("İtem.test", [])));
         Assert.False(HostsAndOrigins.IsTakenOrigin("http://bead.io", ("BEAD.ıO", [])));
     }
+
+    [Fact]
+    public void Refuses_an_absolute_form_target_without_an_authority_or_with_an_uppercase_scheme()
+    {
+        foreach (var target in new[] { "http:///", "HTTP://127.0.0.1/" })
+        {
+            Assert.False(HostsAndOrigins.IsTakenTarget(target), target);
+        }
+    }
+
 }
