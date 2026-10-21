@@ -811,29 +811,45 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal(hasIPv6 ? "localhost" : "127.0.0.1", bound.Address);
         Assert.True(server.IsSecure("any"));
 
-        foreach (var host in hosts)
+        var clients = new List<WebSocketTransportClient>();
+
+        try
         {
-            await using var client = new WebSocketTransportClient();
-
-            await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
-            Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
-
-            var handle = await Next(connections);
-            var peer = Assert.Single(server.Clients, (entry) =>
+            foreach (var host in hosts)
             {
-                return entry.ConnectionHandle == handle;
-            });
+                var client = new WebSocketTransportClient();
 
-            if (host == "localhost")
-            {
-                Assert.True(peer.Address is "127.0.0.1" or "::1");
+                clients.Add(client);
+
+                await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
+                Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
+
+                var handle = await Next(connections);
+                var peer = Assert.Single(server.Clients, (entry) =>
+                {
+                    return entry.ConnectionHandle == handle;
+                });
+
+                if (host == "localhost")
+                {
+                    Assert.True(peer.Address is "127.0.0.1" or "::1");
+                }
+                else
+                {
+                    Assert.Equal(host, peer.Address);
+                }
+
+                Assert.True(server.IsSecure(handle));
             }
-            else
-            {
-                Assert.Equal(host, peer.Address);
-            }
 
-            Assert.True(server.IsSecure(handle));
+            Assert.Equal(hosts.Length, server.Clients.Count);
+        }
+        finally
+        {
+            foreach (var client in clients)
+            {
+                await client.DisposeAsync();
+            }
         }
 
         await server.Stop().WaitAsync(Patience, Cancelled);
