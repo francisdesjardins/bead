@@ -48,6 +48,7 @@ import type { IHeadBoundServerLike } from '../server-bounds';
 import { createWSTransportServer } from '../ws-transport-server';
 import {
   bindError,
+  hasIPv6Loopback,
   holdIPv6Loopback,
   isFreeOn,
   LISTENING_ADDRESSES,
@@ -1309,7 +1310,12 @@ test.describe('createHTTPTransportServer, over TLS', () => {
 
   test('names its host over HTTP/2 by its :authority, a host beside it ignored, for the host and the own origin', async () => {
     await using started = await startSecure();
-    const { session, port } = started;
+    const { session, port, server } = started;
+    const connections: unknown[] = [];
+
+    server.on('connection', (...args) => {
+      connections.push(args);
+    });
     const own = `${host}:${String(port)}`;
 
     expect(
@@ -1369,11 +1375,14 @@ test.describe('createHTTPTransportServer, over TLS', () => {
       [403, REFUSALS.ORIGIN],
     ]);
 
+    const before = connections.length;
+
     // * an empty array omits :authority and suppresses Node's default authority
     expect(
       await answerOverHTTP2(session, { ':authority': [] }),
-      'an HTTP/2 POST without :authority or Host receives the marked host refusal'
-    ).toEqual([403, REFUSALS.HOST]);
+      'an HTTP/2 POST without :authority or Host resets without a response'
+    ).toBe(PROTOCOL_ERROR);
+    expect(connections).toHaveLength(before);
   });
 
   test('resets over HTTP/2 the stream of a request whose :authority is no host, PROTOCOL_ERROR, nothing written', async () => {
@@ -1389,19 +1398,29 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     // no port, after a name and after a literal; then one it takes, on the same session
     expect(
       await Promise.all(
-        ['a%41.test', 'a*b.test', 'a;b=c', 'a+b.test', '[v1.bead]', 'localhost:', '[::1]:'].map(
-          (authority) => {
-            return resetOf(session, { ':authority': authority });
-          }
-        )
+        [
+          'a%41.test',
+          'a*b.test',
+          'a;b=c',
+          'a+b.test',
+          '[v1.bead]',
+          'localhost:',
+          '[::1]:',
+          'bad host',
+        ].map((authority) => {
+          return resetOf(session, { ':authority': authority });
+        })
       )
     ).toEqual(
-      Array.from({ length: 7 }, () => {
+      Array.from({ length: 8 }, () => {
         return PROTOCOL_ERROR;
       })
     );
+    expect(await resetOf(session, { host: 'a*b.test' })).toBe(PROTOCOL_ERROR);
+    expect(await answerOverHTTP2(session, { ':authority': [] })).toBe(PROTOCOL_ERROR);
     expect(connections).toEqual([]);
     expect(await answerOverHTTP2(session, { ':authority': 'localhost' })).toEqual([201, undefined]);
+    expect(connections).toHaveLength(1);
   });
 
   test('resets over HTTP/2 the stream of a request with a field holding an octet past ASCII, PROTOCOL_ERROR, and tells nothing', async () => {
@@ -2953,12 +2972,101 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
       await server.stop();
     }
 
-    // on the wire, the port its client's socket came from, and the address of the loopback
+    // on the wire, every refusal names its socket's port and the loopback address
     await using started = await startTransport({ trustedProxies: ['127.0.0.1'] });
     const wire = refusalsOf(started.server);
-    const port = Number(new URL(started.url).port);
+    const port = portOf(started.url);
+    const own = `${host}:${String(port)}`;
+    const cases: [string, number, string, string | undefined, string | undefined][] = [
+      [
+        'POST /bead HTTP/1.1\r\nHost: rebind.example:8080\r\nOrigin: http://a.example\r\nOrigin: http://b.example\r\nContent-Length: 0\r\n\r\n',
+        403,
+        REFUSALS.HOST,
+        'rebind.example:8080',
+        'http://a.example, http://b.example',
+      ],
+      [
+        `POST http://rebind.example/bead HTTP/1.1\r\nHost: ${own}\r\nContent-Length: 0\r\n\r\n`,
+        403,
+        REFUSALS.HOST,
+        'rebind.example',
+        undefined,
+      ],
+      [
+        'POST /bead HTTP/1.1\r\nHost: \r\nContent-Length: 0\r\n\r\n',
+        403,
+        REFUSALS.HOST,
+        '',
+        undefined,
+      ],
+      [
+        'POST /bead HTTP/1.0\r\nContent-Length: 0\r\n\r\n',
+        403,
+        REFUSALS.HOST,
+        undefined,
+        undefined,
+      ],
+      [
+        `POST /other HTTP/1.1\r\nHost: ${own}\r\nContent-Length: 0\r\n\r\n`,
+        404,
+        REFUSALS.PATH,
+        own,
+        undefined,
+      ],
+      [
+        `POST /bead HTTP/1.1\r\nHost: ${own}\r\nOrigin: http://elsewhere.example\r\nContent-Length: 0\r\n\r\n`,
+        403,
+        REFUSALS.ORIGIN,
+        own,
+        'http://elsewhere.example',
+      ],
+      [
+        `PUT /bead HTTP/1.1\r\nHost: ${own}\r\nContent-Length: 0\r\n\r\n`,
+        405,
+        REFUSALS.METHOD,
+        own,
+        undefined,
+      ],
+      [
+        `POST /bead HTTP/1.1\r\nHost: ${own}\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n`,
+        415,
+        REFUSALS.TYPE,
+        own,
+        undefined,
+      ],
+      [
+        rawConnectOf(own, `${CONNECTION_TOKEN_HEADER}: ${'A'.repeat(22)}\r\n`),
+        404,
+        REFUSALS.CONNECTION_UNKNOWN,
+        own,
+        undefined,
+      ],
+    ];
+    const expected: ITransportServerRefusal[] = [];
+
+    for (const [head, status, reason, authority, origin] of cases) {
+      const result = await rawAnswerOf(port, head);
+
+      expect(result.answer).toEqual([status, reason]);
+      expect(result.localPort).toBeGreaterThan(0);
+      expected.push({
+        address: host,
+        authority,
+        origin,
+        port: Number(result.localPort),
+        reason,
+        status,
+      });
+    }
+
+    for (const head of [
+      'POST /bead HTTP/1.1\r\nHost: localhost:\r\nContent-Length: 0\r\n\r\n',
+      'POST /bead HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\nContent-Length: 0\r\n\r\n',
+    ]) {
+      expect((await rawAnswerOf(port, head)).answer).toEqual([400, null]);
+    }
+
     const { answer, localPort } = await rawAnswerOf(port, rawConnectOf('rebind.example'));
-    // behind a proxy it trusts, the address it forwarded, and the port of the proxy's connection
     const behind = await rawAnswerOf(
       port,
       rawConnectOf('rebind.example', 'X-Forwarded-For: 203.0.113.9\r\n')
@@ -2968,12 +3076,14 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
       [403, REFUSALS.HOST],
       [403, REFUSALS.HOST],
     ]);
-    expect(wire).toEqual([
+    expect(localPort).toBeGreaterThan(0);
+    expect(behind.localPort).toBeGreaterThan(0);
+    expected.push(
       {
         address: host,
         authority: 'rebind.example',
         origin: undefined,
-        port: localPort,
+        port: Number(localPort),
         reason: REFUSALS.HOST,
         status: 403,
       },
@@ -2981,11 +3091,13 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
         address: '203.0.113.9',
         authority: 'rebind.example',
         origin: undefined,
-        port: behind.localPort,
+        port: Number(behind.localPort),
         reason: REFUSALS.HOST,
         status: 403,
-      },
-    ]);
+      }
+    );
+    expect(wire).toEqual(expected);
+    expect(started.server.clients).toEqual([]);
   });
 
   test('tells no refusal of the 404 that ends an exchange or a listen as its connection closes, by a DELETE, a timeout, an outbox past its bound, a close and a stop', async () => {
@@ -3268,6 +3380,61 @@ test.describe('createHTTPTransportServer, the address it listens on', () => {
         server.isSecure('type=HTTP;ip=127.0.0.1;ordinal=1'),
       ]).toEqual([0, 1, true]);
       await server.stop();
+    }
+
+    for (const code of ['EADDRNOTAVAIL', 'EAFNOSUPPORT']) {
+      const absent = createFakeHTTPServer();
+      let closedIPv4 = 0;
+      const server = createHTTPTransportServer({
+        createServer: (listener, options) => {
+          if (options.address === '::1') {
+            const created = absent.createServer(listener, options);
+
+            return {
+              ...created,
+              listen: () => {
+                queueMicrotask(() => {
+                  absent.servers[0]?.emit('error', bindError(code));
+                });
+              },
+            };
+          }
+
+          const created = createServer(listener);
+
+          created.on('close', () => {
+            closedIPv4 += 1;
+          });
+
+          return created;
+        },
+      });
+
+      try {
+        const bound = await server.start({ findOpenPort: true });
+
+        expect(bound.address).toBe('127.0.0.1');
+        expect(server.address).toBe('127.0.0.1');
+        expect(server.isSecure('type=HTTP;ip=127.0.0.1;ordinal=1')).toBe(true);
+        expect(
+          (await connect(`http://${host}:${String(bound.port)}/bead`, server)).response.status
+        ).toBe(201);
+        expect([closedIPv4, absent.servers[0]?.closes]).toEqual([0, 1]);
+
+        if (await hasIPv6Loopback()) {
+          expect(await isFreeOn('::1', bound.port)).toBe(true);
+        }
+      } finally {
+        await server.stop();
+      }
+
+      await expect
+        .poll(() => {
+          return closedIPv4;
+        })
+        .toBe(1);
+      expect(server.isClosed()).toBe(true);
+      expect(absent.servers[0]?.closes).toBe(1);
     }
   });
 

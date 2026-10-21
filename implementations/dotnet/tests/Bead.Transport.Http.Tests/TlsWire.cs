@@ -43,6 +43,7 @@ internal sealed class TlsWire : IAsyncDisposable
 
     private readonly TcpClient _tcp;
     private readonly SslStream _tls;
+    private int _nextStream = 1;
 
     private TlsWire(TcpClient tcp, SslStream tls)
     {
@@ -153,11 +154,20 @@ internal sealed class TlsWire : IAsyncDisposable
     /// </summary>
     public async Task<TlsAnswer> Ask(IReadOnlyList<(string Name, string Value)> fields)
     {
-        (string, string)[] request = [(":method", "POST"), (":scheme", "https"), (":path", "/bead"), .. fields];
-
         await _tls.WriteAsync(Preface, Cancelled);
         await _tls.WriteAsync(FrameOf((Settings, 0, 0), []), Cancelled);
-        await _tls.WriteAsync(FrameOf((Headers, EndStream | EndHeaders, 1), BlockOf(request)), Cancelled);
+
+        return await AskNext(fields);
+    }
+
+    /// <summary>A POST on the next client stream of the same HTTP/2 session.</summary>
+    public async Task<TlsAnswer> AskNext(IReadOnlyList<(string Name, string Value)> fields)
+    {
+        (string, string)[] request = [(":method", "POST"), (":scheme", "https"), (":path", "/bead"), .. fields];
+        var streamId = _nextStream;
+
+        _nextStream += 2;
+        await _tls.WriteAsync(FrameOf((Headers, EndStream | EndHeaders, streamId), BlockOf(request)), Cancelled);
 
         while (true)
         {
@@ -167,7 +177,7 @@ internal sealed class TlsWire : IAsyncDisposable
             {
                 await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
             }
-            else if (stream == 1 && type == ResetStream)
+            else if (stream == streamId && type == ResetStream)
             {
                 return new TlsAnswer(null, null, BinaryPrimitives.ReadUInt32BigEndian(payload));
             }
@@ -177,7 +187,7 @@ internal sealed class TlsWire : IAsyncDisposable
                 // stream id
                 return new TlsAnswer(null, null, null, BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(4)));
             }
-            else if (stream == 1 && type == Headers)
+            else if (stream == streamId && type == Headers)
             {
                 return new HeaderBlock(payload).Answer();
             }

@@ -11,6 +11,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Bead.Tests;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Transport.Http.Tests;
@@ -1694,8 +1695,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var bead = ("content-type", HttpTransport.MediaType);
 
         // :authority names the host and the own origin, a host beside it ignored; a host alone names
-        // it where :authority is absent; neither names none, which the server refuses as it refuses
-        // a request over HTTP/1.0 that names none
+        // it where :authority is absent. Without either field, the request is malformed over HTTP/2;
+        // its stream resets with PROTOCOL_ERROR (RFC 9113 §§8.1.1, 8.3.1)
         Assert.Equal(
             [
                 new TlsAnswer(201, null, null),
@@ -1705,7 +1706,6 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 new TlsAnswer(403, HttpRefusals.Origin, null),
                 new TlsAnswer(201, null, null),
                 new TlsAnswer(201, null, null),
-                new TlsAnswer(403, HttpRefusals.Host, null),
                 new TlsAnswer(403, HttpRefusals.Host, null),
             ],
             [
@@ -1717,8 +1717,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 await Http2Of((":authority", "Bead.LocalHost:443"), bead, ("origin", "https://bead.localhost:443")),
                 await Http2Of(("host", own), bead, ("origin", $"https://{own}")),
                 await Http2Of(("host", "rebind.example:8080"), bead),
-                await Http2Of(bead),
             ]);
+
+        var before = _connections.Count;
+
+        Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of(bead));
+        Assert.Equal(before, _connections.Count);
 
         await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, Hosts = ["bead.test"] });
         Assert.Equal(
@@ -1764,14 +1768,30 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         var bead = ("content-type", HttpTransport.MediaType);
         var answers = new List<(string Authority, TlsAnswer Answer)>();
+        await using var sameSession = await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2));
+        var first = true;
+
+        Task<TlsAnswer> Answer(params (string Name, string Value)[] fields)
+        {
+            if (first)
+            {
+                first = false;
+
+                return sameSession.Ask(fields);
+            }
+
+            return sameSession.AskNext(fields);
+        }
 
         foreach (var authority in new[] { "a*b.test", "a%41.test", "a;b=c", "a+b.test", "[v1.bead]", "localhost:", "[::1]:", "bad host" })
         {
-            answers.Add((authority, await Http2Of((":authority", authority), bead)));
+            answers.Add((authority, await Answer((":authority", authority), bead)));
         }
 
         // a host alone, where :authority is absent, judged as it would be
-        answers.Add(("host a*b.test", await Http2Of(("host", "a*b.test"), bead)));
+        answers.Add(("host a*b.test", await Answer(("host", "a*b.test"), bead)));
+
+        answers.Add(("no authority or host", await Answer(bead)));
 
         // PROTOCOL_ERROR (RFC 9113 §7)
         Assert.All(answers, (answer) =>
@@ -1779,6 +1799,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             Assert.Equal((answer.Authority, new TlsAnswer(null, null, 0x1)), answer);
         });
         Assert.Empty(_connections);
+
+        Assert.Equal(new TlsAnswer(201, null, null), await Answer((":authority", "localhost"), bead));
+        Assert.Single(_connections);
     }
 
     // one request over HTTP/2, written by hand on a socket of its own: its answer, or its reset
@@ -2122,6 +2145,111 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             ],
             told);
         Assert.Empty(_connections);
+
+        // the peer metadata is scripted, while Kestrel parses each request on a real socket
+        await using var scripted = new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["bead.test"], MaximumBodyBytes = 16 });
+        var records = new ConcurrentQueue<TransportServerRefusal>();
+
+        scripted.Refusal += records.Enqueue;
+        scripted.Built += (application) =>
+        {
+            application.Use((context, next) =>
+            {
+                var upload = context.Request.Headers.ContainsKey("x-fixture-upload");
+
+                context.Connection.RemoteIpAddress = IPAddress.Parse(upload ? "10.0.0.1" : "::ffff:192.0.2.7");
+                context.Connection.RemotePort = upload ? 40_000 : 40_001;
+
+                return next(context);
+            });
+        };
+        var scriptedPort = (await scripted.Start(Loopback, Cancelled)).Port;
+
+        async Task<Head> Asked(string head, byte[]? body = null)
+        {
+            using var socket = await Wire.Open(scriptedPort);
+
+            await socket.Write(head);
+            if (body is not null)
+            {
+                await socket.Write(body);
+            }
+
+            var (answer, _) = await socket.Read();
+
+            return answer;
+        }
+
+        foreach (var (head, status) in new (string, int)[]
+        {
+            ("POST /bead HTTP/1.1\r\nHost: rebind.example:8080\r\nOrigin: http://rebind.example:8080\r\nOrigin: null\r\nContent-Length: 0\r\n\r\n", 403),
+            ("POST http://elsewhere.test:81/ HTTP/1.1\r\nHost: bead.test\r\nContent-Length: 0\r\n\r\n", 403),
+            ("POST /bead HTTP/1.0\r\nContent-Length: 0\r\n\r\n", 403),
+            ("POST /other HTTP/1.1\r\nHost: bead.test\r\nContent-Length: 0\r\n\r\n", 404),
+            ("POST /bead HTTP/1.1\r\nHost: bead.test\r\nOrigin: https://elsewhere.test\r\nContent-Length: 0\r\n\r\n", 403),
+            ("PUT /bead HTTP/1.1\r\nHost: bead.test\r\nContent-Length: 0\r\n\r\n", 405),
+            ("POST /bead HTTP/1.1\r\nHost: bead.test\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n", 415),
+            ($"POST /bead HTTP/1.1\r\nHost: bead.test\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: AAAAAAAAAAAAAAAAAAAAAA\r\nContent-Length: 0\r\n\r\n", 404),
+        })
+        {
+            Assert.Equal(status, (await Asked(head)).Status);
+        }
+
+        var drew = await Asked($"POST /bead HTTP/1.1\r\nHost: bead.localhost\r\nX-Fixture-Upload: 1\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+        var token = drew.Headers[HttpTransport.ConnectionTokenHeader];
+
+        Assert.Equal(201, drew.Status);
+        var large = await Asked($"POST /bead HTTP/1.1\r\nHost: bead.localhost\r\nX-Fixture-Upload: 1\r\nContent-Type: {HttpTransport.MediaType}\r\n{HttpTransport.ConnectionTokenHeader}: {token}\r\nTransfer-Encoding: chunked\r\n\r\n", [.. ChunkOf(new byte[17]), .. "0\r\n\r\n"u8]);
+
+        Assert.Equal((413, HttpRefusals.TooLarge), (large.Status, large.Headers[HttpTransport.RefusalHeader]));
+        foreach (var head in new[]
+        {
+            "POST /bead HTTP/1.1\r\nHost: bead.test\r\nHost: bead.test\r\nContent-Length: 0\r\n\r\n",
+            "POST /bead HTTP/1.1\r\nHost: bead.test\r\nX-Other: café\r\nContent-Length: 0\r\n\r\n",
+        })
+        {
+            var unmarked = await Asked(head);
+
+            Assert.Equal(400, unmarked.Status);
+            Assert.False(unmarked.Headers.ContainsKey(HttpTransport.RefusalHeader));
+        }
+
+        Assert.Equal(204, (await Asked($"DELETE /bead HTTP/1.1\r\nHost: bead.localhost\r\nX-Fixture-Upload: 1\r\n{HttpTransport.ConnectionTokenHeader}: {token}\r\nContent-Length: 0\r\n\r\n")).Status);
+        await Until(() =>
+        {
+            return records.Count == 9;
+        });
+        Assert.Equal(
+            [
+                new TransportServerRefusal("192.0.2.7", "rebind.example:8080", "http://rebind.example:8080, null", 40_001, HttpRefusals.Host, 403),
+                new("192.0.2.7", "elsewhere.test:81", null, 40_001, HttpRefusals.Host, 403),
+                new("192.0.2.7", null, null, 40_001, HttpRefusals.Host, 403),
+                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.Path, 404),
+                new("192.0.2.7", "bead.test", "https://elsewhere.test", 40_001, HttpRefusals.Origin, 403),
+                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.Method, 405),
+                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.Type, 415),
+                new("192.0.2.7", "bead.test", null, 40_001, HttpRefusals.ConnectionUnknown, 404),
+                new("10.0.0.1", "bead.localhost", null, 40_000, HttpRefusals.TooLarge, 413),
+            ], records);
+        Assert.Empty(scripted.ConnectionHandles);
+
+        await Start(new HttpTransportServerOptions { TrustedProxies = [Host] });
+        _refusals.Clear();
+        var directPort = await Refused("POST /bead HTTP/1.1\r\nHost: rebind.example\r\nContent-Length: 0\r\n\r\n");
+        var proxyPort = await Refused("POST /bead HTTP/1.1\r\nHost: rebind.example\r\nX-Forwarded-For: 203.0.113.9\r\nContent-Length: 0\r\n\r\n");
+
+        await Until(() =>
+        {
+            return _refusals.Count == 2;
+        });
+
+        Assert.Equal(
+            [
+                new TransportServerRefusal(Host, "rebind.example", null, directPort, HttpRefusals.Host, 403),
+                new("203.0.113.9", "rebind.example", null, proxyPort, HttpRefusals.Host, 403),
+            ], _refusals);
+        Assert.Empty(_connections);
+
     }
 
     [Fact]
@@ -2545,11 +2673,17 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                     },
                 },
             };
+            var built = new List<Microsoft.AspNetCore.Builder.WebApplication>();
+
+            server.Built += built.Add;
             var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
             string[] hosts = ["127.0.0.1"];
 
             Assert.Equal("127.0.0.1", bound.Address);
             Assert.True(server.IsSecure("any"));
+            var application = Assert.Single(built);
+
+            Assert.NotNull(application.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer)));
 
             using var racing = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback });
 
@@ -2568,6 +2702,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             }
             await server.Stop().WaitAsync(Patience, Cancelled);
             Assert.Equal(ReadyState.Closed, server.ReadyState);
+            Assert.Throws<ObjectDisposedException>(() =>
+            {
+                return application.Services.GetService(typeof(Microsoft.AspNetCore.Hosting.Server.IServer));
+            });
         }
     }
 
