@@ -226,18 +226,24 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Answers_as_failed_a_request_whose_admission_throws_and_reports_why()
     {
-        var server = new Peer(RouterSide.Server);
-        var resolver = server.Resolve();
-        var broken = new InvalidOperationException("the admission broke");
-
-        resolver.Admission = (_) =>
+        foreach (var message in new[] { "thrown", "the admission broke" })
         {
-            throw broken;
-        };
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, server.Sent[^1].Failure!.Code);
-        Assert.Same(broken, Assert.Single(server.Reports));
-        Assert.Empty(resolver.Requests);
+            var server = new Peer(RouterSide.Server);
+            var resolver = server.Resolve();
+            var broken = new InvalidOperationException(message);
+
+            resolver.Admission = (_) =>
+            {
+                throw broken;
+            };
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+            Assert.Equal((ushort)ProtocolCode.ProcedureFailed, server.Sent[^1].Failure!.Code);
+            Assert.Same(broken, Assert.Single(server.Reports));
+            Assert.Empty(resolver.Requests);
+            Assert.Equal([Handle], server.ReportedOn);
+            Assert.Equal([Handle], server.SentOn);
+            Assert.Equal((EnvelopeKind.Failure, 1u), (Assert.Single(server.Sent).Kind, server.Sent[0].Header.CallId));
+        }
     }
 
     [Fact]
@@ -938,21 +944,25 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Frees_the_call_of_an_answer_that_could_not_go_out_so_its_call_id_opens_again()
     {
-        var server = new Peer(RouterSide.Server);
-        var resolver = server.Resolve();
+        foreach (var message in new[] { "the transport is closing", "the transport refused the result" })
+        {
+            var server = new Peer(RouterSide.Server);
+            var resolver = server.Resolve();
 
-        server.OnSend = (_) =>
-        {
-            return Task.FromException(new IOException("the transport refused the result"));
-        };
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
-        await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return resolver.Answer(0, new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
-        Assert.Equal(2, resolver.Requests.Count);
-        Assert.Empty(server.Reports);
+            server.OnSend = (_) =>
+            {
+                return Task.FromException(new IOException(message));
+            };
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = message == "the transport is closing" ? Array.Empty<byte>() : new byte[] { 1 } });
+            var refused = await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return resolver.Answer(0, new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+            Assert.Equal(message, refused.Message);
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = message == "the transport is closing" ? Array.Empty<byte>() : new byte[] { 2 } });
+            Assert.Equal(2, resolver.Requests.Count);
+            Assert.Empty(server.Reports);
+        }
     }
 
     [Fact]

@@ -124,13 +124,21 @@ public sealed partial class RouterCoreTests
     {
         var server = new Peer(RouterSide.Server, RouterLimits.Default with { ChunkBytes = 64, MaximumEnvelopeBytes = 64 });
 
-        Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, (await Assert.ThrowsAsync<FailureException>(() =>
+        foreach (var callId in new[] { 1u, 2u })
         {
-            return server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = new byte[57] }, Handle)
+            var refused = await Assert.ThrowsAsync<FailureException>(() =>
+            {
+                return server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = new byte[57] }, Handle)
+                    .WaitAsync(Patience, TestContext.Current.CancellationToken);
+            });
+            Assert.Equal((ushort)ProtocolCode.PayloadTooLarge, refused.Code);
+            Assert.Equal("an envelope is 64 bytes at most, not 65", refused.Detail);
+            await server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = callId }, Payload = new byte[56] }, Handle)
                 .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        })).Code);
-        await server.Core.Send(new Envelope { Header = new NotificationHeader { CallId = 1 }, Payload = new byte[56] }, Handle)
-            .WaitAsync(Patience, TestContext.Current.CancellationToken);
-        Assert.Single(server.Sent);
+        }
+        Assert.Equal([(EnvelopeKind.Notification, 1u), (EnvelopeKind.Notification, 2u)], server.Sent.Select((sent) =>
+        {
+            return (sent.Kind, sent.Header.CallId);
+        }));
     }
 }

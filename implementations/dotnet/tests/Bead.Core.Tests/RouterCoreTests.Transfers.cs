@@ -130,6 +130,29 @@ public sealed partial class RouterCoreTests
         await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
         Assert.Equal(2, resolver.Requests.Count);
         Assert.Empty(server.Reports);
+        Assert.True(asked.IsCompleted);
+        Assert.True(answered.IsCompleted);
+        Assert.Empty(client.Reports);
+        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u)], client.Sent.Select((sent) => { return (sent.Kind, sent.Header.CallId); }));
+        Assert.Equal([(EnvelopeKind.Result, 1u), (EnvelopeKind.Failure, 1u)], server.Sent.Select((sent) => { return (sent.Kind, sent.Header.CallId); }));
+
+        var combined = new Peer(RouterSide.Server, Chunked with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
+        var combinedResolver = combined.Resolve();
+        await combined.Deliver(new Envelope { Header = RequestOf(1) });
+        var request = combined.Request(PatternOf(200), TimeSpan.FromSeconds(1));
+        var answer = combinedResolver.Answer(0, PatternOf(150));
+        await combined.Settle();
+        await combined.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.True(request.IsCompleted);
+        Assert.True(answer.IsCompleted);
+        await Assert.ThrowsAsync<TimeoutException>(() => { return request.WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        var failure = await Assert.ThrowsAsync<FailureException>(() => { return answer.WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        Assert.Equal((ushort)ProtocolCode.TransferStalled, failure.Code);
+        Assert.Equal([(EnvelopeKind.Request, 2u), (EnvelopeKind.Result, 1u), (EnvelopeKind.Cancel, 2u), (EnvelopeKind.Failure, 1u)], combined.Sent.Select((sent) => { return (sent.Kind, sent.Header.CallId); }));
+        Assert.Equal((ushort)ProtocolCode.TransferStalled, combined.Sent[^1].Failure!.Code);
+        await combined.Deliver(new Envelope { Header = RequestOf(1) });
+        Assert.Equal(2, combinedResolver.Requests.Count);
+        Assert.Empty(combined.Reports);
     }
 
     [Fact]
@@ -222,6 +245,32 @@ public sealed partial class RouterCoreTests
             return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
         Assert.IsType<CancelHeader>(client.Sent[^1].Header);
+        Assert.Empty(server.Reports);
+        Assert.Empty(client.Reports);
+        Assert.True(asked.IsCompleted);
+        Assert.Equal([172L], CreditsOf(server.Sent));
+        Assert.Equal([(EnvelopeKind.Credit, 1u), (EnvelopeKind.Failure, 1u)], server.Sent.Select((sent) => { return (sent.Kind, sent.Header.CallId); }));
+        Assert.Equal([160L], CreditsOf(client.Sent));
+        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Credit, 1u), (EnvelopeKind.Cancel, 1u)], client.Sent.Select((sent) => { return (sent.Kind, sent.Header.CallId); }));
+
+        var combined = new Peer(RouterSide.Server, Chunked with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) });
+        combined.Resolve();
+        await combined.Deliver(RequestOpeningOf(1, (new byte[200], 40)));
+        var request = combined.Request(ReadOnlyMemory<byte>.Empty, TimeSpan.FromSeconds(1));
+        await combined.Settle();
+        await combined.Deliver(ResultOpeningOf(2, (new byte[200], 32)));
+        await combined.Advance(TimeSpan.FromMilliseconds(250));
+        Assert.True(request.IsCompleted);
+        await Assert.ThrowsAsync<TimeoutException>(() => { return request.WaitAsync(Patience, TestContext.Current.CancellationToken); });
+        await combined.Deliver(ChunkOf(1, (new byte[200], 40, 48)));
+        await combined.Deliver(ChunkOf(2, (new byte[200], 32, 48)));
+        Assert.Equal(
+            [(EnvelopeKind.Credit, 1u, (long?)168, (ushort?)null), (EnvelopeKind.Request, 2u, null, null), (EnvelopeKind.Credit, 2u, 160, null), (EnvelopeKind.Failure, 1u, null, (ushort)ProtocolCode.TransferStalled), (EnvelopeKind.Cancel, 2u, null, null)],
+            combined.Sent.Select((sent) =>
+            {
+                return (sent.Kind, sent.Header.CallId, (sent.Header as CreditHeader)?.CreditEnd, sent.Failure?.Code);
+            }));
+        Assert.Empty(combined.Reports);
     }
 
     [Fact]
@@ -514,26 +563,31 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Ends_a_result_whose_chunk_cannot_go_out_forgetting_its_call()
     {
-        var server = new Peer(RouterSide.Server);
-        var resolver = server.Resolve();
-        var refused = new IOException("the transport refused the chunk");
-
-        server.OnSend = (envelope) =>
+        foreach (var (total, credit, message) in new[] { (150, 80L, "gone"), (100, 100L, "the transport refused the chunk") })
         {
-            return envelope.Header is ChunkHeader ? Task.FromException(refused) : Task.CompletedTask;
-        };
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 1 } });
+            var server = new Peer(RouterSide.Server);
+            var resolver = server.Resolve();
+            var refused = new IOException(message);
 
-        var answered = resolver.Answer(0, PatternOf(100));
+            server.OnSend = (envelope) =>
+            {
+                return envelope.Header is ChunkHeader ? Task.FromException(refused) : Task.CompletedTask;
+            };
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = total == 150 ? Array.Empty<byte>() : new byte[] { 1 } });
 
-        await server.Settle();
-        await server.Deliver(CreditOf(1, 100));
-        Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        }));
-        await server.Deliver(new Envelope { Header = RequestOf(1), Payload = new byte[] { 2 } });
-        Assert.Equal(2, resolver.Requests.Count);
+            var answered = resolver.Answer(0, PatternOf(total));
+
+            await server.Settle();
+            await server.Deliver(CreditOf(1, credit));
+            Assert.Same(refused, await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return answered.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            }));
+            await server.Deliver(new Envelope { Header = RequestOf(1), Payload = total == 150 ? Array.Empty<byte>() : new byte[] { 2 } });
+            Assert.Equal(2, resolver.Requests.Count);
+            Assert.Empty(server.Reports);
+            Assert.Equal(message, refused.Message);
+        }
     }
 
     [Fact]
