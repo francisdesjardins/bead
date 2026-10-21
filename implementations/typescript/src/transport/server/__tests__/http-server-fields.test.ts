@@ -138,6 +138,46 @@ test.describe('createHTTPTransportServer', () => {
 });
 
 test.describe('createHTTPTransportServer, its edges', () => {
+  test('checks every request field for visible bytes and edge whitespace before admission', async () => {
+    const { events, fake, server } = await startScripted({ hosts: ['bead.test'] });
+    const refusals = refusalsOf(server);
+    const cases: [string, string, number, string | undefined][] = [
+      ['origin', 'http://a.example\tb', 403, REFUSALS.ORIGIN],
+      ['x-other', 'x \ty', 201, undefined],
+      ['x-other', '', 201, undefined],
+    ];
+
+    for (const name of ['host', 'origin', 'x-other', 'bead-after']) {
+      for (const value of ['café', 'a\u0007b', 'x ']) {
+        cases.push([name, value, 400, undefined]);
+      }
+    }
+
+    try {
+      for (const [name, value, status, reason] of cases) {
+        const before = namesOf(events, 'connection').length;
+        const { response } = fake.exchange({
+          headers: { host: 'bead.test', 'content-type': BEAD_MEDIA_TYPE, [name]: value },
+        });
+
+        expect([response.status, response.headers?.[REFUSAL_HEADER]], `${name}: ${value}`).toEqual([
+          status,
+          reason,
+        ]);
+        expect(namesOf(events, 'connection')).toHaveLength(before + (status === 201 ? 1 : 0));
+      }
+
+      expect(server.clients).toHaveLength(2);
+      expect(
+        refusals.map((refusal) => {
+          return refusal.reason;
+        })
+      ).toEqual([REFUSALS.ORIGIN]);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('reads any target without throwing, a header given twice by its first, and HTTP/2’s authority as the host', async () => {
     const { fake, server } = await startScripted({ hosts: ['bead.example'] });
     const statusOf = (

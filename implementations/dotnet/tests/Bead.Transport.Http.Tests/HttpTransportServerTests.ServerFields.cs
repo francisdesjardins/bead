@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using Microsoft.AspNetCore.Builder;
 
 namespace Bead.Transport.Http.Tests;
 
@@ -11,6 +13,67 @@ namespace Bead.Transport.Http.Tests;
 /// </summary>
 public sealed partial class HttpTransportServerTests
 {
+    [Fact]
+    public async Task Checks_every_request_field_for_visible_bytes_and_edge_whitespace_before_admission()
+    {
+        await using var transport = new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["bead.test"] });
+        var connections = new ConcurrentQueue<string>();
+        var refusals = new ConcurrentQueue<TransportServerRefusal>();
+        var cases = new List<(string Name, string Value, int Status, string? Reason)>
+        {
+            ("origin", "http://a.example\tb", 403, HttpRefusals.Origin),
+            ("x-other", "x \ty", 201, null),
+            ("x-other", "", 201, null),
+        };
+
+        foreach (var name in new[] { "host", "origin", "x-other", "bead-after" })
+        {
+            foreach (var value in new[] { "café", "a\u0007b", "x " })
+            {
+                cases.Add((name, value, 400, null));
+            }
+        }
+
+        transport.Connection += connections.Enqueue;
+        transport.Refusal += refusals.Enqueue;
+        transport.Built += (application) =>
+        {
+            application.Use((context, next) =>
+            {
+                var name = context.Request.Headers["x-fixture-field"].ToString();
+                var value = Encoding.UTF8.GetString(Convert.FromBase64String(context.Request.Headers["x-fixture-value"].ToString()));
+
+                context.Request.Headers.Host = "bead.test";
+                context.Request.Headers[name] = value;
+
+                return next(context);
+            });
+        };
+        var bound = await transport.Start(Loopback, Cancelled);
+        var url = new Uri($"http://{Host}:{bound.Port}/bead");
+
+        foreach (var (name, value, status, reason) in cases)
+        {
+            var before = connections.Count;
+            var request = With(With(PostOf(url, (null, null)), ("x-fixture-field", name)), ("x-fixture-value", Convert.ToBase64String(Encoding.UTF8.GetBytes(value))));
+            using var response = await Fetch(request);
+
+            await BytesOf(response);
+            Assert.Equal((status, reason), ((int)response.StatusCode, HeaderOf(response, HttpTransport.RefusalHeader)));
+            Assert.Equal(before + (status == 201 ? 1 : 0), connections.Count);
+        }
+
+        Assert.Equal(2, transport.ConnectionHandles.Count);
+        await Until(() =>
+        {
+            return refusals.Count == 1;
+        });
+        Assert.Equal([HttpRefusals.Origin], refusals.Select((refusal) =>
+        {
+            return refusal.Reason;
+        }));
+    }
+
     [Fact]
     public async Task Answers_a_request_without_a_Host_with_two_or_with_one_that_is_no_host_400_as_HTTP_does_unmarked()
     {

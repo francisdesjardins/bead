@@ -245,6 +245,7 @@ test.describe('createHTTPTransportServer, its edges', () => {
           return read.isClosed;
         })
         .toBe(true);
+      expect(namesOf(started.events, 'message')).toEqual([]);
     } finally {
       socket.destroy();
     }
