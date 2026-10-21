@@ -698,7 +698,8 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions {
    * its name passes this check and is refused by `origins`'. An entry with a port, an empty one, one
    * that is no host, or `*` beside another is a {@link ProgrammerError} as the server is built. A refusal is told on the wire, to an HTTP client, and by the server's
    * `refusal`. An HTTP/1.1 request without a `Host`, with two, or with an authority that is no host is answered
-   * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset.
+   * 400 before it, unmarked, as HTTP answers it (RFC 9112 §3.2); over HTTP/2, its stream is reset,
+   * as is that of a request with neither `:authority` nor `Host`, under `*` too (RFC 9113 §8.3.1).
    */
   hosts?: readonly string[] | undefined;
   /**
