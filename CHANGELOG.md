@@ -25,6 +25,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection ends, before its close, and a listener's throw; never a peer gone without its closing
   handshake, one its heartbeat drops, its own abort past its close timeout, nor over HTTP a server
   gone, a refusal of its own, an exchange lost or its inactivity timeout.
+- Spec 15.12 states that a client bounds what it reads, an answer or an envelope a batch brings, by
+  `maximumBodyBytes`, as both HTTP clients do.
 - Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
   `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
   where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name

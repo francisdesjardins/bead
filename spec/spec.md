@@ -1440,8 +1440,9 @@ come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a p
 envelope holds.
 
 15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
-times its own inactivity by `inactivityTimeout`, its default and whether it may be without end
-alike (section 15.10):
+bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default
+alike, and times its own inactivity by `inactivityTimeout`, its default and whether it may be
+without end alike (section 15.10):
 
 | Bound                          | By default                                                                                                     | Bounds                                                                               | Transports      |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------- |
