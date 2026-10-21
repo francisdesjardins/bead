@@ -794,6 +794,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal([second, third], HandlesOf(_server.Clients));
         Assert.Equal([first], HandlesOf(clients));
+
+        var (_, fourth) = await Connect();
+        var (_, fifth) = await Connect();
+
+        Assert.Equal([second, third, fourth, fifth], HandlesOf(_server.Clients));
+        Assert.Equal([first], HandlesOf(clients));
     }
 
     [Fact]

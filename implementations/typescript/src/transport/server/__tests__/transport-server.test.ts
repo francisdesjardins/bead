@@ -241,12 +241,15 @@ test.describe('createTransportServer', () => {
   test('starts, reporting where it listens', async () => {
     const { server } = createStubServer();
 
+    expect(server.isUninitialized()).toBe(true);
+
     await expect(server.start({ address: '127.0.0.1', findOpenPort: true })).resolves.toEqual({
       address: '127.0.0.1',
       port: 50_000,
     });
     expect([server.address, server.port]).toEqual(['127.0.0.1', 50_000]);
     expect(server.isOpen()).toBe(true);
+    expect(server.isClosing()).toBe(false);
   });
 
   test('an explicit undefined start option falls back to its default', async () => {
@@ -304,14 +307,28 @@ test.describe('createTransportServer', () => {
   });
 
   test('shares a stop already in progress', async () => {
-    const { calls, server } = createStubServer();
+    const gate = Promise.withResolvers<void>();
+    const { calls, server } = createStubServer({
+      onStop: () => {
+        return gate.promise;
+      },
+    });
 
     await server.start();
     const first = server.stop();
     const second = server.stop();
 
     expect(second).toBe(first);
+    expect(server.isClosing()).toBe(true);
+    await expect
+      .poll(() => {
+        return calls;
+      })
+      .toEqual(['start', 'stop']);
+    expect(server.isClosing()).toBe(true);
+    gate.resolve();
     await first;
+    expect(server.isClosed()).toBe(true);
     expect(calls).toEqual(['start', 'stop']);
   });
 
@@ -400,6 +417,13 @@ test.describe('createTransportServer', () => {
     register(C);
 
     expect([handlesOf(server.clients), handlesOf(before)]).toEqual([[B, C], [A]]);
+
+    const D = generateHandle({ ip: '10.0.0.4', ordinal: 4, port: 4, type: 'WS' });
+    const E = generateHandle({ ip: '10.0.0.5', ordinal: 5, port: 5, type: 'WS' });
+
+    register(D);
+    register(E);
+    expect([handlesOf(server.clients), handlesOf(before)]).toEqual([[B, C, D, E], [A]]);
   });
 
   test('"close" resolves false for an unknown handle without reaching the transport', async () => {
