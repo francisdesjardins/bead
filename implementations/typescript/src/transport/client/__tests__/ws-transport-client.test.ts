@@ -153,6 +153,61 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(await upgraded).toBeUndefined();
       });
 
+      if (label === 'ws') {
+        test('offers no extension in its upgrade, permessage-deflate among them', async () => {
+          const offer = Promise.withResolvers<string | string[] | undefined>();
+          const refusing = await startServer({
+            perMessageDeflate: true,
+            verifyClient: (info, done) => {
+              offer.resolve(info.req.headers['sec-websocket-extensions']);
+              done(false, 503);
+            },
+          });
+
+          try {
+            await expect(client.connect({ host, port: portOf(refusing) })).rejects.toBeInstanceOf(
+              ConnectError
+            );
+            expect(await offer.promise).toBeUndefined();
+            expect(client.isClosed()).toBe(true);
+          } finally {
+            await stopServer(refusing);
+          }
+        });
+      } else {
+        test('leaves the global WebSocket’s extension offer to its platform', async () => {
+          const offers: (string | string[] | undefined)[] = [];
+          const extensions: string[] = [];
+
+          server.on('connection', (socket, request) => {
+            offers.push(request.headers['sec-websocket-extensions']);
+            extensions.push(socket.extensions);
+          });
+
+          const direct = new WebSocket(`ws://${host}:${String(port)}/`);
+
+          try {
+            await once(direct, 'open');
+            await client.connect({ host, port });
+            expect(offers).toHaveLength(2);
+            expect(offers[1]).toEqual(offers[0]);
+            expect(extensions).toEqual(['', '']);
+            expect(direct.extensions).toBe('');
+            expect(client.socket).toHaveProperty('extensions', '');
+            expect(client.isOpen()).toBe(true);
+          } finally {
+            if (direct.readyState === WebSocket.OPEN) {
+              const closed = once(direct, 'close');
+
+              direct.close();
+              await closed;
+            } else {
+              direct.close();
+            }
+          }
+        });
+      }
+
       test('rejects with a ConnectError on a port no URL can hold', async () => {
         await expect(client.connect({ host, port: 100_000 })).rejects.toBeInstanceOf(ConnectError);
         expect(client.isClosed()).toBe(true);
@@ -1704,7 +1759,9 @@ test.describe('WSTransportClient, its close timeout', () => {
     await client.connect({ host, port: 8_080 }).catch(() => {});
 
     expect(CLOSE_TIMEOUT).toBe(5_000);
-    expect(given).toEqual([{ closeTimeout: CLOSE_TIMEOUT, maxPayload: MAXIMUM_MESSAGE_BYTES }]);
+    expect(given).toEqual([
+      { closeTimeout: CLOSE_TIMEOUT, maxPayload: MAXIMUM_MESSAGE_BYTES, perMessageDeflate: false },
+    ]);
   });
 
   test('holds its close timeout to a whole number of milliseconds, rounded, refusing zero, and runs on the clock it is given', async () => {

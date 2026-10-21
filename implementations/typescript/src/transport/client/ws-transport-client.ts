@@ -332,6 +332,9 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                         new WebSocket(url, protocols, {
                           closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
                           maxPayload,
+                          // ! no permessage-deflate offer, as the C# client offers none: a third-party
+                          // server must not negotiate compression on this side alone (RFC 7692)
+                          perMessageDeflate: false,
                           ...(written === undefined ? {} : { headers: { authorization: written } }),
                         });
                   } catch (reason) {
