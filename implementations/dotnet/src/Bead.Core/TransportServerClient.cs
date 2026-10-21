@@ -11,6 +11,12 @@ public static class TransportTypes
     /// port and its rank.
     /// </summary>
     public const string WebSocket = "WS";
+
+    /// <summary>
+    /// In memory: <c>type=MEMORY;ip=…;ordinal=…</c>, a connection a connect draws, by the address its
+    /// client gave, or <c>local</c>, and its rank (spec 15.13).
+    /// </summary>
+    public const string Memory = "MEMORY";
 }
 
 /// <summary>

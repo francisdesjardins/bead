@@ -288,6 +288,14 @@ public sealed partial class RouterCoreTests
         // the server's: the client's core, built alone, runs on the clock its options give
         public TimeProvider Clock { get; } = TimeProvider.System;
 
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public RouterCore Client { get; }
 
         public Server<string> Facade { get; }

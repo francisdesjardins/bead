@@ -201,6 +201,54 @@ internal static class Program
 
     private sealed record ConnectOptions(int? Port = null, bool Large = false);
 
+    // A client over the in-memory transport: its router and services on a transport client of its own.
+    private sealed class MemoryClient : IClient
+    {
+        public MemoryClient()
+        {
+            Transport = new MemoryTransportClient();
+            Router = new RouterClient(Transport);
+            Services = new ServiceManager(Router);
+        }
+
+        public MemoryTransportClient Transport { get; }
+
+        public RouterClient Router { get; }
+
+        public ServiceManager Services { get; }
+
+        public Task Connect(MemoryTransportServer server)
+        {
+            return Transport.Connect(new MemoryConnectOptions { Server = server, Address = "127.0.0.1", Port = 50_000 });
+        }
+
+        public Task Disconnect(TransportDisconnectOptions? options = null)
+        {
+            return Transport.CloseConnection(options);
+        }
+
+        public Task Reconnect(TransportReconnectOptions? options = null)
+        {
+            return Transport.Reconnect(options);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            Router.Dispose();
+            await Transport.DisposeAsync();
+        }
+    }
+
+    // A server of the interop service over the in-memory transport, started.
+    private static async Task<(Server<string> Server, MemoryTransportServer Transport)> MemoryServer()
+    {
+        var transport = new MemoryTransportServer();
+        var server = new Server<string>(transport);
+        InteropHandlers.Offer(server);
+        await transport.Start();
+        return (server, transport);
+    }
+
     private static async Task<Connection> Connect(string transport, ConnectOptions? options = null)
     {
         var settings = options ?? new ConnectOptions();
@@ -213,6 +261,16 @@ internal static class Program
         IClient? client = null;
         try
         {
+            if (transport == "memory")
+            {
+                var (memory, listening) = await MemoryServer();
+                server = memory;
+                var inMemory = new MemoryClient();
+                client = inMemory;
+                await inMemory.Connect(listening);
+                return new Connection(client, server);
+            }
+
             var port = settings.Port;
             if (port is null)
             {
@@ -313,6 +371,66 @@ internal static class Program
             }
 
             options.Results.Record("call.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "calls/s" });
+        }
+    }
+
+    // * What a gateway pays per HTTP exchange (decision 0036): a client drawn, connected, called once
+    // and closed over the in-memory transport, against calls on one connection kept, which Calls
+    // measures over the same transport.
+    private static async Task Exchanges((Measurements Results, int Seconds) options)
+    {
+        var (server, transport) = await MemoryServer();
+        await using var serving = server;
+        foreach (var size in Sizes)
+        {
+            var body = JsonSerializer.SerializeToElement(new string('x', size));
+            var row = new Dimensions { Transport = "memory", SizeBytes = size };
+            async Task Exchange()
+            {
+                await using var client = new MemoryClient();
+                await client.Connect(transport);
+                _ = await new InteropClient(client).Echo(body)();
+                await client.Disconnect();
+            }
+
+            for (var index = 0; index < 500; index++)
+            {
+                await Exchange();
+            }
+
+            await Console.Error.WriteLineAsync($"exchanges local/memory/{size}");
+            var durations = new List<double>();
+            var clock = Stopwatch.StartNew();
+            while (clock.Elapsed.TotalSeconds < options.Seconds)
+            {
+                var before = Stopwatch.GetTimestamp();
+                await Exchange();
+                durations.Add(Stopwatch.GetElapsedTime(before).TotalMicroseconds);
+            }
+
+            durations.Sort();
+            foreach (var share in new[] { 0.5, 0.95, 0.99 })
+            {
+                options.Results.Record($"exchange.p{share * 100}", Percentile(durations, share), row);
+            }
+
+            var allocatedBefore = GC.GetTotalAllocatedBytes(true);
+            for (var index = 0; index < MemoryCalls; index++)
+            {
+                await Exchange();
+            }
+
+            var allocated = (GC.GetTotalAllocatedBytes(true) - allocatedBefore) / (double)MemoryCalls;
+            options.Results.Record("exchange.memory", allocated, row with { Unit = "B/exchange" });
+            var done = 0L;
+            clock.Restart();
+            while (clock.Elapsed.TotalSeconds < options.Seconds)
+            {
+                await Task.WhenAll(Enumerable.Range(0, Concurrency).Select((_) => { return Exchange(); }));
+                done += Concurrency;
+            }
+
+            options.Results.Record("exchange.throughput", done / clock.Elapsed.TotalSeconds, row with { Unit = "exchanges/s" });
         }
     }
 
@@ -565,6 +683,13 @@ internal static class Program
                 await using var large = await Connect(transport, new ConnectOptions(Large: true));
                 await Transfer(large, (results, transport, options.Seconds));
             }
+
+            await using (var memory = await Connect("memory"))
+            {
+                await Calls(memory, (results, new Dimensions { Transport = "memory" }, options.Seconds));
+            }
+
+            await Exchanges((results, options.Seconds));
         }
 
         var node = JsonSerializer.Deserialize<JsonElement>(await Output("node", ["-p", "JSON.stringify({node:process.versions.node,v8:process.versions.v8,cpu:require('node:os').cpus()[0].model.trim(),count:require('node:os').cpus().length,platform:require('node:os').platform(),release:require('node:os').release(),architecture:require('node:os').arch()})"]));
@@ -596,6 +721,7 @@ internal static class Program
                 },
                 Transfer = "20 MiB JSON echo; websocket: chunks; http: whole envelope, 32 MiB limit; MiB/s counts both directions",
                 Interop = "calls only; normal interop server launcher, Release configuration",
+                MemoryTransport = "local only: calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed",
             },
             Measures = measures,
         };

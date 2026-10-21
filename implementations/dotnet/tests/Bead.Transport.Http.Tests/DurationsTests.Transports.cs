@@ -478,6 +478,51 @@ public sealed partial class DurationsTests
         }
     }
 
+    // an in-memory client's connect, to a server that holds it as it is reached: as an HTTP client's,
+    // nothing reached where it is refused
+    private static async Task<Observed> ConnectTimeoutByMemory(TimeSpan? given)
+    {
+        var clock = new SteppingClock(Epoch);
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var never = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Accepting = (token) =>
+            {
+                reached.TrySetResult();
+
+                return never.Task.WaitAsync(token);
+            },
+        });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+
+        await server.Start();
+
+        return await ConnectTimeoutOf(new Connecting(client, clock)
+        {
+            Connect = (token) =>
+            {
+                return client.Connect(new MemoryConnectOptions { Server = server, Timeout = Assert.NotNull(given) }, token);
+            },
+            StateOf = () =>
+            {
+                return client.ReadyState;
+            },
+            Reconnect = () =>
+            {
+                return client.Reconnect();
+            },
+            Reached = () =>
+            {
+                return reached.Task;
+            },
+            IsUntouched = () =>
+            {
+                return !reached.Task.IsCompleted;
+            },
+        });
+    }
+
     private static async Task<Observed> ConnectTimeoutOf(Connecting connecting)
     {
         using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);

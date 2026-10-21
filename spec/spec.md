@@ -65,7 +65,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
 - [0034](../docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md): an
   access a server refuses, told, section 13.12;
 - [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
-  payload rules, section 18.
+  payload rules, section 18;
+- [0036](../docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md):
+  the in-memory transport and the joined transport, section 15.
 
 **Version: 0.7.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
@@ -738,11 +740,11 @@ A client fails a call before it goes, and a server a command alike, with `DESTIN
 as a relay refuses a call its leg B cannot carry (section 14.3): nothing was tried, and its
 credential stays. It does so for a call that presents `ELSEWHERE` over a transport that cannot carry
 the credential it presents — a WebSocket whose upgrade carried other bytes, or none (section 15.2),
-a Web Worker, whose messages carry an envelope alone, a server's over HTTP or over a WebSocket
-(sections 15.9, 15.2) — and for one that presents a `JWT` or an `ELSEWHERE` over a transport that
-leaves the machine in the clear, since a bearer credential crosses only TLS off the machine
-([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged by
-what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
+a Web Worker, whose messages carry an envelope alone, a server's over HTTP, over a WebSocket or in
+memory (sections 15.9, 15.2, 15.13) — and for one that presents a `JWT` or an `ELSEWHERE` over a
+transport that leaves the machine in the clear, since a bearer credential crosses only TLS off the
+machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)). A transport is judged
+by what it is given, never by what a name resolves to. It is secure under TLS, its scheme `wss` or
 `https`; on the loopback: a client by the host it names in its URL — `localhost` or a name that ends
 in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, or the IPv6 loopback,
 `[::1]` in a URL — as the
@@ -750,16 +752,16 @@ in `.localhost`, compared in ASCII lower case, an IPv4 address in 127.0.0.0/8, o
 the W3C's Secure Contexts reads an origin, and as
 [Secure Contexts](https://www.w3.org/TR/secure-contexts/#is-origin-trustworthy) judges an origin
 potentially trustworthy; a server by the address it listens on (section 15.12), in 127.0.0.0/8,
-`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker or a router called in
-process. Every client reads a host alike: `127.0.0.1.` and `127.1`, which the parser reads as
-127.0.0.1, are on the loopback; a host it fails on, one followed by a space among them, is not, nor
-is `localhost.`, which it keeps as given. A client takes a `localhost` name on the loopback without
-resolving it, as Secure Contexts does where the platform resolves such names there alone
-([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a platform whose resolver
-sends one elsewhere, its application gives another host. Any other leaves the machine in the clear.
-A server cannot tell what stands in front of it: its application MAY say so, and is then believed
-whatever the server listens on — TLS terminated before it, which makes it secure, or a proxy that
-serves the network in the clear, which leaves it in the clear.
+`::1`, or `localhost`, both; or when it never leaves the machine, a Web Worker, an in-memory
+transport or a router called in process. Every client reads a host alike: `127.0.0.1.` and `127.1`,
+which the parser reads as 127.0.0.1, are on the loopback; a host it fails on, one followed by a
+space among them, is not, nor is `localhost.`, which it keeps as given. A client takes a `localhost`
+name on the loopback without resolving it, as Secure Contexts does where the platform resolves such
+names there alone ([RFC 6761 §6.3](https://www.rfc-editor.org/rfc/rfc6761#section-6.3)): on a
+platform whose resolver sends one elsewhere, its application gives another host. Any other leaves
+the machine in the clear. A server cannot tell what stands in front of it: its application MAY say
+so, and is then believed whatever the server listens on — TLS terminated before it, which makes it
+secure, or a proxy that serves the network in the clear, which leaves it in the clear.
 
 13.5. A credential that does not hold is refused at its resolution, whatever the procedure
 requires (section 9.2, step 6): a call never runs outside the session it presented. A procedure
@@ -1070,9 +1072,10 @@ resolving as section 9.2 says:
    transport cannot carry it (section 13.4): a WebSocket's, whose upgrade carried the relay's own
    credential or none, never leg A's; a `JWT` or an `ELSEWHERE` over a leg B that reaches off the
    machine in the clear, neither over TLS — `wss`, `https` — nor within the machine — the loopback,
-   a Web Worker, a router called in process — since a bearer credential crosses only TLS off the
-   machine ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender
-   holds: `DESTINATION_UNREACHABLE`, since nothing was tried;
+   a Web Worker, an in-memory transport, a router called in process — since a bearer credential
+   crosses only TLS off the machine
+   ([RFC 6750 §5.3](https://www.rfc-editor.org/rfc/rfc6750#section-5.3)), which its sender holds:
+   `DESTINATION_UNREACHABLE`, since nothing was tried;
 6. a payload, or a transfer's total, past the smaller of the two legs' limits, leg B's header
    counted with its credential, call by call — a destination that takes no transfer takes what one
    of its envelopes holds behind that header: `PAYLOAD_TOO_LARGE`.
@@ -1165,21 +1168,23 @@ connection's token, nor a credential. It names no connection: a refusal is a req
 listener's throw is reported with none. A connection that closes ends what was under way on it
 (sections 9.4, 9.10, 12.10, 13.7). A server's transport hands the router each envelope it took with
 the address and port of what brought it — over HTTP its exchange's, read as section 15.12 reads it,
-whichever socket or proxy brought its connect; over a WebSocket its connection's; none over a Web
-Worker — which an access refused names (section 13.12). A transport may carry a credential beside
-an envelope, both ways: it hands the router what it carried with an envelope it took, and carries
-what the router gives it with one it sends. That credential is what a request presenting
-`ELSEWHERE` stands for (section 9.2, step 6), and nothing else: a request that presents none,
-`OPAQUE` or a `JWT` resolves as its header says, whatever its transport carried. Over HTTP, it is
-the `Authorization` field of a request's `POST` (section 15.5), each request's own; over a
-WebSocket, the `Authorization` field of an upgrade that carries no `Origin`, one for every envelope
-of the connection, toward its server alone (section 15.2). A transport says whether it carries the
-credential a call presents beside an envelope it sends — a client's over HTTP any field value, over
-a WebSocket the one its upgrade carried, compared in constant time; a Web Worker's none, nor a
-server's toward its client (sections 15.2, 15.9) — and whether it is secure — under TLS, on the
-loopback, or never leaving the machine — so that a side fails before it goes a call whose credential
-it cannot carry (section 13.4). No failure's detail, event, trace or log carries that credential,
-nor a header's: only its credential scheme.
+whichever socket or proxy brought its connect; over a WebSocket its connection's; over an in-memory
+transport those its client gave as it connected (section 15.13); none over a Web Worker — which an
+access refused names (section 13.12). A transport may carry a credential beside an envelope, both
+ways: it hands the router what it carried with an envelope it took, and carries what the router
+gives it with one it sends. That credential is what a request presenting `ELSEWHERE` stands for
+(section 9.2, step 6), and nothing else: a request that presents none, `OPAQUE` or a `JWT` resolves
+as its header says, whatever its transport carried. Over HTTP, it is the `Authorization` field of a
+request's `POST` (section 15.5), each request's own; over a WebSocket, the `Authorization` field of
+an upgrade that carries no `Origin`, one for every envelope of the connection, toward its server
+alone (section 15.2); over an in-memory transport, what its client hands with each request (section
+15.13). A transport says whether it carries the credential a call presents beside an envelope it
+sends — a client's over HTTP or in memory any field value, over a WebSocket the one its upgrade
+carried, compared in constant time; a Web Worker's none, nor a server's toward its client (sections
+15.2, 15.9, 15.13) — and whether it is secure — under TLS, on the loopback, or never leaving the
+machine — so that a side fails before it goes a call whose credential it cannot carry (section
+13.4). No failure's detail, event, trace or log carries that credential, nor a header's: only its
+credential scheme.
 
 ### WebSocket
 
@@ -1665,6 +1670,29 @@ it; neither stands for the other. A client that connects by `localhost` reaches 
 family it tries first, racing them ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)); a server
 given one loopback, `127.0.0.1` or `::1`, leaves the other's port to any process that listens
 there, which then answers a client that tries that family first.
+
+### In memory
+
+15.13. An in-memory transport joins a client's router and a server's router of one process. A
+connect draws a connection on its server's side, its handle's type `MEMORY` (section 15.1), handed
+with the address and the port its client gave as it connected, or `local` and none. Each envelope
+is copied as it is sent, and handed on whole, once, in the order it was sent, in a later turn than
+its send, never within it. It carries the credential a client hands with a request beside it, any
+field value (section 15.5), and none toward a client: a server's command that presents `ELSEWHERE`
+over it fails before it goes, `DESTINATION_UNREACHABLE` (section 13.4). It never leaves the
+process, so both its ends are secure. It carries transfers under its routers' limits, and holds no
+bound, heartbeat or timeout of its own. Either end closes a connection, its other end told in a
+later turn, the close clean at the end that closed it. A server's transport that stops closes every
+connection it holds and takes no connect; a client's connect then fails before anything goes.
+
+### Joined
+
+15.14. A server MAY take its connections from several transports through one that joins them. A
+joined transport hands on each transport's events with the handle that transport drew, and each
+connection's sending, closing, credential and security are its own transport's. It MUST refuse to
+join two transports whose handles might be one. Its stop stops each, and its bounds and its gauges
+reach each, as section 15.1 has a transport's. It serves no port of its own: one port for two
+transports comes from a proxy in front of them.
 
 ## 16. Services and procedures
 

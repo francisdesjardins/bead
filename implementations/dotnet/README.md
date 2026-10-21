@@ -34,7 +34,8 @@ One solution, `Bead.slnx`:
 src/
   Bead.Core/                    the codec, the router's core, both sides' routers, the service,
                                 session and notification managers, the relay, the server over
-                                them, and the service layer a service is served and called through
+                                them, the service layer a service is served and called through,
+                                the in-memory transport and the joined server transport
   Bead.Protobuf/                the check of a proto payload's records against its message's
                                 descriptor, which a generated proto codec calls before
                                 Google.Protobuf reads them, and what the validators beadc generates
@@ -73,7 +74,12 @@ tools/
 
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
 application of its own: one port for both comes from a proxy in front, never from a server they
-share.
+share. The in-memory transport needs none, and lives in `Bead.Core`: `MemoryTransportClient` and
+`MemoryTransportServer`, two routers of one process, each envelope copied and handed on in a later
+turn, a credential and the client's address beside each request (spec 15.13). One server takes
+its connections from several transports through `JoinedServerTransport`, each handle its own
+transport's, two of one type refused (spec 15.14): an in-memory transport beside a WebSocket one,
+say, its service offered once.
 
 ### The parts of the core, the manager and the HTTP server
 

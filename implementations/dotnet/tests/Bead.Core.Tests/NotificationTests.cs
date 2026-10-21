@@ -563,6 +563,14 @@ public sealed class NotificationTests : IDisposable
 
     private sealed class ServerEnd : IServerTransport
     {
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<string>? Connection;

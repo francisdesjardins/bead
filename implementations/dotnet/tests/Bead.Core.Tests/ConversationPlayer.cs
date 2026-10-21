@@ -15,6 +15,15 @@ internal sealed record PlayerOptions
     /// that moved since the case began, or since the last, with the lines it lists.
     /// </summary>
     public MetricsRegistry? MetricsRegistry { get; init; }
+
+    /// <summary>
+    /// Whether its clients reach the server through a real pair of the in-memory transport (spec
+    /// 15.13), each connection a <see cref="MemoryTransportClient"/> of one
+    /// <see cref="MemoryTransportServer"/>, rather than a transport the player scripts; a
+    /// conversation that opens a connection the in-memory transport is not is played scripted all
+    /// the same (<see cref="ConversationPlayer.CanStandFor"/>).
+    /// </summary>
+    public bool IsInMemory { get; init; }
 }
 
 /// <summary>
@@ -331,7 +340,9 @@ internal static class ConversationPlayer
 
         // the server's clock, which settles once its router and its resolvers are idle
         var clock = new SteppingClock(options.WallClock) { Settle = scheduler.WhenIdle };
-        var transport = new ScriptedTransport { Clock = clock };
+        IPlayedTransport transport = options.IsInMemory && CanStandFor(conversation)
+            ? new InMemoryTransport(scheduler, clock)
+            : new ScriptedTransport { Clock = clock };
 
         // what the server reported, each with the connection it came with
         var reports = new List<(string Report, string? ConnectionHandle)>();
@@ -348,7 +359,7 @@ internal static class ConversationPlayer
         }
 
         await using var server = new Server<string>(
-            transport,
+            transport.Server,
             new ServerOptions
             {
                 Credentials = CredentialsOf((limits, clock)),
@@ -411,7 +422,7 @@ internal static class ConversationPlayer
             return step.TryGetProperty("open", out _);
         }))
         {
-            transport.Open(OnlyConnection, new Carrying(true, true, true));
+            await transport.Open(OnlyConnection, new Carrying(true, true, true));
         }
 
         try
@@ -433,21 +444,21 @@ internal static class ConversationPlayer
                         !step.TryGetProperty("secure", out var secure) || secure.GetBoolean());
 
                     await NothingMore();
-                    transport.Open(opened.GetString()!, carrying);
+                    await transport.Open(opened.GetString()!, carrying);
                     await scheduler.WhenIdle();
                 }
 
                 if (step.TryGetProperty("send", out var bytes))
                 {
                     await NothingMore();
-                    transport.Deliver(new TransportMessage(SentOf(bytes.GetString()!, tokens), false) { Credential = CarriedOf(step) }, connection);
+                    await transport.Deliver(new TransportMessage(SentOf(bytes.GetString()!, tokens), false) { Credential = CarriedOf(step) }, connection);
                     await scheduler.WhenIdle();
                 }
 
                 if (step.TryGetProperty("close", out _))
                 {
                     await NothingMore();
-                    transport.Closed(connection);
+                    await transport.Closed(connection);
                     await scheduler.WhenIdle();
                 }
 
@@ -535,19 +546,217 @@ internal static class ConversationPlayer
         }
         finally
         {
-            transport.CloseEach();
+            await transport.CloseEach();
             await scheduler.WhenIdle();
         }
+    }
+
+    /// <summary>
+    /// Whether a pair of the in-memory transport can stand for every connection a conversation
+    /// opens: each carries the server's own envelopes back and is secure, as an in-memory one is;
+    /// none is asked to carry a credential toward its client, which an in-memory one never carries;
+    /// and no name is opened twice, a connection again under the handle of the one before, which an
+    /// in-memory transport never gives twice (spec 15.13).
+    /// </summary>
+    public static bool CanStandFor(JsonElement conversation)
+    {
+        var steps = conversation.GetProperty("steps").EnumerateArray().ToList();
+        var opened = steps.Where((step) =>
+        {
+            return step.TryGetProperty("open", out _);
+        }).Select((step) =>
+        {
+            return step.GetProperty("open").GetString();
+        }).ToList();
+
+        return opened.Distinct(StringComparer.Ordinal).Count() == opened.Count && steps.All((step) =>
+        {
+            var isTwoWay = !step.TryGetProperty("twoWay", out var twoWay) || twoWay.GetBoolean();
+            var isSecure = !step.TryGetProperty("secure", out var secure) || secure.GetBoolean();
+            var carriesBack = step.TryGetProperty("expect", out var expected) && expected.TryGetProperty("procedureId", out _) && step.TryGetProperty("carried", out _);
+
+            return isTwoWay && isSecure && !carriesBack;
+        });
     }
 
     // what a connection opened carries: the server's own envelopes back, a credential beside an
     // envelope, and whether it is secure
     private readonly record struct Carrying(bool IsTwoWay, bool CarriesCredential, bool IsSecure);
 
+    // what the player plays its clients through: connections it opens by name, delivers to and
+    // closes, and what the server sent on each, with the credential carried beside it
+    private interface IPlayedTransport
+    {
+        IServerTransport Server { get; }
+
+        string HandleOf(string name);
+
+        string NameOf(string connectionHandle);
+
+        Task Open(string name, Carrying carrying);
+
+        Task Deliver(TransportMessage message, string name);
+
+        Task Closed(string name);
+
+        Task CloseEach();
+
+        (ReadOnlyMemory<byte> Bytes, string? Carried)? Next(string name);
+
+        IReadOnlyList<(string Name, ReadOnlyMemory<byte> Bytes, string? Carried)> Left();
+    }
+
+    // a real pair of the in-memory transport: each connection a client of its own, the first named
+    // on the port 50001, the next on 50002, both ends telling on the server's scheduler, so its idle
+    // is the transport's too. A name opened again is a new connection, under the handle it drew
+    private sealed class InMemoryTransport(SerialScheduler scheduler, TimeProvider clock) : IPlayedTransport, IAsyncDisposable
+    {
+        private readonly MemoryTransportServer _server = new(new MemoryTransportServerOptions { Clock = clock, Scheduler = scheduler });
+
+        // what is sent on the scheduler, and taken on the test's
+        private readonly Lock _gate = new();
+
+        // by name, its client, its handle and its port; and back
+        private readonly Dictionary<string, MemoryTransportClient> _clients = [];
+        private readonly Dictionary<string, string> _handles = [];
+        private readonly Dictionary<string, string> _names = [];
+        private readonly Dictionary<string, int> _ports = [];
+
+        // by handle, what was sent on it and not yet taken, in order
+        private readonly Dictionary<string, Queue<(ReadOnlyMemory<byte> Bytes, string? Carried)>> _sent = [];
+
+        public IServerTransport Server
+        {
+            get
+            {
+                return _server;
+            }
+        }
+
+        public string HandleOf(string name)
+        {
+            return _handles.GetValueOrDefault(name, name);
+        }
+
+        public string NameOf(string connectionHandle)
+        {
+            return _names.GetValueOrDefault(connectionHandle, connectionHandle);
+        }
+
+        // * what the step asks of a connection is what an in-memory one is: CanStandFor chose it so
+        public async Task Open(string name, Carrying carrying)
+        {
+            if (_server.ReadyState != ReadyState.Open)
+            {
+                await _server.Start();
+            }
+
+            if (!_ports.TryGetValue(name, out var port))
+            {
+                port = 50_001 + _ports.Count;
+                _ports[name] = port;
+            }
+
+            var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+            var drawn = new List<string>();
+
+            void Drawn(string connectionHandle)
+            {
+                drawn.Add(connectionHandle);
+            }
+
+            _server.Connection += Drawn;
+
+            try
+            {
+                await client.Connect(new MemoryConnectOptions { Server = _server, Address = "127.0.0.1", Port = port });
+            }
+            finally
+            {
+                _server.Connection -= Drawn;
+            }
+
+            var handle = Assert.Single(drawn);
+
+            client.Message += (message) =>
+            {
+                lock (_gate)
+                {
+                    if (!_sent.TryGetValue(handle, out var sent))
+                    {
+                        sent = [];
+                        _sent[handle] = sent;
+                    }
+
+                    sent.Enqueue((message.Bytes, message.Credential));
+                }
+            };
+            _clients[name] = client;
+            _handles[name] = handle;
+            _names[handle] = name;
+        }
+
+        public Task Deliver(TransportMessage message, string name)
+        {
+            return _clients[name].Send(message);
+        }
+
+        // closed by its client, unclean, as the scripted transport tells it
+        public async Task Closed(string name)
+        {
+            if (_clients.Remove(name, out var client))
+            {
+                await client.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+                await client.DisposeAsync();
+            }
+        }
+
+        // closes every connection still open, then stops the server
+        public async Task CloseEach()
+        {
+            foreach (var name in _clients.Keys.ToList())
+            {
+                await Closed(name);
+            }
+
+            await DisposeAsync();
+        }
+
+        // stops the server
+        public ValueTask DisposeAsync()
+        {
+            return _server.DisposeAsync();
+        }
+
+        public (ReadOnlyMemory<byte> Bytes, string? Carried)? Next(string name)
+        {
+            var handle = HandleOf(name);
+
+            lock (_gate)
+            {
+                return _sent.TryGetValue(handle, out var sent) && sent.TryDequeue(out var next) ? next : null;
+            }
+        }
+
+        public IReadOnlyList<(string Name, ReadOnlyMemory<byte> Bytes, string? Carried)> Left()
+        {
+            lock (_gate)
+            {
+                return [.. _sent.SelectMany((sent) =>
+                {
+                    return sent.Value.Select((left) =>
+                    {
+                        return (NameOf(sent.Key), left.Bytes, left.Carried);
+                    });
+                })];
+            }
+        }
+    }
+
     // a transport of connections a test opens by name, delivers to and closes, which records what
     // it sends on each, with the credential it carries beside it. A name keeps its handle: a
     // connection opened again under it is a new connection under the same handle
-    private sealed class ScriptedTransport : IServerTransport
+    private sealed class ScriptedTransport : IServerTransport, IPlayedTransport
     {
         // what is sent and asked on the router's scheduler, and taken on the test's
         private readonly Lock _gate = new();
@@ -571,6 +780,22 @@ internal static class ConversationPlayer
 
         public event Action<bool, string>? Close;
 
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
+        public IServerTransport Server
+        {
+            get
+            {
+                return this;
+            }
+        }
+
         public string HandleOf(string name)
         {
             if (!_handles.TryGetValue(name, out var handle))
@@ -588,7 +813,7 @@ internal static class ConversationPlayer
             return _names.GetValueOrDefault(connectionHandle, connectionHandle);
         }
 
-        public void Open(string name, Carrying carrying)
+        public Task Open(string name, Carrying carrying)
         {
             var handle = HandleOf(name);
 
@@ -599,29 +824,37 @@ internal static class ConversationPlayer
 
             _open.Add(handle);
             Connection?.Invoke(handle);
+
+            return Task.CompletedTask;
         }
 
-        public void Deliver(TransportMessage message, string name)
+        public Task Deliver(TransportMessage message, string name)
         {
             Message?.Invoke(message, HandleOf(name));
+
+            return Task.CompletedTask;
         }
 
-        public void Closed(string name)
+        public Task Closed(string name)
         {
             var handle = HandleOf(name);
 
             _open.Remove(handle);
             Close?.Invoke(false, handle);
+
+            return Task.CompletedTask;
         }
 
         // closes every connection still open
-        public void CloseEach()
+        public Task CloseEach()
         {
             foreach (var handle in _open.ToList())
             {
                 _open.Remove(handle);
                 Close?.Invoke(false, handle);
             }
+
+            return Task.CompletedTask;
         }
 
         // the next envelope sent on a connection, with what it carried beside it, taken; none while

@@ -1198,6 +1198,14 @@ public sealed class ServerTests : IAsyncLifetime
     // how often it is stopped
     private sealed class ScriptedTransport : IServerTransport
     {
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<string>? Connection;
@@ -1351,6 +1359,14 @@ public sealed class ServerTests : IAsyncLifetime
     // a transport that counts nothing: the server's own connections stand for its
     private sealed class Uncounted : IServerTransport
     {
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public event Action<string>? Connection

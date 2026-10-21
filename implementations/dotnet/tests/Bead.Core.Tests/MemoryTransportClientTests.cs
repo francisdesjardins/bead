@@ -1,0 +1,289 @@
+using System.Text.Json;
+using System.Threading.Channels;
+using Bead.Interop;
+
+namespace Bead.Tests;
+
+/// <summary>
+/// <see cref="MemoryTransportClient"/> (spec 15.13): what it hands its server and when, the
+/// credential it carries, and how a close is told at each end. The TypeScript side's
+/// <c>memory-transport-client.test.ts</c> holds the same sentences.
+/// </summary>
+public sealed class MemoryTransportClientTests
+{
+    // constants
+
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    private const string Carried = "Interop sub=ada";
+
+    // whether the current thread is inside a send or a close of the test's own, which a delivery
+    // told within it would see
+    private static readonly ThreadLocal<bool> IsWithin = new();
+
+    // helpers
+
+    private static CancellationToken Cancelled
+    {
+        get
+        {
+            return TestContext.Current.CancellationToken;
+        }
+    }
+
+    // runs what a test calls with the thread marked as within it
+    private static T Within<T>(Func<T> call)
+    {
+        IsWithin.Value = true;
+
+        try
+        {
+            return call();
+        }
+        finally
+        {
+            IsWithin.Value = false;
+        }
+    }
+
+    // a server started and a client connected to it, both telling on the scheduler given
+    private static async Task<(MemoryTransportServer Server, MemoryTransportClient Client, string ConnectionHandle)> Connected(SerialScheduler scheduler)
+    {
+        var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var connections = new List<string>();
+
+        server.Connection += connections.Add;
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        return (server, client, Assert.Single(connections));
+    }
+
+    // definition
+
+    [Fact]
+    public async Task Hands_each_envelope_on_whole_once_and_in_order_in_a_later_turn_than_its_send()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, connectionHandle) = await Connected(scheduler);
+        var toServer = new List<(string Bytes, string ConnectionHandle, bool IsWithin)>();
+        var toClient = new List<(string Bytes, bool IsWithin)>();
+
+        await using (server)
+        await using (client)
+        {
+            server.Message += (message, handle) =>
+            {
+                toServer.Add((Convert.ToHexString(message.Bytes.Span), handle, IsWithin.Value));
+            };
+            client.Message += (message) =>
+            {
+                toClient.Add((Convert.ToHexString(message.Bytes.Span), IsWithin.Value));
+            };
+
+            byte[][] sent = [[1, 2, 3], [4], [5, 6]];
+            byte[][] answered = [[7], [8, 9], [10]];
+
+            foreach (var bytes in sent)
+            {
+                await Within(() =>
+                {
+                    return client.Send(new TransportMessage(bytes, false));
+                });
+
+                // * the sender's buffer stays its own: what changes after its send never crosses
+                bytes[0] = 0;
+            }
+
+            foreach (var bytes in answered)
+            {
+                await Within(() =>
+                {
+                    return server.Send(new TransportMessage(bytes, false), connectionHandle);
+                });
+                bytes[0] = 0;
+            }
+
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal([("010203", connectionHandle, false), ("04", connectionHandle, false), ("0506", connectionHandle, false)], toServer);
+            Assert.Equal([("07", false), ("0809", false), ("0A", false)], toClient);
+        }
+    }
+
+    [Fact]
+    public async Task Carries_the_credential_a_request_presents_beside_it_and_none_toward_its_client()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, connectionHandle) = await Connected(scheduler);
+        var toServer = new List<string?>();
+        var toClient = new List<string?>();
+
+        await using (server)
+        await using (client)
+        {
+            server.Message += (message, _) =>
+            {
+                toServer.Add(message.Credential);
+            };
+            client.Message += (message) =>
+            {
+                toClient.Add(message.Credential);
+            };
+
+            // any field value, as POST /bead carries one; none toward a client, whatever it is given
+            Assert.True(client.Carries(Carried));
+            Assert.True(client.Carries("Bearer mF_9.B5f-4.1JqM"));
+            Assert.False(client.Carries(" Bearer x"));
+            Assert.False(server.CarriesCredential(connectionHandle));
+            Assert.True(client.IsSecure);
+            Assert.True(server.IsSecure(connectionHandle));
+
+            await client.Send(new TransportMessage(new byte[] { 1 }, false) { Credential = Carried });
+            await client.Send(new TransportMessage(new byte[] { 2 }, false));
+            await server.Send(new TransportMessage(new byte[] { 3 }, false) { Credential = Carried }, connectionHandle);
+
+            // one no field carries is refused before it goes, the connection kept
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+            {
+                return client.Send(new TransportMessage(new byte[] { 4 }, false) { Credential = "Interop\nsub=ada" });
+            });
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal([Carried, null], toServer);
+            Assert.Equal([null], toClient);
+            Assert.Equal(ReadyState.Open, client.ReadyState);
+        }
+
+        // * through both routers: a call presenting ELSEWHERE stands for what came beside it
+        var transport = new MemoryTransportServer();
+        await using var built = new Server<string>(transport, new ServerOptions { Credentials = InteropCredentials.Of(TimeProvider.System) });
+        await using var caller = new MemoryTransportClient();
+        var router = new RouterClient(caller, new RouterClientOptions { Credential = Credential.Elsewhere(Carried) });
+        await using var linked = new ServiceLink.LinkedClient(router);
+
+        InteropHandlers.Offer(built);
+        await transport.Start();
+        await caller.Connect(new MemoryConnectOptions { Server = transport }, Cancelled);
+
+        var whoami = await new InteropClient(linked).Whoami(JsonSerializer.SerializeToElement<object?>(null))().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal("ada", whoami.GetString());
+    }
+
+    [Fact]
+    public async Task Tells_the_other_end_of_a_close_in_a_later_turn_the_closer_s_clean()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, connectionHandle) = await Connected(scheduler);
+        var atServer = Channel.CreateUnbounded<string>();
+        var atClient = new List<string>();
+
+        await using (server)
+        await using (client)
+        {
+            server.Message += (message, _) =>
+            {
+                atServer.Writer.TryWrite($"heard {message.Bytes.Span[0]}");
+            };
+            server.Close += (isClean, handle) =>
+            {
+                atServer.Writer.TryWrite($"closed {isClean} {handle == connectionHandle} within {IsWithin.Value}");
+            };
+            client.Close += (isClean, isQuick) =>
+            {
+                atClient.Add($"closed {isClean} {isQuick} within {IsWithin.Value}");
+            };
+
+            // the client closes: its own close in its call, clean as told; its server's in a later
+            // turn, after what it sent before, clean as the closer's
+            await client.Send(new TransportMessage(new byte[] { 1 }, false));
+            await Within(() =>
+            {
+                return client.CloseConnection();
+            });
+            Assert.Equal(["closed True False within True"], atClient);
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+            atServer.Writer.TryWrite("settled");
+
+            Assert.Equal(["heard 1", "closed True True within False", "settled"], await TakeAll(atServer, 3));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            Assert.Empty(server.ConnectionHandles);
+        }
+
+        // the server closes: its own close in a turn of its own, clean; its client's in a later
+        // turn, after what it sent before, unclean, as a close of the peer's
+        var other = new SerialScheduler();
+        var (closing, closed, handle) = await Connected(other);
+        var heard = Channel.CreateUnbounded<string>();
+
+        await using (closing)
+        await using (closed)
+        {
+            closing.Close += (isClean, _) =>
+            {
+                heard.Writer.TryWrite($"server closed {isClean} within {IsWithin.Value}");
+            };
+            closed.Message += (message) =>
+            {
+                heard.Writer.TryWrite($"client heard {message.Bytes.Span[0]}");
+            };
+            closed.Close += (isClean, isQuick) =>
+            {
+                heard.Writer.TryWrite($"client closed {isClean} {isQuick} within {IsWithin.Value}");
+            };
+
+            await closing.Send(new TransportMessage(new byte[] { 2 }, false), handle);
+
+            Assert.True(await Within(() =>
+            {
+                return closing.CloseConnection(handle);
+            }));
+            await other.WhenIdle().WaitAsync(Patience, Cancelled);
+            heard.Writer.TryWrite("settled");
+
+            Assert.Equal(
+                ["client heard 2", "server closed True within False", "client closed False False within False", "settled"],
+                await TakeAll(heard, 4));
+            Assert.Equal(ReadyState.Closed, closed.ReadyState);
+            Assert.False(await closing.CloseConnection(handle));
+        }
+
+        // a close told unclean is told so at its server
+        var third = new SerialScheduler();
+        var (told, unclean, uncleanHandle) = await Connected(third);
+        var ends = new List<string>();
+
+        await using (told)
+        await using (unclean)
+        {
+            told.Close += (isClean, connectionHandle) =>
+            {
+                ends.Add($"server closed {isClean} {connectionHandle == uncleanHandle}");
+            };
+            unclean.Close += (isClean, isQuick) =>
+            {
+                ends.Add($"client closed {isClean} {isQuick}");
+            };
+
+            await unclean.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+            await third.WhenIdle().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(["client closed False False", "server closed False True"], ends);
+        }
+    }
+
+    // the next count messages told, in order, within a patience
+    private static async Task<List<string>> TakeAll(Channel<string> told, int count)
+    {
+        var taken = new List<string>();
+
+        while (taken.Count < count)
+        {
+            taken.Add(await told.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled));
+        }
+
+        return taken;
+    }
+}

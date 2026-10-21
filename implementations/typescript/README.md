@@ -2,8 +2,9 @@
 
 Bead is a binary wire protocol: the envelopes of a request, its result or failure, the
 notifications of a subscription and the commands a server sends back, written at fixed offsets.
-This project is its TypeScript implementation — a WebSocket, an HTTP and a Web Worker transport,
-each a client and a server, a client and a server router over them, the service, session and
+This project is its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory
+transport, each a client and a server, a server's transports joined into one, a client and a server
+router over them, the service, session and
 notification managers, the client and server that put the three layers together, and the service
 layer a service is served and called through. Nothing in it imports a framework at run time. The
 specification and the conformance files both sides play are in [`spec/`](../../spec/).
@@ -24,8 +25,9 @@ first layer of a transport → router → service stack, which is why they sit t
 Each end — client or server — has a shared half and a transport. The shared half owns the events and the guards
 around the life of the connection — `reconnect` and the drop behind `await using` for a client, `start` and `stop`
 and the connection registry for a server. The transport supplies what only it knows: how to open,
-close and send on the wire. WebSocket, HTTP — see [HTTP](#http) — and a Web Worker each supply
-theirs; another transport supplies its own.
+close and send on the wire. WebSocket, HTTP, a Web Worker and memory each supply theirs — see
+[HTTP](#http) and [In memory](#in-memory-and-a-servers-transports-joined); another transport
+supplies its own.
 
 The client runs on the global `WebSocket` — every browser, and Node 24.9, the package's floor — or
 on any constructor passed as `WebSocket`, which is how `ws` plugs in; its suite runs on both. The
@@ -1166,6 +1168,30 @@ the client's connection, and the server is told; a worker terminated without a w
 `createWorkerServer({ transport: { scope: self } })` in the worker and `createWorkerClient({
 transport: { worker } })` in the page are the facades. This one is a page's own: a server in C# has
 no counterpart to mirror.
+
+### In memory, and a server's transports joined
+
+`memory-transport-client` and `memory-transport-server` join a client's router and a server's
+router of one process (spec 15.13): a gateway that calls its application's own server, a core
+before it has a socket, a test. `createMemoryTransportClient({ server })` connects to a
+`createMemoryTransportServer()` with the address and port its caller gives, `local` and none by
+default; the server draws the connection `type=MEMORY;ip=<address>;ordinal=n` and hands that
+address and port with each envelope, so a refusal told names them. Each envelope crosses as a copy,
+whole, once and in order, in a later turn than its send, never within it, so no router is entered
+from its own call. A request's credential crosses beside it, any field value, as `POST /bead`
+carries one; none goes toward a client, so a command presenting `ELSEWHERE` fails before it goes.
+It never leaves the process, so it is secure and a bearer credential crosses it; it carries
+transfers under its routers' limits and holds no bound or heartbeat of its own. Either end closes a
+connection, the other told in a later turn; a server that stops closes each and takes no connect.
+
+`joinTransports([memory, webSocket])`, of `joined-transport-server`, is one server transport over
+several (spec 15.14), so one server — one router, one admission, one session manager, each service
+offered once — takes its connections from all of them. Each handle stays the one its transport drew,
+and its flags, sends and closes go to that transport; each transport's events are told on with
+their handles, each listener within its guard; its stop stops each, and its gauges are their sum.
+Two transports of one type, whose handles might be one, are refused as the join is built: one
+transport binds both addresses. The join starts nothing: each transport is started where it
+listens, and one port for two still comes from a proxy in front.
 
 ### What a server holds
 

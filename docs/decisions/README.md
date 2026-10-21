@@ -46,7 +46,9 @@ not hold:
   ([0012](0012-a-listen-held-is-not-silence.md)), a relay as its bridge to another transport, and a
   relay that carries a subscription, which a page across a broker needs
   ([0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md));
-- **HTTP/JSON transcoding**, which takes a call from HTTP and JSON as gRPC's transcoding does: the
+- **HTTP/JSON transcoding**, which takes a call from HTTP and JSON as gRPC's transcoding does: its
+  calls through the in-memory transport into the application's own server, joined
+  ([0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)), the
   credential it carries ([0010](0010-a-request-presents-a-credential-of-a-scheme.md)), the routes a
   service's name scopes
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)),
@@ -132,16 +134,17 @@ table.
 
 ### Transports and relays
 
-| #                                                                                                 | Decision                                                                                                                          | Status   |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| [0012](0012-a-listen-held-is-not-silence.md)                                                      | A listen held is not silence, and a connection without a session is its server's                                                  | accepted |
-| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                            | A relay terminates each leg between two transports, and routes nothing past it                                                    | accepted |
-| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                          | HTTP draws a connection by a token, and a listen holds it                                                                         | accepted |
-| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                               | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                              | accepted |
-| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md) | A transport goes on through its listener's throw, and takes nothing new once its stop began                                       | accepted |
-| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                    | A transport draws each connection's handle, and gives none twice                                                                  | accepted |
-| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                       | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                          | accepted |
-| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)     | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, and a client follows no redirect | accepted |
+| #                                                                                                                         | Decision                                                                                                                          | Status   |
+| ------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| [0012](0012-a-listen-held-is-not-silence.md)                                                                              | A listen held is not silence, and a connection without a session is its server's                                                  | accepted |
+| [0019](0019-a-relay-terminates-each-leg-and-routes-nothing-past-it.md)                                                    | A relay terminates each leg between two transports, and routes nothing past it                                                    | accepted |
+| [0020](0020-http-draws-a-connection-by-a-token-and-a-listen-holds-it.md)                                                  | HTTP draws a connection by a token, and a listen holds it                                                                         | accepted |
+| [0021](0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)                                                       | A topic-based publish/subscribe broker is one more transport, and Bead is never a network of its own                              | accepted |
+| [0023](0023-a-transport-goes-on-through-its-listeners-throw-and-takes-nothing-new-as-it-stops.md)                         | A transport goes on through its listener's throw, and takes nothing new once its stop began                                       | accepted |
+| [0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md)                                            | A transport draws each connection's handle, and gives none twice                                                                  | accepted |
+| [0029](0029-a-listen-names-its-cursor-and-its-wait-in-fields-of-its-own.md)                                               | A listen names its cursor and its wait in fields of its own, at the connection's one URL                                          | accepted |
+| [0032](0032-a-websocket-upgrade-from-no-page-carries-its-credential-beside-every-envelope.md)                             | A WebSocket upgrade from no page carries its credential beside every envelope of its connection, and a client follows no redirect | accepted |
+| [0036](0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md) | An in-memory transport joins two routers of one process, and a server takes several transports through one                        | accepted |
 
 ### A server's edge
 
@@ -187,7 +190,7 @@ table.
 
 ## Writing one
 
-The next decision is 0035. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
+The next decision is 0037. Its file is `NNNN-the-decision-in-a-few-words.md`, and its title states
 the decision, not its subject. The title may grow with the record; the file's name stays, unless it
 would mislead.
 

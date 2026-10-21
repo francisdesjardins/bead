@@ -6,6 +6,8 @@ import type {
   Data,
   EmitterListener,
   IEventIteratorOptions,
+  IMemoryEndLike,
+  IMemoryTransportServerLike,
   IReadyStateMethods,
   ITransportMessage,
   IWorkerPortLike,
@@ -497,6 +499,35 @@ export type FetchLike = (url: string, init: IFetchInit) => Promise<IFetchRespons
 export type HTTPTransportClient = ITransportClient<
   IHTTPClientConnection,
   IHTTPTransportClientConnectOptions
+>;
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/** What an in-memory connect takes besides: who connects, as its server's router is to see it. */
+export interface IMemoryTransportClientConnectOptions extends ITransportClientConnectOptions {
+  /**
+   * The address its server hands with each envelope and names its connection by (spec 15.13): the
+   * caller a gateway connects for, say; `local` when not given. Visible ASCII but `;`, which ends a
+   * handle's part; any other is a {@link ProgrammerError}.
+   */
+  address?: string | undefined;
+  /** The port its server hands beside the address: a whole number from 0 to 65535; none by default. */
+  port?: number | undefined;
+}
+
+export interface IMemoryTransportClientOptions extends ITransportClientOptions {
+  /** What it connects to: an in-memory transport server of the same process. */
+  server: IMemoryTransportServerLike;
+}
+
+// types
+
+/** A client of the in-memory transport: its socket is its server's end of the connection. */
+export type MemoryTransportClient = ITransportClient<
+  IMemoryEndLike,
+  IMemoryTransportClientConnectOptions
 >;
 
 // ── Worker ────────────────────────────────────────────────────────────────────

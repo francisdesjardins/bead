@@ -16,11 +16,11 @@ anything else whether it can read the rest.
 This repository holds the protocol and its implementations, side by side:
 
 - **the specification**, and the conformance files every implementation plays;
-- **a TypeScript implementation**: WebSocket, HTTP and Web Worker transports, each a client and a
-  server, the client and server routers, the service, session and notification managers, and a
-  demo;
+- **a TypeScript implementation**: WebSocket, HTTP, Web Worker and in-memory transports, each a
+  client and a server, a server's transports joined into one, the client and server routers, the
+  service, session and notification managers, and a demo;
 - **a C# implementation** at behavioural parity with it: the same envelope, the same routers, the
-  WebSocket and HTTP transports;
+  WebSocket, HTTP and in-memory transports, and the joined one;
 - **an interop service** each side offers, which the other side's client calls over both
   transports.
 
@@ -78,8 +78,9 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, ahead,
-a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, memory
+between two routers of one process, and, ahead, a topic-based publish/subscribe broker
+([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -127,10 +128,11 @@ own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a counted
   call's cost measured against an uncounted one, and a constrained C side, each bound by the records
   that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
-- **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
-  one port, mounted in an application's own web server, which would take the place of the
-  small local proxy that couples the two transports
-  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)).
+- **An idea, with no version**: HTTP and WebSocket on one port, mounted in an application's own
+  web server, which would take the place of the small local proxy that couples the two transports
+  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)); one server takes its
+  connections from both through a joined transport
+  ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
 
 ## Layout
 
@@ -176,7 +178,7 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 | [`conversations.json`](spec/conversations.json)         | The conversations: envelopes in and out of a server, step by step, over one connection or several, under the limits and pacing each one sets                                                          |
 | [`transports.json`](spec/transports.json)               | 122 cases: what a transport's server does at its edge, over HTTP and over a WebSocket, the bytes each way                                                                                             |
 | [`clocks.json`](spec/clocks.json)                       | 9 clock cases: what every side's test clock does when a case advances it                                                                                                                              |
-| [`durations.json`](spec/durations.json)                 | 25 places that take a duration an application gives a side, by 37 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
+| [`durations.json`](spec/durations.json)                 | 25 places that take a duration an application gives a side, by 38 ways, and what each makes of each of 19 inputs: held, at once, never, its default, or refused and why                               |
 | [`identities.json`](spec/identities.json)               | 31 procedure names, 28 ids and revisions and 6 procedure kinds, each declared the six ways a side declares, and 8 pairs of names: what a router takes, or refuses and why, as a procedure is declared |
 | [`codecs.json`](spec/codecs.json)                       | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
 | [`codecs.proto`](spec/codecs.proto)                     | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
@@ -419,19 +421,23 @@ and each large echo for one call. Longer phases give the runtimes more time to w
 `--json`, the report prints its environment and method, then each measure's median, minimum and
 maximum. Progress goes to stderr; JSON alone goes to stdout.
 
-| Layer         | Measure                                                    | Unit and scope                                                                     |
-| ------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                     |
-| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                          |
-| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP and WebSocket            |
-| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                     |
-| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes |
-| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                |
-| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                |
-| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                             |
+| Layer         | Measure                                                    | Unit and scope                                                                      |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                      |
+| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                           |
+| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP, WebSocket and in memory  |
+| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                      |
+| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes  |
+| Exchanges     | `exchange.p50`, `exchange.p95`, `exchange.p99`             | us per exchange in memory: a client and its connection drawn, one JSON echo, closed |
+| Exchanges     | `exchange.throughput`, `exchange.memory`                   | exchanges/s in batches of 32, and B/exchange over 2,000 sequential exchanges        |
+| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                 |
+| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                 |
+| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                              |
 
 Every call measure runs with client and server in the same process (`local`) and with the other
-language's interop server in a child process (`interop`), on each transport. The report's `side`
+language's interop server in a child process (`interop`), on each transport; in memory, locally
+alone, where each exchange draws a connection as a gateway draws one per HTTP exchange, against
+calls on one connection kept. The report's `side`
 names its client: `typescript` calls C# in `interop`, and `csharp` calls TypeScript. Codecs,
 notifications and large echoes run locally. The notification producer targets a 1 ms cadence,
 uses a credit window of 32 and gives every value its own place, with no replacement key. At each

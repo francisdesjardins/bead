@@ -14,8 +14,11 @@ import type {
   Data,
   EmitterListener,
   IEventIteratorOptions,
+  IEventMethods,
   IGauges,
   IReadyStateMethods,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
   ITransportMessage,
   IWorkerMessageEventLike,
   IWorkerPortLike,
@@ -837,6 +840,94 @@ export type HTTPTransportServer = ITransportServer<IDrawnConnection, IDrawingReq
    */
   isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
 };
+
+// ── Joined ────────────────────────────────────────────────────────────────────
+
+// interfaces
+
+/**
+ * What a join asks of each transport server it joins — met by each of this package's: the type its
+ * handles open with, its connections' flags, sends and closes, its events, its gauges and its stop.
+ */
+export interface IJoinableTransportServer {
+  /** The clock it runs on, which every transport joined shares; none, and it names none. */
+  readonly clock?: IClock | undefined;
+  /** What each handle it draws opens with, `type=…;`, which no other transport joined shares. */
+  readonly type: string;
+  carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean;
+  close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
+  gauges?(): IGauges<TransportServerConnectionHandle>;
+  isSecure?(connectionHandle: TransportServerConnectionHandle): boolean;
+  isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean;
+  off<K extends TRANSPORT_SERVER_EVENTS>(
+    event: K,
+    listener: EmitterListener<TransportServerEventMap[K]>
+  ): unknown;
+  on<K extends TRANSPORT_SERVER_EVENTS>(
+    event: K,
+    listener: EmitterListener<TransportServerEventMap[K]>
+  ): unknown;
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
+  stop(): Promise<void>;
+}
+
+/**
+ * One transport server over several (spec 15.14), which a server is built on as on any: each
+ * connection is the transport's that drew its handle, which its flags, its sends and its closes go
+ * to; each transport's events are its own, told on; its stop and its gauges reach each.
+ */
+export interface IJoinedTransportServer<
+  Transports extends readonly IJoinableTransportServer[] = readonly IJoinableTransportServer[],
+> extends IEventMethods<TransportServerEventMap, IJoinedTransportServer<Transports>> {
+  /** The clock every transport joined runs on; none when none names one. */
+  readonly clock: IClock | undefined;
+  /** The transports it joins, in the order it was given them: what an application starts. */
+  readonly transports: Transports;
+
+  /** As the transport that drew the handle says; `false` for a handle none of them drew. */
+  carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** Closes one connection through its transport; `false` for a handle none of them drew. */
+  close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>;
+  /**
+   * What every transport holds, summed: each count and each ceiling of one name added, their
+   * connections and their anomalies together; a transport that counts nothing, its connections as
+   * its events told them.
+   */
+  gauges(): IGauges<TransportServerConnectionHandle>;
+  /** As the transport that drew the handle says; `false` for a handle none of them drew. */
+  isSecure(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** As the transport that drew the handle says, two-way without it; `false` for one none drew. */
+  isTwoWay(connectionHandle: TransportServerConnectionHandle): boolean;
+  /** Hands a message to one connection through its transport; dropped for a handle none drew. */
+  send(
+    message: ITransportMessage,
+    connectionHandle: TransportServerConnectionHandle
+  ): Promise<void>;
+  /**
+   * Stops every transport it joins, and settles once each has: rejected with the first that
+   * rejected, in their order, once the others settled.
+   */
+  stop(): Promise<void>;
+  /** What `await using` calls: {@link IJoinedTransportServer.stop}. */
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+// ── Memory ────────────────────────────────────────────────────────────────────
+
+// types
+
+/** An in-memory transport server's options: the clock it runs on, and nothing else to bound. */
+export type IMemoryTransportServerOptions = ITransportServerOptions;
+
+/**
+ * A server of the in-memory transport: each connection's socket is its client's end, the address
+ * and port it gave; what a client connects to by {@link IMemoryTransportServerLike.accept}.
+ */
+export type MemoryTransportServer = ITransportServer<IMemoryPeerLike, undefined> &
+  IMemoryTransportServerLike;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

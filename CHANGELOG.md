@@ -28,6 +28,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   writes by `tools/check-validations.mjs`; and the differential against protovalidate-es, in CI.
 - beadc runs buf's `PROTOVALIDATE` lint rule, and refuses a rule it does not compile;
   `beadc breaking`'s `PROCEDURE_RULES_TIGHTENED`.
+- The in-memory transport, on both sides: two routers of one process, each envelope whole, once and
+  in order in a later turn, a credential and the caller's address beside each request, transfers
+  taken (spec 15.13, decision 0036). Each side's conversations play through a pair of it, and the C#
+  side's service tests link a server and a client through it.
+- A joined server transport, on both sides: one server takes its connections from several
+  transports, each handle its own transport's (spec 15.14, decision 0036).
+- Each side's bench measures calls in memory, and `exchange.*`: a connection drawn, called once and
+  closed, as a gateway draws one per HTTP exchange.
 
 ### Changed
 
@@ -51,6 +59,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   connection ends, before its close, and a listener's throw; never a peer gone without its closing
   handshake, one its heartbeat drops, its own abort past its close timeout, nor over HTTP a server
   gone, a refusal of its own, an exchange lost or its inactivity timeout.
+- Spec 13.4 and 14.3 count an in-memory transport among what never leaves the machine, and 15.1
+  what it carries beside an envelope.
+- `spec/durations.json`'s `transportClient.connectTimeout` gains the way `memory`, the in-memory
+  client's connect.
+- The C# side's `IServerTransport` names the type its handles begin with, `Type`, which a join
+  reads, and a connect refused before anything goes is a `ConnectException`, as the TypeScript
+  side's `ConnectError`.
 - Spec 15.12 states that a client bounds what it reads, an answer or an envelope a batch brings, by
   `maximumBodyBytes`, as both HTTP clients do.
 - Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
@@ -69,7 +84,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransport.inactivityTimeout`, by two ways, `client` and `server`, where
   `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
   outcomes apart: two owners share a place where the spec names one option for both and every
-  column of the file agrees (decision 0014). The file holds 25 places, by 37 ways.
+  column of the file agrees (decision 0014). The file holds 25 places, by 38 ways.
 
 ### Fixed
 

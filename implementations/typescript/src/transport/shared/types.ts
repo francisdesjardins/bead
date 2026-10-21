@@ -94,13 +94,14 @@ export interface IGauges<Handle extends string = string> {
 /**
  * What a transport carries, both ways: an envelope, and the credential it carried beside it (spec
  * 15.1). Over HTTP, it is the `Authorization` field of the `POST /bead` that carries a request, as it
- * came, its surrounding whitespace removed; a WebSocket and a Web Worker carry none, and what a listen
- * brings back carries none either.
+ * came, its surrounding whitespace removed; in memory, what its client handed with a request; a
+ * WebSocket and a Web Worker carry none, and what a listen brings back carries none either.
  */
 export interface ITransportMessage {
   /**
    * The client's address of what brought it, as a server's transport reads it: over HTTP its
-   * exchange's, over a WebSocket its connection's; none over a Web Worker, nor toward a client.
+   * exchange's, over a WebSocket its connection's, in memory the one its client gave as it connected;
+   * none over a Web Worker, nor toward a client.
    */
   readonly address?: string | undefined;
   /** None when nothing was carried: an empty field carries none. */
@@ -113,6 +114,35 @@ export interface ITransportMessage {
   readonly mayOvertake?: boolean | undefined;
   /** The port of what brought it, beside its `address`. */
   readonly port?: number | undefined;
+}
+
+/**
+ * One end of an in-memory connection, as the other end reaches it (spec 15.13). The other end calls
+ * it in a later turn than what it tells, never within it, in the order it happened.
+ */
+export interface IMemoryEndLike {
+  /**
+   * The other end closed the connection: `wasClean` when by its own word, as a WebSocket's 1000;
+   * not when it dropped it.
+   */
+  close(wasClean: boolean): void;
+  /** An envelope the other end sent, in bytes of its own, and what came beside it. */
+  receive(message: ITransportMessage): void;
+}
+
+/** A client's end, as its connect hands it to its server: the address and port it gave, or none. */
+export interface IMemoryPeerLike extends IMemoryEndLike {
+  readonly address: string;
+  readonly port: number | undefined;
+}
+
+/**
+ * What an in-memory client connects to: its server, which meets it, or anything that accepts a
+ * connection as it does. `accept` resolves, in a later turn, with the server's end of a connection
+ * it drew, or rejects with a {@link ConnectError} when it takes none.
+ */
+export interface IMemoryTransportServerLike {
+  accept(peer: IMemoryPeerLike): Promise<IMemoryEndLike>;
 }
 
 /** A message as a port or a worker's scope delivers it: its data, and the ports it carried. */

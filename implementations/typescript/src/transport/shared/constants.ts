@@ -9,6 +9,7 @@ export const RECONNECT_EVENT = 'reconnect';
 export const REFUSAL_EVENT = 'refusal';
 
 export const TRANSPORT_HTTP = 'HTTP';
+export const TRANSPORT_MEMORY = 'MEMORY';
 export const TRANSPORT_WORKER = 'WORKER';
 export const TRANSPORT_WS = 'WS';
 
@@ -100,6 +101,7 @@ export type RECONNECT_EVENT = typeof RECONNECT_EVENT;
 export type REFUSAL_EVENT = typeof REFUSAL_EVENT;
 
 export type TRANSPORT_HTTP = typeof TRANSPORT_HTTP;
+export type TRANSPORT_MEMORY = typeof TRANSPORT_MEMORY;
 export type TRANSPORT_WORKER = typeof TRANSPORT_WORKER;
 export type TRANSPORT_WS = typeof TRANSPORT_WS;
-export type TRANSPORTS = TRANSPORT_HTTP | TRANSPORT_WORKER | TRANSPORT_WS;
+export type TRANSPORTS = TRANSPORT_HTTP | TRANSPORT_MEMORY | TRANSPORT_WORKER | TRANSPORT_WS;
