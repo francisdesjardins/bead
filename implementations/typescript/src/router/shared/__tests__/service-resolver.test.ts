@@ -436,13 +436,15 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.1.10, 4.2.3 and 4.2.4
     test('tells the request it received and the answer it sent with that request’s call id and connection', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
+      const clock = createTestClock(1_000);
+      const manager = createServiceManager(createFakeRouter('server', clock).router);
       const seen = recordDebug(manager);
 
       const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
         request,
         response
       ) => {
+        clock.tick(30);
         return response({ text: `${request.payload.text}!` });
       });
 
@@ -463,7 +465,24 @@ test.describe('createServiceManager', () => {
         ['rx', { text: 'hi' }, undefined, true, header.callId, connectionHandle],
         ['tx', { text: 'hi' }, { text: 'hi!' }, false, header.callId, connectionHandle],
       ]);
-      expect(seen[1]?.info.duration).toBeLessThan(1_000);
+      expect(seen[1]?.info.duration).toBe(30);
+      const received = {
+        callId: 7,
+        connectionHandle,
+        direction: 'rx',
+        procedureId: 1,
+        procedureName: 'echo',
+        rx: { text: 'hi' },
+        serviceId: 2,
+        serviceRevision: 3,
+        startedAt: 1_000,
+        type: 'request',
+      };
+      expect(
+        seen.map(({ info }) => {
+          return info;
+        })
+      ).toEqual([received, { ...received, direction: 'tx', duration: 30, tx: { text: 'hi!' } }]);
     });
 
     test('a received call starts as it arrives: its admission and its decoding count in its duration', async () => {
@@ -500,75 +519,88 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.2, 4.2.4 and 4.3
     test('tells a callback that fails before it answers as an answer that did not go, with why beside it; nothing more for one that fails once it answered, nor for an admission that fails', async () => {
-      const start = Date.UTC(2026, 0, 1);
-      const clock = createTestClock(start);
-      const manager = createServiceManager(createFakeRouter('server', clock).router);
-      const seen = recordDebug(manager);
-      const thrown = new Error('thrown');
-      const rejected = new Error('rejected');
-      const after = new Error('after');
+      for (const [instant, rejectDelay, answerDelay, afterDelay] of [
+        [Date.UTC(2026, 0, 1), 10, 0, 0],
+        [1_000, 20, 5, 5],
+      ] as const) {
+        const start = instant;
+        const clock = createTestClock(start);
+        const manager = createServiceManager(createFakeRouter('server', clock).router);
+        const seen = recordDebug(manager);
+        const thrown = new Error('thrown');
+        const rejected = new Error('rejected');
+        const after = new Error('after');
 
-      // each takes 10 ms before it fails
-      const throwing = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
-        clock.tick(10);
+        // the first throws after 10 ms; the next uses its own delay
+        const throwing = manager.getRequestResolver(echo, { serializer: serverSerializer })(() => {
+          clock.tick(10);
 
-        throw thrown;
-      });
-      const rejecting = manager.getRequestResolver(
-        { ...echo, procedureId: 2 },
-        { serializer: serverSerializer }
-      )(() => {
-        clock.tick(10);
+          throw thrown;
+        });
+        const rejecting = manager.getRequestResolver(
+          { ...echo, procedureId: 2 },
+          { serializer: serverSerializer }
+        )(() => {
+          clock.tick(rejectDelay);
 
-        return Promise.reject(rejected);
-      });
-      const refusing = manager.getRequestResolver(
-        { ...echo, procedureId: 3 },
-        {
-          beforeRequest: () => {
-            throw thrown;
-          },
-          serializer: serverSerializer,
-        }
-      )(() => {
-        return Promise.resolve();
-      });
-      const failingOnceAnswered = manager.getRequestResolver(
-        { ...echo, procedureId: 4 },
-        { serializer: serverSerializer }
-      )(async (request, response) => {
-        await response(request.payload);
+          return Promise.reject(rejected);
+        });
+        const refusing = manager.getRequestResolver(
+          { ...echo, procedureId: 3 },
+          {
+            beforeRequest: () => {
+              throw thrown;
+            },
+            serializer: serverSerializer,
+          }
+        )(() => {
+          return Promise.resolve();
+        });
+        const failingOnceAnswered = manager.getRequestResolver(
+          { ...echo, procedureId: 4 },
+          { serializer: serverSerializer }
+        )(async (request, response) => {
+          clock.tick(answerDelay);
+          await response(request.payload);
+          clock.tick(afterDelay);
 
-        throw after;
-      });
+          throw after;
+        });
 
-      const request = propsOf(encode({ text: 'hi' }));
+        const request = propsOf(encode({ text: 'hi' }));
 
-      await expect(throwing(request)).rejects.toBe(thrown);
-      await expect(rejecting(request)).rejects.toBe(rejected);
-      await expect(refusing(request)).rejects.toBe(thrown);
-      await expect(failingOnceAnswered(request)).rejects.toBe(after);
+        await expect(throwing(request)).rejects.toBe(thrown);
+        await expect(rejecting(request)).rejects.toBe(rejected);
+        await expect(refusing(request)).rejects.toBe(thrown);
+        await expect(failingOnceAnswered(request)).rejects.toBe(after);
 
-      expect(
-        seen.map(({ error, info }) => {
-          return [
-            info.procedureId,
-            info.direction,
-            info.tx,
-            error,
-            info.startedAt,
-            info.duration,
-            info.callId,
-          ];
-        })
-      ).toEqual([
-        [1, 'rx', undefined, null, start, undefined, header.callId],
-        [1, 'tx', undefined, thrown, start, 10, header.callId],
-        [2, 'rx', undefined, null, start + 10, undefined, header.callId],
-        [2, 'tx', undefined, rejected, start + 10, 10, header.callId],
-        [4, 'rx', undefined, null, start + 20, undefined, header.callId],
-        [4, 'tx', { text: 'hi' }, null, start + 20, 0, header.callId],
-      ]);
+        expect(
+          seen.map(({ error, info }) => {
+            return [
+              info.procedureId,
+              info.direction,
+              info.tx,
+              error,
+              info.startedAt,
+              info.duration,
+              info.callId,
+              info.connectionHandle,
+              info.rx,
+            ];
+          })
+        ).toEqual(
+          [
+            [1, 'rx', undefined, null, start, undefined, header.callId],
+            [1, 'tx', undefined, thrown, start, 10, header.callId],
+            [2, 'rx', undefined, null, start + 10, undefined, header.callId],
+            [2, 'tx', undefined, rejected, start + 10, rejectDelay, header.callId],
+            [4, 'rx', undefined, null, start + 10 + rejectDelay, undefined, header.callId],
+            [4, 'tx', { text: 'hi' }, null, start + 10 + rejectDelay, answerDelay, header.callId],
+          ].map((row) => {
+            return [...row, connectionHandle, { text: 'hi' }];
+          })
+        );
+      }
     });
 
     // debugging 4.2 and 4.2.4
@@ -643,9 +675,9 @@ test.describe('createServiceManager', () => {
       );
       expect(
         seen.map(({ error, info }) => {
-          return [info.direction, error];
+          return [info.direction, info.type, error];
         })
-      ).toEqual([['rx', null]]);
+      ).toEqual([['rx', 'request', null]]);
     });
   });
 

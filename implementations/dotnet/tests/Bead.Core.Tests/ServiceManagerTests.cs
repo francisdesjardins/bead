@@ -839,29 +839,25 @@ public sealed partial class ServiceManagerTests
 
         router.SubscribeGate = gate.Task;
 
-        var settled = new List<string>();
-
-        async Task Register(string value)
-        {
-            await notification.Register(new Text(value), Unheard)();
-            settled.Add(value);
-        }
-
-        var first = Register("a");
+        var first = notification.Register(new Text("a"), Unheard)();
 
         // the router holds it now, and is still subscribing
         Assert.True(router.Holds(Echo.Address));
 
-        var second = Register("b");
+        var second = notification.Register(new Text("b"), Unheard)();
+        var ordered = second.ContinueWith((completed) =>
+        {
+            Assert.True(completed.IsCompletedSuccessfully);
+            Assert.True(first.IsCompletedSuccessfully, "the first registration settles before the second");
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
         Assert.False(first.IsCompleted);
         Assert.False(second.IsCompleted);
 
         gate.SetResult();
-        await Task.WhenAll(first, second).WaitAsync(Patience, Cancelled);
+        await Task.WhenAll(first, second, ordered).WaitAsync(Patience, Cancelled);
 
         Assert.Single(router.Requests);
-        Assert.Equal(["a", "b"], settled);
     }
 
     [Fact]
@@ -1029,6 +1025,7 @@ public sealed partial class ServiceManagerTests
         Assert.Empty(heard);
         Assert.Equal([(DebugDirection.Rx, DebugType.Notification)], StepsOf(seen));
         Assert.Same(failure, Assert.Single(seen).Error);
+        Assert.IsType<JsonException>(failure.InnerException);
     }
 
     [Fact]
