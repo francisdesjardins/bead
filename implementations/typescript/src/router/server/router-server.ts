@@ -537,7 +537,7 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   const onClose = (_: boolean, connectionHandle: TransportServerConnectionHandle): void => {
     dropWith(connectionHandle);
     connections.delete(connectionHandle);
-    // its destinations stay unreachable, whoever takes its handle next
+    // its destinations stay unreachable until each is registered anew, on another connection
     relay.closeConnection(connectionHandle);
     places.clear(connectionHandle);
     notifications.clean(connectionHandle);
@@ -628,6 +628,10 @@ export const createRouterServer = <Transport extends IRouterServerTransportLike>
   const relay = createRelay({
     carriageOf,
     failures: SERVER_FAILURES,
+    // a connection the router follows: one it heard close, or never heard of, is not
+    isOpen: (connectionHandle) => {
+      return connections.has(connectionHandle);
+    },
     isTwoWay: (connectionHandle) => {
       return transport.isTwoWay?.(connectionHandle) ?? true;
     },

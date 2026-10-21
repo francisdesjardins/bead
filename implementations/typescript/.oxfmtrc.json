@@ -22,13 +22,15 @@
   // `_pb.ts` is protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to
   // its generator instead. `_bead.ts` is beadc's, laid out by its generator and never by a
   // formatter: `beadc generate --check` holds it (decision 0022), and so is its route table,
-  // `bead_http.ts`, in an output with `http: true` (decision 0037).
+  // `bead_http.ts`, in an output with `http: true` (decision 0037). A `.blueprint.json`, the demo's
+  // in `demo/gen/`, is beadc's too, in its one form, which `generate --check` holds alike.
   "ignorePatterns": [
     ".yarn/**",
     "**/*.min.js",
     "**/*.min.css",
     "**/*_pb.ts",
     "**/*_bead.ts",
-    "**/bead_http.ts"
+    "**/bead_http.ts",
+    "**/*.blueprint.json"
   ]
 }

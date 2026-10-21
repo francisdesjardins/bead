@@ -436,7 +436,10 @@ export interface IRouterServer<
   readonly notifications: INotificationManager;
   readonly transport: Transport;
 
-  /** The destinations registered, each as its registration names it. */
+  /**
+   * The destinations registered, each as its registration names it, and whether its connection
+   * closed, as it is now.
+   */
   destinations(): IDestination[];
   /**
    * Ends each subscription `connectionHandle` holds, established by its answer, with `failure` on
@@ -500,9 +503,15 @@ export interface IRouterServer<
    * Relays each request that names the destination to `target` — a client router this relay calls
    * through, or a connection of its own — and gives its registration: the relay terminates each
    * leg, passing on the payload's bytes and the answer, a failure of the target's counted one relay
-   * more. Why leg B failed is reported to `error`, with leg A's connection, and never passed on. A
-   * destination given that is taken, or not an integer from 1 to 2³² − 1, or a timeout no timer
-   * holds, is a {@link ProgrammerError}.
+   * more. Why leg B failed is reported to `error`, with leg A's connection, and never passed on.
+   * Who may register which destination is the application's to decide: the relay checks nobody
+   * (spec 14.1). A destination taken stays taken, its connection closed or not, until its
+   * registration takes it out or one that `replaces` it takes its place. A connection this router
+   * no longer holds is registered closed: unreachable at once, and never forwarded to (spec 14.4).
+   * A destination given that is taken, unless `replaces` names the registration that holds it, a
+   * `replaces` that does not hold its destination, or another than the destination given, a
+   * destination not an integer from 1 to 2³² − 1, or a timeout no timer holds, is a
+   * {@link ProgrammerError}.
    */
   registerDestination(target: RelayTarget, options?: IDestinationOptions): IDestinationRegistration;
   /**
@@ -621,15 +630,20 @@ export interface IRouterServerOptions {
  * A connection of the relay's own router that a destination names: something behind the relay that
  * connected to it, which the relay asks as the server asks a client, by a command. Once that
  * connection closes, the destination is unreachable, and no connection takes its handle again: the
- * application unregisters it, and registers the next connection anew once it knows it.
+ * application registers the next connection anew once it knows it, in its place, by `replaces`.
  */
 export interface IConnectionTarget {
   connectionHandle: TransportServerConnectionHandle;
 }
 
-/** A destination, as its registration names it. */
+/** A destination, as its registration names it, and whether its connection closed. */
 export interface IDestination {
   readonly destinationId: DestinationId;
+  /**
+   * Whether the connection of the relay's own it names closed, or had as it was registered: it is
+   * unreachable until it is registered anew. Never, for a router the relay calls through.
+   */
+  readonly isClosed: boolean;
   /** What the application calls it, for a list of its own. */
   readonly label: string | undefined;
 }
@@ -646,6 +660,14 @@ export interface IDestinationOptions {
   /** What the application calls it, for a list of its own. */
   label?: string | undefined;
   /**
+   * The registration this one replaces, the one its destination holds now: the new one takes its
+   * place at once, so a request in between finds the destination, never `DESTINATION_UNKNOWN`, and
+   * the one replaced takes nothing out after. Its destination is this one's. Whether to replace a
+   * destination, its connection closed or not, is the application's to decide; one that is not the
+   * registration of its destination now is a {@link ProgrammerError}.
+   */
+  replaces?: IDestinationRegistration | undefined;
+  /**
    * The milliseconds leg B waits for its answer, the relay's at most; the relay's if not given. From
    * 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` for none; any other, 0 among
    * them, is a {@link ProgrammerError}.
@@ -653,7 +675,10 @@ export interface IDestinationOptions {
   timeout?: number | undefined;
 }
 
-/** A destination registered: what names it, and what takes it out. */
+/**
+ * A destination registered: what names it, whether its connection closed — as it is now, read at
+ * each access — and what takes it out.
+ */
 export interface IDestinationRegistration extends IDestination {
   /**
    * Takes the destination out, unless another took its id since; whether it did. A call relayed

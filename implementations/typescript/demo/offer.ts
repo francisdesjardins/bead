@@ -9,6 +9,7 @@ import type { IMetricsRegistry } from '../src/router/shared/metrics-registry';
 import type { IAdmissionRequest, IBeforeRequest } from '../src/router/shared/types';
 import type { IServer, IServerTransportLike } from '../src/server/types';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
+import { SignUpServer } from './gen/typescript/demo/v1/sign_up_bead';
 import { answererOf, askerOf, BURST_CHANGES, CALLS, NOTIFICATIONS, type Role } from './procedures';
 import { drawGlyph } from './glyph';
 import { issueToken } from './token';
@@ -64,9 +65,9 @@ const increment = (): Promise<void>[] => {
 };
 
 /**
- * The demo's procedures, on one server: each transport's server has its own router, which verifies
- * the token each call presents with the credentials it was given, so the procedures are offered on
- * each. `metricsRegistry` is the registry the server counts into, which `metrics` reads.
+ * The demo's procedures, and its sign-up service, on one server: each transport's server has its
+ * own router, which verifies the token each call presents with the credentials it was given, so the
+ * procedures are offered on each. `metricsRegistry` is the registry the server counts into, which `metrics` reads.
  */
 export const offer = <Transport extends IServerTransportLike>(
   server: IServer<Transport>,
@@ -244,6 +245,21 @@ export const offer = <Transport extends IServerTransportLike>(
 
     return response(time);
   });
+
+  // * the sign-up, a service beadc generated from proto/demo/v1/sign_up.proto: its request is held
+  // to the rules of its .proto before its resolver, and one they refuse is answered PAYLOAD_INVALID,
+  // its violations in its detail, without reaching it (spec 18)
+  const signUp = new SignUpServer();
+
+  signUp.on('signUp', (request, response) => {
+    const { email, name, phone, seats } = request.payload;
+    const held = `${String(seats)} seat${seats === 1 ? '' : 's'}`;
+
+    return response({
+      welcome: `welcome, ${name}: ${held} held, confirmed by ${email === '' ? `text to ${phone}` : `email to ${email}`}`,
+    });
+  });
+  signUp.offer(server);
 };
 
 /**

@@ -1,13 +1,14 @@
 // ── A call's detail ───────────────────────────────────────────────────────────
 
 // The tabs beside the list, for the call selected: Overview, what it was and how it ended in a
-// sentence; Payload, its request and its answer, as a tree where they read as one; Exchange, its
-// thread; Diff, what changed against the value before it; Trace, the stack that made it, each frame
-// opened in Sources.
+// sentence, a PAYLOAD_INVALID's violations as a table; Payload, its request and its answer, as a
+// tree where they read as one; Exchange, its thread; Diff, what changed against the value before
+// it; Trace, the stack that made it, each frame opened in Sources.
 
 // dependencies
 
 import { FailureScope } from '../../src/router/client/router-client';
+import type { IReadViolations } from '../../src/router/shared/violations';
 import type { ICall } from '../model/calls';
 import { diffPayloads } from '../model/diff';
 import {
@@ -25,7 +26,18 @@ import {
   transferOf,
 } from '../model/facts';
 import { isBranch, isWhole, treeOfText } from '../model/tree';
-import { bytesOf, clockOf, numberOf, originWordsOf, schemeNameOf, spanOf } from '../model/words';
+import {
+  boundsWordsOf,
+  bytesOf,
+  clockOf,
+  closingWordsOf,
+  numberOf,
+  originWordsOf,
+  schemeNameOf,
+  spanOf,
+  violationFieldOf,
+  violationsReadOf,
+} from '../model/words';
 import type { PreviewNode } from '../preview';
 import type { IStackFrame } from '../stack';
 import { durationWordsOf, typeWordsOf } from './calls';
@@ -215,6 +227,67 @@ const payloadBlockOf = (
   ];
 };
 
+/**
+ * A PAYLOAD_INVALID's violations, a row each in their order — its field, its rule, its words, its
+ * bounds — then what its closing line says, or that it was cut.
+ */
+const violationsViewOf = (read: IReadViolations): Node[] => {
+  const closing = closingWordsOf(read);
+  const count = read.violations.length;
+  const columns = [
+    ['Field', 'field'],
+    ['Rule', 'rule'],
+    ['Words', 'words'],
+    ['Bounds', 'bounds'],
+  ] as const;
+
+  return [
+    ...(count === 0
+      ? []
+      : [
+          make('table', {
+            children: [
+              make('caption', {
+                text: `${numberOf(count)} ${count === 1 ? 'violation' : 'violations'}, in their order`,
+              }),
+              make('colgroup', {
+                children: columns.map(([, className]) => {
+                  return make('col', { className });
+                }),
+              }),
+              make('thead', {
+                children: [
+                  make('tr', {
+                    children: columns.map(([head]) => {
+                      return make('th', { attributes: { scope: 'col' }, text: head });
+                    }),
+                  }),
+                ],
+              }),
+              make('tbody', {
+                children: read.violations.map((violation) => {
+                  const cells = {
+                    bounds: boundsWordsOf(violation),
+                    field: violationFieldOf(violation),
+                    rule: violation.ruleId,
+                    words: violation.message ?? '',
+                  };
+
+                  return make('tr', {
+                    children: columns.map(([, className]) => {
+                      return make('td', { className, text: cells[className] });
+                    }),
+                  });
+                }),
+              }),
+            ],
+            className: 'plain violations',
+          }),
+        ]),
+    ...(closing === undefined ? [] : [noteOf(closing)]),
+  ];
+};
+
 const overviewOf = (call: ICall, context: IDetailContext): Node[] => {
   const status = statusOf(call);
   const error = errorOf(call);
@@ -286,7 +359,7 @@ const overviewOf = (call: ICall, context: IDetailContext): Node[] => {
   ]);
   const box = (
     className: string,
-    { more = [], text }: { more?: string[]; text: string }
+    { after = [], more = [], text }: { after?: Node[]; more?: string[]; text: string }
   ): HTMLElement => {
     return make('div', {
       children: [
@@ -294,20 +367,24 @@ const overviewOf = (call: ICall, context: IDetailContext): Node[] => {
         ...more.flatMap((line) => {
           return [make('br'), line];
         }),
+        ...after,
       ],
       className: `outcome-box ${className}`,
     });
   };
+  // * a PAYLOAD_INVALID's detail read as its violations, by the package's own reader; text otherwise
+  const violations = error === undefined ? undefined : violationsReadOf(error);
   let outcome: HTMLElement;
 
   if (status === 'failed') {
     outcome = box('failed', {
+      after: violations === undefined ? [] : violationsViewOf(violations),
       more:
         error?.code === undefined
           ? [error?.message ?? '']
           : [
               `${error.scope === FailureScope.APPLICATION ? 'The procedure’s own code' : 'A protocol code'}${originWordsOf(error) === undefined ? '' : `, ${originWordsOf(error) ?? ''}`}${error.destinationId === undefined ? '' : `, for destination ${String(error.destinationId)}`}.`,
-              ...(error.detail === undefined ? [] : [error.detail]),
+              ...(error.detail === undefined || violations !== undefined ? [] : [error.detail]),
             ],
       text: `Failed: ${outcomeOf(call)}.`,
     });

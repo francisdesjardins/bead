@@ -1001,7 +1001,12 @@ _Transports: `spec/transports.json`._
 `DESTINATION` names one goes on to what stands behind it: a router it calls through, or a connection
 of its own, asked by a request of the server's. Each destination answers the same procedures; the
 requester picks one by its destination. A side with no destination registered relays nothing: it
-answers a request that names any with `DESTINATION_UNKNOWN` (section 9.2).
+answers a request that names any with `DESTINATION_UNKNOWN` (section 9.2). A destination stays
+registered until its application takes it out, its connection closed or not, and registering one
+that is registered is refused, unless the registration names the one it replaces, whose place it
+takes at once, so that no request finds the destination unknown meanwhile. The application decides
+who may register which destination, as its `beforeRoute` decides who may reach one (section 14.7):
+the relay checks nobody.
 
 14.2. The relay terminates each leg: leg A, from the requester, and leg B, to the destination, each
 with its own call ids, limits and session. What crosses is the payload's bytes, undecoded, and the
@@ -1084,7 +1089,9 @@ resolving as section 9.2 says:
 
 14.4. A destination on a connection of the relay's own dies with that connection: once it closed,
 the destination is unreachable until it is registered anew, on another connection: no connection
-takes a handle its transport gave before (section 15.1). Leg B waits for its answer as long as its
+takes a handle its transport gave before (section 15.1). One registered on a connection its side no
+longer holds is unreachable from its registration, and nothing is forwarded to it. Each destination
+its side lists says whether its connection closed. Leg B waits for its answer as long as its
 destination says, and the relay's own timeout at most; by default, without end: the requester's own
 timeout governs, end to end, by its cancel. A cancel on leg A, or leg A's connection gone, cancels
 leg B, and leg A is answered nothing.
@@ -1151,7 +1158,9 @@ fails no exchange and closes nothing. What a side's transport reports on its `er
 a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
 with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
 connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
-15.12); a batch that does not read, saying what of it does not (section 15.9) — and what a listener
+15.12); a batch that does not read, saying what of it does not (section 15.9); a Web Worker
+client's worker that errs, an exception its script did not catch, which ends no worker, named by its
+message and where its script threw it, its server told the close unclean — and what a listener
 throws, as it throws: a connection's own once, as it ends, its close or its drop begun, so that no
 listener's throw keeps it open, and before its close, which is then unclean. It reports no peer that
 drops without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops,

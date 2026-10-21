@@ -1,12 +1,20 @@
 import { expect, test } from '@playwright/test';
 import { createWorkerTransportServer } from '../../server/worker-transport-server';
-import { ConnectError, ProgrammerError, ReadyStateError, TimeoutError } from '../../shared/errors';
+import { createTestClock, delaysOn } from '../../shared/__tests__/fixtures';
+import {
+  ConnectError,
+  GenericError,
+  ProgrammerError,
+  ReadyStateError,
+  TimeoutError,
+} from '../../shared/errors';
 import type { ITransportMessage } from '../../shared/types';
 import { dispose } from '../transport-client';
 import type { ITransportClientInternal } from '../types';
 import {
   CONNECT_DEFAULTS,
   createWorkerTransportClient,
+  type IWorkerErrorEventLike,
   type IWorkerLike,
   WORKER_MESSAGES,
   type WorkerTransportClient,
@@ -21,7 +29,7 @@ import {
 const startWorker = async () => {
   const scope = new MessageChannel();
   const server = createWorkerTransportServer({ scope: scope.port1 });
-  const errorListeners = new Set<() => void>();
+  const errorListeners = new Set<(event: IWorkerErrorEventLike) => void>();
   const serverEvents: unknown[][] = [];
   const worker: IWorkerLike = {
     addEventListener: (_, listener) => {
@@ -60,6 +68,30 @@ const startWorker = async () => {
       scope.port2.close();
     },
   };
+};
+
+/** What the client tells of its end, in order: each error by its class and words, each close. */
+const recordEnds = (client: WorkerTransportClient) => {
+  const told: unknown[][] = [];
+
+  client.on('error', (error) => {
+    told.push(['error', error instanceof GenericError, error.message]);
+  });
+  client.on('close', (...params) => {
+    told.push(['close', ...params]);
+  });
+
+  return told;
+};
+
+/** The worker's `error`, as HTML fires it on a `Worker`, heard by each listener the client keeps. */
+const fireError = (
+  errorListeners: ReadonlySet<(event: IWorkerErrorEventLike) => void>,
+  event: IWorkerErrorEventLike
+) => {
+  for (const listener of errorListeners) {
+    listener(event);
+  }
 };
 
 const nextEvent = (client: WorkerTransportClient, event: 'close' | 'message') => {
@@ -131,25 +163,173 @@ test.describe('createWorkerTransportClient', () => {
 
     await server.close('type=WORKER;ip=local;ordinal=1');
 
-    expect(await closedByServer).toEqual([true, false]);
+    expect(await closedByServer).toEqual([false, false]);
     expect(errorListeners.size).toBe(0);
 
     // again, then lost with its worker
     await client.reconnect();
 
-    const lost = nextEvent(client, 'close');
+    const told = recordEnds(client);
 
-    for (const listener of errorListeners) {
-      listener();
-    }
+    fireError(errorListeners, {
+      colno: 7,
+      filename: 'worker.js',
+      lineno: 3,
+      message: 'Uncaught TypeError: answer is not a function',
+    });
 
-    expect(await lost).toEqual([false, false]);
+    expect(told).toEqual([
+      [
+        'error',
+        true,
+        'its worker erred: Uncaught TypeError: answer is not a function (at worker.js:3:7)',
+      ],
+      ['close', false, false],
+    ]);
     expect([client.isClosed(), errorListeners.size]).toEqual([true, 0]);
     await expect
       .poll(() => {
-        return server.clients;
+        return [server.clients, started.serverEvents];
       })
-      .toEqual([]);
+      .toEqual([
+        [],
+        [
+          ['close', true, 'type=WORKER;ip=local;ordinal=1'],
+          ['close', false, 'type=WORKER;ip=local;ordinal=2'],
+        ],
+      ]);
+  });
+
+  test('tells its worker’s error once, as the connection ends and before its close, in the words the error gives, or saying it gives none', async () => {
+    await using started = await startWorker();
+    const { errorListeners, worker } = started;
+    const client = createWorkerTransportClient({ worker });
+    const told = recordEnds(client);
+    const events: IWorkerErrorEventLike[] = [
+      { filename: 'worker.js', message: 'Uncaught RangeError: too deep' },
+      { colno: 0, filename: 'worker.js', lineno: 12, message: 'Uncaught RangeError: too deep' },
+      { colno: 5, lineno: 12, message: 'Uncaught RangeError: too deep' },
+      { colno: 2, filename: 'worker.js', lineno: 1 },
+      { colno: 0, filename: '', lineno: 0, message: '' },
+      {},
+    ];
+
+    for (const event of events) {
+      await client.connect({});
+
+      // heard twice, told once: the first ends the connection
+      fireError(errorListeners, event);
+      fireError(errorListeners, event);
+    }
+
+    const erred = 'its worker erred';
+
+    expect(told).toEqual([
+      ['error', true, `${erred}: Uncaught RangeError: too deep (at worker.js)`],
+      ['close', false, false],
+      ['error', true, `${erred}: Uncaught RangeError: too deep (at worker.js:12)`],
+      ['close', false, false],
+      ['error', true, `${erred}: Uncaught RangeError: too deep`],
+      ['close', false, false],
+      ['error', true, `${erred}, saying nothing (at worker.js:1:2)`],
+      ['close', false, false],
+      ['error', true, `${erred}, saying nothing`],
+      ['close', false, false],
+      ['error', true, `${erred}, saying nothing`],
+      ['close', false, false],
+    ]);
+  });
+
+  test('tells its server its close as clean as its disconnect says', async () => {
+    await using started = await startWorker();
+    const { serverEvents, worker } = started;
+    const client = createWorkerTransportClient({ worker });
+    const told = recordEnds(client);
+
+    await client.connect({});
+    await client.disconnect();
+    await client.connect({});
+    await client.disconnect({ isClean: false });
+
+    expect(told).toEqual([
+      ['close', true, false],
+      ['close', false, false],
+    ]);
+    await expect
+      .poll(() => {
+        return serverEvents;
+      })
+      .toEqual([
+        ['close', true, 'type=WORKER;ip=local;ordinal=1'],
+        ['close', false, 'type=WORKER;ip=local;ordinal=2'],
+      ]);
+  });
+
+  test('fails its connect at once as its worker errs before the connection opens, telling a server that takes the port later', async () => {
+    // a clock that never moves: no timeout fails the connect
+    const clock = createTestClock(Date.UTC(2026, 0, 1));
+    const held: MessagePort[] = [];
+    const errorListeners = new Set<(event: IWorkerErrorEventLike) => void>();
+    const failing: IWorkerLike = {
+      addEventListener: (_, listener) => {
+        errorListeners.add(listener);
+      },
+      postMessage: (_, transfer) => {
+        held.push(transfer[0] as MessagePort);
+      },
+      removeEventListener: (_, listener) => {
+        errorListeners.delete(listener);
+      },
+    };
+    const client = createWorkerTransportClient({ clock, worker: failing });
+    const told = recordEnds(client);
+    const connecting = client.connect({});
+
+    // a script that failed to load: a bare `Event`, which says nothing
+    fireError(errorListeners, {});
+
+    await expect(connecting).rejects.toThrow(
+      new ConnectError('its worker erred before the connection opened, saying nothing')
+    );
+
+    const loading = client.connect({});
+
+    fireError(errorListeners, {
+      colno: 1,
+      filename: 'worker.js',
+      lineno: 1,
+      message: 'Uncaught SyntaxError: Unexpected token',
+    });
+
+    await expect(loading).rejects.toThrow(
+      new ConnectError(
+        'its worker erred before the connection opened: Uncaught SyntaxError: Unexpected token (at worker.js:1:1)'
+      )
+    );
+    // no timer left, and nothing told but the rejections
+    expect([client.isClosed(), errorListeners.size, delaysOn(clock), told]).toEqual([
+      true,
+      0,
+      [],
+      [],
+    ]);
+
+    const heard: unknown[] = [];
+    const [late] = held;
+
+    late?.addEventListener('message', ({ data }) => {
+      heard.push(data);
+    });
+    late?.start();
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.CLOSE]);
+
+    for (const port of held) {
+      port.close();
+    }
   });
 
   test('gives up on a worker that never answers, telling a server that takes the port later', async () => {

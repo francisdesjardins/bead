@@ -550,7 +550,7 @@ internal static class HostsAndOrigins
 
             if (parts.Port is not null)
             {
-                throw Refused((name, entry), "a host is taken on any port, and is given without one");
+                throw Refused((name, entry), $"a host is taken on any port, and is given without one; write {parts.Host}, not {entry}");
             }
         }
     }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer as createNodeServer } from 'node:http';
-import type { AddressInfo, Socket } from 'node:net';
+import { createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
@@ -52,6 +52,7 @@ import {
   type WSTransportClient,
 } from '../ws-transport-client';
 import { createWSTransportServer } from '../../server/ws-transport-server';
+import { hasIPv6Loopback } from '../../server/__tests__/addresses';
 import { createFakeWebSocket } from './fake-websocket';
 
 /** The drop only an implementation reaches, as the base and the transport use it. */
@@ -63,7 +64,7 @@ const drop = (client: ITransportClient<object, never>): void => {
  * Whether a client carries a credential, and is secure, once a connect to `target` was tried — the
  * judgement made from the URL it was given, its socket refused.
  */
-const judgedOf = async (target: { host: string; secured?: boolean }) => {
+const judgedOf = async (target: { host: string; secured?: boolean; port?: number }) => {
   const client = createWSTransportClient({
     // no constructor at all: the socket it would open is refused as it is made
     WebSocket: (() => {
@@ -71,7 +72,7 @@ const judgedOf = async (target: { host: string; secured?: boolean }) => {
     }) as unknown as IWebSocketConstructor,
   });
 
-  await client.connect({ ...target, port: 8_080 }).catch(() => {});
+  await client.connect({ port: 8_080, ...target }).catch(() => {});
 
   return [client.carries(BEARER), client.isSecure];
 };
@@ -317,6 +318,44 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         ).rejects.toBeInstanceOf(ConnectError);
 
         expect([...sockets.keys()].at(-1)?.url).toMatch(/^wss:\/\/127\.0\.0\.1:\d+\/$/);
+
+        const hello = Promise.withResolvers<number>();
+        let peer: Socket | undefined;
+        const listener = createTcpServer((socket) => {
+          peer = socket;
+          socket.once('data', (bytes: Buffer) => {
+            hello.resolve(bytes[0] ?? -1);
+          });
+          socket.on('error', () => {});
+        });
+
+        listener.listen(0, host);
+        await once(listener, 'listening');
+
+        const controller = new AbortController();
+        const connecting = client
+          .connect({
+            host,
+            port: (listener.address() as AddressInfo).port,
+            secured: true,
+            signal: controller.signal,
+          })
+          .catch((reason: unknown) => {
+            return reason;
+          });
+
+        try {
+          expect(await hello.promise).toBe(0x16);
+          controller.abort();
+          expect(await connecting).toBeInstanceOf(CancelError);
+        } finally {
+          peer?.destroy();
+          await new Promise<void>((resolve) => {
+            listener.close(() => {
+              resolve();
+            });
+          });
+        }
       });
     });
 
@@ -454,7 +493,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         server.once('connection', (socket) => {
           socket.send('first');
+          socket.send(Uint8Array.of(1));
           socket.send('second');
+          socket.send(Uint8Array.of(2));
         });
         client.once('message', () => {
           throw thrown;
@@ -466,7 +507,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         const both = new Promise<void>((resolve) => {
           client.on('message', ({ data }) => {
             messages.push(data);
-            if (messages.length === 2) {
+            if (messages.length === 4) {
               resolve();
             }
           });
@@ -475,7 +516,14 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.connect({ host, port });
         await both;
 
-        expect(messages).toEqual(['first', 'second']);
+        expect(messages).toEqual([
+          'first',
+          expect.any(ArrayBuffer),
+          'second',
+          expect.any(ArrayBuffer),
+        ]);
+        expect([...new Uint8Array(messages[1] as ArrayBuffer)]).toEqual([1]);
+        expect([...new Uint8Array(messages[3] as ArrayBuffer)]).toEqual([2]);
         expect(reported).toHaveLength(1);
         expect(reported[0]).toBe(thrown);
         expect(client.isOpen()).toBe(true);
@@ -907,6 +955,26 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
       'ws://127.0.0.1:8080/',
       'ws://example.test:8080/',
     ]);
+
+    for (const address of ['127.0.0.1', '::1']) {
+      if (address === '::1' && !(await hasIPv6Loopback())) {
+        continue;
+      }
+
+      const server = await startServer({ host: address });
+      const real = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+      try {
+        for (const host of address === '::1' ? ['::1', '[::1]'] : ['127.0.0.1', 'localhost']) {
+          await real.connect({ host, port: portOf(server) });
+          expect(real.isOpen()).toBe(true);
+          await real.disconnect();
+        }
+      } finally {
+        await stopServer(server);
+        await allClosed();
+      }
+    }
   });
 
   test('dispose drops a connecting socket even when its close throws', async () => {
@@ -950,7 +1018,9 @@ test.describe('WSTransportClient, what it carries', () => {
   };
 
   test('carries no credential its upgrade did not carry, and is secure under wss or to a loopback host, judged by the URL it was given', async () => {
-    expect(createWSTransportClient().isSecure).toBe(false);
+    const unstarted = createWSTransportClient();
+
+    expect([unstarted.carries(BEARER), unstarted.isSecure]).toEqual([false, false]);
     expect(
       await Promise.all([
         judgedOf({ host: 'bead.example', secured: true }),
@@ -959,6 +1029,9 @@ test.describe('WSTransportClient, what it carries', () => {
         judgedOf({ host: '::1' }),
         judgedOf({ host: 'bead.example' }),
         judgedOf({ host: '192.0.2.1' }),
+        judgedOf({ host: '192.0.2.1', secured: true }),
+        judgedOf({ host: '192.0.2.1', port: 80 }),
+        judgedOf({ host: '192.0.2.1', port: 443, secured: true }),
       ])
     ).toEqual([
       [false, true],
@@ -967,7 +1040,22 @@ test.describe('WSTransportClient, what it carries', () => {
       [false, true],
       [false, false],
       [false, false],
+      [false, true],
+      [false, false],
+      [false, true],
     ]);
+
+    const server = await startServer();
+    const connected = createWSTransportClient({ WebSocket: IMPLEMENTATIONS[1][1] });
+
+    try {
+      await connected.connect({ host, port: portOf(server) });
+      expect([connected.carries(BEARER), connected.isSecure]).toEqual([false, true]);
+      await connected.disconnect();
+    } finally {
+      await stopServer(server);
+      await allClosed();
+    }
   });
 
   // spec 15.1 and 15.2
@@ -1267,6 +1355,11 @@ test.describe('WSTransportClient, its message limit', () => {
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
     const client = createWSTransportClient({ WebSocket: TrackedWsWebSocket });
     const connection = nextConnection(server);
+    const delivered: number[] = [];
+
+    client.on('message', ({ data }) => {
+      delivered.push((data as ArrayBuffer).byteLength);
+    });
 
     try {
       await client.connect({ host, port: portOf(server) });
@@ -1286,9 +1379,14 @@ test.describe('WSTransportClient, its message limit', () => {
         });
       });
 
+      const clientClosed = nextEvent(client, 'close');
+
       socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES + 1));
 
       expect(await closed).toBe(1009);
+      await clientClosed;
+      expect(delivered).toEqual([16_778_240]);
+      expect(client.isClosed()).toBe(true);
     } finally {
       await stopServer(server);
       await allClosed();

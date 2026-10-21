@@ -95,12 +95,12 @@
     {
       "procedureName": "register",
       "request": "{\"destination\":n}, with \"audience\":a, \"timeout\":t, or both",
-      "answers": "n, once it registered its caller's connection as the destination n, with the audience a, which that destination verifies, when given, and with none otherwise (section 14.1), leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already fails it, an application failure: code 8, detail \"that destination is registered already\""
+      "answers": "n, once it registered its caller's connection as the destination n, with the audience a, which that destination verifies, when given, and with none otherwise (section 14.1), leg B waiting t milliseconds at most for its answer when given, t held as section 1.4 holds a duration; a t under a millisecond or past 2³¹ − 1, as given, registers nothing and fails it, which its server answers with PROCEDURE_FAILED and reports; a destination registered already whose connection is open, or that is no connection of the server's, fails it, an application failure: code 8, detail \"that destination is registered already\", and one whose connection closed it registers anew, in its place at once (section 14.1). It checks nobody: any connection registers any destination, as section 14.1 leaves it to the application"
     },
     {
       "procedureName": "unregister",
       "request": "any JSON value",
-      "answers": "true, once it took out the destination its caller's connection registered last; false when there is none, or another took its id since"
+      "answers": "true, once it took out the destination its caller's connection registered last; false when there is none, or another connection registered it anew since"
     },
     {
       "procedureName": "endSession",

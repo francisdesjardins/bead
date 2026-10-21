@@ -6,7 +6,7 @@ import { EnvelopeKind } from '../../src/router/shared/constants';
 import { writeEnvelope } from '../../src/router/shared/envelope';
 import type { BackgroundMessage } from '../messages';
 import { assertBuilt, EXTENSION } from './fixtures';
-import { IDS, T0, TRAFFIC } from './traffic';
+import { IDS, REFUSED_INVALID, T0, TRAFFIC } from './traffic';
 
 // interfaces
 
@@ -1172,6 +1172,33 @@ test.describe('the panel', () => {
     await rowOf(page, 'counter').click();
     await page.click('[data-detail="diff"]');
     await expect(page.locator('#detail .diff .added').first()).toHaveText('+   "value": 47');
+  });
+
+  test('tables the violations of a call its client’s validates refused before it went, wide and narrow', async ({
+    page,
+  }) => {
+    await openWithTraffic(page);
+    await deliver(page, { dropped: 0, records: [...REFUSED_INVALID], type: 'records' });
+
+    await rowOf(page, 'submit counted').click();
+
+    const table = page.locator('#detail .outcome-box table.violations');
+
+    await expect(page.locator('#detail .outcome-box')).toContainText('Failed: PAYLOAD_INVALID.');
+    await expect(table.locator('caption')).toHaveText('2 violations, in their order');
+    await expect(table.locator('tbody tr').first()).toHaveText(
+      'fromint32.ltemust be less than or equal to 10{"lte":10}'
+    );
+    await expect(page.locator('#detail .outcome-box .note')).toHaveText('and 3 more');
+
+    await rowOf(page, 'submit wordless').click();
+    await expect(table.locator('tbody tr')).toHaveCount(6);
+
+    for (const width of [360, 1280]) {
+      await resize(page, { height: 640, width });
+      expect(await isWholeOf(page, 'html')).toBe(true);
+      expect(await isWholeOf(page, '#detail')).toBe(true);
+    }
   });
 
   test('rebuilds the state at a moment the cursor stands on, replaying nothing', async ({

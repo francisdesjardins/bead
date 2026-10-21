@@ -255,6 +255,30 @@ test.describe('createWorkerTransportServer', () => {
     expect(server.gauges().counts).toEqual({ connections: 0 });
   });
 
+  test('ends a connection its page says it lost, unclean, once', async () => {
+    await using started = await startWorker();
+    const { connect, events, server } = started;
+    const { heard, port } = connect();
+
+    await expect
+      .poll(() => {
+        return heard;
+      })
+      .toEqual([WORKER_MESSAGES.OPEN]);
+    port.postMessage(WORKER_MESSAGES.LOST);
+    port.postMessage(WORKER_MESSAGES.CLOSE);
+    await expect
+      .poll(() => {
+        return events.filter(([name]) => {
+          return name === 'close';
+        });
+      })
+      .toEqual([['close', false, 'type=WORKER;ip=local;ordinal=1']]);
+    await settled();
+
+    expect([events.length, server.clients, WORKER_MESSAGES.LOST]).toEqual([2, [], 'bead-lost']);
+  });
+
   test('stops by closing each connection, telling its page, and hears no connect after', async () => {
     const started = await startWorker();
     const { connect, events, server } = started;

@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package demo.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Signs a visitor up for a workshop, once the request holds to its rules.
+service SignUpService {
+  option (bead.service) = {
+    id: 2
+    revision: 1
+  };
+
+  // Holds seats for a name, to be confirmed by email or by phone.
+  rpc SignUp(SignUpRequest) returns (SignUpResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}
+
+// Who signs up, how many seats, and where to confirm: an email or a phone, exactly one.
+message SignUpRequest {
+  option (buf.validate.message) = {
+    oneof: [
+      {
+        fields: ["email", "phone"]
+        required: true
+      }
+    ]
+  };
+
+  // A DNS label's shape (RFC 1035 2.3.1): a lower-case letter, then letters, digits or hyphens.
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 63
+    pattern: "^[a-z][a-z0-9-]*$"
+  }];
+  // From 1 to 10.
+  int32 seats = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 10
+  }];
+  // A local part, an @ and a domain with a dot, within RFC 5321's 254 octets of a path.
+  string email = 3 [(buf.validate.field).string = {
+    max_len: 254
+    pattern: "^[^@ ]+@[^@ .]+(\\.[^@ .]+)+$"
+  }];
+  // An E.164 number: a +, then 7 to 15 digits, the first not 0.
+  string phone = 4 [(buf.validate.field).string.pattern = "^\\+[1-9][0-9]{6,14}$"];
+}
+
+// What the sign-up holds.
+message SignUpResponse {
+  string welcome = 1;
+}

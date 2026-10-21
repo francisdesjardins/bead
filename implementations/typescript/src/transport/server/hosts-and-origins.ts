@@ -474,7 +474,7 @@ export const assertOrigins = (origins: readonly string[] | undefined): void => {
   for (const entry of origins ?? []) {
     if (entry === '*') {
       throw new ProgrammerError(
-        'origins has no wildcard: it names each origin a page comes from besides the server’s own'
+        'origins has no wildcard, not *: it names each origin a page comes from besides the server’s own'
       );
     }
 

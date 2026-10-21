@@ -657,8 +657,11 @@ public sealed partial class RouterServerTests
     }
 
     [Fact]
-    public async Task Asks_a_connection_of_its_own_by_a_command_cancels_it_with_leg_A_answers_lost_when_it_goes_and_unreachable_after_whoever_takes_its_handle()
+    public async Task Asks_a_connection_of_its_own_by_a_command_cancels_it_with_leg_A_answers_lost_when_it_goes_and_unreachable_after_until_a_connection_opened_since_takes_its_place()
     {
+        // the connection the device opened next, under a handle its transport never gave
+        const string Newcomer = "type=WS;ip=127.0.0.1;port=50002;ordinal=2";
+
         Start(new RouterServerOptions { Relay = Admitting });
         _transport.Open(First);
         _transport.Open(Second);
@@ -680,8 +683,8 @@ public sealed partial class RouterServerTests
         _transport.Closed(Second);
         await Settle();
 
-        // a newcomer under the same handle is not the destination
-        _transport.Open(Second);
+        // the connection opened next is not the destination
+        _transport.Open(Newcomer);
         Deliver(First, To(9, RequestOf(7)));
         await Settle();
 
@@ -698,17 +701,27 @@ public sealed partial class RouterServerTests
                 "first failure 7 DestinationUnreachable",
             ],
             SentSince());
-        Assert.Equal([new Destination(9, null)], Router.Destinations());
+        Assert.Equal([new Destination(9, null) { IsClosed = true }], Router.Destinations());
+        Assert.True(registration.Destination.IsClosed);
 
-        // registered anew, the newcomer is asked; the relay disposed, neither leg hears more
-        Assert.True(registration.Unregister());
-        Router.RegisterDestination(new ConnectionTarget(Second), new DestinationOptions { DestinationId = 9 });
-        Deliver(First, To(9, RequestOf(9, payload: "again")));
+        // registered on the connection it no longer holds, it is closed at once
+        var again = Router.RegisterDestination(new ConnectionTarget(Second), new DestinationOptions { Replaces = registration });
+
+        Deliver(First, To(9, RequestOf(9)));
+        await Settle();
+
+        Assert.True(again.Destination.IsClosed);
+        Assert.Equal(["first failure 9 DestinationUnreachable"], SentSince());
+
+        // in its place, the newcomer is asked; the relay disposed, neither leg hears more
+        Router.RegisterDestination(new ConnectionTarget(Newcomer), new DestinationOptions { Replaces = again });
+        Deliver(First, To(9, RequestOf(11, payload: "again")));
         await Settle();
         Router.Dispose();
         await Settle();
 
-        Assert.Equal(["second request 8 again"], SentSince());
+        Assert.False(registration.Unregister());
+        Assert.Equal([$"{Newcomer} request 8 again"], SentSince());
         Assert.Equal(["the connection closed before the answer first"], Reported());
     }
 

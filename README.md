@@ -355,12 +355,15 @@ BEAD_INTEROP_REQUIRED=1 yarn test:browser
 
 A page with a button per kind of call — a read, a write, a subscription, a transfer either way, a
 cancel, a failure, a command — the calls and envelopes logged as the client sees them, and what the
-client's and the server's metrics registries count, over WebSocket, HTTP or a Web Worker.
+client's and the server's metrics registries count, over WebSocket, HTTP or a Web Worker; and a
+sign-up form, a service beadc generates from the demo's `.proto`, whose refusals by its payload
+rules show each violation under its field.
 
 ```sh
 cd implementations/typescript
 yarn demo                    # page and servers on http://localhost:8080 (DEMO_PORT moves it)
 yarn playground:build:file   # the static build, into demo/dist/playground/
+yarn test:demo               # its tests, once the static build is built
 ```
 
 The static build runs its server in a Web Worker of the page, every path relative, so any static
@@ -707,16 +710,16 @@ back-merge filed under the released version, it goes back under `[Unreleased]` i
 runner images, `ubuntu-26.04`, and `windows-2025` and `ubuntu-26.04-arm` for the builder's: `spec`
 (regenerate, then diff, then `spec/check.py`), `typescript` on Node 26 and on the floor, 24.9
 (install, check, test, under coverage on Node 26, held to the side's floor, the demo's static
-build, the DevTools extension built and, on Node 26, tested in Chromium, and the root's files under
-the same formatter), `dotnet` (every C# package audited by NuGetAudit as it restores, format,
+build, the DevTools extension built and, on Node 26, tested in Chromium, the demo's tests on Node
+26, and the root's files under the same formatter), `dotnet` (every C# package audited by NuGetAudit as it restores, format,
 build, the builder's C# goldens among its projects, test under coverage, held to the side's floor,
 the interop both ways with `BEAD_INTEROP_REQUIRED=1`, and a page of another origin in Chromium
 against both HTTP servers),
 `builder` (install, protoc by its pin's sha256, test with `BEADC_PROTOC_REQUIRED=1` and
 `BEADC_WRAPPERS_REQUIRED=1`, the wrappers held to one contract against
 a stand-in engine, then beadc over the interop's blueprint, its rules and its form, and
-`beadc generate --check` over the root's `beadc.yaml`, each side's interop, on Node 26 on Linux and
-Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
+`beadc generate --check` over the root's `beadc.yaml`, each side's interop, and over the demo's,
+on Node 26 on Linux and Windows and on 24.9 on Linux; then `beadc breaking` over the interop's blueprint and
 `examples/hello`, against the last release, which carries both, on Linux; its types, the
 goldens' among them, lint and format, buf's among them, on Linux; and on the image's legs, Linux on
 Node 26, amd64 and arm64, each natively: beadc's image built, its test stage run on the image

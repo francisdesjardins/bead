@@ -69,6 +69,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
   `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites
   `transcoding.md`'s units, `transcoding:9.2`.
+- The DevTools panel reads a `PAYLOAD_INVALID`'s detail with the package's own reader: a call's
+  Overview tables its violations, a row each with its field, rule, words and bounds, then what the
+  closing line counts, that its side stopped, or that the detail was cut; the Wire view sums one up
+  on its line.
+- The demo's sign-up, a service beadc generates from the demo's own `.proto`, its request held to
+  protovalidate's rules: a refusal's violations each under its field, marked `aria-invalid` and
+  described by them, one of no field above the form, and "Validate before sending" refusing before
+  anything goes; `yarn test:demo` runs the demo's tests, and CI holds its generated code.
 
 ### Changed
 
@@ -130,9 +138,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
   outcomes apart: two owners share a place where the spec names one option for both and every
   column of the file agrees (decision 0014). The file holds 27 places, by 43 ways.
+- Each destination a server's router lists says whether its connection closed, `isClosed` and
+  `Destination.IsClosed`, its registration's as it is now; `registerDestination` takes `replaces`,
+  the registration the caller holds, whose id the new one takes at once, under one lock on the C#
+  side, so no relayed call meanwhile is answered `DESTINATION_UNKNOWN` (spec 14.1, 14.4, decision
+  0019). Registering an id that is taken stays refused, closed or not: who may register which
+  destination is the application's to decide, and the relay checks nobody.
+- The interop service keeps its registrations by destination id: `register` refuses code 8 only a
+  destination whose connection is open, or one that is no connection's, and registers anew in its
+  place one whose connection closed; `unregister` takes out its caller's own.
+- The conversation of a destination dead with its connection opens the device again as a new
+  connection, under a handle never given, which registers the destination anew; each side's
+  scripted player draws a new handle when a name opens again, and the conversations played in
+  memory are 170 of the 175.
+- The Web Worker client tells its worker's `error`, an exception its script did not catch, once as
+  the connection ends, before its close, unclean, naming the error's message and where it was
+  thrown; its server hears that close unclean, by `bead-lost`, as it hears a `disconnect` that is
+  not clean (spec 15.1, decision 0036).
+- The TypeScript side's transport client and server refuse a start or a connect in the C# side's
+  words: `the transport client is already open`, `the transport server is already connecting`,
+  `the transport server is starting`.
+- A server's options name the form to write where an entry is refused for its form alone, on both
+  sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
+  its bare address, and the refused origins wildcard names `*`.
 
 ### Fixed
 
+- The demo's relay forwards a listen's `bead-after` and `bead-wait`, which the HTTP server needs:
+  the page over `?transport=http` connects again, where every listen was refused 400 `malformed`.
 - The TypeScript servers report a server not yet started as insecure unless its application says
   otherwise or it has TLS, as the C# servers do.
 - The TypeScript HTTP server writes an answer that comes before its request's body is whole with
@@ -181,6 +214,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript side does.
 - The TypeScript service manager names a notification's window as the C# side does, `window 4`
   or `no window`, in the error of a second ask for it with another.
+- A destination registered on a connection its router no longer holds is closed from its
+  registration, unreachable at once, and never forwarded to (spec 14.4).
+- A Web Worker client whose worker errs before the connection opens, its script failing to load,
+  fails its connect with a `ConnectError` at once, rather than after its timeout.
 
 ## [0.6.0] - 2026-10-20
 

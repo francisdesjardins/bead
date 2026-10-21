@@ -78,6 +78,8 @@ const TAKEN_HOSTS = [
   'bead.test:80',
   'XN--BAD-BMA.test',
   'elsewhere.example:1',
+  'bead.test:443',
+  'XN--BAD-BMA.test:8080',
 ];
 const OTHER_HOSTS = [
   undefined,
@@ -88,6 +90,9 @@ const OTHER_HOSTS = [
   'bead.testx',
   'béad.test',
   'xn--a.test',
+  ':8080',
+  'elsewhere.test',
+  'bead.testing',
 ];
 const ORIGINS = ['https://bead.example'];
 
@@ -170,6 +175,7 @@ const BUILT_HOSTS = [
   ['*'],
   ['bead.test'],
   ['Bead.Test', '127.0.0.1', '[::1]', 'localhost', 'xn--a', 'bead.localhost'],
+  ['Bead.Test', 'xn--bad-bma.test', '127.0.0.1', '[::1]', 'localhost'],
 ];
 const REFUSED_HOSTS = [
   ['bead.test:8080'],
@@ -187,6 +193,11 @@ const REFUSED_HOSTS = [
   ['*', 'bead.test'],
   ['bead.test', '*'],
   ['*', '*'],
+  ['bead.test:'],
+  ['127.0.0.1:8080'],
+  ['[::1]:8443'],
+  [':8080'],
+  ['*.bead.test'],
 ];
 
 // an `origins` entry that is built, and one that is refused as it is built
@@ -234,6 +245,16 @@ const REFUSED_ORIGINS = [
   ' http://bead.test',
   'Null',
   '',
+  'http://bead.test/',
+  'http://bead.test/path',
+  'http://user@bead.test',
+  'HTTP://bead.test',
+  'http://Bead.Test',
+  'http://bead.test:',
+  'http://bead.test:65536',
+  'http://',
+  'http://béad.test',
+  'http://a*b.test',
 ];
 
 // an origin, and the Host of a request that comes from it: the server's own, `http://` or
@@ -296,16 +317,18 @@ const NOT_OWN: [origin: string, host: string | undefined][] = [
 
 test.describe('hosts and origins', () => {
   test('takes a Host HTTP takes: one line, none in a request that needs none, its value uri-host and an optional port without the whitespace around it, and none of a percent-encoded octet, *+,;= in a name, an IPvFuture literal or a colon with no port', () => {
-    expect(
-      WELL_FORMED_HOSTS.filter((host) => {
-        return isWellFormedHost([host], { isRequired: true });
-      })
-    ).toEqual(WELL_FORMED_HOSTS);
-    expect(
-      MALFORMED_HOSTS.filter((host) => {
-        return isWellFormedHost([host], { isRequired: false });
-      })
-    ).toEqual([]);
+    for (const isRequired of [false, true]) {
+      expect(
+        WELL_FORMED_HOSTS.filter((host) => {
+          return isWellFormedHost([host], { isRequired });
+        })
+      ).toEqual(WELL_FORMED_HOSTS);
+      expect(
+        MALFORMED_HOSTS.filter((host) => {
+          return isWellFormedHost([host], { isRequired });
+        })
+      ).toEqual([]);
+    }
 
     // none, where HTTP/1.1 asks one and HTTP/1.0 does not; two, whatever they name
     expect([
@@ -352,10 +375,10 @@ test.describe('hosts and origins', () => {
       })
     ).toEqual([]);
     expect(
-      OTHER_HOSTS.filter((host) => {
+      [...OTHER_HOSTS, 'rebind.example:8080', 'xn--a'].filter((host) => {
         return isTakenHost(host, ['*']);
       })
-    ).toEqual(OTHER_HOSTS);
+    ).toEqual([...OTHER_HOSTS, 'rebind.example:8080', 'xn--a']);
   });
 
   test('refuses a hosts entry with a port, an empty one, one that is no host, and * beside another', () => {
@@ -369,6 +392,12 @@ test.describe('hosts and origins', () => {
       expect(() => {
         assertHosts(hosts);
       }, String(hosts)).toThrow(ProgrammerError);
+      expect(() => {
+        assertHosts(hosts);
+      }).toThrow('hosts');
+      expect(() => {
+        assertHosts(hosts);
+      }).toThrow(hosts.includes('*') ? '*' : hosts.at(-1) || 'empty');
     }
 
     // the message names what to write instead
@@ -386,9 +415,19 @@ test.describe('hosts and origins', () => {
     }).not.toThrow();
 
     for (const origin of REFUSED_ORIGINS) {
-      expect(() => {
-        assertOrigins([origin]);
-      }, origin).toThrow(ProgrammerError);
+      for (const origins of [[origin], ['https://bead.example', origin]]) {
+        expect(() => {
+          assertOrigins(origins);
+        }, origin).toThrow(ProgrammerError);
+        expect(() => {
+          assertOrigins(origins);
+        }).toThrow('origins');
+        expect
+          .soft(() => {
+            assertOrigins(origins);
+          })
+          .toThrow(origin);
+      }
     }
 
     expect(() => {
@@ -401,7 +440,15 @@ test.describe('hosts and origins', () => {
   });
 
   test('reads an IPv4 address by RFC 3986’s grammar, never as the platform’s parser reads one', () => {
-    const addresses = ['0.0.0.0', '127.0.0.1', '10.0.0.10', '192.0.2.1', '255.255.255.255'];
+    const addresses = [
+      '0.0.0.0',
+      '127.0.0.1',
+      '10.0.0.10',
+      '192.0.2.1',
+      '255.255.255.255',
+      '10.0.0.255',
+      '1.22.199.249',
+    ];
     // a short form, octal, hexadecimal, one number, an octet past 255, a leading zero, a final
     // dot, a fifth octet, a space, a port
     const others = [
@@ -415,6 +462,15 @@ test.describe('hosts and origins', () => {
       '1.2.3.4.5',
       ' 127.0.0.1',
       '127.0.0.1:80',
+      '127.0.1',
+      '00.0.0.0',
+      '1.2.3.',
+      '.1.2.3',
+      '1..2.3',
+      '+1.2.3.4',
+      '1.2.3.4 ',
+      '',
+      'localhost',
     ];
 
     expect(addresses.filter(isIPv4Address)).toEqual(addresses);
@@ -424,7 +480,8 @@ test.describe('hosts and origins', () => {
       [...addresses, ...others].filter((host) => {
         return isTakenHost(host, []);
       })
-    ).toEqual([...addresses, '127.0.0.1:80']);
+    ).toEqual([...addresses, '127.0.0.1:80', 'localhost']);
+    expect(URL.parse('http://127.1')?.hostname).toBe('127.0.0.1');
   });
 
   test('takes a request with no Origin, one among those given, and the server’s own: http:// or https:// followed by its Host, in any ASCII case, nothing parsed', () => {
@@ -509,15 +566,24 @@ test.describe('hosts and origins', () => {
         'https://bead.example:443',
         'http://bead.example',
         'https://bead.test',
+        'Null',
         undefined,
       ].map((origin) => {
         return isListedOrigin(origin, ORIGINS);
       })
-    ).toEqual([true, false, false, false, false, false, false]);
+    ).toEqual([true, false, false, false, false, false, false, false]);
     // the server's own, named
     expect(isListedOrigin('https://bead.test', ['https://bead.test'])).toBe(true);
     // none, whatever is named
-    expect([isListedOrigin(undefined, []), isListedOrigin('null', [])]).toEqual([false, false]);
+    expect([
+      isListedOrigin(undefined, []),
+      isListedOrigin('null', []),
+      isListedOrigin(undefined, ['null']),
+    ]).toEqual([false, false, false]);
+    for (const [origin] of OWN) {
+      expect(isListedOrigin(origin, [])).toBe(false);
+      expect(isListedOrigin(origin, [origin])).toBe(true);
+    }
   });
 
   test('isIPAddress takes a bare IP address by RFC 3986’s grammar, and refuses a name, every other form, brackets, a zone and an IPv4-mapped address', () => {

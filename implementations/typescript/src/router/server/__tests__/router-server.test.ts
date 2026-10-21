@@ -3517,7 +3517,9 @@ test.describe('createRouterServer, relaying', () => {
     expect(admissions).toBe(3);
     // the target's own failures are answered, not reported
     expect(errors).toEqual([]);
-    expect(router.destinations()).toEqual([{ destinationId: 7, label: 'the device' }]);
+    expect(router.destinations()).toEqual([
+      { destinationId: 7, isClosed: false, label: 'the device' },
+    ]);
   });
 
   test('hands beforeRoute a JWT unresolved, refusing a scheme to come CREDENTIAL_UNSUPPORTED and an ELSEWHERE that carried nothing SESSION_REQUIRED before it; OPAQUE resolves to leg A’s connection’s session, which beforeRoute reads', async () => {
@@ -4027,11 +4029,13 @@ test.describe('createRouterServer, relaying', () => {
     expect(admissions).toBe(2);
   });
 
-  test('asks a connection of its own by a command, cancels it with leg A, answers lost when it goes, and unreachable after, whoever takes its handle', async () => {
+  test('asks a connection of its own by a command, cancels it with leg A, answers lost when it goes, and unreachable after, until a connection opened since takes its place', async () => {
     const legA = createScriptedTransport();
     using relay = createRouterServer(legA.transport, { relay: admitting });
     const { close, deliver, open, sent } = legA;
     const errors = recordErrors(relay);
+    // the connection the device opened next, under a handle its transport never gave
+    const newcomer: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=2';
 
     open(first);
     open(second);
@@ -4054,8 +4058,8 @@ test.describe('createRouterServer, relaying', () => {
     await sleep(0);
     close(second);
     await sleep(0);
-    // a newcomer under the same handle is not the destination
-    open(second);
+    // the connection opened next is not the destination
+    open(newcomer);
     deliver(first, requestOf(7, { destinationId: 9 }));
     await sleep(0);
 
@@ -4075,17 +4079,32 @@ test.describe('createRouterServer, relaying', () => {
       procedureId: 1,
       serviceId: 2,
     });
-    expect(relay.destinations()).toEqual([{ destinationId: 9, label: undefined }]);
+    expect(relay.destinations()).toEqual([{ destinationId: 9, isClosed: true, label: undefined }]);
+    expect(registration.isClosed).toBe(true);
 
-    // registered anew, the newcomer is asked; the relay disposed, neither leg hears more
-    expect(registration.unregister()).toBe(true);
-    relay.registerDestination({ connectionHandle: second }, { destinationId: 9 });
-    deliver(first, requestOf(9, { destinationId: 9, payload: text.encode('again') }));
+    // registered on the connection it no longer holds, it is closed at once
+    const again = relay.registerDestination(
+      { connectionHandle: second },
+      { replaces: registration }
+    );
+
+    deliver(first, requestOf(9, { destinationId: 9 }));
+    await sleep(0);
+
+    expect(again.isClosed).toBe(true);
+    expect(answersOf(sent.slice(7))).toEqual([
+      [first, 'failure', 9, ProtocolCode.DESTINATION_UNREACHABLE],
+    ]);
+
+    // in its place, the newcomer is asked; the relay disposed, neither leg hears more
+    relay.registerDestination({ connectionHandle: newcomer }, { replaces: again });
+    deliver(first, requestOf(11, { destinationId: 9, payload: text.encode('again') }));
     await sleep(0);
     relay[Symbol.dispose]();
     await sleep(0);
 
-    expect(answersOf(sent.slice(7))).toEqual([[second, EnvelopeKind.REQUEST, 8, 'again']]);
+    expect(registration.unregister()).toBe(false);
+    expect(answersOf(sent.slice(8))).toEqual([[newcomer, EnvelopeKind.REQUEST, 8, 'again']]);
     expect(reportedOf(errors)).toEqual([['the connection closed before the answer', first]]);
   });
 });

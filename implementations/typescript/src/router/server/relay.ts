@@ -44,13 +44,20 @@ import type {
 
 /**
  * A destination registered: its target, the audience it verifies, how long leg B waits, whether its
- * connection closed.
+ * connection closed, and the registration its application holds.
  */
-interface IRegistration extends IDestination {
+interface IRegistration {
   /** The audience a `JWT` names for it (RFC 8707); none takes no `JWT` and no `ELSEWHERE`. */
   audience: string | undefined;
-  /** For a connection of the relay's own: set once it closed, whoever takes its handle next. */
+  destinationId: DestinationId;
+  /** What the application holds of it, which a registration that `replaces` it names. */
+  handed: IDestinationRegistration | undefined;
+  /**
+   * For a connection of the relay's own: set once it closed, or as it is registered on one its
+   * router no longer holds; never unset, since no connection takes its handle again.
+   */
   isClosed: boolean;
+  label: string | undefined;
   target: RelayTarget;
   timeout: number;
 }
@@ -70,11 +77,11 @@ export interface IRelay {
   audiences(): string[];
   /**
    * Marks the destinations on a connection of the relay's own that closed: each is unreachable
-   * until the application unregisters it and registers it anew, so a newcomer under the same
-   * handle is never taken for it.
+   * until the application registers it anew, on another connection, since no connection takes its
+   * handle again.
    */
   closeConnection(connectionHandle: TransportServerConnectionHandle): void;
-  /** The destinations registered, each as its registration names it. */
+  /** The destinations registered, each as its registration names it, and whether its connection closed. */
   destinations(): IDestination[];
   /**
    * Its destinations, counted, those whose connection closed among them: kept until the application
@@ -169,6 +176,7 @@ const heldTimeoutOf = (timeout: number): number => {
 export const createRelay = ({
   carriageOf,
   failures,
+  isOpen,
   isTwoWay,
   limits,
   options,
@@ -182,6 +190,11 @@ export const createRelay = ({
    */
   carriageOf?: ((connectionHandle: Handle) => ICarriage) | undefined;
   failures: IRouterFailures;
+  /**
+   * Whether the relay's router holds a connection of its own, open: a destination registered on
+   * one it does not is closed from its registration. Every one, without it.
+   */
+  isOpen?: ((connectionHandle: Handle) => boolean) | undefined;
   /** Whether a connection of the relay's own takes a request of the relay's: HTTP's does not. */
   isTwoWay?: ((connectionHandle: Handle) => boolean) | undefined;
   /** The relay router's own. */
@@ -442,8 +455,12 @@ export const createRelay = ({
     }
   };
 
-  const register = (target: RelayTarget, options?: IDestinationOptions) => {
-    const { audience, destinationId: given, label } = options ?? {};
+  const register = (
+    target: RelayTarget,
+    options?: IDestinationOptions
+  ): IDestinationRegistration => {
+    const { audience, label, replaces } = options ?? {};
+    const given = options?.destinationId ?? replaces?.destinationId;
     const timeout = heldTimeoutOf(options?.timeout ?? Infinity);
 
     if (audience !== undefined && (typeof audience !== 'string' || !audience.isWellFormed())) {
@@ -456,7 +473,24 @@ export const createRelay = ({
       );
     }
 
-    if (given !== undefined && registrations.has(given)) {
+    if (replaces !== undefined && replaces.destinationId !== given) {
+      throw new ProgrammerError(
+        `a registration replaces the one of its own destination, ${String(given)}, not ${String(replaces.destinationId)}`
+      );
+    }
+
+    // ! the registration replaced is the one that holds its id now: a caller holding one taken out,
+    // or replaced already, would take a destination it does not hold
+    if (
+      replaces !== undefined &&
+      (given === undefined || registrations.get(given)?.handed !== replaces)
+    ) {
+      throw new ProgrammerError(
+        `destination ${String(given)} is not registered by the registration it replaces`
+      );
+    }
+
+    if (replaces === undefined && given !== undefined && registrations.has(given)) {
       throw new ProgrammerError(`destination ${String(given)} is registered already`);
     }
 
@@ -466,19 +500,22 @@ export const createRelay = ({
         return registrations.has(candidate);
       });
     // the relay's timeout is the longest any leg B waits: a destination's own stays under it
+    // a connection its router no longer holds closed before it was registered: it is unreachable
+    // from now on, and nothing is forwarded to it (spec 14.4)
     const registration: IRegistration = {
       audience,
       destinationId,
-      isClosed: false,
+      handed: undefined,
+      isClosed: isConnectionTarget(target) && isOpen?.(target.connectionHandle) === false,
       label,
       target,
       timeout: Math.min(timeout, relayTimeout),
     };
-
-    registrations.set(destinationId, registration);
-
-    return {
+    const handed: IDestinationRegistration = {
       destinationId,
+      get isClosed() {
+        return registration.isClosed;
+      },
       label,
       // its own registration alone: one that took its id since stays
       unregister: () => {
@@ -487,6 +524,13 @@ export const createRelay = ({
         );
       },
     };
+
+    registration.handed = handed;
+    // * one replaced gives its place at once: a request in between finds the destination, never
+    // DESTINATION_UNKNOWN, and a call bound to the one replaced finishes with it
+    registrations.set(destinationId, registration);
+
+    return handed;
   };
 
   return {
@@ -515,8 +559,8 @@ export const createRelay = ({
       }
     },
     destinations: () => {
-      return [...registrations.values()].map(({ destinationId, label }) => {
-        return { destinationId, label };
+      return [...registrations.values()].map(({ destinationId, isClosed, label }) => {
+        return { destinationId, isClosed, label };
       });
     },
     gauges: () => {

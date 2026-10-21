@@ -796,14 +796,18 @@ What comes late is dropped in silence where it is known for late, and reported e
 A server's router relays a request that names a destination registered in it, as a gateway does for
 what stands behind it: each destination answers the same procedures, and the requester picks one by
 its destination — `getRequest(procedure, …)(payload)({ destinationId })`.
-`registerDestination(target, { audience?, destinationId?, label?, timeout? })` names a client router
-the relay calls through, or `{ connectionHandle }`, a connection of its own it asks by a command,
-and gives the destination: given, or drawn, never 0. Its `audience` is the one the destination
-verifies, as a resource is named for a token (RFC 8707); a destination registered with none takes
-no credential the relay forwards. `destinations()` lists them, for the application to publish. A
-destination on a connection dies with it: once that connection closes, it is unreachable until the
-application unregisters it and registers it anew, on another connection: no connection takes a
-handle its transport gave before.
+`registerDestination(target, { audience?, destinationId?, label?, replaces?, timeout? })` names a
+client router the relay calls through, or `{ connectionHandle }`, a connection of its own it asks by
+a command, and gives the destination: given, or drawn, never 0. Its `audience` is the one the
+destination verifies, as a resource is named for a token (RFC 8707); a destination registered with
+none takes no credential the relay forwards. `destinations()` lists them, each saying whether its
+connection closed, for the application to publish. A destination on a connection dies with it: once
+that connection closes, it is unreachable until it is registered anew, on another connection: no
+connection takes a handle its transport gave before, and one the router no longer holds is
+registered closed. Its id stays taken, closed or not: the application unregisters it, or registers
+the next connection in its place at once by `replaces`, the registration it holds, so no request
+meanwhile finds the destination unknown. Who may register which destination is the application's
+to decide (spec 14.1): the relay checks nobody.
 
 The relay terminates each leg. Leg A, from the requester, and leg B, to the target, each have their
 own call ids, limits and session; what crosses is the payload's bytes, undecoded, the answer, and a
@@ -1160,12 +1164,17 @@ for a server that runs beside its page with no backend — a demo, a playground,
 connects by posting `bead-connect` to the worker with one end of a `MessageChannel`; that port is
 the connection, `type=WORKER;ip=local;ordinal=n`, which the server accepts with `bead-open`.
 Envelopes go both ways as bytes, each copied and its buffer transferred, so no one else's is taken;
-either end ends the connection with `bead-close`, since a port does not tell its close. It is
-two-way, in order, and carries transfers, as a socket does. It carries no credential beside an
-envelope, and never leaves the machine: a `JWT` crosses it, and an `ELSEWHERE` fails before it goes.
-The server's `start` listens at once, before anything is awaited, so a connect the worker hears as
-its script runs is not lost; the worker's other messages are left to it. A worker's `error` loses
-the client's connection, and the server is told; a worker terminated without a word is not heard.
+either end ends the connection with `bead-close`, since a port does not tell its close, and a
+client whose close is not clean with `bead-lost`, which its server tells unclean; a client tells
+its server's close unclean, as every client tells a close it did not ask for. It is two-way, in
+order, and carries transfers, as a socket does. It carries no credential beside an envelope, and
+never leaves the machine: a `JWT` crosses it, and an `ELSEWHERE` fails before it goes. The server's
+`start` listens at once, before anything is awaited, so a connect the worker hears as its script
+runs is not lost; the worker's other messages are left to it. A worker's `error` — an exception its
+script did not catch, or a script that failed to load — fails a connect under way at once with a
+`ConnectError`, and ends an open connection of the client's own (spec 15.1): told once on `error`,
+its message and where it was thrown, then its close, unclean at both ends. A worker terminated
+without a word is not heard.
 `createWorkerServer({ transport: { scope: self } })` in the worker and `createWorkerClient({
 transport: { worker } })` in the page are the facades. This one is a page's own: a server in C# has
 no counterpart to mirror.
@@ -1719,6 +1728,19 @@ five changes, once subscribed, shows the two ways to follow one: the counter's s
 as two notifications, the first and the latest; its signal, "it changed", comes five times, and the
 page merges it into two reads.
 
+A form signs up for a workshop through a service of its own, `SignUpService`, which beadc generates
+from the demo's `.proto`, [`demo/proto/demo/v1/sign_up.proto`](demo/proto/demo/v1/sign_up.proto),
+as [`demo/beadc.yaml`](demo/beadc.yaml) says, into `demo/gen/`: its request holds protovalidate's
+rules — a name of 1 to 63 characters in a DNS label's shape, 1 to 10 seats, an email or a phone,
+exactly one — which every server judges before its resolver, answering a request they refuse
+`PAYLOAD_INVALID` (spec 18). The page reads the detail with `violationsOf`: each violation under the
+field its path names, the field marked `aria-invalid` and described by it, the first focused, one of
+no field above the form. "Validate before sending" calls through a client side whose options say
+`validates`, which refuses the same request before anything goes on the wire. `yarn test:demo` runs
+the demo's tests, in a Playwright config of their own: its procedures in Node, a server and a client
+joined in memory, and the form in Chromium, against the static build `yarn playground:build:file`
+makes.
+
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server
 verifies it through its `credentials`, its key and its audience, so each call runs in its
@@ -1751,7 +1773,9 @@ first.
   words (`CREDIT · up to 2.5 MiB`, `CHUNK · at 1 MiB · more`); a subscription keeps its last 50
   notifications and counts the others. Its **Envelopes** mode lists every envelope on its own. A
   call selected shows its **Overview**, its failure whole — where it was raised, the relays it
-  crossed, its destination; its **Payload**, as a tree where it reads as one; its **Exchange**, its
+  crossed, its destination, and a PAYLOAD_INVALID's violations as a table, read by the package's
+  own reader of its detail, a row each with its field, its rule, its words and its bounds, then the
+  more its closing line counts, that its side stopped, or that the detail was cut; its **Payload**, as a tree where it reads as one; its **Exchange**, its
   envelopes as beads on its thread, a third lane for a destination behind a relay, a transfer's bytes
   against its credit; its **Diff**, a notification against the one before it, an answer against its
   procedure's last; and its **Trace**, the stack that made it, each frame opened in Sources.
@@ -1766,7 +1790,8 @@ first.
   it; a procedure's name shows its calls alone, and a client given no registry says so.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
   panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
-  procedure named where a client of the page told its name; an exchange copies as the skeleton of
+  procedure named where a client of the page told its name, a PAYLOAD_INVALID summed up on one line
+  by its first violation and their count; an exchange copies as the skeleton of
   an entry of `spec/conversations.json`.
 
 The bar filters by client and by the package's own filter, as `bead:debug` reads one
