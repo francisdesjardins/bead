@@ -1115,7 +1115,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var thrown = new InvalidOperationException("a message listener that throws");
         var answer = EnvelopeOf(EnvelopeKind.Result, (1, 3));
         var errors = new ConcurrentQueue<(Exception Reason, string ConnectionHandle)>();
-        Task? answered = null;
+        var heard = new ConcurrentQueue<string>();
 
         _server.Message += (_, _) =>
         {
@@ -1125,7 +1125,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // a listener after it, as a router answering, hears the request all the same
         _server.Message += (_, handle) =>
         {
-            answered = _server.Send(new TransportMessage(answer, false), handle);
+            heard.Enqueue(handle);
         };
         _server.Error += (reason, handle) =>
         {
@@ -1134,10 +1134,53 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         using var response = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
 
+        await Until(() =>
+        {
+            return heard.Count == 1;
+        });
+        Assert.Equal([connectionHandle], heard);
+        Assert.Equal(1, Count("waitingExchanges"));
+        await _server.Send(new TransportMessage(answer, false), connectionHandle).WaitAsync(Patience, Cancelled);
+
         Assert.Equal(200, (int)response.StatusCode);
         Assert.Equal(answer, await BytesOf(response));
-        await answered!.WaitAsync(Patience, Cancelled);
         Assert.Equal([(thrown, connectionHandle)], errors);
+        Assert.Equal(0, Count("waitingExchanges"));
+        Assert.Equal([connectionHandle], _server.ConnectionHandles);
+        Assert.Empty(_closes);
+
+        using var second = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
+        await Until(() =>
+        {
+            return heard.Count == 2;
+        });
+        var shortAnswer = EnvelopeOf(EnvelopeKind.Result, (3, 1));
+
+        Assert.Equal([connectionHandle, connectionHandle], heard);
+        Assert.Equal(1, Count("waitingExchanges"));
+        await _server.Send(new TransportMessage(shortAnswer, false), connectionHandle).WaitAsync(Patience, Cancelled);
+        Assert.Equal(200, (int)second.StatusCode);
+        Assert.Equal(shortAnswer, await BytesOf(second));
+        Assert.Equal([(thrown, connectionHandle), (thrown, connectionHandle)], errors);
+        Assert.Equal(0, Count("waitingExchanges"));
+        Assert.Equal([connectionHandle], _server.ConnectionHandles);
+        Assert.Empty(_closes);
+
+        Task? answered = null;
+        var immediateAnswer = EnvelopeOf(EnvelopeKind.Result, (5, 3));
+
+        _server.Message += (_, handle) =>
+        {
+            answered = _server.Send(new TransportMessage(immediateAnswer, false), handle);
+        };
+
+        using var immediate = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 5)));
+
+        Assert.Equal(200, (int)immediate.StatusCode);
+        Assert.Equal(immediateAnswer, await BytesOf(immediate));
+        await answered!.WaitAsync(Patience, Cancelled);
+        Assert.Equal([connectionHandle, connectionHandle, connectionHandle], heard);
+        Assert.Equal([(thrown, connectionHandle), (thrown, connectionHandle), (thrown, connectionHandle)], errors);
         Assert.Equal(0, Count("waitingExchanges"));
         Assert.Equal([connectionHandle], _server.ConnectionHandles);
         Assert.Empty(_closes);
@@ -1457,6 +1500,13 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal((false, true), (_server.CarriesCredential("any"), _server.IsSecure("any")));
         Assert.Equal((false, true), (underTls.CarriesCredential("any"), underTls.IsSecure("any")));
         Assert.Equal((false, false), (unstarted.CarriesCredential("any"), unstarted.IsSecure("any")));
+
+        foreach (var tls in new[] { true, false })
+        {
+            await using var active = new HttpTransportServer(new HttpTransportServerOptions { Certificate = tls ? Certificate.Value : null });
+            await active.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled);
+            Assert.Equal((false, tls), (active.CarriesCredential("any"), active.IsSecure("any")));
+        }
     }
 
     [Fact]
@@ -1956,6 +2006,18 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             return new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["bead.test", "bead.test:8080"] });
         });
+        _ = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["bead.test:8080"] });
+        });
+        _ = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Hosts = ["bead.test", "*"] });
+        });
+        _ = Assert.Throws<ArgumentException>(() =>
+        {
+            return new HttpTransportServer(new HttpTransportServerOptions { Origins = ["https://bead.test/"] });
+        });
         var star = Assert.Throws<ArgumentException>(() =>
         {
             return new HttpTransportServer(new HttpTransportServerOptions { Origins = ["*"] });
@@ -2209,9 +2271,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         foreach (var field in new[]
         {
             ("authorization", "  Bearer x "),
+            ("authorization", $" {Bearer}"),
+            ("authorization", $"{Bearer}\t"),
             ("content-type", $"{HttpTransport.MediaType} "),
             ("origin", $" {Page}"),
+            ("origin", $"\t{Page}"),
             (HttpTransport.AfterHeader, "\t0"),
+            (HttpTransport.AfterHeader, " 0"),
+            (HttpTransport.AfterHeader, "0 "),
         })
         {
             (string, string)[] fields = field.Item1 == "content-type" ? [own, field] : [own, bead, field];
@@ -2222,13 +2289,19 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(
             [
                 ("authorization", new TlsAnswer(null, null, 0x1)),
+                ("authorization", new TlsAnswer(null, null, 0x1)),
+                ("authorization", new TlsAnswer(null, null, 0x1)),
                 ("content-type", new TlsAnswer(null, null, 0x1)),
                 ("origin", new TlsAnswer(null, null, 0x1)),
+                ("origin", new TlsAnswer(null, null, 0x1)),
+                (HttpTransport.AfterHeader, new TlsAnswer(null, null, 0x1)),
+                (HttpTransport.AfterHeader, new TlsAnswer(null, null, 0x1)),
                 (HttpTransport.AfterHeader, new TlsAnswer(null, null, 0x1)),
             ],
             answers);
         Assert.Empty(_refusals);
         Assert.Empty(_connections);
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of(own, bead, ("x-other", "a b")));
     }
 
     [Fact]
@@ -2243,6 +2316,9 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             throw thrown;
         };
+        var after = new ConcurrentQueue<TransportServerRefusal>();
+
+        _server.Refusal += after.Enqueue;
         _server.Error += (reason, connectionHandle) =>
         {
             errors.Enqueue((reason, connectionHandle));
@@ -2263,6 +2339,18 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             return refusal.Reason;
         }));
         Assert.Equal([(thrown, "")], errors);
+        Assert.Equal((404, HttpRefusals.Path), await RefusalOf(new HttpRequestMessage(HttpMethod.Post, new Uri(Url + "/other"))));
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(new string('A', 22), null)));
+        await Until(() =>
+        {
+            return errors.Count == 3;
+        });
+        Assert.Equal([HttpRefusals.Origin, HttpRefusals.Path, HttpRefusals.ConnectionUnknown], after.Select((refusal) =>
+        {
+            return refusal.Reason;
+        }));
+        Assert.Equal(_refusals.ToArray(), after.ToArray());
+        Assert.Equal([(thrown, ""), (thrown, ""), (thrown, "")], errors);
         Assert.NotEmpty((await Connect()).ConnectionToken);
     }
 
@@ -2444,37 +2532,42 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Listens_on_127_0_0_1_alone_where_the_IPv6_loopback_is_absent_and_reports_127_0_0_1()
     {
-        // its bind refused for want of the address, as in a container with IPv6 off
-        await using var server = new HttpTransportServer()
+        foreach (var code in new[] { SocketError.AddressNotAvailable, SocketError.AddressFamilyNotSupported })
         {
-            Loopback = new LoopbackBinding
+            // its bind refused for want of the address, as in a container with IPv6 off
+            await using var server = new HttpTransportServer()
             {
-                IPv6Refusal = (_) =>
+                Loopback = new LoopbackBinding
                 {
-                    return new SocketException((int)SocketError.AddressNotAvailable);
+                    IPv6Refusal = (_) =>
+                    {
+                        return new SocketException((int)code);
+                    },
                 },
-            },
-        };
-        var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
-        string[] hosts = ["127.0.0.1"];
+            };
+            var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
+            string[] hosts = ["127.0.0.1"];
 
-        Assert.Equal("127.0.0.1", bound.Address);
-        Assert.True(server.IsSecure("any"));
+            Assert.Equal("127.0.0.1", bound.Address);
+            Assert.True(server.IsSecure("any"));
 
-        using var racing = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback });
+            using var racing = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallback });
 
-        foreach (var host in hosts)
-        {
-            var authority = host.Contains(':', StringComparison.Ordinal) ? $"[{host}]:{bound.Port}" : $"{host}:{bound.Port}";
-            using var drew = await Fetch(racing, With(PostOf(new Uri($"http://{authority}/bead"), (null, null)), ("origin", $"http://{authority}")));
+            foreach (var host in hosts)
+            {
+                var authority = host.Contains(':', StringComparison.Ordinal) ? $"[{host}]:{bound.Port}" : $"{host}:{bound.Port}";
+                using var drew = await Fetch(racing, With(PostOf(new Uri($"http://{authority}/bead"), (null, null)), ("origin", $"http://{authority}")));
 
-            Assert.Equal((host, 201), (host, (int)drew.StatusCode));
-        }
+                Assert.Equal((host, 201), (host, (int)drew.StatusCode));
+            }
 
-        // the IPv6 loopback's port is left alone
-        if (Addresses.HasIPv6Loopback())
-        {
-            using var free = HeldOnIPv6(bound.Port);
+            // the IPv6 loopback's port is left alone
+            if (Addresses.HasIPv6Loopback())
+            {
+                using var free = HeldOnIPv6(bound.Port);
+            }
+            await server.Stop().WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Closed, server.ReadyState);
         }
     }
 
