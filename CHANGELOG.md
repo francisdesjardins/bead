@@ -88,6 +88,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript servers report a server not yet started as insecure unless its application says
+  otherwise or it has TLS, as the C# servers do.
 - The TypeScript HTTP server writes an answer that comes before its request's body is whole with
   `connection: close`, its connection closed in stages, as spec 15.12 states and the C# side does,
   where it kept the connection alive.
