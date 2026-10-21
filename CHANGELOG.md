@@ -34,6 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   side's service tests link a server and a client through it.
 - A joined server transport, on both sides: one server takes its connections from several
   transports, each handle its own transport's (spec 15.14, decision 0036).
+- Each side's bench measures calls in memory, and `exchange.*`: a connection drawn, called once and
+  closed, as a gateway draws one per HTTP exchange.
 
 ### Changed
 

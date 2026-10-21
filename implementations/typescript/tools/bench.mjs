@@ -44,6 +44,10 @@ const entry = `
   export { createWSServer } from './src/server/ws-server.ts';
   export { createHTTPClient } from './src/client/http-client.ts';
   export { createHTTPServer } from './src/server/http-server.ts';
+  export { createClient } from './src/client/client.ts';
+  export { createServer } from './src/server/server.ts';
+  export { createMemoryTransportClient } from './src/transport/client/memory-transport-client.ts';
+  export { createMemoryTransportServer } from './src/transport/server/memory-transport-server.ts';
   export { EnvelopeKind, SERVER_FAILURES } from './src/router/shared/constants.ts';
   export { readEnvelope, writeEnvelope } from './src/router/shared/envelope.ts';
   export { PAYLOAD_CODECS } from './src/router/shared/payloads.ts';
@@ -140,6 +144,14 @@ const startInterop = async () => {
   }
 };
 
+// A client of the in-memory transport to `server`'s, announced to no DevTools, as a gateway's is.
+const memoryClientOf = (reader, { limits, server }) => {
+  return reader.createClient(
+    { transport: reader.createMemoryTransportClient({ server: server.transport }) },
+    { devtools: false, limits }
+  );
+};
+
 const connect = async (reader, transport, settings = {}) => {
   const limits = settings.large
     ? {
@@ -155,18 +167,22 @@ const connect = async (reader, transport, settings = {}) => {
       server =
         transport === 'http'
           ? reader.createHTTPServer({ limits, transport: { createServer } })
-          : reader.createWSServer({
-              limits,
-              transport: { WebSocketServer: reader.WebSocketServer },
-            });
+          : transport === 'memory'
+            ? reader.createServer({ transport: reader.createMemoryTransportServer() }, { limits })
+            : reader.createWSServer({
+                limits,
+                transport: { WebSocketServer: reader.WebSocketServer },
+              });
       reader.offerInterop(server);
       ({ port } = await server.transport.start({ address: '127.0.0.1', findOpenPort: true }));
     }
     client =
       transport === 'http'
         ? reader.createHTTPClient({ limits })
-        : reader.createWSClient({ limits, transport: { WebSocket: reader.WebSocket } });
-    await client.connect({ host: '127.0.0.1', port });
+        : transport === 'memory'
+          ? memoryClientOf(reader, { limits, server })
+          : reader.createWSClient({ limits, transport: { WebSocket: reader.WebSocket } });
+    await client.connect(transport === 'memory' ? {} : { host: '127.0.0.1', port });
     return {
       client,
       server,
@@ -186,12 +202,11 @@ const connect = async (reader, transport, settings = {}) => {
   }
 };
 
-const calls = async (connection, dimensions) => {
+// * `callOf` gives what one measured call does: a call on a connection kept, or, as `exchange`, a
+// connection drawn, called once and closed, as a gateway does for each HTTP exchange.
+const calls = async (callOf, dimensions, { measure = 'call' } = {}) => {
   for (const sizeBytes of SIZES) {
-    const body = 'x'.repeat(sizeBytes);
-    const call = () => {
-      return connection.interop.echo(body)();
-    };
+    const call = callOf('x'.repeat(sizeBytes));
     const row = { ...dimensions, sizeBytes };
     for (let index = 0; index < 500; index++) {
       await call();
@@ -208,7 +223,7 @@ const calls = async (connection, dimensions) => {
       return a - b;
     });
     for (const share of [0.5, 0.95, 0.99]) {
-      record(`call.p${share * 100}`, percentile(durations, share), row);
+      record(`${measure}.p${share * 100}`, percentile(durations, share), row);
     }
 
     // * Account for reclaimed bytes as well as live heap growth, including transient objects.
@@ -238,9 +253,9 @@ const calls = async (connection, dimensions) => {
       }
       allocated += before - after;
     }
-    record('call.memory', allocated / MEMORY_CALLS, {
+    record(`${measure}.memory`, allocated / MEMORY_CALLS, {
       ...row,
-      unit: 'B/call',
+      unit: `B/${measure}`,
     });
 
     let done = 0;
@@ -249,9 +264,9 @@ const calls = async (connection, dimensions) => {
       await Promise.all(Array.from({ length: CONCURRENCY }, call));
       done += CONCURRENCY;
     }
-    record('call.throughput', (done * 1_000) / (performance.now() - started), {
+    record(`${measure}.throughput`, (done * 1_000) / (performance.now() - started), {
       ...row,
-      unit: 'calls/s',
+      unit: `${measure}s/s`,
     });
   }
 };
@@ -417,7 +432,14 @@ try {
               : undefined,
         });
         try {
-          await calls(connection, { scenario, transport });
+          await calls(
+            (body) => {
+              return () => {
+                return connection.interop.echo(body)();
+              };
+            },
+            { scenario, transport }
+          );
           if (scenario === 'local') {
             await notifications(connection, reader, { transport });
           }
@@ -431,6 +453,33 @@ try {
       } finally {
         await connection.close();
       }
+    }
+    // in memory: calls on one connection kept, against a connection drawn for each call
+    const connection = await connect(reader, 'memory');
+    try {
+      const dimensions = { scenario: 'local', transport: 'memory' };
+      await calls((body) => {
+        return () => {
+          return connection.interop.echo(body)();
+        };
+      }, dimensions);
+      await calls(
+        (body) => {
+          return async () => {
+            const client = memoryClientOf(reader, { server: connection.server });
+            try {
+              await client.connect({});
+              return await new reader.InteropClient(client).echo(body)();
+            } finally {
+              await client[Symbol.asyncDispose]();
+            }
+          };
+        },
+        dimensions,
+        { measure: 'exchange' }
+      );
+    } finally {
+      await connection.close();
     }
   }
   const result = {
@@ -463,6 +512,8 @@ try {
       transfer:
         '20 MiB JSON echo; websocket: chunks; http: whole envelope, 32 MiB limit; MiB/s counts both directions',
       interop: 'calls only; normal interop server launcher, Release configuration',
+      memoryTransport:
+        'local only: calls on one in-memory connection kept, and exchanges, each a client and its connection drawn, called once and closed',
     },
     measures: [...measures.values()].map((row) => {
       const sorted = row.samples.toSorted((a, b) => {

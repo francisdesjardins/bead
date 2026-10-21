@@ -421,19 +421,23 @@ and each large echo for one call. Longer phases give the runtimes more time to w
 `--json`, the report prints its environment and method, then each measure's median, minimum and
 maximum. Progress goes to stderr; JSON alone goes to stdout.
 
-| Layer         | Measure                                                    | Unit and scope                                                                     |
-| ------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                     |
-| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                          |
-| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP and WebSocket            |
-| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                     |
-| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes |
-| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                |
-| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                |
-| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                             |
+| Layer         | Measure                                                    | Unit and scope                                                                      |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                      |
+| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                           |
+| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP, WebSocket and in memory  |
+| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                      |
+| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes  |
+| Exchanges     | `exchange.p50`, `exchange.p95`, `exchange.p99`             | us per exchange in memory: a client and its connection drawn, one JSON echo, closed |
+| Exchanges     | `exchange.throughput`, `exchange.memory`                   | exchanges/s in batches of 32, and B/exchange over 2,000 sequential exchanges        |
+| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                 |
+| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                 |
+| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                              |
 
 Every call measure runs with client and server in the same process (`local`) and with the other
-language's interop server in a child process (`interop`), on each transport. The report's `side`
+language's interop server in a child process (`interop`), on each transport; in memory, locally
+alone, where each exchange draws a connection as a gateway draws one per HTTP exchange, against
+calls on one connection kept. The report's `side`
 names its client: `typescript` calls C# in `interop`, and `csharp` calls TypeScript. Codecs,
 notifications and large echoes run locally. The notification producer targets a 1 ms cadence,
 uses a credit window of 32 and gives every value its own place, with no replacement key. At each
