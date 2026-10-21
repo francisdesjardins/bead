@@ -138,6 +138,51 @@ public sealed class HttpTransportClientTests
         return new Answer { Status = 201, Headers = headers };
     }
 
+    // what a client tells as its connection ends, in order: each error by its type and its message,
+    // then its close
+    private static List<string> EndOf(HttpTransportClient client)
+    {
+        var told = new List<string>();
+
+        client.Error += (reason) =>
+        {
+            lock (told)
+            {
+                told.Add($"{reason.GetType().Name}: {reason.Message}");
+            }
+        };
+        client.Close += (wasClean, wasQuick) =>
+        {
+            lock (told)
+            {
+                told.Add($"close {wasClean} {wasQuick}");
+            }
+        };
+
+        return told;
+    }
+
+    // what it told so far
+    private static string[] Told(List<string> told)
+    {
+        lock (told)
+        {
+            return [.. told];
+        }
+    }
+
+    // an envelope past the client's bound, as its Error tells it, then its close
+    private static string[] PastOf(int maximumBodyBytes)
+    {
+        return [string.Create(CultureInfo.InvariantCulture, $"InvalidDataException: the connection is closed: an envelope past its maximumBodyBytes, {maximumBodyBytes} bytes"), "close False False"];
+    }
+
+    // a batch that does not read, as its Error tells it, then its close
+    private static string[] UnreadOf(string why)
+    {
+        return [$"InvalidDataException: the connection is closed: a batch that does not read, {why}", "close False False"];
+    }
+
     // a refusal the transport marks
     private static Answer RefusalOf(int status, string refusal)
     {
@@ -2662,6 +2707,90 @@ public sealed class HttpTransportClientTests
         Assert.Equal("1", (await atLimit.Fetch.CallOf(2)).After);
         Assert.Equal([largest], atLimit.Heard);
         await atLimit.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
+    }
+
+    // spec 15.1
+    [Fact]
+    public async Task Tells_an_envelope_past_maximumBodyBytes_an_answer_s_or_a_batch_s_on_error_before_its_close_naming_the_bound_and_its_value()
+    {
+        var toldOf = new List<string[]>();
+
+        foreach (var answer in new[]
+        {
+            new Answer { Status = 200, Body = new byte[17], Headers = new Dictionary<string, string> { ["content-length"] = "17", ["content-type"] = HttpTransport.MediaType } },
+            new Answer { Status = 200, Body = new byte[17], Headers = Bead },
+            // an answer of another type, a gateway's: its close alone
+            new Answer { Status = 200, Body = "<html>"u8.ToArray(), Headers = new Dictionary<string, string> { ["content-type"] = "text/html" } },
+        })
+        {
+            await using var faked = await ConnectFake(NotListening with { MaximumBodyBytes = 16 });
+            var told = EndOf(faked.Client);
+            var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+
+            (await faked.Fetch.CallOf(1)).Answer(answer);
+            await sending.WaitAsync(Patience, Cancelled);
+            await faked.Closed();
+            toldOf.Add(Told(told));
+        }
+
+        await using (var listening = await ConnectFake(ListeningOn(new FakeTimeProvider()) with { MaximumBodyBytes = 24 }))
+        {
+            var told = EndOf(listening.Client);
+
+            (await listening.Fetch.CallOf(1)).Answer(Batch(1) with { Body = [0, 0, 0, 25, .. new byte[25]] });
+            await listening.Closed();
+            toldOf.Add(Told(told));
+        }
+
+        Assert.Equal([PastOf(16), PastOf(16), ["close False False"], PastOf(24)], toldOf);
+    }
+
+    // spec 15.1
+    [Fact]
+    public async Task Tells_a_batch_that_does_not_read_on_error_before_its_close_saying_what_of_it_does_not_and_a_refusal_of_its_listen_by_its_close_alone()
+    {
+        var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+        var framed = BatchOf(envelope);
+        var answers = new[]
+        {
+            Batch(1, envelope) with { Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.BatchMediaType } },
+            Batch(1, envelope) with
+            {
+                Headers = new Dictionary<string, string> { ["content-type"] = HttpTransport.BatchMediaType, [HttpTransport.SequenceHeader] = "2" },
+            },
+            Batch(1) with { Body = [0, 0, 0, 0, .. framed] },
+            Batch(1) with { Body = [] },
+            Batch(1) with { IsBodiless = true },
+            Batch(1) with { Body = [.. framed, 0, 0] },
+            Batch(1) with { Body = [.. framed, .. framed[..6]] },
+            RefusalOf(409, HttpRefusals.ListenUndeclared),
+            RefusalOf(404, HttpRefusals.ConnectionUnknown),
+        };
+        var toldOf = new List<string[]>();
+
+        foreach (var answer in answers)
+        {
+            await using var faked = await ConnectFake(ListeningOn(new FakeTimeProvider()) with { MaximumBodyBytes = 24 });
+            var told = EndOf(faked.Client);
+
+            (await faked.Fetch.CallOf(1)).Answer(answer);
+            await faked.Closed();
+            toldOf.Add(Told(told));
+        }
+
+        Assert.Equal(
+            [
+                UnreadOf("its bead-sequence not 1"),
+                UnreadOf("its bead-sequence not 1"),
+                UnreadOf("an envelope of 0 bytes"),
+                UnreadOf("it holds no envelope"),
+                UnreadOf("it holds no envelope"),
+                UnreadOf("it ends within an envelope"),
+                UnreadOf("it ends within an envelope"),
+                ["close False False"],
+                ["close False False"],
+            ],
+            toldOf);
     }
 
     [Fact]

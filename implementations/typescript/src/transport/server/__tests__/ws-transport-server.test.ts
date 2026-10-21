@@ -18,6 +18,7 @@ import {
   host,
   IMPLEMENTATIONS,
   spyIntervals,
+  trapUncaught,
 } from '../../shared/__tests__/fixtures';
 import {
   ProgrammerError,
@@ -104,30 +105,6 @@ const closeCodeOf = (received: Buffer): number | undefined => {
   const frame = received.subarray(received.indexOf('\r\n\r\n') + 4);
 
   return frame[0] === 0x88 && frame.length >= 4 ? frame.readUInt16BE(2) : undefined;
-};
-
-// what a test's listeners throw meanwhile, which reaches Node as an uncaught exception: taken from
-// the runner's own listeners, which would fail the test, and given back to them once it ends
-const trapUncaught = (): Disposable & { thrown: unknown[] } => {
-  const thrown: unknown[] = [];
-  const runners = process.rawListeners('uncaughtException');
-  const trap = (error: unknown): void => {
-    thrown.push(error);
-  };
-
-  process.removeAllListeners('uncaughtException');
-  process.on('uncaughtException', trap);
-
-  return {
-    thrown,
-    [Symbol.dispose]: () => {
-      process.off('uncaughtException', trap);
-
-      for (const runner of runners) {
-        process.on('uncaughtException', runner as (error: Error) => void);
-      }
-    },
-  };
 };
 
 const upgradeRequest = () => {

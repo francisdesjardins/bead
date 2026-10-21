@@ -224,7 +224,10 @@ export type TransportClientEventMap = {
   close: [wasClean: boolean, wasQuick: boolean];
   /**
    * What a listener of its `message`, its `close` or its `reconnect` threw, which changes nothing the
-   * client does. A failure of the connection itself shows as `connect` rejecting, or as `close`.
+   * client does; and, once open, what the client closes its connection for of its own — a protocol
+   * error, a message or an envelope past its bound, a batch that does not read — once, as the
+   * connection ends, before its `close` (spec 15.1). A connect that fails rejects; a server or a
+   * network that ends the connection shows as `close` alone.
    */
   error: [error: Error];
   /**
@@ -369,7 +372,8 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
   heartbeat?: number | undefined;
   /**
    * The largest message it reads, in bytes, where its `WebSocket` takes a bound — `ws`'s, which
-   * closes a connection that sends a larger one with 1009; the global `WebSocket` takes none, its
+   * closes a connection that sends a larger one with 1009, told on `error` naming it and its value;
+   * the global `WebSocket` takes none, its
    * platform's bound applying. Defaults to {@link MAXIMUM_MESSAGE_BYTES}, the default envelope's
    * limit: a router whose `maximumEnvelopeBytes` is raised needs it raised alike, as
    * `createWSClient` does.
@@ -455,9 +459,9 @@ export interface IHTTPTransportClientOptions extends ITransportClientOptions {
    */
   isListening?: boolean | undefined;
   /**
-   * The largest answer taken, in bytes: an envelope's limit; one past it loses the connection. It is
-   * checked once the answer is read, and it bounds each envelope a listen brings back, alone, as it
-   * comes. Defaults to {@link MAXIMUM_BODY_BYTES}.
+   * The largest answer taken, in bytes: an envelope's limit; one past it closes the connection, told
+   * on `error` first, naming it and its value. It is checked once the answer is read, and it bounds
+   * each envelope a listen brings back, alone, as it comes. Defaults to {@link MAXIMUM_BODY_BYTES}.
    */
   maximumBodyBytes?: number | undefined;
   /**
