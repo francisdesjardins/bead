@@ -354,6 +354,11 @@ public sealed class HostsAndOriginsTests
             Assert.Equal("Hosts", refused.ParamName);
             Assert.Contains($"\"{refusal.Entry}\"", refused.Message, StringComparison.Ordinal);
         });
+
+        Assert.Contains("bead.test, not bead.test:8080", Assert.Throws<ArgumentException>(() =>
+        {
+            HostsAndOrigins.AssertHosts(["bead.test:8080"], "Hosts");
+        }).Message, StringComparison.Ordinal);
     }
 
     // spec 15.12
