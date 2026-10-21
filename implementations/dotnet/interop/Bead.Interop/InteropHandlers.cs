@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Bead.Protobuf;
 
 namespace Bead.Interop;
 
@@ -7,7 +8,8 @@ namespace Bead.Interop;
 /// The resolvers of Bead's interop service, its API <c>spec/interop-blueprint.json</c>, generated
 /// into <c>Generated/InteropBead.cs</c>, and its behaviour <c>spec/interop-service.json</c>, as the
 /// C# side answers them: what a client of any implementation calls, and what
-/// <c>spec/conversations.json</c> plays against. Only the resolvers and the hook are written here.
+/// <c>spec/conversations.json</c> plays against. Only the resolvers, the hook and the rules of
+/// <c>checked</c> are written here.
 /// </summary>
 public static class InteropHandlers
 {
@@ -17,6 +19,33 @@ public static class InteropHandlers
     private const string Question = "What time is it where you are?";
 
     private static readonly TimeSpan ClockTimeout = TimeSpan.FromSeconds(10);
+
+    // checked's rules, as interop-service.json states them: 50 names at most, each of 1 to 3
+    // characters, their sites as section 18 writes them
+    private const int MostNames = 50;
+    private const int FewestCharacters = 1;
+    private const int MostCharacters = 3;
+
+    private static readonly ViolationRule NamesRequired = new() { RuleId = "required", Message = "value is required" };
+
+    private static readonly ViolationRule MaxItems =
+        new() { RuleId = "repeated.max_items", Message = "must contain no more than 50 item(s)", Bounds = Validators.BoundsOf("{\"max_items\":\"50\"}") };
+
+    private static readonly ViolationRule MinLen =
+        new() { RuleId = "string.min_len", Message = "must be at least 1 characters", Bounds = Validators.BoundsOf("{\"min_len\":\"1\"}") };
+
+    private static readonly ViolationRule MaxLen =
+        new() { RuleId = "string.max_len", Message = "must be at most 3 characters", Bounds = Validators.BoundsOf("{\"max_len\":\"3\"}") };
+
+    // checked's validator, its rules judged into a sink as a generated one's are: the violations a
+    // detail of its bound carries, the rest counted
+    private static readonly RequestValidator<JsonElement> CheckedValidator = Validators.Of<JsonElement>(JudgeChecked);
+
+    // * checked, its descriptor made again from the generated one with its rules: the blueprint binds
+    // json, whose rules are a function its side is given (spec 18.1)
+    private static readonly RequestProcedure<InteropProcedures, JsonElement, JsonElement, NoFailure> Checked = new(
+        InteropProcedures.Checked.Procedure,
+        InteropProcedures.Checked.Bindings with { Validate = CheckedRules });
 
     // helpers
 
@@ -77,6 +106,85 @@ public static class InteropHandlers
             ["id"] => new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = StringOf("id") },
             _ => throw new ArgumentException("endSession names a credential's session by {issuer, sub}, {issuer, sid} or {id}", nameof(request)),
         };
+    }
+
+    // the names checked is given: an object holding names, an array of strings, its other members
+    // aside; none for anything else
+    private static List<string>? NamesOf(JsonElement request)
+    {
+        if (request.ValueKind != JsonValueKind.Object
+            || !request.TryGetProperty("names", out var names)
+            || names.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var held = new List<string>(names.GetArrayLength());
+
+        foreach (var name in names.EnumerateArray())
+        {
+            if (name.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            held.Add(name.GetString()!);
+        }
+
+        return held;
+    }
+
+    /// <summary>
+    /// The rules of <c>checked</c>, by hand, as section 18 judges a request's: <c>names</c> holds 50
+    /// items at most, then each item 1 character at least and 3 at most, counted as code points; a
+    /// request that is no such object breaks <c>required</c> at <c>names</c>, alone. A judging under
+    /// failFast stops at its first violation.
+    /// </summary>
+    internal static Judged CheckedRules(JsonElement request, ValidateOptions options)
+    {
+        return CheckedValidator(request, options);
+    }
+
+    // checked's rules into its sink, in 18.5's order: names' own, then each name's
+    private static bool JudgeChecked(JsonElement request, IViolationSink sink)
+    {
+        var names = NamesOf(request);
+
+        sink.Enter("names");
+
+        if (names is null)
+        {
+            return sink.Add(NamesRequired, request);
+        }
+
+        if (names.Count > MostNames && sink.Add(MaxItems, names))
+        {
+            return true;
+        }
+
+        sink.Leave();
+
+        for (var index = 0; index < names.Count; index += 1)
+        {
+            var name = names[index];
+            var length = Validators.CodePointLength(name);
+
+            sink.EnterIndex("names", index);
+
+            if (length < FewestCharacters && sink.Add(MinLen, name))
+            {
+                return true;
+            }
+
+            if (length > MostCharacters && sink.Add(MaxLen, name))
+            {
+                return true;
+            }
+
+            sink.Leave();
+        }
+
+        return false;
     }
 
     // the issuer endSessionsOf takes: an object of this member alone, a string — {"issuer"}
@@ -414,7 +522,17 @@ public static class InteropHandlers
             await response.Answer(Null);
         });
 
+        // * checked is served with its rules by a server side of its own, since the generated one
+        // holds the descriptors its blueprint gave; its resolver counts the names its rules took
+        var judging = new ServiceServer<InteropProcedures, string>([Checked]);
+
+        judging.On(Checked, (request, response) =>
+        {
+            return response.Answer(JsonSerializer.SerializeToElement(NamesOf(request.Payload)!.Count));
+        });
+
         interop.Offer(server);
+        judging.Offer(server);
 
         return interop;
     }

@@ -1,0 +1,306 @@
+// The messages spec/validations.json judges, their rules protovalidate's, written with the verdicts
+// by spec/generators/make_validations.py: regenerate, never edit (spec section 18, decision 0035).
+edition = "2023";
+
+package bead.validations.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+import "google/protobuf/wrappers.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// Each message bound as a request, so that beadc generates each side's validators for it.
+service ValidationsService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  // Judges a Numbers, and answers nothing more.
+  rpc JudgeNumbers(Numbers) returns (Taken) {
+    option (bead.procedure) = {id: 1};
+  }
+
+  // Judges a Floats, and answers nothing more.
+  rpc JudgeFloats(Floats) returns (Taken) {
+    option (bead.procedure) = {id: 2};
+  }
+
+  // Judges a Strings, and answers nothing more.
+  rpc JudgeStrings(Strings) returns (Taken) {
+    option (bead.procedure) = {id: 3};
+  }
+
+  // Judges a Bytes, and answers nothing more.
+  rpc JudgeBytes(Bytes) returns (Taken) {
+    option (bead.procedure) = {id: 4};
+  }
+
+  // Judges a Enums, and answers nothing more.
+  rpc JudgeEnums(Enums) returns (Taken) {
+    option (bead.procedure) = {id: 5};
+  }
+
+  // Judges a Repeated, and answers nothing more.
+  rpc JudgeRepeated(Repeated) returns (Taken) {
+    option (bead.procedure) = {id: 6};
+  }
+
+  // Judges a Maps, and answers nothing more.
+  rpc JudgeMaps(Maps) returns (Taken) {
+    option (bead.procedure) = {id: 7};
+  }
+
+  // Judges a Presence, and answers nothing more.
+  rpc JudgePresence(Presence) returns (Taken) {
+    option (bead.procedure) = {id: 8};
+  }
+
+  // Judges a Wrappers, and answers nothing more.
+  rpc JudgeWrappers(Wrappers) returns (Taken) {
+    option (bead.procedure) = {id: 9};
+  }
+
+  // Judges a Oneofs, and answers nothing more.
+  rpc JudgeOneofs(Oneofs) returns (Taken) {
+    option (bead.procedure) = {id: 10};
+  }
+
+  // Judges a Nested, and answers nothing more.
+  rpc JudgeNested(Nested) returns (Taken) {
+    option (bead.procedure) = {id: 11};
+  }
+
+  // Judges a Order, and answers nothing more.
+  rpc JudgeOrder(Order) returns (Taken) {
+    option (bead.procedure) = {id: 12};
+  }
+
+  // Judges a Patterns, and answers nothing more.
+  rpc JudgePatterns(Patterns) returns (Taken) {
+    option (bead.procedure) = {id: 13};
+  }
+}
+
+// What a procedure answers a request its rules take: nothing.
+message Taken {}
+
+// A colour, by its number, the enum the rules on an enum judge.
+enum Colour {
+  COLOUR_UNSPECIFIED = 0;
+  COLOUR_RED = 1;
+  COLOUR_GREEN = 2;
+}
+
+// A message the others hold: its name, one character at least.
+message Inner {
+  string name = 1 [features.field_presence = IMPLICIT, (buf.validate.field) = {string: {min_len: 1}}];
+}
+
+// A message whose own rule allows one of two fields, judged after its fields.
+message Pair {
+  option (buf.validate.message) = {oneof: [{fields: ["left", "right"]}]};
+  string label = 1 [features.field_presence = IMPLICIT, (buf.validate.field) = {string: {min_len: 1}}];
+  string left = 2;
+  string right = 3;
+}
+
+// The ten integer types and bool: each bound alone, each range, a range given reversed, const, in and not_in.
+message Numbers {
+  int32 at_most_ten = 1 [(buf.validate.field) = {int32: {lte: 10}}];
+  int32 below_ten = 2 [(buf.validate.field) = {int32: {lt: 10}}];
+  int32 above_zero = 3 [(buf.validate.field) = {int32: {gt: 0}}];
+  int32 at_least_one = 4 [(buf.validate.field) = {int32: {gte: 1}}];
+  int32 between = 5 [(buf.validate.field) = {int32: {gt: 0 lt: 10}}];
+  int32 outside = 6 [(buf.validate.field) = {int32: {gt: 10 lt: 5}}];
+  int32 within = 7 [(buf.validate.field) = {int32: {gte: 0 lte: 10}}];
+  int32 exactly = 8 [(buf.validate.field) = {int32: {const: 3}}];
+  int32 listed = 9 [(buf.validate.field) = {int32: {in: [1, 2, 3]}}];
+  int32 unlisted = 10 [(buf.validate.field) = {int32: {not_in: [0, 13]}}];
+  int64 wide = 11 [(buf.validate.field) = {int64: {lt: -9007199254740993}}];
+  uint64 unsigned_wide = 12 [(buf.validate.field) = {uint64: {in: [1, 2, 18446744073709551615]}}];
+  uint32 unsigned = 13 [(buf.validate.field) = {uint32: {gte: 1 lt: 4294967295}}];
+  sint32 zigzag = 14 [(buf.validate.field) = {sint32: {gt: -1}}];
+  sint64 zigzag_wide = 15 [(buf.validate.field) = {sint64: {gte: -5 lte: 5}}];
+  fixed32 fixed = 16 [(buf.validate.field) = {fixed32: {lte: 100}}];
+  fixed64 fixed_wide = 17 [(buf.validate.field) = {fixed64: {gt: 9007199254740992}}];
+  sfixed32 signed_fixed = 18 [(buf.validate.field) = {sfixed32: {gte: 10 lt: 0}}];
+  sfixed64 signed_fixed_wide = 19 [(buf.validate.field) = {sfixed64: {gt: 10 lte: 0}}];
+  int64 above_to = 20 [(buf.validate.field) = {int64: {gt: 0 lte: 100}}];
+  uint64 outside_wide = 21 [(buf.validate.field) = {uint64: {gte: 10 lte: 5}}];
+  bool truth = 22 [(buf.validate.field) = {bool: {const: true}}];
+  int32 sampled = 23 [(buf.validate.field) = {int32: {gt: 0 example: [5]}}];
+  int32 ranged_listed = 24 [(buf.validate.field) = {int32: {gt: 0 in: [5, 7]}}];
+}
+
+// A float and a double: a float at its bound, NaN and the infinities, -0.0, bounds not finite, a range given reversed.
+message Floats {
+  float above_tenth = 1 [(buf.validate.field) = {float: {gt: 0.1}}];
+  double unit = 2 [(buf.validate.field) = {double: {gte: 0 lte: 1}}];
+  double real = 3 [(buf.validate.field) = {double: {finite: true}}];
+  double listed = 4 [(buf.validate.field) = {double: {in: [-inf, 1]}}];
+  float beyond = 5 [(buf.validate.field) = {float: {gt: inf}}];
+  double exactly = 6 [(buf.validate.field) = {double: {const: 0.30000000000000004}}];
+  double outside = 7 [(buf.validate.field) = {double: {gt: 1 lt: -1}}];
+  float unlisted = 8 [(buf.validate.field) = {float: {not_in: [0]}}];
+  double below_large = 9 [(buf.validate.field) = {double: {lt: 1e+21}}];
+  float real_float = 10 [(buf.validate.field) = {float: {finite: true gte: 0}}];
+}
+
+// Each rule on a string, lengths in code points and in UTF-8 bytes, and the orders where readings part.
+message Strings {
+  string exactly = 1 [(buf.validate.field) = {string: {const: "a\"b"}}];
+  string three = 2 [(buf.validate.field) = {string: {len: 3}}];
+  string short = 3 [(buf.validate.field) = {string: {min_len: 1 max_len: 3}}];
+  string four_bytes = 4 [(buf.validate.field) = {string: {len_bytes: 4}}];
+  string few_bytes = 5 [(buf.validate.field) = {string: {min_bytes: 2 max_bytes: 3}}];
+  string lower = 6 [(buf.validate.field) = {string: {pattern: "^[a-z]+$"}}];
+  string prefixed = 7 [(buf.validate.field) = {string: {prefix: "bead:"}}];
+  string suffixed = 8 [(buf.validate.field) = {string: {suffix: ".v1"}}];
+  string containing = 9 [(buf.validate.field) = {string: {contains: "@"}}];
+  string excluding = 10 [(buf.validate.field) = {string: {not_contains: "--"}}];
+  string listed = 11 [(buf.validate.field) = {string: {in: ["a", "b"]}}];
+  string unlisted = 12 [(buf.validate.field) = {string: {not_in: ["root"]}}];
+  string lengths = 13 [(buf.validate.field) = {string: {pattern: "^[a-z]+$" len: 4}}];
+  string byte_lengths = 14 [(buf.validate.field) = {string: {prefix: "x" len_bytes: 4}}];
+  string excluded_listed = 15 [(buf.validate.field) = {string: {in: ["a--", "b"] not_contains: "--"}}];
+}
+
+// Each rule on bytes, its words in hexadecimal, its bounds in base64.
+message Bytes {
+  bytes exactly = 1 [(buf.validate.field) = {bytes: {const: "\000\377"}}];
+  bytes four = 2 [(buf.validate.field) = {bytes: {len: 4}}];
+  bytes few = 3 [(buf.validate.field) = {bytes: {min_len: 2 max_len: 3}}];
+  bytes png = 4 [(buf.validate.field) = {bytes: {prefix: "\211PNG"}}];
+  bytes terminated = 5 [(buf.validate.field) = {bytes: {suffix: "\000"}}];
+  bytes marked = 6 [(buf.validate.field) = {bytes: {contains: "\376"}}];
+  bytes lengths = 7 [(buf.validate.field) = {bytes: {prefix: "PK" len: 8}}];
+}
+
+// Each rule on an enum, a number its enum does not declare among them.
+message Enums {
+  Colour defined = 1 [(buf.validate.field) = {enum: {defined_only: true}}];
+  Colour exactly = 2 [(buf.validate.field) = {enum: {const: 2}}];
+  Colour listed = 3 [(buf.validate.field) = {enum: {in: [1]}}];
+  Colour unlisted = 4 [(buf.validate.field) = {enum: {not_in: [0]}}];
+  Colour checked = 5 [(buf.validate.field) = {enum: {defined_only: true in: [1, 2]}}];
+}
+
+// A repeated field's counts, its unique items, the rules of its items, and the messages it holds.
+message Repeated {
+  repeated string names = 1 [(buf.validate.field) = {repeated: {min_items: 1 max_items: 3 items: {string: {min_len: 1}}}}];
+  repeated int32 distinct = 2 [(buf.validate.field) = {repeated: {unique: true}}];
+  repeated double reals = 3 [(buf.validate.field) = {repeated: {unique: true}}];
+  repeated string words = 4 [(buf.validate.field) = {repeated: {unique: true}}];
+  repeated Inner inners = 5;
+  repeated string many = 6 [(buf.validate.field) = {repeated: {items: {string: {min_len: 1}}}}];
+  repeated Colour colours = 7 [(buf.validate.field) = {repeated: {unique: true items: {enum: {defined_only: true}}}}];
+}
+
+// A map's counts, its keys' and its values' rules, entries judged by key, and keys of every type.
+message Maps {
+  map<string, int32> labels = 1 [(buf.validate.field) = {map: {min_pairs: 1 max_pairs: 2 keys: {string: {min_len: 2}} values: {int32: {gte: 0}}}}];
+  map<int32, Inner> by_id = 2;
+  map<bool, string> flags = 3 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<string, string> by_text = 4 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<int64, string> by_int64 = 5 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<uint32, string> by_uint32 = 6 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<uint64, string> by_uint64 = 7 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<sint32, string> by_sint32 = 8 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<sint64, string> by_sint64 = 9 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<fixed32, string> by_fixed32 = 10 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<fixed64, string> by_fixed64 = 11 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<sfixed32, string> by_sfixed32 = 12 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<sfixed64, string> by_sfixed64 = 13 [(buf.validate.field) = {map: {values: {string: {min_len: 1}}}}];
+  map<string, int32> keyed = 14 [(buf.validate.field) = {map: {keys: {string: {max_len: 1}}}}];
+}
+
+// Explicit and implicit presence, required each way, and each ignore.
+message Presence {
+  string explicit = 1 [(buf.validate.field) = {string: {min_len: 1}}];
+  string implicit = 2 [features.field_presence = IMPLICIT, (buf.validate.field) = {string: {min_len: 1}}];
+  string needed = 3 [(buf.validate.field) = {required: true}];
+  int32 needed_implicit = 4 [features.field_presence = IMPLICIT, (buf.validate.field) = {required: true}];
+  repeated string needed_items = 5 [(buf.validate.field) = {required: true}];
+  int32 skipped_zero = 6 [features.field_presence = IMPLICIT, (buf.validate.field) = {ignore: IGNORE_IF_ZERO_VALUE int32: {gt: 5}}];
+  Inner inner = 9 [(buf.validate.field) = {required: true}];
+  Inner ignored_inner = 10 [(buf.validate.field) = {ignore: IGNORE_ALWAYS}];
+  map<string, string> needed_pairs = 11 [(buf.validate.field) = {required: true}];
+  repeated string some_items = 12 [(buf.validate.field) = {ignore: IGNORE_IF_ZERO_VALUE repeated: {min_items: 2}}];
+  map<string, string> some_pairs = 13 [(buf.validate.field) = {ignore: IGNORE_IF_ZERO_VALUE map: {min_pairs: 2}}];
+}
+
+// Each wrapper, its scalar's rules judged on its value once set, required while unset.
+message Wrappers {
+  google.protobuf.Int32Value count = 1 [(buf.validate.field) = {int32: {gt: 0}}];
+  google.protobuf.StringValue title = 2 [(buf.validate.field) = {required: true string: {min_len: 1}}];
+  google.protobuf.DoubleValue ratio = 3 [(buf.validate.field) = {double: {finite: true}}];
+  google.protobuf.UInt64Value size = 4 [(buf.validate.field) = {uint64: {lte: 10}}];
+  google.protobuf.BoolValue flag = 5 [(buf.validate.field) = {bool: {const: true}}];
+  google.protobuf.BytesValue blob = 6 [(buf.validate.field) = {bytes: {min_len: 1}}];
+  google.protobuf.FloatValue weight = 7 [(buf.validate.field) = {float: {gt: 0}}];
+  google.protobuf.Int64Value offset = 8 [(buf.validate.field) = {int64: {gte: -9007199254740993}}];
+  google.protobuf.UInt32Value port = 9 [(buf.validate.field) = {uint32: {lte: 65535}}];
+}
+
+// A oneof required, a member's own rule, and the message's own oneof rules.
+message Oneofs {
+  option (buf.validate.message) = {oneof: [{fields: ["x", "y"]}, {fields: ["p", "q"] required: true}]};
+  oneof choice {
+    option (buf.validate.oneof).required = true;
+    string name = 1 [(buf.validate.field) = {string: {min_len: 1}}];
+    int32 id = 2 [(buf.validate.field) = {int32: {gt: 0}}];
+  }
+  string x = 3 [features.field_presence = IMPLICIT, (buf.validate.field) = {string: {min_len: 3}}];
+  string y = 4 [features.field_presence = IMPLICIT];
+  string p = 5;
+  string q = 6;
+}
+
+// Messages held: one, a repeated one, a map of them, and a message with its own rule, its fields before it.
+message Nested {
+  Inner inner = 1;
+  Pair pair = 2;
+  repeated Pair pairs = 3;
+  Nested deep = 4;
+}
+
+// Fields declared out of their numbers: judged by their numbers, the message's own rules after them.
+message Order {
+  option (buf.validate.message) = {oneof: [{fields: ["p", "q"] required: true}]};
+  string late = 9 [(buf.validate.field) = {string: {min_len: 1}}];
+  int32 early = 2 [(buf.validate.field) = {int32: {gt: 5}}];
+  Inner inner = 1;
+  oneof choice {
+    option (buf.validate.oneof).required = true;
+    string x = 3;
+    string y = 4;
+  }
+  string p = 5;
+  string q = 6;
+}
+
+// Patterns in RE2's syntax: what each character class takes, the anchors, case folding, the classes of Unicode 17.0.0, and inputs a backtracking engine never ends.
+message Patterns {
+  string any = 1 [(buf.validate.field) = {string: {pattern: "^.$"}}];
+  string space = 2 [(buf.validate.field) = {string: {pattern: "^\\s$"}}];
+  string digit = 3 [(buf.validate.field) = {string: {pattern: "^\\d$"}}];
+  string kelvin = 4 [(buf.validate.field) = {string: {pattern: "(?i)^k$"}}];
+  string ends = 5 [(buf.validate.field) = {string: {pattern: "^a$"}}];
+  string word_end = 6 [(buf.validate.field) = {string: {pattern: "a\\b"}}];
+  string anywhere = 7 [(buf.validate.field) = {string: {pattern: "b"}}];
+  string not_a = 8 [(buf.validate.field) = {string: {pattern: "^[^a]$"}}];
+  string nested = 9 [(buf.validate.field) = {string: {pattern: "^(a+)+$"}}];
+  string counted = 10 [(buf.validate.field) = {string: {pattern: "[a-z]{1,1000}[0-9]"}}];
+  string letter = 11 [(buf.validate.field) = {string: {pattern: "^\\pL$"}}];
+  string greek = 12 [(buf.validate.field) = {string: {pattern: "^\\p{Greek}+$"}}];
+  string person = 13 [(buf.validate.field) = {string: {pattern: "^\\p{L}[\\p{L}\\p{M} '-]{0,63}$"}}];
+  string lines = 14 [(buf.validate.field) = {string: {pattern: "(?m)^ok$"}}];
+  string word = 15 [(buf.validate.field) = {string: {pattern: "^\\w+$"}}];
+  string long = 16 [(buf.validate.field) = {string: {pattern: "^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$"}}];
+}

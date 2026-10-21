@@ -174,9 +174,13 @@
           "xunit.v3.runner.common": "[4.0.2]"
         }
       },
+      "bead.core": {
+        "type": "Project"
+      },
       "bead.protobuf": {
         "type": "Project",
         "dependencies": {
+          "Bead.Core": "[0.6.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       }

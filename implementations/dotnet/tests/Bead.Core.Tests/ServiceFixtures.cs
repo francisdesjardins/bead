@@ -65,6 +65,82 @@ public sealed class GreeterProcedures
     }
 }
 
+/// <summary>
+/// The checked service, 8, each procedure's request held to one rule, by hand: a string of one
+/// character at least, <c>string.min_len</c>, as section 18 words it. A request, one that notifies,
+/// and a command; the service layer's tests judge each before its resolver, and before it goes.
+/// </summary>
+public sealed class CheckedProcedures
+{
+    private CheckedProcedures()
+    {
+    }
+
+    /// <summary>The detail a request its rule refuses is answered with (spec 18.6).</summary>
+    public const string Detail = "{\"bounds\":{\"min_len\":\"1\"},\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}";
+
+    /// <summary>The rule, its value one character at least: none for any other.</summary>
+    public static RequestValidator<string> NotEmpty { get; } = (request, options) =>
+    {
+        return request.Length > 0
+            ? Judged.None
+            : new Judged
+            {
+                Stopped = options.FailFast,
+                Violations = [new Violation { Bounds = MinLen, Message = "must be at least 1 characters", RuleId = "string.min_len", Value = request }],
+            };
+    };
+
+    /// <summary>A request.</summary>
+    public static RequestProcedure<CheckedProcedures, string, string, NoFailure> Echo { get; } = new(ProcedureOf(1, "echo"), BindingsOf(NotEmpty));
+
+    /// <summary>A request that notifies.</summary>
+    public static RequestProcedure<CheckedProcedures, string, string, string, NoFailure> News { get; } = new(
+        ProcedureOf(2, "news"),
+        new ProcedureBindings<string, string, string>
+        {
+            Admission = AdmissionRule.None,
+            Notification = PayloadCodecs.Text,
+            Request = PayloadCodecs.Text,
+            Result = PayloadCodecs.Text,
+            Validate = NotEmpty,
+        });
+
+    /// <summary>A command, which a client answers.</summary>
+    public static CommandProcedure<CheckedProcedures, string, string, NoFailure> Shout { get; } = new(ProcedureOf(3, "shout"), BindingsOf(NotEmpty));
+
+    /// <summary>Every procedure of the service.</summary>
+    public static IReadOnlyList<IServiceProcedure<CheckedProcedures>> All { get; } = [Echo, News, Shout];
+
+    private static System.Text.Json.JsonElement MinLen { get; } = Bead.Protobuf.Validators.BoundsOf("{\"min_len\":\"1\"}");
+
+    /// <summary>A text procedure's bindings, judged by <paramref name="validate"/>.</summary>
+    public static ProcedureBindings<string, string> BindingsOf(RequestValidator<string> validate)
+    {
+        return new ProcedureBindings<string, string>
+        {
+            Admission = AdmissionRule.None,
+            Request = PayloadCodecs.Text,
+            Result = PayloadCodecs.Text,
+            Validate = validate,
+        };
+    }
+
+    private static Procedure ProcedureOf(ushort procedureId, string procedureName)
+    {
+        return new Procedure { ServiceId = 8, ProcedureId = procedureId, ProcedureName = procedureName, ServiceRevision = 1 };
+    }
+}
+
+/// <summary>The checked service's hooks: none, its options' record.</summary>
+public sealed class CheckedAdmissions : IServiceAdmissions<CheckedProcedures>
+{
+    IReadOnlyDictionary<string, AdmissionHook> IServiceAdmissions<CheckedProcedures>.ToDictionary()
+    {
+        return new Dictionary<string, AdmissionHook>();
+    }
+}
+
 /// <summary>The greeter's hooks, as generated code writes them: <c>loud</c>, required.</summary>
 public sealed class GreeterAdmissions : IServiceAdmissions<GreeterProcedures>
 {
@@ -268,6 +344,14 @@ internal sealed class InterceptingRouter(IRouterLike router) : IRouterLike
         get
         {
             return router.Clock;
+        }
+    }
+
+    public int DetailBytes
+    {
+        get
+        {
+            return router.DetailBytes;
         }
     }
 

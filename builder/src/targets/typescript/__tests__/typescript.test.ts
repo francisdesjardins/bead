@@ -43,7 +43,7 @@ const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
 const INTEROP_OPTIONS: ITypeScriptOptions = {
   importExtension: 'none',
   runtime: '../../src/service/service',
-  protoRuntime: '../../src/proto/records',
+  protoRuntime: '../../src/proto/proto',
   messages: Messages.GENERATE,
 };
 
@@ -295,7 +295,7 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('export class CommentsServer<Data = unknown> {');
   expect(content).toContain('export class OtherServer<Data = unknown> {');
-  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_3;/gu)).toHaveLength(1);
+  expect(content.match(/GENERATED_CODE_SUPPORTS_VERSION_4;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
 });
 
@@ -329,7 +329,7 @@ test("the codec a target writes checks a payload's records by its message's desc
         'bead/messages/v1/messages_bead.ts'
       )
     ).toContain(
-      `import { checkProtoRecords } from "../../../../../src/proto/records${extension}";\n`
+      `import { checkProtoRecords } from "../../../../../src/proto/proto${extension}";\n`
     );
   }
 

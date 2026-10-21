@@ -11,8 +11,8 @@ public sealed partial class ServiceManager
         }
     }
 
-    // what a resolver is made of: its procedure, its serializer, its admission, its callback, and
-    // what its calls are
+    // what a resolver is made of: its procedure, its serializer, its admission, the rules its
+    // requests are judged by, its callback, and what its calls are
     private sealed record ResolverMade<TRequest, TResponse>
     {
         internal required Procedure Procedure { get; init; }
@@ -21,21 +21,37 @@ public sealed partial class ServiceManager
 
         internal BeforeRequest? BeforeRequest { get; init; }
 
+        internal (RequestValidator<TRequest>? Validate, bool FailFast) Judging { get; init; }
+
         internal required Func<RequestProps<TRequest>, INotificationResponse<TResponse>, Task> Callback { get; init; }
 
         internal required DebugType Type { get; init; }
     }
 
     // the resolver of one procedure, registered in the router
-    private sealed class Resolver<TRequest, TResponse>(ServiceTrace trace, (IRouterLike Router, ResolverMade<TRequest, TResponse> Made) made) : IRequestResolver
+    private sealed class Resolver<TRequest, TResponse> : IRequestResolver
     {
-        private readonly IRouterLike _router = made.Router;
+        private readonly ServiceTrace _trace;
+        private readonly IRouterLike _router;
+        private readonly ResolverMade<TRequest, TResponse> _made;
+
+        // * what a request decoded is handed to: its callback, or, where it has rules, their
+        // judging first, so a procedure without them takes no step and no field more
+        private readonly Func<RequestProps<TRequest>, INotificationResponse<TResponse>, Task> _callback;
+
+        internal Resolver(ServiceTrace trace, (IRouterLike Router, ResolverMade<TRequest, TResponse> Made) made)
+        {
+            _trace = trace;
+            _router = made.Router;
+            _made = made.Made;
+            _callback = _made.Judging.Validate is { } validate ? JudgedBefore(validate, _made.Callback) : _made.Callback;
+        }
 
         public Procedure Procedure
         {
             get
             {
-                return made.Made.Procedure;
+                return _made.Procedure;
             }
         }
 
@@ -49,7 +65,7 @@ public sealed partial class ServiceManager
 
         public Failure? Admit(AdmissionRequest request)
         {
-            return made.Made.BeforeRequest?.RefusalOf(request);
+            return _made.BeforeRequest?.RefusalOf(request);
         }
 
         public async Task Handle(RequestResolverProps props)
@@ -58,7 +74,7 @@ public sealed partial class ServiceManager
 
             // * the call starts as it arrives, its admission and its decoding counted in its duration,
             // for a listener: one check while nobody listens, and no clock read
-            Started? started = trace.IsDebugging ? trace.StartedNow() : null;
+            Started? started = _trace.IsDebugging ? _trace.StartedNow() : null;
             var target = new AnswerTarget(props.ConnectionHandle, props.Header);
             TRequest payload;
 
@@ -89,7 +105,7 @@ public sealed partial class ServiceManager
             // a payload that does not decode never reaches the callback
             try
             {
-                payload = made.Made.Serializer.Decode(props.Payload);
+                payload = _made.Serializer.Decode(props.Payload);
             }
             catch (Exception)
             {
@@ -100,7 +116,7 @@ public sealed partial class ServiceManager
 
             if (started is { } at)
             {
-                trace.Trace(Procedure, new DebugStep(DebugDirection.Rx, made.Made.Type)
+                _trace.Trace(Procedure, new DebugStep(DebugDirection.Rx, _made.Type)
                 {
                     CallId = props.Header.CallId,
                     ConnectionHandle = props.ConnectionHandle,
@@ -121,7 +137,7 @@ public sealed partial class ServiceManager
 
             try
             {
-                await made.Made.Callback(request, response);
+                await _callback(request, response);
             }
             catch (Exception reason)
             {
@@ -134,7 +150,7 @@ public sealed partial class ServiceManager
 
                     if (started.HasValue && !props.Signal.IsCancellationRequested)
                     {
-                        trace.Trace(Procedure, new DebugStep(DebugDirection.Tx, made.Made.Type)
+                        _trace.Trace(Procedure, new DebugStep(DebugDirection.Tx, _made.Type)
                         {
                             CallId = props.Header.CallId,
                             ConnectionHandle = props.ConnectionHandle,
@@ -156,7 +172,7 @@ public sealed partial class ServiceManager
         {
             get
             {
-                return made.Made.Serializer;
+                return _made.Serializer;
             }
         }
 
@@ -164,13 +180,38 @@ public sealed partial class ServiceManager
         {
             get
             {
-                return made.Made.Type;
+                return _made.Type;
             }
         }
 
         private void Traced(DebugStep step)
         {
-            trace.Trace(Procedure, step);
+            _trace.Trace(Procedure, step);
+        }
+
+        // a request's rules judged before its callback, once it decoded and its rx step was told
+        // (spec 18.2; spec/debugging.md 4.3): one they refuse is answered PAYLOAD_INVALID, its
+        // violations in its detail under its router's bound, its tx step told with that failure,
+        // and its callback never called; rules that throw throw as a callback does, answered as
+        // failed, and why goes on, for the router to report
+        private Func<RequestProps<TRequest>, INotificationResponse<TResponse>, Task> JudgedBefore(
+            RequestValidator<TRequest> validate,
+            Func<RequestProps<TRequest>, INotificationResponse<TResponse>, Task> callback)
+        {
+            var failFast = _made.Judging.FailFast;
+
+            return (request, response) =>
+            {
+                var bound = _router.DetailBytes;
+                var judged = validate(request.Payload, new ValidateOptions { FailFast = failFast, MaximumBytes = bound });
+
+                if (!judged.Refuses)
+                {
+                    return callback(request, response);
+                }
+
+                return ((Response)response).Refuse(Failure.OfProtocol(ProtocolCode.PayloadInvalid, Violations.DetailOf(judged, bound)));
+            };
         }
 
         // answers as failed; what keeps that answer from going out — a connection gone — is not heard
@@ -240,6 +281,18 @@ public sealed partial class ServiceManager
                     () =>
                     {
                         return RouterAnswer.OfFailure(ResolverFailureOf(failure));
+                    },
+                    failure);
+            }
+
+            // answers with a failure of the side's own, which no resolver may answer: its rules'
+            // PAYLOAD_INVALID, told as any answer is
+            public Task Refuse(Failure failure)
+            {
+                return Send(
+                    () =>
+                    {
+                        return RouterAnswer.OfFailure(failure);
                     },
                     failure);
             }

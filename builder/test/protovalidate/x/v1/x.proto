@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request whose rules buf's PROTOVALIDATE refuses: a minimum above its maximum, a pattern that
+// does not compile, and a string's rule on a number.
+message ReadRequest {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 5
+    max_len: 2
+  }];
+  string code = 2 [(buf.validate.field).string.pattern = "(a"];
+  int32 count = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+// Answers nothing more.
+message ReadResponse {}
+
+// A read, its request held to rules buf refuses.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Read(ReadRequest) returns (ReadResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}

@@ -40,6 +40,7 @@ test.describe('ProtocolCode', () => {
       CREDIT_EXCEEDED: 3,
       PAYLOAD_UNDECODABLE: 3,
       TRANSFER_STALLED: 3,
+      PAYLOAD_INVALID: 3,
       PROCEDURE_FAILED: 4,
       DESTINATION_LOST: 4,
     } as const;
@@ -51,13 +52,13 @@ test.describe('ProtocolCode', () => {
     }
   });
 
-  test('holds 22 codes, each once, and leaves out the ones to come', () => {
+  test('holds 23 codes, each once, and leaves out the ones to come', () => {
     const codes = Object.values(ProtocolCode);
 
-    expect(codes).toHaveLength(22);
-    expect(new Set(codes).size).toBe(22);
+    expect(codes).toHaveLength(23);
+    expect(new Set(codes).size).toBe(23);
 
-    for (const later of [23, 37, 66]) {
+    for (const later of [23, 37, 53, 66]) {
       expect(codes).not.toContain(later);
     }
 

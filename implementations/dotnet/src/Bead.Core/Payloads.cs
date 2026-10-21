@@ -169,6 +169,21 @@ internal static class Payloads
     }
 
     /// <summary>
+    /// The canonical form of the string <paramref name="text"/> (17.7.3), in UTF-8, its quotation
+    /// marks included: one holding a surrogate alone is refused, a <see cref="FormatException"/>.
+    /// </summary>
+    public static ReadOnlyMemory<byte> WriteJsonString(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var canonical = new Canonical(Written, text.Length + 2);
+
+        canonical.WriteString(text);
+
+        return canonical.Bytes;
+    }
+
+    /// <summary>
     /// The string of a <c>text</c> payload (17.4): its bytes read as UTF-8, a leading U+FEFF kept as a
     /// character; bytes that are not UTF-8 refused.
     /// </summary>
@@ -389,7 +404,7 @@ internal static class Payloads
         // a string as JSON.stringify writes a well-formed one (17.7.3): each character as it is,
         // but " and \, five control characters as short escapes, and the others as \u in lower-case
         // hexadecimal
-        private void WriteString(string text)
+        internal void WriteString(string text)
         {
             Append((byte)'"');
 

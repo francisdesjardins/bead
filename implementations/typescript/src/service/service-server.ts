@@ -38,6 +38,14 @@ import type { IListedFailure } from './failures';
 
 // interfaces
 
+/** How a side judges requests by their rules (spec 18), beside what else its options give. */
+export interface IJudgingOptions {
+  /** Stops each judging at its first violation, protovalidate's `failFast`; not when none. */
+  readonly failFast?: boolean | undefined;
+  /** Whether each requester judges its value by its descriptor's `validate` before it writes it. */
+  readonly validates?: boolean | undefined;
+}
+
 /** The server side of a service, offered on one Bead server. */
 export interface IServiceServer<S extends ServiceProcedures, Data = unknown> {
   /**
@@ -115,12 +123,16 @@ export type ServiceResolvers<S extends ServiceProcedures> = {
 
 /**
  * What a server side is given after its procedures: the hooks they name, by name, required when one
- * names any.
+ * names any; and how it judges requests, its own by `failFast`, its commands' also by `validates`.
  */
 export type ServiceServerOptions<S extends ServiceProcedures> = [HookName<S>] extends [never]
-  ? [options?: { readonly admissions?: Readonly<Record<string, never>> | undefined }]
+  ? [
+      options?: IJudgingOptions & {
+        readonly admissions?: Readonly<Record<string, never>> | undefined;
+      },
+    ]
   : [
-      options: {
+      options: IJudgingOptions & {
         readonly admissions: Readonly<
           Record<HookName<S>, IAdmissionHook<TransportServerConnectionHandle>>
         >;
@@ -232,14 +244,16 @@ export const listedResponseOf = (
 };
 
 /**
- * `request` as its descriptor's `validate` holds it, before its resolver: one that throws fails the
- * call as a resolver that throws does, PROCEDURE_FAILED, reported.
+ * What a requester or a resolver of `descriptor` is given to judge its requests by (spec 18): its
+ * `validate`, and whether it stops at its first violation; nothing when it judges none.
  */
-export const validated = (
+export const judgingOf = (
   descriptor: IServiceDescriptor,
-  request: IRequestProps<unknown>
-): void => {
-  descriptor.validate?.(request.payload);
+  { failFast = false, judges }: { failFast?: boolean | undefined; judges: boolean }
+): { failFast?: boolean; validate?: NonNullable<IServiceDescriptor['validate']> } => {
+  const { validate } = descriptor;
+
+  return judges && validate !== undefined ? { failFast, validate } : {};
 };
 
 // definition
@@ -285,6 +299,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
 ): IServiceServer<S, Data> => {
   const [given] = options;
   const hooks = hooksOf(procedures, given?.admissions);
+  const { failFast, validates = false } = given ?? {};
   const callbacks = new Map<string, AnyCallback>();
   // what the offer made: the requester of each command, and the resolver of each procedure that
   // notifies, once registered
@@ -300,7 +315,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
   };
 
   // a resolver registered on the server offered: its admission built once, its failures held to
-  // its list, its request validated
+  // its list, its request judged by its rules before it (spec 18.2)
   const bind = (name: string, callback: AnyCallback): void => {
     const server = offered as IServer<IServerTransportLike, Data>;
     const descriptor = procedures[name] as IServiceDescriptor;
@@ -320,8 +335,6 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
       props: IRequestProps<unknown, TransportServerConnectionHandle>,
       response: INotificationResponse<unknown, ResolverFailure>
     ): Promise<void> => {
-      validated(descriptor, props);
-
       await callback(
         props,
         listedResponseOf(response, {
@@ -332,7 +345,10 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
         })
       );
     };
-    const dependencies = beforeRequest === undefined ? {} : { beforeRequest };
+    const dependencies = {
+      ...(beforeRequest === undefined ? {} : { beforeRequest }),
+      ...judgingOf(descriptor, { failFast, judges: true }),
+    };
 
     if (procedure.procedureKind === ProcedureKind.NOTIFIES) {
       const { notification } = descriptor;
@@ -416,11 +432,14 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
 
       offered = server;
 
-      for (const [name, { procedure, request, result }] of Object.entries(procedures)) {
+      for (const [name, descriptor] of Object.entries(procedures)) {
+        const { procedure, request, result } = descriptor;
+
         if (procedure.procedureKind === ProcedureKind.COMMAND) {
           commands.set(
             name,
             server.services.getCommand(procedure, {
+              ...judgingOf(descriptor, { failFast, judges: validates }),
               serializer: {
                 decode: result.decode,
                 encode: request.encode as (value: unknown) => Uint8Array,

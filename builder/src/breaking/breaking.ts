@@ -156,6 +156,7 @@ const SHAPES_OF_RULE: Readonly<Partial<Record<RuleName, readonly Shape[]>>> = Ob
   PROCEDURE_MESSAGE_SWITCHED: ['procedure'],
   PROCEDURE_SAME_LIMIT: ['procedure'],
   PROCEDURE_ADMISSION_TIGHTENED: ['procedure'],
+  PROCEDURE_RULES_TIGHTENED: ['procedure'],
   PROCEDURE_SAME_MESSAGES: ['procedure'],
   PROCEDURE_SAME_HOOK: ['procedure'],
   PROCEDURE_FAILURE_NO_DELETE: ['listed'],

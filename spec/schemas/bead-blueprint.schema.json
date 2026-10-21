@@ -37,7 +37,7 @@
           }
         },
         "messages": {
-          "description": "The messages a binding names, by full name, each with the file that declares it: what a target imports, never their fields.",
+          "description": "The messages a binding names, and under the feature validate those a request's rules reach, by full name, each with the file that declares it: what a target imports, and under validate the fields that hold a rule or lead to one.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/message"
@@ -72,6 +72,35 @@
       }
     }
   },
+  "if": {
+    "description": "A message that carries its rules requires the feature validate (decision 0035), as JOSE's crit names a member a reader must know.",
+    "type": "object",
+    "required": ["proto"],
+    "properties": {
+      "proto": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "contains": {
+              "type": "object",
+              "required": ["rules"]
+            }
+          }
+        }
+      }
+    }
+  },
+  "then": {
+    "properties": {
+      "requires": {
+        "type": "array",
+        "contains": {
+          "const": "validate"
+        }
+      }
+    }
+  },
   "$defs": {
     "file": {
       "type": "object",
@@ -100,8 +129,12 @@
         "file": {
           "description": "The path, among its files, of the file that declares it.",
           "$ref": "#/$defs/protoPath"
+        },
+        "rules": {
+          "$ref": "#/$defs/messageRules"
         }
-      }
+      },
+      "description": "A message, and under the feature validate its rules (decision 0035)."
     },
     "service": {
       "type": "object",
@@ -372,6 +405,1101 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 65535
+          }
+        }
+      }
+    },
+    "ruleInt32": {
+      "type": "integer",
+      "minimum": -2147483648,
+      "maximum": 2147483647
+    },
+    "ruleUint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "ruleInt64": {
+      "description": "A 64-bit integer, as protobuf's JSON mapping writes one: a string.",
+      "type": "string",
+      "pattern": "^-?(?:0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "ruleUint64": {
+      "description": "An unsigned 64-bit integer, as protobuf's JSON mapping writes one: a string.",
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "ruleReal": {
+      "description": "The double it is, in section 17.7.4's form, a float's widened to one; or Infinity, -Infinity or NaN, as protobuf's JSON mapping writes a value not finite.",
+      "type": "string",
+      "pattern": "^(?:-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:e[+-][0-9]+)?|Infinity|-Infinity|NaN)(?![\\s\\S])"
+    },
+    "ruleBytes": {
+      "description": "Bytes in base64 (RFC 4648 §4), as protobuf's JSON mapping writes them.",
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?(?![\\s\\S])"
+    },
+    "floatRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleReal"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleReal"
+          }
+        },
+        "finite": {
+          "type": "boolean"
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleReal"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "doubleRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleReal"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleReal"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleReal"
+          }
+        },
+        "finite": {
+          "type": "boolean"
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleReal"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "int32Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "int64Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "uint32Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint32"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint32"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint32"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "uint64Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint64"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint64"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint64"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "sint32Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "sint64Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "fixed32Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleUint32"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint32"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint32"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint32"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "fixed64Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint64"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint64"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleUint64"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "sfixed32Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "sfixed64Rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "lt": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "lte": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "gt": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "gte": {
+          "$ref": "#/$defs/ruleInt64"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt64"
+          }
+        }
+      },
+      "not": {
+        "anyOf": [
+          {
+            "required": ["lt", "lte"]
+          },
+          {
+            "required": ["gt", "gte"]
+          }
+        ]
+      }
+    },
+    "boolRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "type": "boolean"
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "stringRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "type": "string"
+        },
+        "len": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "min_len": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "max_len": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "len_bytes": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "min_bytes": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "max_bytes": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "pattern": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "contains": {
+          "type": "string"
+        },
+        "not_contains": {
+          "type": "string"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "bytesRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleBytes"
+        },
+        "len": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "min_len": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "max_len": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "prefix": {
+          "$ref": "#/$defs/ruleBytes"
+        },
+        "suffix": {
+          "$ref": "#/$defs/ruleBytes"
+        },
+        "contains": {
+          "$ref": "#/$defs/ruleBytes"
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleBytes"
+          }
+        }
+      }
+    },
+    "enumRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "const": {
+          "$ref": "#/$defs/ruleInt32"
+        },
+        "defined_only": {
+          "type": "boolean"
+        },
+        "in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "not_in": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        },
+        "example": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ruleInt32"
+          }
+        }
+      }
+    },
+    "repeatedRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_items": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "max_items": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "unique": {
+          "type": "boolean"
+        },
+        "items": {
+          "$ref": "#/$defs/fieldRules"
+        }
+      }
+    },
+    "mapRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_pairs": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "max_pairs": {
+          "$ref": "#/$defs/ruleUint64"
+        },
+        "keys": {
+          "$ref": "#/$defs/fieldRules"
+        },
+        "values": {
+          "$ref": "#/$defs/fieldRules"
+        }
+      }
+    },
+    "fieldRules": {
+      "description": "A field's (buf.validate.field), in protobuf's JSON mapping by proto names: the members beadc compiles, each meaning what protovalidate's validate.proto v1.2.2 states of it (spec 18.1), and the one type member its field's type takes, which VALIDATE_RULE_FIT holds.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "ignore": {
+          "enum": ["IGNORE_UNSPECIFIED", "IGNORE_IF_ZERO_VALUE", "IGNORE_ALWAYS"]
+        },
+        "float": {
+          "$ref": "#/$defs/floatRules"
+        },
+        "double": {
+          "$ref": "#/$defs/doubleRules"
+        },
+        "int32": {
+          "$ref": "#/$defs/int32Rules"
+        },
+        "int64": {
+          "$ref": "#/$defs/int64Rules"
+        },
+        "uint32": {
+          "$ref": "#/$defs/uint32Rules"
+        },
+        "uint64": {
+          "$ref": "#/$defs/uint64Rules"
+        },
+        "sint32": {
+          "$ref": "#/$defs/sint32Rules"
+        },
+        "sint64": {
+          "$ref": "#/$defs/sint64Rules"
+        },
+        "fixed32": {
+          "$ref": "#/$defs/fixed32Rules"
+        },
+        "fixed64": {
+          "$ref": "#/$defs/fixed64Rules"
+        },
+        "sfixed32": {
+          "$ref": "#/$defs/sfixed32Rules"
+        },
+        "sfixed64": {
+          "$ref": "#/$defs/sfixed64Rules"
+        },
+        "bool": {
+          "$ref": "#/$defs/boolRules"
+        },
+        "string": {
+          "$ref": "#/$defs/stringRules"
+        },
+        "bytes": {
+          "$ref": "#/$defs/bytesRules"
+        },
+        "enum": {
+          "$ref": "#/$defs/enumRules"
+        },
+        "repeated": {
+          "$ref": "#/$defs/repeatedRules"
+        },
+        "map": {
+          "$ref": "#/$defs/mapRules"
+        }
+      }
+    },
+    "scalar": {
+      "enum": [
+        "double",
+        "float",
+        "int64",
+        "uint64",
+        "int32",
+        "fixed64",
+        "fixed32",
+        "bool",
+        "string",
+        "bytes",
+        "uint32",
+        "sfixed32",
+        "sfixed64",
+        "sint32",
+        "sint64"
+      ]
+    },
+    "fieldType": {
+      "description": "A field's type, as its rules read it: a scalar; an enum or a message, by its full name; or a message of google/protobuf/wrappers.proto, by the scalar it wraps.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["scalar"],
+          "additionalProperties": false,
+          "properties": {
+            "scalar": {
+              "$ref": "#/$defs/scalar"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["enum"],
+          "additionalProperties": false,
+          "properties": {
+            "enum": {
+              "$ref": "#/$defs/fullName"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["message"],
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/fullName"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["wrapper"],
+          "additionalProperties": false,
+          "properties": {
+            "wrapper": {
+              "$ref": "#/$defs/scalar"
+            }
+          }
+        }
+      ]
+    },
+    "protoName": {
+      "description": "A field's or a oneof's name, as its .proto declares it.",
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])"
+    },
+    "fieldRulesEntry": {
+      "description": "A field its message's rules judge: one that holds a rule, one that leads to a message that does, or one a message's oneof names; a map's type is its values', its key's scalar beside it.",
+      "type": "object",
+      "required": ["fieldName", "fieldNumber", "type", "presence"],
+      "additionalProperties": false,
+      "properties": {
+        "fieldName": {
+          "$ref": "#/$defs/protoName"
+        },
+        "fieldNumber": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 536870911
+        },
+        "type": {
+          "$ref": "#/$defs/fieldType"
+        },
+        "label": {
+          "enum": ["repeated", "map"]
+        },
+        "key": {
+          "$ref": "#/$defs/scalar"
+        },
+        "presence": {
+          "enum": ["explicit", "implicit"]
+        },
+        "oneof": {
+          "$ref": "#/$defs/protoName"
+        },
+        "rules": {
+          "$ref": "#/$defs/fieldRules"
+        }
+      },
+      "if": {
+        "required": ["label"],
+        "properties": {
+          "label": {
+            "const": "map"
+          }
+        }
+      },
+      "then": {
+        "required": ["key"]
+      },
+      "else": {
+        "not": {
+          "required": ["key"]
+        }
+      }
+    },
+    "messageRules": {
+      "description": "Under the feature validate (decision 0035): its fields' rules, by number; its own (buf.validate.message); each oneof's (buf.validate.oneof), by its index.",
+      "type": "object",
+      "required": ["fields", "message", "oneofs"],
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldRulesEntry"
+          }
+        },
+        "message": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "oneof": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["fields"],
+                "additionalProperties": false,
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "$ref": "#/$defs/protoName"
+                    }
+                  },
+                  "required": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "oneofs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["oneofIndex", "oneofName", "rules"],
+            "additionalProperties": false,
+            "properties": {
+              "oneofIndex": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "oneofName": {
+                "$ref": "#/$defs/protoName"
+              },
+              "rules": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "required": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
           }
         }
       }

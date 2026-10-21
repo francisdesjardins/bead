@@ -112,8 +112,8 @@ once, at first use, and cached by its descriptor, in a `WeakMap` and a `Conditio
 field number to what its records take, and the shapes of the messages it holds, so a message holds
 itself.
 
-- **TypeScript**: the subpath `@francisdesjardins/bead/proto`, `src/proto/records.ts`,
-  `checkProtoRecords(bytes, schema)`, which throws a `SyntaxError`, as the other codecs do for bytes
+- **TypeScript**: the subpath `@francisdesjardins/bead/proto`, `src/proto/proto.ts`, and its
+  `checkProtoRecords(bytes, schema)`, in `src/proto/records.ts`, which throws a `SyntaxError`, as the other codecs do for bytes
   that do not read. `schema` is a `DescMessage` by `import type` from `@bufbuild/protobuf`, nothing
   imported at run time; `@bufbuild/protobuf` is an optional peer dependency, in the range generated
   code needs, and stays a development dependency. The check reads `fields`, `number`, `fieldKind`,
@@ -174,9 +174,11 @@ as Google.Protobuf counts them.
 `GENERATED_CODE_SUPPORTS_VERSION_3`. C#:
 `global::Bead.Protobuf.ProtoRecords.Check(bytes.Span, global::Foo.Descriptor);` before the framing,
 and `GeneratedCode.SupportsVersion3`. Generated code that calls the check needs an export a runtime
-without it lacks, which is what moves the counter. **The runtime holds contract 3 alone**, on both
-sides: it holds no `GENERATED_CODE_SUPPORTS_VERSION_2` and no `GeneratedCode.SupportsVersion2`, so
-code that names 2, an earlier beadc's, fails its type-check and its build until it is regenerated.
+without it lacks, which is what moves the counter. **The runtime holds its latest contract alone**,
+on both sides, 4 since a request's rules are generated
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):
+it holds no `GENERATED_CODE_SUPPORTS_VERSION_2` and no `GeneratedCode.SupportsVersion2`, so code
+that names 2, an earlier beadc's, fails its type-check and its build until it is regenerated.
 A runtime keeps a constant while it still serves the code that names it, and one that would run
 version-2 code unchecked no longer serves it as Bead conforms: before 1.0.0, an older constant goes
 once the code that names it no longer conforms through the runtime; from 1.0.0, it stays for the

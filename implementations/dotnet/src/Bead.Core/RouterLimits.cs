@@ -9,6 +9,10 @@ public sealed record RouterLimits
 {
     // constants
 
+    // what a failure's envelope holds besides its detail: its prefix, the announcement it may carry,
+    // and its record
+    private const int FailureOverheadBytes = 8 + Credential.AnnouncementBytes + 4;
+
     /// <summary>The limits a router holds by when its options say nothing.</summary>
     public static RouterLimits Default { get; } = new();
 
@@ -73,6 +77,18 @@ public sealed record RouterLimits
 
     /// <summary>How far past the bytes it received, contiguous, a receiver lets its sender send.</summary>
     public int WindowBytes { get; init; } = 4_194_304;
+
+    /// <summary>
+    /// The bound of a failure's detail it writes: <see cref="MaximumDetailBytes"/>, within what an
+    /// envelope of <see cref="MaximumEnvelopeBytes"/> holds of one besides its header (spec 7.4).
+    /// </summary>
+    internal int DetailBytes
+    {
+        get
+        {
+            return Math.Min(MaximumDetailBytes, MaximumEnvelopeBytes - FailureOverheadBytes);
+        }
+    }
 
     /// <summary>
     /// These limits, checked, a transfer's inactivity held: whole numbers, positive but for the

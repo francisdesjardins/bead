@@ -8,7 +8,7 @@
           "hook": "greeted"
         },
         "failures": [],
-        "procedureId": 19,
+        "procedureId": 20,
         "procedureKind": "request",
         "procedureName": "greet",
         "request": {
@@ -22,7 +22,7 @@
     {
       "op": "replace",
       "path": "/services/0/serviceRevision",
-      "value": 2
+      "value": 3
     }
   ],
   "findings": [

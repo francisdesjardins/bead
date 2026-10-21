@@ -34,7 +34,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- the conformance vectors, the conversations, the clock cases, the durations, the debug filters, the metrics, the identities and the codecs: the files both implementations' tests read -->
+    <!-- the conformance vectors, the conversations, the clock cases, the durations, the debug filters, the metrics, the identities, the codecs and the payload rules' details: the files both implementations' tests read -->
     <Content Include="../../../../spec/vectors.json" Link="vectors.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../../spec/conversations.json" Link="conversations.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../../spec/clocks.json" Link="clocks.json" CopyToOutputDirectory="PreserveNewest" />
@@ -43,6 +43,7 @@
     <Content Include="../../../../spec/metrics.json" Link="metrics.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../../spec/identities.json" Link="identities.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../../../spec/codecs.json" Link="codecs.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../../../spec/validations.json" Link="validations.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

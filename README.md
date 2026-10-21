@@ -112,7 +112,10 @@ envelopes.
 A version here is the product's, its `v*` tag; the spec and its companion move on an axis of their
 own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-owner.md)).
 
-- **Next**: one corpus read alike by both sides' parsers, held as a gate as
+- **Next**: a payload's rules written in CEL, a total subset beadc compiles into each side beside
+  the rules it compiles already
+  ([0035](docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md));
+  one corpus read alike by both sides' parsers, held as a gate as
   `tools/protobuf-conformance.mjs differential` holds a `proto` payload, a target for a
   WebSocket's handshake beside the four of [Fuzzing](#fuzzing), and a short run of them in CI; and a
   guard in CI against a gross regression of the benches, where their spread on CI's runners lets
@@ -120,7 +123,7 @@ own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-
 - **Then**: a topic-based publish/subscribe broker as one more transport, one core and one adapter
   a broker, Bead's envelope, routers and sessions the same at each end
   ([0021](docs/decisions/0021-a-broker-is-a-transport-and-bead-is-never-a-network.md)).
-- **Further**: HTTP/JSON transcoding, payload validation, the transports' client part of the
+- **Further**: HTTP/JSON transcoding, the transports' client part of the
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a counted
   call's cost measured against an uncounted one, and a constrained C side, each bound by the records
   that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
@@ -178,11 +181,13 @@ side traces, filters and counts beside the wire, under a version of its own. Bes
 | [`codecs.json`](spec/codecs.json)                       | Payloads read and values written, in `raw`, `text`, `json` and `proto`: the bytes written back, a JSON value in its canonical form, the fields a `proto` payload reads, or refused and why            |
 | [`codecs.proto`](spec/codecs.proto)                     | `Probe`, the fixed message the `proto` rows of `codecs.json` read and write, which each side's tests generate with their stock protobuf generator                                                     |
 | [`debug-filters.json`](spec/debug-filters.json)         | 52 debug filters, what each reads as and which calls and envelopes it keeps, or why it is refused, and 6 filters given as functions, event by event                                                   |
-| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 52 exits of the interop service's server, the series each step moved                                                |
-| [`interop-blueprint.json`](spec/interop-blueprint.json) | the interop service's API: its one service, its 18 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                    |
+| [`metrics.json`](spec/metrics.json)                     | 24 expositions, the text a registry writes for what it counts, byte for byte, and 53 exits of the interop service's server, the series each step moved                                                |
+| [`validations.json`](spec/validations.json)             | 180 verdicts, payloads judged by their message's rules, the violations each gives in their order, and 64 details, what `PAYLOAD_INVALID`'s detail writes and reads                                    |
+| [`validations.proto`](spec/validations.proto)           | the messages the verdicts judge, their rules protovalidate's, which beadc generates each side's validators for                                                                                        |
+| [`interop-blueprint.json`](spec/interop-blueprint.json) | the interop service's API: its one service, its 19 procedures, each with its kind, its bindings, its admission and its failures, in the builder's blueprint's form                                    |
 | [`interop-service.json`](spec/interop-service.json)     | what each procedure of the interop service takes, answers, admits and notifies, by its name; what its relay admits and forwards; and the credentials it verifies                                      |
 
-Both implementations read these files from `spec/` in their tests; neither keeps a copy. Nine
+Both implementations read these files from `spec/` in their tests; neither keeps a copy. Ten
 generators write them, and regenerating must give the same bytes:
 
 ```sh
@@ -195,6 +200,7 @@ python spec/generators/make_debug_filters.py
 python spec/generators/make_metrics.py
 python spec/generators/make_codecs.py
 python spec/generators/make_identities.py
+python spec/generators/make_validations.py
 git diff --exit-code -- spec
 ```
 
@@ -208,7 +214,9 @@ and that every exposition reads as the Prometheus text format 0.0.4, that the in
 is in its form and `interop-service.json` states its procedures, and that each count the table
 above and the matrix's, in [`docs/support.md`](docs/support.md), state is what the files hold;
 then it reports which groups and files each side's tests read, and fails on one a side does not.
-It runs on Python 3.14, with `jsonschema`, which `spec/requirements.txt` locks with every hash:
+It runs on Python 3.14, with `jsonschema`, and `make_validations.py` with `google-re2`, which
+`spec/requirements.txt` locks with every hash; `make_validations.py` reads Unicode 17.0.0's files
+where `spec/generators/ucd.json` pins them, fetched once into the temporary folder:
 
 ```sh
 python -m venv .venv    # then activate it: .venv/bin/activate, or .venv\Scripts\Activate.ps1
@@ -599,6 +607,14 @@ against each server.
   its sha512; or one corpus of `Probe` through both sides, read alike. The suite runs on Linux or
   macOS, where the runner has a binary; it needs the TypeScript side and the builder installed,
   and .NET for the C# side.
+- `node tools/protovalidate-differential.mjs oracle|typescript|csharp`: protovalidate-es, at the pin
+  `tools/protovalidate-differential/pin.json` holds and fetched by its sha512, over the verdicts of
+  `spec/validations.json`; or those verdicts and a corpus mutated from them through one side's
+  generated validators and through protovalidate-es, the violations compared by rule and by path
+  elements. It needs the TypeScript side and the builder installed, and .NET for the C# side.
+- `node tools/check-validations.mjs [typescript|csharp]`: each side's validators of
+  `spec/validations.proto`, committed beside its verdicts test, are what beadc writes for it;
+  `--write` writes them. It needs the builder installed.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder.
 

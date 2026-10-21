@@ -35,7 +35,11 @@ refuses, as a procedure is declared to it
 ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)); `spec/codecs.json`
 holds the bytes every side's codecs write of what they read and of what they are given, in `raw`,
 `text`, `json` and `proto` ([0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md),
-[0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)).
+[0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md));
+`spec/validations.json` holds what each side's validators give of a payload of
+`spec/validations.proto`'s messages, and what a `PAYLOAD_INVALID`'s detail writes and reads, which a
+differential against protovalidate-es holds besides
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
 Beside the wire, its companion [`spec/debugging.md`](../../spec/debugging.md) has two files of its
 own ([0013](0013-every-language-debugs-alike-at-no-cost-when-off.md)): `spec/debug-filters.json`
 holds what a debug filter reads as and keeps, and `spec/metrics.json` what a registry writes and

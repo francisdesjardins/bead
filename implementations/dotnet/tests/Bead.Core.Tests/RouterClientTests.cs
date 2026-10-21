@@ -210,7 +210,9 @@ public sealed partial class RouterClientTests
             }).Order(StringComparer.Ordinal);
         }
 
-        Assert.Empty(interop.ProceduresWithoutResolver());
+        // * checked alone is answered by a server side of its own, which holds it with its rules: its
+        // resolver is registered all the same
+        Assert.Equal([InteropProcedures.Checked.Procedure], interop.ProceduresWithoutResolver());
         Assert.Equal(NamesOf(false), ResolversOf(server.Intercepted));
         Assert.Equal(NamesOf(true), ResolversOf(client.Intercepted));
     }
@@ -1633,6 +1635,8 @@ public sealed partial class RouterClientTests
     private sealed class Registrations(RouterSide side) : IRouterLike
     {
         public TimeProvider Clock { get; init; } = TimeProvider.System;
+
+        public int DetailBytes { get; init; } = LimitDefaults.MaximumDetailBytes;
 
         public List<string> Names { get; } = [];
 

@@ -31,17 +31,17 @@ namespace Hello.V1 {
             "KQoRQ291bnREb3duUmVzcG9uc2USFAoFdGlja3MYASABKAVSBXRpY2tzIiQK",
             "BFRpY2sSHAoJcmVtYWluaW5nGAEgASgFUglyZW1haW5pbmciLAoOQXNrTmFt",
             "ZVJlcXVlc3QSGgoIcXVlc3Rpb24YASABKAlSCHF1ZXN0aW9uIiUKD0Fza05h",
-            "bWVSZXNwb25zZRISCgRuYW1lGAEgASgJUgRuYW1lKmQKDEhlbGxvRmFpbHVy",
+            "bWVSZXNwb25zZRISCgRuYW1lGAEgASgJUgRuYW1lKmYKDEhlbGxvRmFpbHVy",
             "ZRIdChlIRUxMT19GQUlMVVJFX1VOU1BFQ0lGSUVEEAASGgoWSEVMTE9fRkFJ",
-            "TFVSRV9OQU1FTEVTUxABEhkKFUhFTExPX0ZBSUxVUkVfVE9PX0ZBUhACMtQC",
-            "CgxIZWxsb1NlcnZpY2USYQoIU2F5SGVsbG8SGS5oZWxsby52MS5TYXlIZWxs",
-            "b1JlcXVlc3QaGi5oZWxsby52MS5TYXlIZWxsb1Jlc3BvbnNlIh6iyBwaCAE6",
-            "FkhFTExPX0ZBSUxVUkVfTkFNRUxFU1MSfwoJQ291bnREb3duEhouaGVsbG8u",
-            "djEuQ291bnREb3duUmVxdWVzdBobLmhlbGxvLnYxLkNvdW50RG93blJlc3Bv",
-            "bnNlIjmiyBw1CAISDwoNaGVsbG8udjEuVGljayIJGgdncmVldGVkOhVIRUxM",
-            "T19GQUlMVVJFX1RPT19GQVISSAoHQXNrTmFtZRIYLmhlbGxvLnYxLkFza05h",
-            "bWVSZXF1ZXN0GhkuaGVsbG8udjEuQXNrTmFtZVJlc3BvbnNlIgiiyBwECAMa",
-            "ABoWosgcEggBEAEiDEhlbGxvRmFpbHVyZUIIosgcBAoCCgBiBnByb3RvMw=="));
+            "TFVSRV9OQU1FTEVTUxABIgQIAhACKhVIRUxMT19GQUlMVVJFX1RPT19GQVIy",
+            "vQIKDEhlbGxvU2VydmljZRJhCghTYXlIZWxsbxIZLmhlbGxvLnYxLlNheUhl",
+            "bGxvUmVxdWVzdBoaLmhlbGxvLnYxLlNheUhlbGxvUmVzcG9uc2UiHqLIHBoI",
+            "AToWSEVMTE9fRkFJTFVSRV9OQU1FTEVTUxJoCglDb3VudERvd24SGi5oZWxs",
+            "by52MS5Db3VudERvd25SZXF1ZXN0GhsuaGVsbG8udjEuQ291bnREb3duUmVz",
+            "cG9uc2UiIqLIHB4IAhIPCg1oZWxsby52MS5UaWNrIgkaB2dyZWV0ZWQSSAoH",
+            "QXNrTmFtZRIYLmhlbGxvLnYxLkFza05hbWVSZXF1ZXN0GhkuaGVsbG8udjEu",
+            "QXNrTmFtZVJlc3BvbnNlIgiiyBwECAMaABoWosgcEggBEAIiDEhlbGxvRmFp",
+            "bHVyZUIIosgcBAoCCgBiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Bead.Protobuf.OptionsReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Hello.V1.HelloFailure), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -67,10 +67,6 @@ namespace Hello.V1 {
     /// Nobody to greet: no name given, and none the caller gave when asked.
     /// </summary>
     [pbr::OriginalName("HELLO_FAILURE_NAMELESS")] Nameless = 1,
-    /// <summary>
-    /// A count past 10.
-    /// </summary>
-    [pbr::OriginalName("HELLO_FAILURE_TOO_FAR")] TooFar = 2,
   }
 
   #endregion

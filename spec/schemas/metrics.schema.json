@@ -156,6 +156,7 @@
         "CREDIT_EXCEEDED",
         "PAYLOAD_UNDECODABLE",
         "TRANSFER_STALLED",
+        "PAYLOAD_INVALID",
         "PROCEDURE_FAILED",
         "DESTINATION_LOST",
         "application",

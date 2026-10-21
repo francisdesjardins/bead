@@ -304,7 +304,12 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
   }
 
   // * the targets, and the compiler protoplugin loads, for generate alone
-  const { differencesOf, planOf, writePlan } = await import('./generate.ts');
+  const { differencesOf, planOf, ungeneratedOf, writePlan } = await import('./generate.ts');
+
+  if (report(ungeneratedOf(config, { checked }), call)) {
+    return Exit.FINDINGS;
+  }
+
   const plan = planOf(config, checked);
 
   if (!call.check) {

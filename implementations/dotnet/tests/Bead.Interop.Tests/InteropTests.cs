@@ -249,6 +249,40 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
         Assert.Equal((ushort)ProtocolCode.PayloadUndecodable, (await FailureOf(RequesterOf(client, (echo, new NotJson()))(JsonOf("null")))).Code);
     }
 
+    // * the detail as the server writes it, lines of canonical JSON, byte for byte
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task A_request_its_rules_refuse_is_answered_PAYLOAD_INVALID_its_violations_in_its_detail(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        var failure = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.Interop.Checked(JsonOf("{\"names\":[\"ab\",\"\",\"abcd\"]}"))().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, failure.Code);
+        Assert.Equal(FailureScope.Protocol, failure.Scope);
+        Assert.Equal(
+            string.Join(
+                '\n',
+                "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}",
+                "{\"bounds\":{\"max_len\":\"3\"},\"fieldPath\":\"names[2]\",\"message\":\"must be at most 3 characters\",\"ruleId\":\"string.max_len\"}",
+                "{\"more\":0}"),
+            failure.Detail);
+    }
+
+    [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
+    [InlineData(WebSocket)]
+    [InlineData(Http)]
+    public async Task Checked_answers_the_count_of_the_names_its_rules_take(string transport)
+    {
+        await using var client = await ConnectedOver(transport);
+
+        Assert.Equal(2, (await client.Interop.Checked(JsonOf("{\"names\":[\"a\",\"bc\"]}"))().WaitAsync(Patience, Cancelled)).GetInt32());
+    }
+
     [Theory(Skip = Reason, SkipUnless = nameof(IsInterop))]
     [InlineData(WebSocket)]
     [InlineData(Http)]

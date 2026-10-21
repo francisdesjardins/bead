@@ -10,8 +10,8 @@
     }
   },
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node24 --external:ws --outfile=dist/generate/hello.mjs",
-    "build:external": "yarn messages && esbuild src/main.ts --bundle --platform=node --format=esm --target=node24 --external:ws --conditions=external --outfile=dist/external/hello.mjs",
+    "build": "esbuild src/main.ts --bundle --preserve-symlinks --platform=node --format=esm --target=node24 --external:ws --outfile=dist/generate/hello.mjs",
+    "build:external": "yarn messages && esbuild src/main.ts --bundle --preserve-symlinks --platform=node --format=esm --target=node24 --external:ws --conditions=external --outfile=dist/external/hello.mjs",
     "check": "yarn messages && yarn type-check && yarn type-check:external && yarn type-check:consumer && yarn lint --deny-warnings && yarn format:check",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

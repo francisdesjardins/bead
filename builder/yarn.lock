@@ -137,6 +137,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@bufbuild/re2@npm:0.6.1":
+  version: 0.6.1
+  resolution: "@bufbuild/re2@npm:0.6.1"
+  checksum: 10c0/35dc96441bb04471d4900b80175b67868ac8c76c4e17dd0a93c0e9e34a5e8fdb5e5bcf8494468e21d078a8e635deba2ddb78acae80268ebae9326d57383211e0
+  languageName: node
+  linkType: hard
+
 "@francisdesjardins/beadc@workspace:.":
   version: 0.0.0-use.local
   resolution: "@francisdesjardins/beadc@workspace:."
@@ -146,6 +153,7 @@ __metadata:
     "@bufbuild/protobuf-floor": "npm:@bufbuild/protobuf@2.13.0"
     "@bufbuild/protoc-gen-es": "npm:2.16.0"
     "@bufbuild/protoplugin": "npm:2.16.0"
+    "@bufbuild/re2": "npm:0.6.1"
     "@playwright/test": "npm:1.64.1"
     "@types/node": "npm:^24.19.2"
     ajv: "npm:8.20.0"

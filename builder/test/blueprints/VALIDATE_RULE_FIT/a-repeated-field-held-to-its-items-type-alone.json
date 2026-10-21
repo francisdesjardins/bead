@@ -1,0 +1,53 @@
+{
+  "patch": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Request",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "names",
+                  "fieldNumber": 1,
+                  "label": "repeated",
+                  "presence": "implicit",
+                  "rules": {
+                    "string": {
+                      "min_len": "1"
+                    }
+                  },
+                  "type": {
+                    "scalar": "string"
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "VALIDATE_RULE_FIT",
+      "pointer": "/proto/messages/0/rules/fields/0/rules/string"
+    }
+  ]
+}

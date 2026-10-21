@@ -5,7 +5,9 @@
 // the runtime's packages alone: each package's own licence files are copied to
 // `node_modules/<package>/`; a package that ships none has the texts its `license` field names
 // written there, from what this tool knows of each; protoc's archive ships none, so protobuf's goes
-// to `protoc/LICENSE`; and Bead's own to `LICENSE`. A package whose licence names an identifier
+// to `protoc/LICENSE`; protovalidate's `validate.proto`, which beadc vendors, carries Buf's notice in
+// its header and the Apache License 2.0's text at `protovalidate/LICENSE`; and Bead's own to
+// `LICENSE`. A package whose licence names an identifier
 // outside the expression given, the image's `org.opencontainers.image.licenses`, or one it holds
 // no text for, fails the build: the label and the files cannot part (OCI Image Format's
 // annotations; SPDX's license expressions; Apache-2.0 4(a) and BSD-3-Clause's second clause, a
@@ -24,6 +26,8 @@ const MODULES = join(BUILDER, 'node_modules');
 // Bead's licence, the Apache License 2.0's text, and protobuf's, BSD-3-Clause with Google's notice
 const APACHE = join(BUILDER, '..', 'LICENSE');
 const PROTOBUF = join(BUILDER, 'licenses', 'protobuf.txt');
+// protovalidate's, the Apache License 2.0's text, for the validate.proto beadc vendors (0035)
+const PROTOVALIDATE = join(BUILDER, 'licenses', 'protovalidate.txt');
 
 // a package's licence files, as npm counts them, and its notices, typescript's third parties' among
 // them, in any case
@@ -114,6 +118,8 @@ function main() {
 
   mkdirSync(join(out, 'protoc'), { recursive: true });
   copyFileSync(PROTOBUF, join(out, 'protoc', 'LICENSE'));
+  mkdirSync(join(out, 'protovalidate'), { recursive: true });
+  copyFileSync(PROTOVALIDATE, join(out, 'protovalidate', 'LICENSE'));
   copyFileSync(APACHE, join(out, 'LICENSE'));
 
   console.log(

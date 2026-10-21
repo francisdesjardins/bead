@@ -26,6 +26,7 @@
       "bead.protobuf": {
         "type": "Project",
         "dependencies": {
+          "Bead.Core": "[0.6.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
       },

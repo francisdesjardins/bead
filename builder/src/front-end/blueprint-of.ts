@@ -2,7 +2,8 @@
 
 // A `.proto`'s blueprint: the cascade of admissions resolved into each procedure, the kinds, the
 // bindings by their messages, the names, the failures and the reservations, its `proto` members from
-// buf's set (decision 0022). And where each of its places is in the `.proto`, for a finding: a
+// buf's set (decision 0022); and, under the feature `validate`, the rules of every message a request
+// reaches, in protovalidate's own shape (decision 0035). And where each of its places is in the `.proto`, for a finding: a
 // member at its option's field or its declaration's, its nearest place when the `.proto` states none.
 
 // dependencies
@@ -18,15 +19,17 @@ import type {
 
 import type { IPlace } from '../diagnostics.ts';
 import type { IdRange } from '../generated/bead/options_pb.ts';
-import type {
-  AdmissionRule,
-  IBinding,
-  IBlueprint,
-  IDeprecation,
-  IFailureEntry,
-  IProcedureEntry,
-  IRange,
-  IServiceEntry,
+import {
+  type AdmissionRule,
+  type IBinding,
+  type IBlueprint,
+  type IDeprecation,
+  type IFailureEntry,
+  type IMessageEntry,
+  type IProcedureEntry,
+  type IRange,
+  type IServiceEntry,
+  VALIDATE_FEATURE,
 } from '../model/blueprint.ts';
 import { FORMAT, specVersion } from '../version.ts';
 import { type ISourcePosition, leadingOf, pathOf, positionOf } from './comments.ts';
@@ -40,6 +43,7 @@ import {
   procedureOptionsOf,
   serviceOptionsOf,
 } from './options.ts';
+import { judgedOf } from './rules.ts';
 
 // types
 
@@ -167,7 +171,7 @@ export const failureNameOf = (catalogue: DescEnum, valueName: string): string =>
 export const blueprintOf = (input: IProtoInput): IProtoBlueprint => {
   const sources = new WeakMap<object, ISource>();
   const files = new Map<string, { path: string; package: string }>();
-  const messages = new Map<string, { fullName: string; file: string }>();
+  const messages = new Map<string, IMessageEntry>();
   const services: IServiceEntry[] = [];
   const reservedIds: IRange[] = [];
   const reservedNames: string[] = [];
@@ -442,6 +446,16 @@ export const blueprintOf = (input: IProtoInput): IProtoBlueprint => {
     }
   }
 
+  // * the messages a request's rules reach, each with its rules, its file among the files
+  for (const [fullName, { desc, rules }] of judgedOf(input).messages) {
+    noteFile(desc.file);
+    messages.set(fullName, { fullName, file: desc.file.proto.name, rules });
+  }
+
+  const validates = [...messages.values()].some((message) => {
+    return message.rules !== undefined;
+  });
+
   reservedIds.sort(
     byKey((range) => {
       return range.first;
@@ -457,7 +471,7 @@ export const blueprintOf = (input: IProtoInput): IProtoBlueprint => {
   const blueprint: IBlueprint = {
     format: FORMAT,
     specVersion: specVersion(),
-    requires: [],
+    requires: validates ? [VALIDATE_FEATURE] : [],
     proto: {
       files: [...files.values()].sort(
         byKey((file) => {

@@ -277,6 +277,7 @@ const ANSWERED_CODES: ReadonlySet<number> = new Set([
   ProtocolCode.CREDIT_EXCEEDED,
   ProtocolCode.PAYLOAD_UNDECODABLE,
   ProtocolCode.TRANSFER_STALLED,
+  ProtocolCode.PAYLOAD_INVALID,
   ProtocolCode.PROCEDURE_FAILED,
 ]);
 
@@ -398,7 +399,7 @@ const layoutOf = ({
   return { slotOf, slots: Object.freeze(slots) };
 };
 
-// every code, section 8's 22 by their numbers, then application and _OTHER
+// every code, section 8's 23 by their numbers, then application and _OTHER
 const EVERY_CODE: readonly [number, string][] = Object.freeze([
   ...CODES,
   [CallEnding.APPLICATION, 'application'],
@@ -407,7 +408,7 @@ const EVERY_CODE: readonly [number, string][] = Object.freeze([
 
 // the layouts of the call families' series (7.6)
 const LAYOUTS = Object.freeze({
-  // a procedure's in the server families: its 12 codes
+  // a procedure's in the server families: its 13 codes
   answered: layoutOf({
     codes: [
       ...CODES.filter(([code]) => {

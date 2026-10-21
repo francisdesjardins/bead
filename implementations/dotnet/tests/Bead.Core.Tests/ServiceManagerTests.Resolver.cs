@@ -113,6 +113,72 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
+    public async Task Answers_PAYLOAD_INVALID_to_a_request_its_rules_refuse_before_its_callback()
+    {
+        var router = new RecordingRouter { DetailBytes = 512 };
+        var reached = new List<string>();
+        var given = new List<ValidateOptions>();
+        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered() with { FailFast = true, Validate = Judging(given) })((request, response) =>
+        {
+            reached.Add(request.Payload.Value);
+
+            return response.Answer(request.Payload);
+        });
+
+        await resolver.Handle(PropsOf(Encode(new Text("")))).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["hi"], reached);
+        Assert.Equal(
+            [
+                new Responded(Target, null, Failure.OfProtocol(ProtocolCode.PayloadInvalid, RefusedDetail)),
+                new Responded(Target, new Text("hi"), null),
+            ],
+            router.Responses);
+
+        // * judged under its router's bound and its dependencies' failFast
+        Assert.Equal([new ValidateOptions { FailFast = true, MaximumBytes = 512 }, new ValidateOptions { FailFast = true, MaximumBytes = 512 }], given);
+    }
+
+    // debugging 4.3
+    [Fact]
+    public async Task Traces_a_request_its_rules_refuse_its_rx_then_its_failure()
+    {
+        var time = new FakeTimeProvider(Started);
+        var manager = new ServiceManager(new RecordingRouter { Clock = time });
+        var seen = RecordDebug(manager);
+        var resolver = manager.GetRequestResolver(Echo, Answered() with { FailFast = true, Validate = Judging([]) })(Unanswering);
+
+        await resolver.Handle(PropsOf(Encode(new Text("")))).WaitAsync(Patience, Cancelled);
+
+        var received = new DebugEvent
+        {
+            CallId = 7,
+            ConnectionHandle = Handle,
+            Direction = DebugDirection.Rx,
+            ProcedureId = 1,
+            ProcedureName = "echo",
+            Rx = new Text(""),
+            ServiceId = 2,
+            ServiceRevision = 3,
+            StartedAt = Started,
+            Type = DebugType.Request,
+        };
+
+        Assert.Equal(
+            [
+                (null, received),
+                ((Exception?)null, received with
+                {
+                    Direction = DebugDirection.Tx,
+                    Duration = TimeSpan.Zero,
+                    Tx = Failure.OfProtocol(ProtocolCode.PayloadInvalid, RefusedDetail),
+                }),
+            ],
+            seen);
+    }
+
+    [Fact]
     public async Task A_request_before_request_refuses_is_answered_with_an_access_denied_seen_on_its_header_alone()
     {
         var router = new RecordingRouter();

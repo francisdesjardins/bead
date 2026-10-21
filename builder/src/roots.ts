@@ -1,8 +1,10 @@
 // ── Roots ─────────────────────────────────────────────────────────────────────
 
 // A project's `.proto` roots, read before buf compiles them: a `bead/options.proto` among them is a
-// copy of beadc's, which beadc compiles first and alone (OPTIONS_COPY). Where a file of the set is on
-// disk, for a finding's path. beadc writes nothing into a root.
+// copy of beadc's, which beadc compiles first and alone (OPTIONS_COPY), and so is a
+// `buf/validate/validate.proto`, protovalidate's, which beadc vendors at the version it compiles
+// (VALIDATE_COPY). Where a file of the set is on disk, for a finding's path. beadc writes nothing
+// into a root.
 
 // dependencies
 
@@ -15,6 +17,15 @@ import { diagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
 
 /** Where Bead's options are, under a root, by the path an import names. */
 export const OPTIONS_FILE = 'bead/options.proto';
+
+/** Where protovalidate's options are, under a root, by the path an import names (decision 0035). */
+export const VALIDATE_FILE = 'buf/validate/validate.proto';
+
+/** The version of protovalidate's `validate.proto` beadc vendors and compiles. */
+export const VALIDATE_VERSION = 'v1.2.2';
+
+/** The files beadc compiles from its own root, never a project's: its options and protovalidate's. */
+export const BEADC_FILES: ReadonlySet<string> = new Set([OPTIONS_FILE, VALIDATE_FILE]);
 
 // definition
 
@@ -56,19 +67,33 @@ export const assertRoots = (
   }
 };
 
-/** A `bead/options.proto` among `roots`, each an OPTIONS_COPY. */
+/**
+ * A `bead/options.proto` among `roots`, each an OPTIONS_COPY, and a `buf/validate/validate.proto`,
+ * each a VALIDATE_COPY.
+ */
 export const optionsCopiesOf = (roots: readonly string[]): IDiagnostic[] => {
   return roots.flatMap((root) => {
-    const copy = join(root, ...OPTIONS_FILE.split('/'));
+    const options = join(root, ...OPTIONS_FILE.split('/'));
+    const validate = join(root, ...VALIDATE_FILE.split('/'));
 
-    return existsSync(copy)
-      ? [
-          diagnosticOf('OPTIONS_COPY', {
-            message: `a copy of ${OPTIONS_FILE} among the roots: beadc compiles its own, first, and imports find it; take the copy out`,
-            place: { file: displayOf(copy), line: 1, column: 1 },
-          }),
-        ]
-      : [];
+    return [
+      ...(existsSync(options)
+        ? [
+            diagnosticOf('OPTIONS_COPY', {
+              message: `a copy of ${OPTIONS_FILE} among the roots: beadc compiles its own, first, and imports find it; take the copy out`,
+              place: { file: displayOf(options), line: 1, column: 1 },
+            }),
+          ]
+        : []),
+      ...(existsSync(validate)
+        ? [
+            diagnosticOf('VALIDATE_COPY', {
+              message: `a copy of ${VALIDATE_FILE} among the roots: beadc compiles its own, protovalidate's ${VALIDATE_VERSION}, and imports find it; take the copy out`,
+              place: { file: displayOf(validate), line: 1, column: 1 },
+            }),
+          ]
+        : []),
+    ];
   });
 };
 

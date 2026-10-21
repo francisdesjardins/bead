@@ -44,10 +44,10 @@ test("prints a procedure's deprecation and its payload limit in its procedure, a
   );
 
   expect(content).toContain(
-    "    procedure: { deprecation: { message: 'Use \\'other\\', a\\nline later.' }, maximumPayloadBytes: 1024, procedureId: 1, procedureName: 'echo', serviceId: 1, serviceRevision: 1 },\n"
+    "    procedure: { deprecation: { message: 'Use \\'other\\', a\\nline later.' }, maximumPayloadBytes: 1024, procedureId: 1, procedureName: 'echo', serviceId: 1, serviceRevision: 2 },\n"
   );
   expect(content).toContain(
-    "    procedure: { deprecation: {}, procedureId: 2, procedureName: 'fail', serviceId: 1, serviceRevision: 1 },\n"
+    "    procedure: { deprecation: {}, procedureId: 2, procedureName: 'fail', serviceId: 1, serviceRevision: 2 },\n"
   );
 });
 

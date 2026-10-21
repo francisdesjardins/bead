@@ -13,15 +13,13 @@ import { HelloFailures, HelloServer } from '#hello';
 /** What `sayHello` asks a caller that gave no name. */
 const QUESTION = 'What is your name?';
 
-/** The highest number `countDown` starts from. */
-const LONGEST_COUNT = 10;
-
 // definition
 
 /**
  * HelloService, offered on `server`: `sayHello` greets a name, asking its caller's by `askName`
  * when it is given none; `countDown` answers the ticks it will notify, then notifies them to its
- * caller's connection alone, and admits a connection that `sayHello` greeted.
+ * caller's connection alone, and admits a connection that `sayHello` greeted. A count past 10 never
+ * reaches it: its request's rule refuses it first.
  */
 export const offerHello = <Data>(
   server: IServer<IServerTransportLike, Data>
@@ -61,13 +59,6 @@ export const offerHello = <Data>(
 
   hello.on('countDown', async (request, response) => {
     const { connectionHandle, payload } = request;
-
-    if (payload.from > LONGEST_COUNT) {
-      return response(
-        null,
-        HelloFailures.of('TOO_FAR', `a count starts at ${String(LONGEST_COUNT)} at most`)
-      );
-    }
 
     await response({ ticks: payload.from + 1 });
 

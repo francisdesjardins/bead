@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "PROCEDURE_RULES_TIGHTENED",
+      "line": 34,
+      "column": 16
+    }
+  ],
+  "API": [
+    {
+      "rule": "PROCEDURE_RULES_TIGHTENED",
+      "line": 34,
+      "column": 16
+    }
+  ]
+}

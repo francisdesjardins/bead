@@ -44,7 +44,7 @@ const swapped = (text: string): string => {
     .replace('"procedureName": "fail"', '"procedureName": "FAIL"')
     .replace('"procedureName": "tick"', '"procedureName": "fail"')
     .replace('"procedureName": "FAIL"', '"procedureName": "tick"')
-    .replace('"serviceRevision": 1', '"serviceRevision": 2');
+    .replace('"serviceRevision": 2', '"serviceRevision": 3');
 };
 
 // each finding as its rule, then its subject or its pointer
@@ -110,6 +110,7 @@ test("a bare waiver of a breaking rule is refused, naming its subject's form: it
   for (const [given, form] of [
     ['PROCEDURE_SAME_NAME', 'PROCEDURE_SAME_NAME@service:<id>/procedure:<id>'],
     ['SERVICE_REVISION', 'SERVICE_REVISION@service:<id>'],
+    ['PROCEDURE_RULES_TIGHTENED', 'PROCEDURE_RULES_TIGHTENED@service:<id>/procedure:<id>'],
     [
       'NAME_NO_DELETE',
       'NAME_NO_DELETE@service:<id> or NAME_NO_DELETE@service:<id>/procedure:<id> or NAME_NO_DELETE@service:<id>/failure:<code>',
@@ -220,14 +221,14 @@ test("a subject of another kind than the rule's is refused, exit 2", () => {
 
 test("a reserved range is waived by the earlier's range, whatever part the current released", () => {
   const earlier = blueprintWith('earlier.json', (value) => {
-    value.services[0]?.reserved.procedureIds.push({ first: 19, last: 21 });
+    value.services[0]?.reserved.procedureIds.push({ first: 20, last: 22 });
   });
 
   // * one id of the range released, then the other end: the finding's subject is the earlier's
   // range both times, so the waiver written for the first stands for the second
   for (const [name, kept] of [
-    ['narrowed.json', { first: 19, last: 20 }],
-    ['other-end.json', { first: 20, last: 21 }],
+    ['narrowed.json', { first: 20, last: 21 }],
+    ['other-end.json', { first: 21, last: 22 }],
   ] as const) {
     const current = blueprintWith(name, (value) => {
       value.services[0]?.reserved.procedureIds.push(kept);
@@ -240,18 +241,18 @@ test("a reserved range is waived by the earlier's range, whatever part the curre
     };
 
     expect(runWith([]), name).toEqual([
-      'RESERVED_NO_DELETE service:1/procedure:19-21',
+      'RESERVED_NO_DELETE service:1/procedure:20-22',
       'SERVICE_REVISION service:1',
     ]);
     expect(
-      runWith(['RESERVED_NO_DELETE@service:1/procedure:19-21', 'SERVICE_REVISION@service:1']),
+      runWith(['RESERVED_NO_DELETE@service:1/procedure:20-22', 'SERVICE_REVISION@service:1']),
       name
     ).toEqual([]);
   }
 });
 
 test("a deletion's subject is the earlier's", () => {
-  // * procedure 18, the earlier's last, gone: no place in the current holds it, its subject does
+  // * procedure 19, the earlier's last, gone: no place in the current holds it, its subject does
   const current = blueprintWith('deleted.json', (value) => {
     value.services[0]?.procedures.pop();
   });
@@ -262,7 +263,7 @@ test("a deletion's subject is the earlier's", () => {
     return diagnostic.rule === 'PROCEDURE_NO_DELETE';
   });
 
-  expect(deleted?.subject).toBe('service:1/procedure:18');
+  expect(deleted?.subject).toBe('service:1/procedure:19');
   expect(deleted?.pointer).toBe('/services/0/reserved/procedureIds');
 });
 
@@ -338,7 +339,7 @@ test('--except WAIVER_UNUSED is refused', () => {
 });
 
 test('a deletion waived, then the release compared with itself, is WAIVER_UNUSED, a warning, never exit 2', () => {
-  // * the waiver a release's cycle carried: procedure 18, deprecated, taken out and its id and name
+  // * the waiver a release's cycle carried: procedure 19, deprecated, taken out and its id and name
   // reserved, which API finds; then, on the release's own commit, the release against itself, where
   // the waiver waives nothing and is said, never refused
   const earlier = blueprintWith('deprecated.json', (value) => {
@@ -352,14 +353,14 @@ test('a deletion waived, then the release compared with itself, is WAIVER_UNUSED
     const [service] = value.services;
 
     service?.procedures.pop();
-    service?.reserved.procedureIds.push({ first: 18, last: 18 });
-    service?.reserved.procedureNames.push('endSessionsOf');
+    service?.reserved.procedureIds.push({ first: 19, last: 19 });
+    service?.reserved.procedureNames.push('checked');
 
     if (service !== undefined) {
-      service.serviceRevision = 2;
+      service.serviceRevision += 1;
     }
   });
-  const except = ['PROCEDURE_NO_DELETE@service:1/procedure:18'];
+  const except = ['PROCEDURE_NO_DELETE@service:1/procedure:19'];
 
   expect(
     breaking({ blueprint: current }, { against: earlier, category: Category.API, except })
@@ -377,6 +378,6 @@ test('a deletion waived, then the release compared with itself, is WAIVER_UNUSED
     })
   ).toEqual(['WAIVER_UNUSED warning']);
   expect(again[0]?.message).toBe(
-    '--except PROCEDURE_NO_DELETE@service:1/procedure:18 waived nothing: take it out'
+    '--except PROCEDURE_NO_DELETE@service:1/procedure:19 waived nothing: take it out'
   );
 });

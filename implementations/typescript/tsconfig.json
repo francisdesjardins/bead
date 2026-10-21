@@ -21,5 +21,6 @@
     "playwright.config.ts",
     "playwright.devtools.config.ts"
   ],
-  "exclude": ["node_modules"]
+  // beadc's output for spec/validations.proto: tsconfig.validations.json type-checks it
+  "exclude": ["node_modules", "src/proto/__tests__/generated"]
 }

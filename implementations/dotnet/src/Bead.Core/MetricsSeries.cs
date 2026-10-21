@@ -34,7 +34,7 @@ internal enum CallRole
 
 /// <summary>
 /// The codes a series takes, as spec/debugging.md 7.6 lists them: section 8's by their number, then
-/// <c>application</c> and <c>_OTHER</c>, each with its index among the 24, from which every table
+/// <c>application</c> and <c>_OTHER</c>, each with its index among the 25, from which every table
 /// below is cut.
 /// </summary>
 internal static class MetricsCodes
@@ -42,13 +42,13 @@ internal static class MetricsCodes
     // constants
 
     /// <summary>The index of <c>application</c>, a procedure's own failure.</summary>
-    public const int Application = 22;
+    public const int Application = 23;
 
     /// <summary>The index of <c>_OTHER</c>, a code section 8 names none of.</summary>
-    public const int Other = 23;
+    public const int Other = 24;
 
     /// <summary>The index of <c>PROCEDURE_FAILED</c>.</summary>
-    public const int ProcedureFailed = 20;
+    public const int ProcedureFailed = 21;
 
     /// <summary>Every code a label holds, in the exposition's order: section 8's by number, then the two.</summary>
     public static readonly string[] Names =
@@ -57,21 +57,21 @@ internal static class MetricsCodes
         "DESTINATION_UNKNOWN", "DESTINATION_UNREACHABLE", "SERVICE_UNKNOWN", "PROCEDURE_UNKNOWN",
         "CALL_UNKNOWN", "SUBSCRIPTION_UNKNOWN", "SUBSCRIPTION_UNSUPPORTED",
         "SESSION_REQUIRED", "ACCESS_DENIED", "PAYLOAD_TOO_LARGE", "CAPACITY_EXCEEDED", "CREDENTIAL_UNSUPPORTED",
-        "CHUNK_INVALID", "CREDIT_EXCEEDED", "PAYLOAD_UNDECODABLE", "TRANSFER_STALLED",
+        "CHUNK_INVALID", "CREDIT_EXCEEDED", "PAYLOAD_UNDECODABLE", "TRANSFER_STALLED", "PAYLOAD_INVALID",
         "PROCEDURE_FAILED", "DESTINATION_LOST",
         "application", "_OTHER",
     ];
 
     // section 8's numbers, in the order of the names above
-    private static readonly ushort[] Numbers = [1, 2, 3, 4, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 36, 48, 49, 50, 51, 64, 65];
+    private static readonly ushort[] Numbers = [1, 2, 3, 4, 16, 17, 18, 19, 20, 21, 22, 32, 33, 34, 35, 36, 48, 49, 50, 51, 52, 64, 65];
 
     // by a protocol code's number, its index; -1 for a number section 8 names none of
     private static readonly int[] ByNumber = IndexOfNumbers();
 
-    /// <summary>The 12 codes of a procedure's series in the server families, by their indices.</summary>
-    public static readonly int[] Server = [IndexOf(22), IndexOf(32), IndexOf(33), IndexOf(34), IndexOf(35), IndexOf(36), IndexOf(48), IndexOf(49), IndexOf(50), IndexOf(51), IndexOf(64), Application];
+    /// <summary>The 13 codes of a procedure's series in the server families, by their indices.</summary>
+    public static readonly int[] Server = [IndexOf(22), IndexOf(32), IndexOf(33), IndexOf(34), IndexOf(35), IndexOf(36), IndexOf(48), IndexOf(49), IndexOf(50), IndexOf(51), IndexOf(52), IndexOf(64), Application];
 
-    /// <summary>Every one of the 24, by its index.</summary>
+    /// <summary>Every one of the 25, by its index.</summary>
     public static readonly int[] Every = [.. Enumerable.Range(0, Names.Length)];
 
     // helpers
@@ -193,13 +193,13 @@ internal sealed class CallTable
         Columns = columns;
     }
 
-    /// <summary>A procedure's, in the server families: 16 columns, 12 codes.</summary>
+    /// <summary>A procedure's, in the server families: 17 columns, 13 codes.</summary>
     public static CallTable ServerProcedure { get; } = new((Answered, MetricsCodes.Server));
 
-    /// <summary><c>_OTHER</c>'s, in the server families: 28 columns, every code.</summary>
+    /// <summary><c>_OTHER</c>'s, in the server families: 29 columns, every code.</summary>
     public static CallTable ServerOther { get; } = new((Answered, MetricsCodes.Every));
 
-    /// <summary>A procedure's and <c>_OTHER</c>'s, in the client families: 29 columns, every code.</summary>
+    /// <summary>A procedure's and <c>_OTHER</c>'s, in the client families: 30 columns, every code.</summary>
     public static CallTable Client { get; } = new((Made, MetricsCodes.Every));
 
     /// <summary>Its columns, in the exposition's order: an outcome, and its code under failure.</summary>
@@ -312,7 +312,7 @@ internal sealed class CallSeries(CallTable table, string labels)
 }
 
 /// <summary>
-/// A procedure's subscriptions dropped, at either end, by code: none and every one of the 24 (7.6),
+/// A procedure's subscriptions dropped, at either end, by code: none and every one of the 25 (7.6),
 /// made at 0 as it is declared; the side that notifies and the side that hears count into the same.
 /// </summary>
 internal sealed class DroppedSeries(string labels)

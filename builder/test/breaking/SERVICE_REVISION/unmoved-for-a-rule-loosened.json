@@ -1,0 +1,113 @@
+{
+  "earlier": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Echo",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "count",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "type": {
+                    "scalar": "int32"
+                  },
+                  "rules": {
+                    "int32": {
+                      "gte": 1
+                    }
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Echo"
+      }
+    }
+  ],
+  "current": [
+    {
+      "op": "replace",
+      "path": "/requires",
+      "value": ["validate"]
+    },
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Echo",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "count",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "type": {
+                    "scalar": "int32"
+                  },
+                  "rules": {
+                    "int32": {
+                      "gte": 0
+                    }
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Echo"
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "SERVICE_REVISION",
+      "pointer": "/services/0/serviceRevision",
+      "subject": "service:1"
+    }
+  ]
+}

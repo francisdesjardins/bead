@@ -5,10 +5,6 @@ internal sealed partial class RouterCore
     // what goes to the transport, and the session each connection was last told of
     private sealed class RouterWriter
     {
-        // what a failure's envelope holds besides its detail: its prefix, the announcement it may
-        // carry, and its record
-        private const int FailureOverheadBytes = 8 + Credential.AnnouncementBytes + 4;
-
         private readonly IRouterCorePort _port;
         private readonly Options _options;
         private readonly RouterSide _side;
@@ -25,7 +21,7 @@ internal sealed partial class RouterCore
             _side = port.Side;
 
             // a failure's detail fits in an envelope, whatever the limit of a detail says
-            _detailBytes = Math.Min(options.Limits.MaximumDetailBytes, options.Limits.MaximumEnvelopeBytes - FailureOverheadBytes);
+            _detailBytes = options.Limits.DetailBytes;
         }
 
         internal sealed record Options

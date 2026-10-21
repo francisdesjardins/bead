@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request whose pattern's table passes beadc's bound: an unanchored counted dot.
+message FindRequest {
+  string text = 1 [(buf.validate.field).string.pattern = "a.{20}"];
+}
+
+// Answers nothing more.
+message FindResponse {}
+
+// A search, its request held to a pattern too large to compile.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc Find(FindRequest) returns (FindResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}

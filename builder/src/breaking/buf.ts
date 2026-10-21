@@ -2,8 +2,8 @@
 
 // buf's breaking rules over the messages of two buf images, the earlier's and the current's, each
 // written under the system's temporary folder, then `buf breaking` with a configuration of beadc's
-// own: `WIRE` under `WIRE`, `FILE` under `API`, the imports excluded, `bead/options.proto` ignored,
-// and every rule buf keys by a service's or an rpc's name excepted, since Bead keys them by id and
+// own: `WIRE` under `WIRE`, `FILE` under `API`, the imports excluded, beadc's own files ignored,
+// `bead/options.proto` and protovalidate's `buf/validate/validate.proto`, and every rule buf keys by a service's or an rpc's name excepted, since Bead keys them by id and
 // holds them by its own rules (decision 0022). buf runs without the call's waivers, which beadc
 // applies to its findings, by rule and by path as buf's `ignore_only` matches one, so that a waiver
 // that waived nothing is said. Each finding is `buf:` and buf's rule, at buf's place, its import
@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { bufDiagnosticOf, type IDiagnostic, InputError } from '../diagnostics.ts';
-import { displayOf, OPTIONS_FILE, pathOnDisk } from '../roots.ts';
+import { BEADC_FILES, displayOf, pathOnDisk } from '../roots.ts';
 import { Category } from '../rules.ts';
 
 // types
@@ -240,7 +240,7 @@ export const bufConfigOf = (category: Category): object => {
     breaking: {
       use: [BUF_CATEGORY[category]],
       except: [...BUF_EXCEPTED],
-      ignore: [OPTIONS_FILE],
+      ignore: [...BEADC_FILES],
     },
   };
 };

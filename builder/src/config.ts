@@ -43,6 +43,11 @@ export interface ITypeScriptOutput {
   readonly messages: Messages;
   /** Where another generator writes the messages, for `external`. */
   readonly messagesOut?: string;
+  /**
+   * Whether the messages it generates keep protovalidate's options and its import, for a project
+   * that runs protovalidate on its own; off, they go (decision 0035).
+   */
+  readonly keepValidateOptions?: boolean;
 }
 
 /** A C# output: its folder, the namespace of a blueprint's services, and its messages. */
@@ -52,6 +57,8 @@ export interface ICSharpOutput {
   /** For a blueprint source alone: a `.proto`'s services take their file's. */
   readonly namespace?: string;
   readonly messages: Messages;
+  /** As a TypeScript output's: protovalidate's options kept in the messages it generates. */
+  readonly keepValidateOptions?: boolean;
 }
 
 /** An output `beadc generate` writes. */
@@ -101,9 +108,14 @@ const TYPESCRIPT_KEYS = new Set([
   'protoRuntime',
   'messages',
   'messagesOut',
+  'keepValidateOptions',
 ]);
-const CSHARP_KEYS = new Set(['language', 'out', 'namespace', 'messages']);
-const MESSAGES: readonly unknown[] = Object.values(Messages);
+const CSHARP_KEYS = new Set(['language', 'out', 'namespace', 'messages', 'keepValidateOptions']);
+// ! read as each output is, never as the module loads: target.ts and this module import each other
+// through the targets' own imports, so Messages may not be there yet
+const messagesOf = (): readonly unknown[] => {
+  return Object.values(Messages);
+};
 
 // a path an import names, relative to the importer, and the extension it would name itself
 const RELATIVE = /^\.{1,2}\//u;
@@ -239,6 +251,29 @@ export const parseConfig = (
   const { folder } = options;
   const document = documentOf(text, { ...options, keys: KEYS });
   const { value, refuse, resolved } = document;
+  // whether an output keeps protovalidate's options, which only messages it generates hold
+  const keepsOf = (
+    given: Record<string, unknown>,
+    details: { readonly key: string; readonly messages: unknown }
+  ): { keepValidateOptions?: boolean } => {
+    const keeps = given['keepValidateOptions'];
+
+    if (keeps === undefined) {
+      return {};
+    }
+
+    if (typeof keeps !== 'boolean') {
+      return refuse(`${details.key}.keepValidateOptions is true or false`);
+    }
+
+    if (keeps && details.messages !== Messages.GENERATE) {
+      refuse(
+        `${details.key}.keepValidateOptions keeps protovalidate's options in the messages beadc generates, and only then`
+      );
+    }
+
+    return { keepValidateOptions: keeps };
+  };
   // a C# output, its keys read or refused: a namespace for a blueprint's services, and only then
   const csharpOutputOf = (given: Record<string, unknown>, key: string): ICSharpOutput => {
     const source = value['source'];
@@ -268,7 +303,7 @@ export const parseConfig = (
       refuse(`${key}.namespace is a C# namespace, identifiers of letters, digits and _ by dots`);
     }
 
-    if (!MESSAGES.includes(messages)) {
+    if (!messagesOf().includes(messages)) {
       refuse(`${key}.messages is generate or external`);
     }
 
@@ -277,6 +312,7 @@ export const parseConfig = (
       out: resolved(given['out'], `${key}.out`),
       ...(typeof namespace === 'string' ? { namespace } : {}),
       messages: messages as Messages,
+      ...keepsOf(given, { key, messages }),
     };
   };
   // each output, its keys read or refused, its folders under this one
@@ -326,7 +362,7 @@ export const parseConfig = (
       refuse(`${key}.protoRuntime: ${protoRuntime} names no extension; importExtension gives it`);
     }
 
-    if (!MESSAGES.includes(messages)) {
+    if (!messagesOf().includes(messages)) {
       refuse(`${key}.messages is generate or external`);
     }
 
@@ -344,6 +380,7 @@ export const parseConfig = (
       ...('messagesOut' in given
         ? { messagesOut: resolved(given['messagesOut'], `${key}.messagesOut`) }
         : {}),
+      ...keepsOf(given, { key, messages }),
     };
   };
   const outputsOf = (): { outputs?: readonly Output[] } => {

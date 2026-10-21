@@ -28,10 +28,18 @@ public sealed record ServiceClientOptions<TService>
     public IServiceWindows<TService>? Windows { get; init; }
 
     /// <summary>
-    /// Whether each requester checks a request's value by its procedure's <c>Validate</c> before it
-    /// is written, so that a call that would be refused fails before it goes; none does by default.
+    /// Whether each requester judges a request's value by its procedure's rules before it is
+    /// written, a subscribing request among them, so that a call they refuse fails before it goes,
+    /// with PAYLOAD_INVALID, counted (spec 18.2); none does by default.
     /// </summary>
     public bool Validates { get; init; }
+
+    /// <summary>
+    /// Whether the judging of a request by its procedure's rules stops at its first violation,
+    /// protovalidate's <c>failFast</c> (spec 18.5): a requester's, and a command's before its
+    /// resolver; every rule is judged by default.
+    /// </summary>
+    public bool FailFast { get; init; }
 }
 
 /// <summary>
@@ -57,6 +65,7 @@ public sealed class ServiceClient<TService>
     private readonly Dictionary<ProcedureAddress, object> _requesters = [];
     private readonly Dictionary<ProcedureAddress, object> _notifications = [];
     private readonly HashSet<ProcedureAddress> _answered = [];
+    private readonly bool _failFast;
 
     /// <summary>
     /// The client side of <paramref name="procedures"/>, over <paramref name="client"/>: two at one
@@ -72,6 +81,9 @@ public sealed class ServiceClient<TService>
         ArgumentNullException.ThrowIfNull(client);
 
         _services = client.Services;
+        _failFast = options?.FailFast ?? false;
+
+        var judging = new RequesterJudging { FailFast = _failFast, Validates = options?.Validates ?? false };
 
         foreach (var procedure in procedures)
         {
@@ -107,13 +119,13 @@ public sealed class ServiceClient<TService>
             var described = (IDescribedProcedure)procedure;
             var address = procedure.Procedure.Address;
 
-            _requesters[address] = described.RequesterOn(_services, options?.Validates ?? false);
+            _requesters[address] = described.RequesterOn(_services, judging);
 
             if (procedure.Procedure.ProcedureKind == ProcedureKind.Notifies)
             {
                 _notifications[address] = described.NotificationOn(
                     _services,
-                    windows.TryGetValue(procedure.Procedure.ProcedureName, out var window) ? window : null)!;
+                    (windows.TryGetValue(procedure.Procedure.ProcedureName, out var window) ? window : null, judging))!;
             }
         }
     }
@@ -196,11 +208,13 @@ public sealed class ServiceClient<TService>
                     // * a client's router resolves a command's credential to a session as a server
                     // does, so a session's rule is the same on both ends of a call (decision 0018)
                     BeforeRequest = procedure.Admission.Kind == AdmissionKind.Session ? SessionRequired : null,
+                    FailFast = _failFast,
                     Serializer = new ServerCodecs<TRequest, TResult>(bindings.Request, bindings.Result),
+
+                    // * a command is judged as a server's request is, by its service manager (spec 9.1)
+                    Validate = bindings.Validate,
                 })((request, response) =>
                 {
-                    bindings.Validate?.Invoke(request.Payload);
-
                     return callback(request, new ServiceResponse<TResult, TFailure>(response));
                 });
         }

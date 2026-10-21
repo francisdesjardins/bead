@@ -1,5 +1,5 @@
 import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
-import { failureTableOf } from '../constants';
+import { failureTableOf, LIMIT_DEFAULTS } from '../constants';
 import {
   ProgrammerError,
   type CallId,
@@ -151,6 +151,7 @@ export const createFakeRouter = (side: RouterSide = 'server', clock: IClock = PL
   const router: IRouterLike = {
     clock,
     failures: failureTableOf(side),
+    limits: LIMIT_DEFAULTS,
 
     answeredOf: () => {
       return undefined;

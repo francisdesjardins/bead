@@ -10,7 +10,7 @@ import { expect, test } from '@playwright/test';
 
 import { compile } from '../../compile.ts';
 import { type IDiagnostic, InputError } from '../../diagnostics.ts';
-import { displayOf, OPTIONS_FILE } from '../../roots.ts';
+import { displayOf, OPTIONS_FILE, VALIDATE_FILE } from '../../roots.ts';
 import { Category } from '../../rules.ts';
 import { breaking, waiversOf } from '../breaking.ts';
 import {
@@ -120,7 +120,9 @@ test('bead/options.proto and an import dropped are never compared', () => {
   expect(procedure).toBeDefined();
 
   for (const category of Object.values(Category)) {
-    expect(bufConfigOf(category)).toMatchObject({ breaking: { ignore: [OPTIONS_FILE] } });
+    expect(bufConfigOf(category)).toMatchObject({
+      breaking: { ignore: [OPTIONS_FILE, VALIDATE_FILE] },
+    });
 
     const found = bufFindings(toBinary(FileDescriptorSetSchema, current), {
       earlier,

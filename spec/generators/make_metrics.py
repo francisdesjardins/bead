@@ -21,7 +21,7 @@ CODES = {
     20: 'CALL_UNKNOWN', 21: 'SUBSCRIPTION_UNKNOWN', 22: 'SUBSCRIPTION_UNSUPPORTED',
     32: 'SESSION_REQUIRED', 33: 'ACCESS_DENIED', 34: 'PAYLOAD_TOO_LARGE', 35: 'CAPACITY_EXCEEDED',
     36: 'CREDENTIAL_UNSUPPORTED', 48: 'CHUNK_INVALID', 49: 'CREDIT_EXCEEDED', 50: 'PAYLOAD_UNDECODABLE',
-    51: 'TRANSFER_STALLED', 64: 'PROCEDURE_FAILED', 65: 'DESTINATION_LOST',
+    51: 'TRANSFER_STALLED', 52: 'PAYLOAD_INVALID', 64: 'PROCEDURE_FAILED', 65: 'DESTINATION_LOST',
 }
 APPLICATION, OTHER = 'application', '_OTHER'
 
@@ -32,8 +32,8 @@ CODE_ORDER = {None: -1, **{name: number for number, name in CODES.items()}, APPL
 EVERY_CODE = [*CODES.values(), APPLICATION, OTHER]
 SERVER_CODES = ['SESSION_REQUIRED', 'ACCESS_DENIED', 'PAYLOAD_TOO_LARGE', 'CAPACITY_EXCEEDED', 'CREDENTIAL_UNSUPPORTED',
                 'SUBSCRIPTION_UNSUPPORTED', 'CHUNK_INVALID', 'CREDIT_EXCEEDED', 'PAYLOAD_UNDECODABLE', 'TRANSFER_STALLED',
-                'PROCEDURE_FAILED', APPLICATION]
-assert len(EVERY_CODE) == 24 and len(SERVER_CODES) == 12
+                'PAYLOAD_INVALID', 'PROCEDURE_FAILED', APPLICATION]
+assert len(EVERY_CODE) == 25 and len(SERVER_CODES) == 13
 
 # 11.3: A66's bounds, in microseconds, each with its le, OpenMetrics' canonical number for it
 BOUNDS = [
@@ -262,9 +262,9 @@ def series_count(registry):
     return sum(len(series) for series in registry.families().values())
 
 
-# the record's counts (7.7): 61, 74, 27, 26, and _OTHER's 73 and 74
-for way, router, notifies, expected in (('resolver', 'server', False, 61), ('requester', 'client', False, 74),
-                                        ('resolver', 'server', True, 61 + 27), ('notification', 'client', False, 26)):
+# the record's counts (7.7): 62, 75, 28, 27, and _OTHER's 74 and 75
+for way, router, notifies, expected in (('resolver', 'server', False, 62), ('requester', 'client', False, 75),
+                                        ('resolver', 'server', True, 62 + 28), ('notification', 'client', False, 27)):
     counted = Registry()
     counted.declare(router, way, (1, 1), 'p', notifies)
     assert series_count(counted) == expected, (way, series_count(counted))
@@ -272,8 +272,8 @@ for way, router, notifies, expected in (('resolver', 'server', False, 61), ('req
 counted = Registry()
 counted.give('server')
 assert len(counted.families()['bead_server_call_duration_seconds']) + len(counted.families()['bead_server_call_handled_total']) \
-    + len(counted.families()['bead_server_call_started_total']) == 73
-assert series_count(counted) == 73 + 74
+    + len(counted.families()['bead_server_call_started_total']) == 74
+assert series_count(counted) == 74 + 75
 
 # ── The expositions ─────────────────────────────────────────────────────────────────────────────
 
@@ -384,10 +384,10 @@ EXPOSITIONS = [
      None, ['server'], [], []),
     ('a registry given to a client\'s router makes its _OTHER series at 0: request among its client families, command among its server families',
      [MADE_AHEAD, ROLES, LABELED, ORDERED], None, ['client'], [], []),
-    ('a resolver declared makes its 61 series at 0, and one whose procedure notifies 27 more, as the side that notifies',
+    ('a resolver declared makes its 62 series at 0, and one whose procedure notifies 28 more, as the side that notifies',
      [DECLARED, AS_RESOLVER, MADE_AHEAD, CODES_OF, CODES_SERVER, CODES_NOTIFIER, SERIES_COUNTS, GROUPED, ORDERED], None,
      ['server'], [resolver(SERVER, 1, 1, 'echo'), resolver(SERVER, 1, 10, 'ticks', notifies=True)], []),
-    ('a requester declared makes its 74 series at 0, and a notification registered 26, as the side that hears',
+    ('a requester declared makes its 75 series at 0, and a notification registered 27, as the side that hears',
      [DECLARED, AS_REQUESTER, AS_HEARER, MADE_AHEAD, CODES_OF, CODES_CLIENT, CODES_HEARER, SERIES_COUNTS, ORDERED], None,
      ['client'], [requester(SERVER, 1, 1, 'echo'), notification(SERVER, 1, 10, 'ticks')], []),
     ('a resolver declared on a client\'s router counts its commands, and a requester on a server\'s router the commands it makes',
@@ -567,13 +567,13 @@ SECOND = 1_000_000
 SERVER_STARTS, SERVER_ENDS, CLIENT_STARTS, CLIENT_ENDS, GOES, HEARD, DROPPED = (
     '9.1.1', '9.1.2', '9.1.3', '9.1.4', '9.1.5', '9.1.6', '9.1.7')
 PAST_ANSWERING, ROUTE, CREDENTIAL, ADMISSION, SUBSCRIPTION, TOO_LARGE, OPENING_REFUSED, OPENING_PAST, \
-    REQUEST_TRANSFER, UNREADABLE, UNDECODABLE, RESOLVER_FAILS, OWN_FAILURE, QUEUE_PAST, RESULT_STALLED, RELAYED, \
+    REQUEST_TRANSFER, UNREADABLE, UNDECODABLE, INVALID, RESOLVER_FAILS, OWN_FAILURE, QUEUE_PAST, RESULT_STALLED, RELAYED, \
     CANCELLED, CLOSED = (
         '9.4.2', '9.4.3', '9.4.4', '9.4.5', '9.4.6', '9.4.7', '9.4.8', '9.4.9', '9.4.10', '9.4.11', '9.4.12', '9.4.13',
-        '9.4.14', '9.4.15', '9.4.16', '9.4.17', '9.4.18', '9.4.19')
+        '9.4.14', '9.4.15', '9.4.16', '9.4.17', '9.4.18', '9.4.19', '9.4.20')
 ANSWERED_RESULT = '9.4.1'
 MADE_RESULT, MADE_FAILURE, MADE_ENDED, MADE_TIMEOUT, MADE_CANCELLED, MADE_CLOSED = (
-    '9.6.5', '9.6.6', '9.6.7', '9.6.8', '9.6.9', '9.6.10')
+    '9.6.6', '9.6.7', '9.6.8', '9.6.9', '9.6.10', '9.6.11')
 LAST_CHUNK, WIRE = '9.5', '9.8'
 NOTIFICATION_SENT, QUEUE_DROPPED, SESSION_DROPPED, CLOSE_DROPPED, CANCEL_DROPS_NOTHING = (
     '10.1', '10.3.1', '10.3.2', '10.3.4', '10.4')
@@ -696,6 +696,9 @@ EXITS = [
      {2: answered_whole('ticks', 'result'), 4: [], 7: [*answered_whole('tick', 'result'), sent('ticks')]}),
     ('a payload its procedure cannot read counts PAYLOAD_UNDECODABLE', [UNDECODABLE],
      'a payload that is not JSON is answered PAYLOAD_UNDECODABLE', {2: answered_whole('echo', 'failure', 'PAYLOAD_UNDECODABLE')}),
+    ('a payload its rules refuse counts PAYLOAD_INVALID', [INVALID],
+     'a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail',
+     {2: answered_whole('checked', 'failure', 'PAYLOAD_INVALID')}),
     ('a resolver that fails before it answers counts PROCEDURE_FAILED', [RESOLVER_FAILS],
      'a resolver that throws before it answers is answered PROCEDURE_FAILED, and reported',
      {3: answered_whole('broken', 'failure', 'PROCEDURE_FAILED')}),

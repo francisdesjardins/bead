@@ -94,18 +94,45 @@ public sealed partial class ServiceManager
             }
         }
 
+        // whether a serializer's throw is a value its rules refused: a PAYLOAD_INVALID raised here,
+        // which its call fails with once it starts, counted, rather than a value that does not write
+        private static bool IsJudged(FailureException refused)
+        {
+            return refused.Origin == FailureOrigin.Local
+                && refused.Scope == FailureScope.Protocol
+                && refused.Code == (ushort)ProtocolCode.PayloadInvalid;
+        }
+
+        // a request's payload written, or the refusal its rules judged it with in its place; a
+        // value that does not write throws
+        private static (ReadOnlyMemory<byte> Encoded, Failure? Refusal) WrittenOf<TRequest, TResponse>(
+            IRequestSerializerClient<TRequest, TResponse> serializer,
+            TRequest payload)
+        {
+            try
+            {
+                return (serializer.Encode(payload), null);
+            }
+            catch (FailureException refused) when (IsJudged(refused))
+            {
+                return (default, refused.Failure);
+            }
+        }
+
         // one call — a request, a command, or the request that subscribes a notification: its options
         // with the defaults applied, its trace, the request, the close on timeout, and its result
         // decoded; a timeout refused fails as the options are resolved, and a value that does not write
         // as it is written, both before the trace and the deprecation: no call is made (spec 17.2,
-        // item 4; spec/debugging.md 4.3)
+        // item 4; spec/debugging.md 4.3). A value its rules refuse is a call refused before it goes:
+        // handed to the router with its refusal, which fails it in its turn, counted, its tx step told
+        // as it is refused, no call id drawn (spec 18.2; spec/debugging.md 4.4, 9.6)
         internal async Task<(uint CallId, TResponse Response)> CallOf<TRequest, TResponse>(
             TRequest payload,
             (Procedure Procedure, IRequestSerializerClient<TRequest, TResponse> Serializer, RequestOptions? Options, (DebugType Type, INotificationLike? Subscribes, ProcedureSeries? Series) Made) call)
         {
             var (procedure, serializer, given, (type, subscribes, series)) = call;
             var options = OptionsOf(given);
-            var encoded = serializer.Encode(payload);
+            var (encoded, refusal) = WrittenOf(serializer, payload);
 
             // * one check a call while nobody listens: no clock read, no step, no copy of its options,
             // nothing to hear its call id; a credential stays out of what a side tells, and the trace
@@ -130,6 +157,7 @@ public sealed partial class ServiceManager
                 new RouterRequest(procedure, options)
                 {
                     OnCallId = traced is null ? null : traced.OnCallId,
+                    Refusal = refusal,
                     Series = series,
                     Subscribes = subscribes,
                 });

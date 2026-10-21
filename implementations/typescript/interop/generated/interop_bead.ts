@@ -2,11 +2,11 @@
 // Do not edit: regenerate with beadc.
 
 import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "../../src/service/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_3, PAYLOAD_CODECS, requestOf } from "../../src/service/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_4, PAYLOAD_CODECS, requestOf } from "../../src/service/service";
 
 
 /**
- * The procedures of `Interop`: service 1, revision 1.
+ * The procedures of `Interop`: service 1, revision 2.
  *
  * Bead's interop service: the procedures every implementation's interop server offers alike, what each takes, answers and admits stated in interop-service.json.
  */
@@ -17,7 +17,7 @@ export const InteropProcedures = Object.freeze({
   echo: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 1, procedureName: 'echo', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 1, procedureName: 'echo', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -27,7 +27,7 @@ export const InteropProcedures = Object.freeze({
   fail: requestOf({
     admission: 'none',
     failures: { ON_PURPOSE: 7 },
-    procedure: { procedureId: 2, procedureName: 'fail', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 2, procedureName: 'fail', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -37,7 +37,7 @@ export const InteropProcedures = Object.freeze({
   slow: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 3, procedureName: 'slow', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 3, procedureName: 'slow', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -47,7 +47,7 @@ export const InteropProcedures = Object.freeze({
   cancellations: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 4, procedureName: 'cancellations', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 4, procedureName: 'cancellations', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -57,7 +57,7 @@ export const InteropProcedures = Object.freeze({
   denied: requestOf({
     admission: { hook: 'nobody' },
     failures: {},
-    procedure: { procedureId: 5, procedureName: 'denied', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 5, procedureName: 'denied', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -67,7 +67,7 @@ export const InteropProcedures = Object.freeze({
   broken: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 6, procedureName: 'broken', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 6, procedureName: 'broken', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -77,7 +77,7 @@ export const InteropProcedures = Object.freeze({
   bytes: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 7, procedureName: 'bytes', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 7, procedureName: 'bytes', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -87,7 +87,7 @@ export const InteropProcedures = Object.freeze({
   ask: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 8, procedureName: 'ask', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 8, procedureName: 'ask', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -97,7 +97,7 @@ export const InteropProcedures = Object.freeze({
   clock: commandOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 9, procedureName: 'clock', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 9, procedureName: 'clock', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -108,7 +108,7 @@ export const InteropProcedures = Object.freeze({
     admission: 'none',
     failures: { ON_PURPOSE: 7 },
     notification: PAYLOAD_CODECS.json,
-    procedure: { procedureId: 10, procedureName: 'ticks', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 10, procedureName: 'ticks', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -118,7 +118,7 @@ export const InteropProcedures = Object.freeze({
   tick: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 11, procedureName: 'tick', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 11, procedureName: 'tick', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -128,7 +128,7 @@ export const InteropProcedures = Object.freeze({
   login: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 12, procedureName: 'login', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 12, procedureName: 'login', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -138,7 +138,7 @@ export const InteropProcedures = Object.freeze({
   logout: requestOf({
     admission: 'session',
     failures: {},
-    procedure: { procedureId: 13, procedureName: 'logout', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 13, procedureName: 'logout', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -148,7 +148,7 @@ export const InteropProcedures = Object.freeze({
   whoami: requestOf({
     admission: 'session',
     failures: {},
-    procedure: { procedureId: 14, procedureName: 'whoami', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 14, procedureName: 'whoami', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -158,7 +158,7 @@ export const InteropProcedures = Object.freeze({
   register: requestOf({
     admission: 'none',
     failures: { REGISTERED_ALREADY: 8 },
-    procedure: { procedureId: 15, procedureName: 'register', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 15, procedureName: 'register', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -168,7 +168,7 @@ export const InteropProcedures = Object.freeze({
   unregister: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 16, procedureName: 'unregister', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 16, procedureName: 'unregister', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -178,7 +178,7 @@ export const InteropProcedures = Object.freeze({
   endSession: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 17, procedureName: 'endSession', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 17, procedureName: 'endSession', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -188,7 +188,17 @@ export const InteropProcedures = Object.freeze({
   endSessionsOf: requestOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 18, procedureName: 'endSessionsOf', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 18, procedureName: 'endSessionsOf', serviceId: 1, serviceRevision: 2 },
+    request: PAYLOAD_CODECS.json,
+    result: PAYLOAD_CODECS.json,
+  }),
+  /**
+   * Counts the names it is given, held to the rules each server judges it by before its resolver: 50 at most, each of 1 to 3 characters. Admits every call.
+   */
+  checked: requestOf({
+    admission: 'none',
+    failures: {},
+    procedure: { procedureId: 19, procedureName: 'checked', serviceId: 1, serviceRevision: 2 },
     request: PAYLOAD_CODECS.json,
     result: PAYLOAD_CODECS.json,
   }),
@@ -336,6 +346,10 @@ export class InteropClient {
    */
   public readonly endSessionsOf: IServiceClient<typeof InteropProcedures>['request']['endSessionsOf'];
   /**
+   * Counts the names it is given, held to the rules each server judges it by before its resolver: 50 at most, each of 1 to 3 characters.
+   */
+  public readonly checked: IServiceClient<typeof InteropProcedures>['request']['checked'];
+  /**
    * The notification of each procedure that notifies, at the window its options gave, or unpaced.
    */
   public readonly notifications: IServiceClient<typeof InteropProcedures>['notifications'];
@@ -367,10 +381,11 @@ export class InteropClient {
     this.unregister = service.request.unregister;
     this.endSession = service.request.endSession;
     this.endSessionsOf = service.request.endSessionsOf;
+    this.checked = service.request.checked;
     this.notifications = service.notifications;
     this.on = service.on;
   }
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_3;
+void GENERATED_CODE_SUPPORTS_VERSION_4;

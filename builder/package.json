@@ -24,13 +24,16 @@
     "options:generate": "node tools/check-options.mjs --write",
     "test": "playwright test",
     "test:coverage": "c8 playwright test",
-    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.json && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.floor.json && node node_modules/typescript-7/bin/tsc -p test/consumer/tsconfig.json"
+    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.json && node node_modules/typescript-7/bin/tsc -p test/golden/typescript/tsconfig.floor.json && node node_modules/typescript-7/bin/tsc -p test/consumer/tsconfig.json",
+    "unicode:check": "node tools/make-unicode.mjs --check",
+    "unicode:generate": "node tools/make-unicode.mjs"
   },
   "dependencies": {
     "@bufbuild/buf": "1.74.0",
     "@bufbuild/protobuf": "2.16.0",
     "@bufbuild/protoc-gen-es": "2.16.0",
     "@bufbuild/protoplugin": "2.16.0",
+    "@bufbuild/re2": "0.6.1",
     "ajv": "8.20.0",
     "yaml": "2.9.1"
   },

@@ -300,6 +300,7 @@ far a request went:
 | 49   | `CREDIT_EXCEEDED`          | a chunk runs past the credit granted                                                                                                                                                      |
 | 50   | `PAYLOAD_UNDECODABLE`      | the procedure's serializer cannot read the payload                                                                                                                                        |
 | 51   | `TRANSFER_STALLED`         | nothing came for a transfer through its inactivity timeout                                                                                                                                |
+| 52   | `PAYLOAD_INVALID`          | the payload reads, and its procedure's rules refuse it: its violations in its detail (spec 18)                                                                                            |
 | 64   | `PROCEDURE_FAILED`         | the resolver failed before it answered, its admission threw or a verifier failed, or its result could not go out: past what its side sends, or past what leg A of a relay carries         |
 | 65   | `DESTINATION_LOST`         | the relay handed the request on, then lost its destination: the procedure may have run                                                                                                    |
 
@@ -613,10 +614,25 @@ or where sections 17.9.5 and 17.9.6 refuse them: a field at a wire type its type
 a map's entry with a field other than its key and its value
 ([0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
 Each message's shape is built once, from its descriptor; `./proto` takes `@bufbuild/protobuf` as an
-optional peer, by its types alone, so no protobuf code loads with it. Protobuf's conformance suite
-plays the generated codec, the check in front, through the testee in `tools/protobuf-conformance/`,
-which the root's `tools/protobuf-conformance.mjs` generates its code into and runs, with its failure
-list, `failing.txt`.
+optional peer, the check by its types alone, the validators by its `create`. Protobuf's conformance
+suite plays the generated codec, the check in front, through the testee in
+`tools/protobuf-conformance/`, which the root's `tools/protobuf-conformance.mjs` generates its code
+into and runs, with its failure list, `failing.txt`.
+
+A `proto` request's rules are protovalidate's options on its message, which beadc compiles into
+each side's validator ([0035](../../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):
+`validatorOf(schema, rules)` of `./proto` makes the descriptor's `validate` of the rules it
+generates, which judge the message into a sink. The sink holds the violations a detail of
+`maximumBytes` carries, each sized as its writer writes it, and counts the rest without building
+their path, so a judging holds a detail's worth whatever the request breaks; under `failFast` it
+stops at the first. A `pattern` is a table beadc builds ahead of time, `matchesPattern` walking it a
+cell a code point. `judgeRules` judges rules written by hand alike, a `json` binding's. Every
+verdict of `spec/validations.json` plays through the validators beadc generates for
+`spec/validations.proto`, in `src/proto/__tests__/generated/`, which `yarn validations:check` holds
+to beadc and `yarn validations:generate` writes, builder/ installed, through the root's
+`tools/check-validations.mjs`; the root's
+`tools/protovalidate-differential.mjs` plays them against protovalidate-es through the testee in
+`tools/protovalidate-differential/`.
 
 ```ts
 const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
@@ -681,8 +697,13 @@ command a hook admits is a `ProgrammerError` there. Each requester and resolver 
 call stays curried, `request.sayHello(payload)(options)`: what the payload gives is a bound call,
 `IBoundCall`, or `IRegistrar` for a notification, whose `then` no promise matches, so
 `await greeter.request.sayHello('Ada')`, its options' call forgotten, does not compile. A descriptor
-may carry `validate`, which throws on a request its rules refuse: the side that answers calls it
-before the resolver, and a client whose options say `validates: true` before the request is written.
+may carry `validate`, its request's rules (spec 18), which beadc generates: the side that answers
+judges every request once it reads, before its resolver, and answers one its rules refuse
+`PAYLOAD_INVALID`, its violations in its detail, lines of canonical JSON that `violationsOf` reads
+back; a client whose options say `validates: true`, or a server's for its commands, judges the value
+before it is written, and a value its rules refuse fails its call before anything goes, with the
+same failure, counted and traced as a call refused before it goes. `failFast: true` stops a judging
+at its first violation. A `validate` that throws is its side's own error, `PROCEDURE_FAILED`.
 
 ### Transfers
 

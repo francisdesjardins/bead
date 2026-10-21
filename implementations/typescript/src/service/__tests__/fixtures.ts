@@ -2,7 +2,7 @@
 
 // A service of every kind of call, and a server in a worker's scope with a client to it, which the
 // service layer's tests serve and call; a service with deprecated procedures, and the lint that
-// finds their uses.
+// finds their uses; and a text's rules, as generated code judges a message's.
 
 // dependencies
 
@@ -11,8 +11,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createWorkerClient } from '../../client/worker-client';
+import { judgeRules } from '../../proto/validate';
 import type { IMetricsRegistry } from '../../router/shared/metrics-registry';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
+import type { IJudged, IValidateOptions } from '../../router/shared/violations';
 import { expectAtRest } from '../../server/__tests__/fixtures';
 import { createWorkerServer } from '../../server/worker-server';
 import type { TransportServerConnectionHandle } from '../../transport/server/types';
@@ -37,6 +39,24 @@ const NO_DEPRECATED = fileURLToPath(new URL('no-deprecated.oxlintrc.json', impor
 
 /** The directive a use the lint must flag carries. */
 const DIRECTIVE = '// oxlint-disable-next-line typescript/no-deprecated --';
+
+/** A text's one rule: a character at least, its violation the payload's own, at no path. */
+export const NOT_EMPTY = Object.freeze({
+  bounds: Object.freeze({ min_len: '1' }),
+  message: 'must be at least 1 characters',
+  ruleId: 'string.min_len',
+});
+
+/** The detail PAYLOAD_INVALID carries of an empty text, under {@link NOT_EMPTY}. */
+export const NOT_EMPTY_DETAIL =
+  '{"bounds":{"min_len":"1"},"message":"must be at least 1 characters","ruleId":"string.min_len"}\n{"more":0}';
+
+/** A text's rules: {@link NOT_EMPTY}, judged as generated code judges a message's. */
+export const notEmpty = (request: unknown, options?: IValidateOptions): IJudged => {
+  return judgeRules((sink) => {
+    return request === '' && sink.add(NOT_EMPTY, request);
+  }, options);
+};
 
 /** The greeter's failures: service 7's catalogue. */
 export const GreeterFailures = failuresOf({
@@ -220,13 +240,16 @@ export const deprecationsIn = async (
  * to it through the other end, both started; `await using` takes them apart once the server keeps
  * nothing.
  */
-export const connectWorker = async (options: { metricsRegistry?: IMetricsRegistry } = {}) => {
+export const connectWorker = async (
+  options: { clientMetricsRegistry?: IMetricsRegistry; metricsRegistry?: IMetricsRegistry } = {}
+) => {
   const scope = new MessageChannel();
   const server = createWorkerServer<string>({
     metricsRegistry: options.metricsRegistry,
     transport: { scope: scope.port1 },
   });
   const client = createWorkerClient({
+    metricsRegistry: options.clientMetricsRegistry,
     transport: {
       worker: {
         postMessage: (message, transfer) => {

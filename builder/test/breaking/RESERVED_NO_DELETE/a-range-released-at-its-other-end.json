@@ -4,8 +4,8 @@
       "op": "add",
       "path": "/services/0/reserved/procedureIds/-",
       "value": {
-        "first": 19,
-        "last": 21
+        "first": 20,
+        "last": 22
       }
     }
   ],
@@ -14,21 +14,21 @@
       "op": "add",
       "path": "/services/0/reserved/procedureIds/-",
       "value": {
-        "first": 20,
-        "last": 21
+        "first": 21,
+        "last": 22
       }
     },
     {
       "op": "replace",
       "path": "/services/0/serviceRevision",
-      "value": 2
+      "value": 3
     }
   ],
   "findings": [
     {
       "rule": "RESERVED_NO_DELETE",
       "pointer": "/services/0/reserved/procedureIds",
-      "subject": "service:1/procedure:19-21"
+      "subject": "service:1/procedure:20-22"
     }
   ]
 }

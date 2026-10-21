@@ -65,6 +65,20 @@ public sealed record ServiceServerOptions<TService>
     /// <see cref="ArgumentException"/>.
     /// </summary>
     public required IServiceAdmissions<TService> Admissions { get; init; }
+
+    /// <summary>
+    /// Whether the judging of a request by its procedure's rules stops at its first violation,
+    /// protovalidate's <c>failFast</c> (spec 18.5), its detail saying it stopped; every rule is
+    /// judged by default.
+    /// </summary>
+    public bool FailFast { get; init; }
+
+    /// <summary>
+    /// Whether each command's requester judges its request's value by its procedure's rules before
+    /// it is written, so that a call they refuse fails before it goes, with PAYLOAD_INVALID; none
+    /// does by default, as a client side's options say.
+    /// </summary>
+    public bool Validates { get; init; }
 }
 
 /// <summary>
@@ -81,6 +95,7 @@ public sealed class ServiceServer<TService, TData>
     private readonly Lock _gate = new();
     private readonly Dictionary<ProcedureAddress, IServiceProcedure<TService>> _procedures = [];
     private readonly IReadOnlyDictionary<string, AdmissionHook> _hooks;
+    private readonly RequesterJudging _judging;
 
     // what registers each resolver given, kept until the service is offered, and run at once after
     private readonly Dictionary<ProcedureAddress, Action<IBeadServer<TData>>> _resolvers = [];
@@ -98,7 +113,7 @@ public sealed class ServiceServer<TService, TData>
     /// procedure names, and one that is no hook, are an <see cref="ArgumentException"/>.
     /// </summary>
     public ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures, ServiceServerOptions<TService> options)
-        : this(procedures, HooksOf(options))
+        : this(procedures, (HooksOf(options), new RequesterJudging { FailFast = options.FailFast, Validates = options.Validates }))
     {
     }
 
@@ -107,15 +122,18 @@ public sealed class ServiceServer<TService, TData>
     /// takes them, for procedures that name no hook.
     /// </summary>
     public ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures)
-        : this(procedures, new Dictionary<string, AdmissionHook>())
+        : this(procedures, (new Dictionary<string, AdmissionHook>(), RequesterJudging.None))
     {
     }
 
-    private ServiceServer(IReadOnlyList<IServiceProcedure<TService>> procedures, IReadOnlyDictionary<string, AdmissionHook> hooks)
+    private ServiceServer(
+        IReadOnlyList<IServiceProcedure<TService>> procedures,
+        (IReadOnlyDictionary<string, AdmissionHook> Hooks, RequesterJudging Judging) made)
     {
         ArgumentNullException.ThrowIfNull(procedures);
 
-        _hooks = hooks;
+        _hooks = made.Hooks;
+        _judging = made.Judging;
 
         foreach (var procedure in procedures)
         {
@@ -155,12 +173,13 @@ public sealed class ServiceServer<TService, TData>
                 new RequestResolverDependencies<TRequest, TResult>
                 {
                     BeforeRequest = AdmissionOf((procedure.Admission, server)),
+                    FailFast = _judging.FailFast,
                     Serializer = new ServerCodecs<TRequest, TResult>(bindings.Request, bindings.Result),
+
+                    // * its rules judged by its service manager, after its decode and before its resolver
+                    Validate = bindings.Validate,
                 })((request, response) =>
                 {
-                    // the check of a request's value, after its decode and before its resolver
-                    bindings.Validate?.Invoke(request.Payload);
-
                     return callback(request, new ServiceResponse<TResult, TFailure>(response));
                 });
         });
@@ -187,11 +206,11 @@ public sealed class ServiceServer<TService, TData>
                 new NotificationResolverDependencies<TRequest, TResult, TNotification>
                 {
                     BeforeRequest = AdmissionOf((procedure.Admission, server)),
+                    FailFast = _judging.FailFast,
                     Serializer = new ServerNotificationCodecs<TRequest, TResult, TNotification>(bindings),
+                    Validate = bindings.Validate,
                 })((request, response) =>
                 {
-                    bindings.Validate?.Invoke(request.Payload);
-
                     return callback(request, new ServiceNotificationResponse<TResult, TFailure>(response));
                 });
 
@@ -230,7 +249,7 @@ public sealed class ServiceServer<TService, TData>
 
             foreach (var procedure in _procedures.Values.Where(ServiceLayer.IsCommand))
             {
-                _commands[procedure.Procedure.Address] = ((IDescribedProcedure)procedure).RequesterOn(server.Services, false);
+                _commands[procedure.Procedure.Address] = ((IDescribedProcedure)procedure).RequesterOn(server.Services, _judging);
             }
 
             registering = [.. _resolvers.Values];

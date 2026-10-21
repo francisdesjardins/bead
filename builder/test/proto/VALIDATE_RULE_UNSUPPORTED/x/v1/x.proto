@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "buf/validate/validate.proto";
+import "google/protobuf/wrappers.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request whose rules beadc does not compile yet: a well-known format, a CEL rule, a CEL rule of
+// the message's own, and the rules of a repeated wrapper's items.
+message SignUpRequest {
+  option (buf.validate.message).cel = {
+    id: "named"
+    expression: "this.email != ''"
+  };
+
+  string email = 1 [(buf.validate.field).string.email = true];
+  string nickname = 2 [(buf.validate.field).cel = {
+    id: "short"
+    expression: "this.size() < 9"
+  }];
+  repeated string tags = 3 [(buf.validate.field).repeated.items.string.uuid = true];
+  string name = 4 [(buf.validate.field).string.min_len = 1];
+  repeated google.protobuf.StringValue aliases = 5 [(buf.validate.field).repeated.items.string.min_len = 1];
+}
+
+// Answers nothing more.
+message SignUpResponse {}
+
+// A sign-up, its request held to rules.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  rpc SignUp(SignUpRequest) returns (SignUpResponse) {
+    option (bead.procedure) = {id: 1};
+  }
+}

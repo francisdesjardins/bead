@@ -52,11 +52,6 @@ not hold:
   ([0017](0017-ids-are-for-life-and-a-procedures-name-takes-one-ascii-form.md)),
   and one OpenAPI document written from the blueprint for every language
   ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md));
-- **payload validation**, protovalidate's rules carried from a `.proto` through the blueprint
-  ([0022](0022-a-proto-becomes-one-checked-blueprint-and-each-language-is-generated-from-it.md))
-  into the slot a typed descriptor keeps for it, after the decode on the side that answers and
-  before the encode on a client whose options say so
-  ([0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md));
 - **the transports' client part** of the conformance, with the outcomes the spec names for a
   client's call ([0004](0004-one-behaviour-in-every-language.md)), the bound on a WebSocket client's
   close ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)) and the defaults of a
@@ -78,6 +73,11 @@ not hold:
 
 Ahead besides, each by a decision of its own that meets the Tenth Man:
 
+- **a payload's rules written in CEL**, a total subset beadc compiles into each side beside the
+  rules it compiles already, and then the rules
+  [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)
+  refuses until they land: the well-known string formats, `bytes.pattern`, `bytes.in`, `any`,
+  `duration`, `timestamp`, `field_mask` and `predefined` rules;
 - what [0033](0033-a-side-bounds-what-a-peer-holds-of-it.md) keeps ahead of the bounds a side
   keeps against a peer that holds it: a bound on the payload bytes of the calls a connection has
   answered, as HTTP/2's connection window; a raise of `maximumAnsweringCalls` for one trusted
@@ -120,6 +120,7 @@ table.
 | [0016](0016-a-json-payload-has-one-form-whichever-side-writes-it.md)                                | A JSON payload is read as I-JSON, its noncharacters aside, and written in RFC 8785's canonical form, the same bytes from every language | accepted |
 | [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md) | A `proto` payload's records are read against its message before its library reads them                                                  | accepted |
 | [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)                    | A `proto` payload is protobuf's binary format, read and written through each side's stock library, and Bead states only what is its own | accepted |
+| [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)      | A payload that reads is held to its message's rules before its resolver sees it                                                         | accepted |
 
 ### Services and their names
 

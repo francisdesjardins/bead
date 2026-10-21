@@ -17,7 +17,14 @@ import { checkBlueprintFile, checkRoots, type IChecked } from '../check.ts';
 import { type IConfig, parseConfig } from '../config.ts';
 import { InputError } from '../diagnostics.ts';
 import type { IBlueprint } from '../model/blueprint.ts';
-import { differencesOf, EDITOR_COPY, planOf, writeEditorCopy, writePlan } from '../generate.ts';
+import {
+  differencesOf,
+  EDITOR_COPY,
+  planOf,
+  ungeneratedOf,
+  writeEditorCopy,
+  writePlan,
+} from '../generate.ts';
 import { PROTOC_CSHARP_HEADER } from '../protoc.ts';
 import { needsProtoc } from './pinned.ts';
 
@@ -25,6 +32,7 @@ const CLI = fileURLToPath(new URL('../cli.ts', import.meta.url));
 const INTEROP = fileURLToPath(new URL('../../../spec/interop-blueprint.json', import.meta.url));
 const MESSAGES = fileURLToPath(new URL('../../test/messages/', import.meta.url));
 const OPTIONS = fileURLToPath(new URL('../../proto/bead/options.proto', import.meta.url));
+const VALIDATE = fileURLToPath(new URL('../../proto/buf/validate/validate.proto', import.meta.url));
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
 
 // a project in the running test's output folder: its beadc.yaml and its files, by their paths
@@ -172,10 +180,12 @@ test("writes the editor's copy for a .proto source and never compares it", () =>
     { proto: MESSAGES }
   );
   const copy = join(folder, ...EDITOR_COPY.split('/'), 'bead', 'options.proto');
+  const validate = join(folder, ...EDITOR_COPY.split('/'), 'buf', 'validate', 'validate.proto');
 
   generate(folder);
 
   expect(readFileSync(copy, 'utf8')).toBe(readFileSync(OPTIONS, 'utf8'));
+  expect(readFileSync(validate, 'utf8')).toBe(readFileSync(VALIDATE, 'utf8'));
   expect(existsSync(join(folder, 'gen', 'bead.blueprint.json'))).toBe(true);
   expect(existsSync(join(folder, 'gen', 'ts', 'bead', 'options_pb.ts'))).toBe(true);
   expect(existsSync(join(folder, 'gen', 'ts', 'bead', 'messages', 'v1', 'messages_pb.ts'))).toBe(
@@ -279,8 +289,10 @@ test("--check names a stale Bead.cs by its header and protoc's file by its heade
 
   expect(findingsOf(folder)).toEqual([
     'gen/Bead/Messages/V1/Messages.cs: no such file; beadc generate writes it',
+    'gen/Bead/Messages/V1/Rules.cs: no such file; beadc generate writes it',
     'gen/Bead/Protobuf/Options.cs: no such file; beadc generate writes it',
     'gen/Bead/Messages/V1/MessagesBead.cs: no such file; beadc generate writes it',
+    'gen/Bead/Messages/V1/RulesBead.cs: no such file; beadc generate writes it',
   ]);
 
   generate(folder);
@@ -586,4 +598,51 @@ test('writes a C# output from a blueprint at its root, in its namespace, and --c
   expect(findingsOf(folder)).toEqual([
     'gen/InteropBead.cs:8: line 8 differs from what beadc generate writes',
   ]);
+});
+
+test("an output whose target generates no feature its blueprint requires is FEATURE_UNGENERATED, before a file is written; both of beadc's generate validate", () => {
+  const folder = projectOf(
+    [
+      'version: 1',
+      'source:',
+      '  proto: [proto]',
+      'outputs:',
+      '  - language: typescript',
+      '    out: gen/ts',
+      '  - language: csharp',
+      '    out: gen/cs',
+      '',
+    ].join('\n'),
+    { proto: MESSAGES }
+  );
+  const config = configOf(folder);
+  const checked = checkedOf(config);
+
+  expect(checked.blueprint?.requires).toEqual(['validate']);
+  expect(ungeneratedOf(config, { checked })).toEqual([]);
+
+  // * a target of a third language that judges nothing: refused, by the feature and the target
+  const judgesNothing = { name: 'elsewhere', features: new Set<string>() };
+  const found = ungeneratedOf(config, {
+    checked,
+    targets: { typescript: judgesNothing, csharp: judgesNothing },
+  });
+
+  expect(
+    found.map((diagnostic) => {
+      return [diagnostic.rule, diagnostic.severity, diagnostic.message];
+    })
+  ).toEqual([
+    [
+      'FEATURE_UNGENERATED',
+      'error',
+      'the elsewhere target generates no validate, which the blueprint requires: an output of it would let through what the other sides refuse',
+    ],
+    [
+      'FEATURE_UNGENERATED',
+      'error',
+      'the elsewhere target generates no validate, which the blueprint requires: an output of it would let through what the other sides refuse',
+    ],
+  ]);
+  expect(existsSync(join(folder, 'gen'))).toBe(false);
 });

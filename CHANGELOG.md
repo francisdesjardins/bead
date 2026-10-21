@@ -13,6 +13,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   judgement, on both sides, seeded from `spec/vectors.json`'s verdicts and `spec/transports.json`'s
   upgrades; `blueprint`, beadc's blueprint reader and its form, from `builder/tools/fuzz/`, seeded
   from the repository's blueprints.
+- Payload rules: protovalidate's `buf.validate` rules on a `proto` request, read by beadc into the
+  blueprint under the feature `validate` and generated as native validators on both sides; a server
+  judges every request before its resolver, a client before it sends when its options say so, and
+  `failFast` stops at the first violation (spec 18, decision 0035).
+- `PAYLOAD_INVALID` (52): a payload that reads and breaks a rule, its violations in its detail as
+  lines of canonical JSON, a cut keeping its whole lines (spec 8.1, 9.5, 18.6).
+- beadc builds a pattern's DFA ahead of time, its classes from its own Unicode 17.0.0 tables, and a
+  target declares the features it generates.
+- `spec/validations.json` and `spec/validations.proto`, written by
+  `spec/generators/make_validations.py`, its patterns judged by RE2 itself, `google-re2`, pinned in
+  `spec/requirements.txt`, and Unicode's files pinned by `spec/generators/ucd.json`; the interop's
+  `checked`, its conversations and its exit; each side's validators of it held to what beadc
+  writes by `tools/check-validations.mjs`; and the differential against protovalidate-es, in CI.
+- beadc runs buf's `PROTOVALIDATE` lint rule, and refuses a rule it does not compile;
+  `beadc breaking`'s `PROCEDURE_RULES_TIGHTENED`.
+
+### Changed
+
+- A descriptor's `validate` gives its violations, and is given `failFast` and the bound of what it
+  holds; a violation is answered `PAYLOAD_INVALID`, no longer `PROCEDURE_FAILED`, by the service
+  manager. Generated code names `GENERATED_CODE_SUPPORTS_VERSION_4`, `GeneratedCode.SupportsVersion4`;
+  the runtimes no longer carry version 3, so code generated before this release must be regenerated.
+- The companion counts `PAYLOAD_INVALID` among each family's codes: a procedure takes 62 series in
+  the server families and 75 in the client ones, `_OTHER` 74 and 75 (debugging 7.6, 7.7). Its 9.4's
+  rows from its thirteenth on are one later, past the new one, and its 9.6's from its fifth on.
+- The interop service is at revision 2, `checked` among its procedures.
+- The example's count past 10 is a rule of its `.proto`, its failure retired, its service at
+  revision 2.
 
 ### Changed
 
@@ -90,6 +118,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   batch's, as `the connection is closed: an envelope past its maximumBodyBytes, N bytes`, and a
   batch that does not read as `the connection is closed: a batch that does not read, …`, saying
   what of it does not, each an error of their own, where they told their close alone.
+- The C# client validates a notifying procedure's subscribing request under `Validates`, as the
+  TypeScript side does.
 
 ## [0.6.0] - 2026-10-20
 

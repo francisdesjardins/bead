@@ -5,7 +5,8 @@
 // project they import, `bead/options.proto` among them where they import it, since a `_pb.ts` imports
 // the `_pb.ts` of each file its embedded descriptor depends on. protobuf's well-known types are
 // `@bufbuild/protobuf/wkt`'s, never generated. Each file is protoc-gen-es's output as `buf generate`
-// writes it, its own header first.
+// writes it, its own header first. protovalidate's options are taken out of what it is handed, beadc
+// compiling a request's rules itself, unless the output keeps them (decision 0035).
 
 // dependencies
 
@@ -17,6 +18,7 @@ import type { ImportExtension, Plugin } from '@bufbuild/protoplugin';
 
 import type { IBlueprint } from './model/blueprint.ts';
 import type { IGeneratedFile } from './targets/target.ts';
+import { withoutValidateOptions } from './validate-options.ts';
 
 // constants
 
@@ -40,13 +42,21 @@ const protocGenEs = (): Plugin => {
 
 /**
  * The `_pb.ts` files of the messages `blueprint` binds, from `set`, buf's FileDescriptorSet of its
- * `.proto` source: none when it binds none of a file of its own.
+ * `.proto` source: none when it binds none of a file of its own; protovalidate's options taken out
+ * unless `keepValidateOptions`.
  */
 export const generateMessages = (
   set: Uint8Array,
-  options: { readonly blueprint: IBlueprint; readonly importExtension: ImportExtension }
+  options: {
+    readonly blueprint: IBlueprint;
+    readonly importExtension: ImportExtension;
+    readonly keepValidateOptions?: boolean;
+  }
 ): readonly IGeneratedFile[] => {
-  const descriptors = fromBinary(FileDescriptorSetSchema, set);
+  const descriptors = fromBinary(
+    FileDescriptorSetSchema,
+    options.keepValidateOptions === true ? set : withoutValidateOptions(set)
+  );
   const dependencies = new Map(
     descriptors.file.map((file) => {
       return [file.name, file.dependency];
