@@ -216,9 +216,10 @@ duration it is given is the durations file's.
 ## The Tenth Man
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-three rounds, two on the rule and one on the file, where the user chose what it asked: the defaults
-no clause states left out of the file, and the HTTP transports' places on the clock a side is given
-observed `held`. Its objections, each with the answer that holds:
+four rounds: two on the rule; one on the file, where the user chose what it asked — the defaults no
+clause states left out of the file, and the HTTP transports' places on the clock a side is given
+observed `held`; and one on the places two owners share. Its objections, each with the answer that
+holds:
 
 ### On durations
 
@@ -261,3 +262,16 @@ observed `held`. Its objections, each with the answer that holds:
 | 15.12 names its timeouts for both sides, yet the HTTP client's 5 minutes were left out                                                                                                                           | Accepted: 15.12 says a client times its inactivity by `inactivityTimeout` alike, 15.10 names the timer, and the client's place cites 15.12.9 and holds its 5 minutes.                                                                                                                   |
 | A default that depends on state or on the transport passes for the wrong reason when its place is built with nothing given                                                                                       | Accepted: a default names the ways that read it and the state it holds in, a way that cannot leave its duration out is `required`, and the server layer's default says an HTTP server gives its own 30 s.                                                                               |
 | The places observed by their refusal carry held values and defaults no harness reads                                                                                                                             | Accepted: such a place writes `taken`, with no `held`, and has no default in the file.                                                                                                                                                                                                  |
+
+### On the places two owners share
+
+| Objection                                                                                                         | Answer                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The close timeout's default was said to be out of the file because no clause states it, where 15.3 states its 5 s | Accepted: it is out because its place is observed by its refusal alone, as the heartbeat's 30 s is, and each side's tests hold both.                                                    |
+| Comments and the TypeScript README named a WebSocket server's close timeout alone, the clients' bounded too       | Accepted: each names a WebSocket's close timeout, its client's and its server's.                                                                                                        |
+| The C# client's twin promised a rounding it did not check                                                         | Accepted: it reads the close timeout its connections are built with, as the TypeScript twin reads what `ws` is handed.                                                                  |
+| The clients' never differed unseen: the TypeScript client hands `ws` 2³¹ − 1 ms, the C# client waits without end  | Accepted: a twin pair waits on a server without end for an infinite close timeout, and the matrix states the TypeScript side's cap.                                                     |
+| No rule said when two owners share a place                                                                        | Accepted: when the spec names one option for both and every column the file holds agrees; `httpTransport.inactivityTimeout` is the HTTP client's and server's, whose columns all agree. |
+| A place renamed changes what a conforming harness answers to, and was told as a test                              | Accepted: the HTTP place shared is a feature of the spec; no alias and no version, with no third language before 1.0.                                                                   |
+| The C# twin played every input of a place, whichever way it plays                                                 | Accepted: `Durations.Played(place, way)` plays nothing of a way this side is excused from, as the TypeScript twin skips it.                                                             |
+| The close timeout's place sat apart from the heartbeat's, its twin in shape                                       | Accepted: beside it, in the generator, the file and both harnesses.                                                                                                                     |
