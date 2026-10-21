@@ -1,0 +1,15 @@
+# beadc.yaml: the demo's sign-up service, from its .proto, generated for the TypeScript side, its
+# runtime reached from its source. From this folder: `node ../../../builder/src/cli.ts generate`
+# writes it, and `generate --check` holds it there.
+version: 1
+source:
+  proto: [proto]
+blueprint: gen/demo.blueprint.json
+outputs:
+  - language: typescript
+    out: gen/typescript
+    importExtension: none
+    runtime: ../../../src/service/service
+    protoRuntime: ../../../src/proto/proto
+# the output's folder is beadc's own: generate takes out what it no longer writes there
+clean: true

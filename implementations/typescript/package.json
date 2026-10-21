@@ -57,6 +57,7 @@
     "test:coverage": "c8 playwright test",
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
     "test:browser": "playwright test --config playwright.browser.config.ts",
+    "test:demo": "playwright test --config playwright.demo.config.ts",
     "test:devtools": "playwright test --config playwright.devtools.config.ts",
     "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc --noEmit -p tsconfig.validations.json",
     "verify:all": "yarn check && yarn test",
