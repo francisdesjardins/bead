@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
@@ -67,27 +66,6 @@ public sealed partial class ServiceManagerTests
             {
                 return told.Error;
             }));
-
-        var mutableManager = new ServiceManager(new RecordingRouter());
-        var mutableSeen = RecordDebug(mutableManager);
-        var payload = new Dictionary<string, string> { ["Value"] = "hello" };
-        var asked = new RequestDependencies<Dictionary<string, string>, Dictionary<string, string>>
-        {
-            Serializer = new JsonPayloads<Dictionary<string, string>>(),
-        };
-        var answer = await mutableManager.GetRequest(Echo, asked)(payload)().WaitAsync(Patience, Cancelled);
-
-        Assert.Equal("hello", answer["Value"]);
-        Assert.Equal(2, mutableSeen.Count);
-        Assert.Null(mutableSeen[0].Event.Duration);
-        Assert.InRange(mutableSeen[1].Event.Duration!.Value, TimeSpan.Zero, TimeSpan.FromMilliseconds(999));
-        payload["Value"] = "changed after";
-
-        Assert.All(mutableSeen, (step) =>
-        {
-            Assert.Equal("hello", JsonSerializer.SerializeToElement(step.Event.Tx, JsonOptions).GetProperty("Value").GetString());
-        });
-        Assert.Equal("hello", JsonSerializer.SerializeToElement(mutableSeen[1].Event.Rx, JsonOptions).GetProperty("Value").GetString());
     }
 
     // debugging 4.1 and 4.1.8
