@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
+
 namespace Bead.Tests;
 
 /// <summary>
@@ -6,6 +9,23 @@ namespace Bead.Tests;
 /// </summary>
 public sealed partial class ServiceManagerTests
 {
+    private static readonly JsonSerializerOptions TraceJsonOptions = CreateTraceJsonOptions();
+
+    private static JsonSerializerOptions CreateTraceJsonOptions()
+    {
+        var resolver = new DefaultJsonTypeInfoResolver();
+
+        resolver.Modifiers.Add((type) =>
+        {
+            if (type.Type == typeof(CancellationToken))
+            {
+                type.Properties.Clear();
+            }
+        });
+
+        return new JsonSerializerOptions { IncludeFields = true, TypeInfoResolver = resolver };
+    }
+
     [Fact]
     public async Task Fills_what_the_options_leave_out_and_passes_a_destination_as_it_is()
     {
@@ -99,22 +119,39 @@ public sealed partial class ServiceManagerTests
         var router = new RecordingRouter();
         var manager = new ServiceManager(router);
         var seen = RecordDebug(manager);
+        var jwt = Credential.Jwt("a.secret.token");
+        var elsewhere = Credential.Elsewhere("Bearer secret");
 
-        await manager.GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { Credential = Credential.Opaque() }).WaitAsync(Patience, Cancelled);
+        foreach (var credential in new[] { Credential.Opaque(), jwt, elsewhere })
+        {
+            await manager.GetRequest(Echo, Asked)(new Text("a"))(new RequestOptions { Credential = credential }).WaitAsync(Patience, Cancelled);
+        }
+
         await manager.GetRequest(Echo, Asked)(new Text("b"))().WaitAsync(Patience, Cancelled);
+        Assert.Equal(8, seen.Count);
         await manager.GetRequest(Echo, Asked)(new Text("c"))(new RequestOptions { Credential = Credential.Jwt("a.b.c") }).WaitAsync(Patience, Cancelled);
         await manager.GetRequest(Echo, Asked)(new Text("d"))(new RequestOptions { Credential = Credential.Elsewhere("Interop sub=ada") }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(
-            [Credential.Opaque(), null, Credential.Jwt("a.b.c"), Credential.Elsewhere("Interop sub=ada")],
+            [Credential.Opaque(), jwt, elsewhere, null, Credential.Jwt("a.b.c"), Credential.Elsewhere("Interop sub=ada")],
             router.Requests.Select((sent) =>
             {
                 return sent.Request.Options.Credential;
             }));
+        Assert.Equal(12, seen.Count);
         Assert.All(seen, (told) =>
         {
-            Assert.Null(told.Event.Options!.Credential);
+            Assert.NotNull(told.Event.Options);
+            Assert.Null(told.Event.Options.Credential);
         });
+
+        var serialized = JsonSerializer.Serialize(seen, TraceJsonOptions);
+
+        Assert.Contains("\"ProcedureName\":\"echo\"", serialized, StringComparison.Ordinal);
+        foreach (var secret in new[] { "secret", "a.secret.token", "Bearer secret", "a.b.c", "Interop sub=ada" })
+        {
+            Assert.DoesNotContain(secret, serialized, StringComparison.Ordinal);
+        }
     }
 
     // debugging 4.1.9 and 4.2.2
@@ -131,6 +168,10 @@ public sealed partial class ServiceManagerTests
 
         // what is not a failure goes on as it is as well
         var reset = new IOException("reset");
+        var lookalike = new IOException("reset");
+
+        lookalike.Data["code"] = "ECONNRESET";
+        lookalike.Data["scope"] = 0;
 
         router.Answer = (_) =>
         {
@@ -148,16 +189,24 @@ public sealed partial class ServiceManagerTests
             }));
         // its code, its scope and its detail, the relays it crossed left out
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "no"), seen[1].Event.Rx);
-        router.Answer = (_) =>
+        foreach (var reason in new[] { lookalike, reset })
         {
-            return Task.FromException<RouterResult>(reset);
-        };
-        Assert.Same(reset, await Assert.ThrowsAsync<IOException>(() =>
+            router.Answer = (_) =>
+            {
+                return Task.FromException<RouterResult>(reason);
+            };
+            Assert.Same(reason, await Assert.ThrowsAsync<IOException>(() =>
+            {
+                return requester(new Text("x"))().WaitAsync(Patience, Cancelled);
+            }));
+            Assert.Same(reason, seen[^1].Error);
+            Assert.Null(seen[^1].Event.Rx);
+        }
+
+        Assert.Equal<Exception?>([null, failure, null, lookalike, null, reset], seen.Select((told) =>
         {
-            return requester(new Text("x"))().WaitAsync(Patience, Cancelled);
+            return told.Error;
         }));
-        Assert.Same(reset, seen[3].Error);
-        Assert.Null(seen[3].Event.Rx);
     }
 
     // spec 17.2.4; debugging 4.3

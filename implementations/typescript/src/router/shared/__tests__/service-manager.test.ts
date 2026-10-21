@@ -937,24 +937,41 @@ test.describe('createServiceManager', () => {
     });
 
     test('refuses a notification asked for again at another window, none against one among them, and gives the same at the same', () => {
-      const manager = createServiceManager(createFakeRouter('client').router);
-      const paced = { ...echo, procedureId: 71 };
-      const notification = manager.getNotification(paced, { serializer, window: 4 });
+      for (const [pacedId, unpacedId] of [
+        [71, 1],
+        [1, 9],
+      ] as const) {
+        const manager = createServiceManager(createFakeRouter('client').router);
+        const paced = { ...echo, procedureId: pacedId };
+        const unpacedProcedure = { ...echo, procedureId: unpacedId };
+        const notification = manager.getNotification(paced, { serializer, window: 4 });
 
-      expect(manager.getNotification(paced, { serializer, window: 4 })).toBe(notification);
-      expect(() => {
-        return manager.getNotification(paced, { serializer, window: 1 });
-      }).toThrow(/window 4, not 1/);
-      expect(() => {
-        return manager.getNotification(paced, { serializer });
-      }).toThrow(ProgrammerError);
+        expect(manager.getNotification(paced, { serializer, window: 4 })).toBe(notification);
+        expect(() => {
+          return manager.getNotification(paced, { serializer, window: 1 });
+        }).toThrow(
+          new ProgrammerError(
+            `2/${String(pacedId)} is already a notification with window 4, not window 1`
+          )
+        );
+        expect(() => {
+          return manager.getNotification(paced, { serializer });
+        }).toThrow(ProgrammerError);
 
-      const unpaced = manager.getNotification(echo, { serializer });
+        const unpaced = manager.getNotification(unpacedProcedure, { serializer });
 
-      expect(manager.getNotification(echo, { serializer })).toBe(unpaced);
-      expect(() => {
-        return manager.getNotification(echo, { serializer, window: 1 });
-      }).toThrow(ProgrammerError);
+        expect(manager.getNotification(unpacedProcedure, { serializer })).toBe(unpaced);
+        expect(() => {
+          return manager.getNotification(unpacedProcedure, { serializer, window: 1 });
+        }).toThrow(ProgrammerError);
+        expect(() => {
+          return manager.getNotification(unpacedProcedure, { serializer, window: 1 });
+        }).toThrow(
+          new ProgrammerError(
+            `2/${String(unpacedId)} is already a notification with no window, not window 1`
+          )
+        );
+      }
     });
 
     test("refuses a procedure off section 16 before its own reason, a notification's asked for otherwise", () => {

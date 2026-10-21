@@ -41,9 +41,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The interop service is at revision 2, `checked` among its procedures.
 - The example's count past 10 is a rule of its `.proto`, its failure retired, its service at
   revision 2.
-
-### Changed
-
 - Spec 15.3 states that a side fails a connection with 1009 past its `maximumMessageBytes` (RFC
   6455 §7.1.7): it drains until the peer's close or its close timeout, its close unclean whatever
   code the peer answers with, and the side reports it naming the bound and its value. A side's close
@@ -120,6 +117,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   what of it does not, each an error of their own, where they told their close alone.
 - The C# client validates a notifying procedure's subscribing request under `Validates`, as the
   TypeScript side does.
+- The TypeScript service manager names a notification's window as the C# side does, `window 4`
+  or `no window`, in the error of a second ask for it with another.
 
 ## [0.6.0] - 2026-10-20
 

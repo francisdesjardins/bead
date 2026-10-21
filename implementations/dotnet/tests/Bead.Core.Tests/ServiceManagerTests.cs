@@ -716,26 +716,29 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public void Refuses_a_notification_asked_for_again_at_another_window_none_against_one_among_them_and_gives_the_same_at_the_same()
     {
-        var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
-        var paced = manager.GetNotification(Echo, Notified(window: 4));
-        var unpaced = manager.GetNotification(Echo with { ProcedureId = 9 }, Notified());
+        foreach (var (pacedId, unpacedId) in new (ushort, ushort)[] { (71, 1), (1, 9) })
+        {
+            var manager = new ServiceManager(new RecordingRouter(RouterSide.Client));
+            var pacedProcedure = Echo with { ProcedureId = pacedId };
+            var unpacedProcedure = Echo with { ProcedureId = unpacedId };
+            var paced = manager.GetNotification(pacedProcedure, Notified(window: 4));
+            var unpaced = manager.GetNotification(unpacedProcedure, Notified());
 
-        Assert.Same(paced, manager.GetNotification(Echo, Notified(window: 4)));
-        Assert.Same(unpaced, manager.GetNotification(Echo with { ProcedureId = 9 }, Notified()));
-        Assert.Equal("2/1 is already a notification with window 4, not window 1", Assert.Throws<InvalidOperationException>(() =>
-        {
-            return manager.GetNotification(Echo, Notified(window: 1));
-        }).Message);
-
-        // * unpaced and paced are two windows, one of them none
-        Assert.Throws<InvalidOperationException>(() =>
-        {
-            return manager.GetNotification(Echo, Notified());
-        });
-        Assert.Equal("2/9 is already a notification with no window, not window 1", Assert.Throws<InvalidOperationException>(() =>
-        {
-            return manager.GetNotification(Echo with { ProcedureId = 9 }, Notified(window: 1));
-        }).Message);
+            Assert.Same(paced, manager.GetNotification(pacedProcedure, Notified(window: 4)));
+            Assert.Same(unpaced, manager.GetNotification(unpacedProcedure, Notified()));
+            Assert.Equal($"2/{pacedId} is already a notification with window 4, not window 1", Assert.Throws<InvalidOperationException>(() =>
+            {
+                return manager.GetNotification(pacedProcedure, Notified(window: 1));
+            }).Message);
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                return manager.GetNotification(pacedProcedure, Notified());
+            });
+            Assert.Equal($"2/{unpacedId} is already a notification with no window, not window 1", Assert.Throws<InvalidOperationException>(() =>
+            {
+                return manager.GetNotification(unpacedProcedure, Notified(window: 1));
+            }).Message);
+        }
     }
 
     [Fact]

@@ -203,6 +203,13 @@ public sealed partial class ServiceManagerTests
         Assert.Equal(["allowed"], reached);
         Assert.Equal([new AdmissionRequest(Handle, Header), new AdmissionRequest(Handle, Header with { CallId = 9 })], seen);
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied), router.Responses[0].Failure);
+        Assert.All(seen, (request) =>
+        {
+            Assert.Equal(["ConnectionHandle", "Header", "Session"], request.GetType().GetProperties().Select((property) =>
+            {
+                return property.Name;
+            }));
+        });
     }
 
     // a failure carries no side here — the router writes it as its own — so what is left to show is
@@ -742,28 +749,67 @@ public sealed partial class ServiceManagerTests
     [Fact]
     public async Task Admission_reads_the_call_s_session_its_router_resolved_and_so_does_the_callback_whoever_asks_it()
     {
-        var router = new RecordingRouter();
-        var admitted = new List<object?>();
-        var received = new List<object?>();
-        var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        var ada = new CallSession { Data = "ada" };
+        var bob = new CallSession { Data = "bob" };
+        var read = new List<(string Phase, CallSession? Session)>();
+        var resolver = new ServiceManager(new RecordingRouter()).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
         {
-            admitted.Add(request.Session?.Data);
+            read.Add(("admission", request.Session));
 
-            return true;
+            return request.Session is not null;
         })))((request, response) =>
         {
-            received.Add(request.Session?.Data);
+            read.Add(("callback", request.Session));
 
             return response.Answer(request.Payload);
         });
 
-        // asked here, then by its router, which hands the callback the session it resolved
-        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = new CallSession { Data = "ada" } }).WaitAsync(Patience, Cancelled);
+        Assert.Null(resolver.Admit(new AdmissionRequest(Handle, Header) { Session = ada }));
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = ada }).WaitAsync(Patience, Cancelled);
+        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { Session = ada }).WaitAsync(Patience, Cancelled);
         await resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
-        await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = new CallSession { Data = "bob" } }).WaitAsync(Patience, Cancelled);
 
-        Assert.Equal(["ada", null], admitted);
-        Assert.Equal(["ada", null, "bob"], received);
+        Assert.Equal(["admission", "callback", "admission", "callback", "admission"], read.Select((entry) =>
+        {
+            return entry.Phase;
+        }));
+        Assert.All(read.Take(4), (entry) =>
+        {
+            Assert.Same(ada, entry.Session);
+        });
+        Assert.Null(read[4].Session);
+
+        var admitted = new List<CallSession?>();
+        var received = new List<CallSession?>();
+        var permissive = new ServiceManager(new RecordingRouter()).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
+        {
+            admitted.Add(request.Session);
+
+            return true;
+        })))((request, response) =>
+        {
+            received.Add(request.Session);
+
+            return response.Answer(request.Payload);
+        });
+
+        await permissive.Handle(PropsOf(Encode(new Text("hi"))) with { Session = ada }).WaitAsync(Patience, Cancelled);
+        await permissive.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        await permissive.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true, Session = bob }).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["ada", null], admitted.Select((session) =>
+        {
+            return session?.Data;
+        }));
+        Assert.Equal(["ada", null, "bob"], received.Select((session) =>
+        {
+            return session?.Data;
+        }));
+        Assert.Same(ada, admitted[0]);
+        Assert.Null(admitted[1]);
+        Assert.Same(ada, received[0]);
+        Assert.Null(received[1]);
+        Assert.Same(bob, received[2]);
     }
 
     [Fact]
@@ -771,6 +817,7 @@ public sealed partial class ServiceManagerTests
     {
         var router = new RecordingRouter();
         var asked = new List<uint>();
+        var handed = new List<string[]>();
         var resolver = new ServiceManager(router).GetRequestResolver(Echo, Answered(new BeforeRequest((request) =>
         {
             asked.Add(request.Header.CallId);
@@ -778,12 +825,18 @@ public sealed partial class ServiceManagerTests
             return false;
         })))((request, response) =>
         {
+            handed.Add([.. request.GetType().GetProperties().Select((property) =>
+            {
+                return property.Name;
+            })]);
+
             return response.Answer(request.Payload);
         });
 
         await resolver.Handle(PropsOf(Encode(new Text("hi"))) with { IsAdmitted = true }).WaitAsync(Patience, Cancelled);
 
         Assert.Empty(asked);
+        Assert.Equal(["ConnectionHandle", "Header", "Payload", "Session", "Signal"], Assert.Single(handed));
         Assert.Equal(new Text("hi"), Assert.Single(router.Responses).Payload);
     }
 

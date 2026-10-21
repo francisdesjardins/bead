@@ -155,18 +155,41 @@ test.describe('createServiceManager', () => {
 
       await manager.getRequest(echo, { serializer })({ text: 'b' })();
 
+      expect(seen).toHaveLength(8);
+      await manager.getRequest(echo, { serializer })({ text: 'c' })({
+        credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+      });
+      await manager.getRequest(echo, { serializer })({ text: 'd' })({
+        credential: { carried: 'Interop sub=ada', scheme: CredentialScheme.ELSEWHERE },
+      });
+
       expect(
         calls.request.map(({ request }) => {
           return request.options.credential;
         })
-      ).toEqual([{ scheme: CredentialScheme.OPAQUE }, jwt, elsewhere, undefined]);
-      expect(seen).toHaveLength(8);
+      ).toEqual([
+        { scheme: CredentialScheme.OPAQUE },
+        jwt,
+        elsewhere,
+        undefined,
+        { scheme: CredentialScheme.JWT, token: 'a.b.c' },
+        { carried: 'Interop sub=ada', scheme: CredentialScheme.ELSEWHERE },
+      ]);
+      expect(seen).toHaveLength(12);
       expect(
         seen.every(({ info }) => {
           return info.options !== undefined && !('credential' in info.options);
         })
       ).toBe(true);
-      expect(JSON.stringify(seen)).not.toContain('secret');
+      for (const secret of [
+        'secret',
+        'a.secret.token',
+        'Bearer secret',
+        'a.b.c',
+        'Interop sub=ada',
+      ]) {
+        expect(JSON.stringify(seen)).not.toContain(secret);
+      }
     });
 
     // debugging 4.1.9
@@ -178,6 +201,7 @@ test.describe('createServiceManager', () => {
         ...CLIENT_FAILURES.accessDenied,
         detail: 'no',
         origin: 'peer',
+        relays: 2,
       });
       // what merely looks like a failure is not one
       const lookalike = Object.assign(new Error('reset'), { code: 'ECONNRESET', scope: 0 });
@@ -202,6 +226,21 @@ test.describe('createServiceManager', () => {
         lookalike
       );
       expect(seen[3]?.info.rx).toBeUndefined();
+      expect(seen[3]?.error).toBe(lookalike);
+
+      const reset = new Error('reset');
+
+      control.answer = () => {
+        return Promise.reject(reset);
+      };
+
+      await expect(manager.getRequest(echo, { serializer })({ text: 'x' })()).rejects.toBe(reset);
+      expect(seen[5]?.info.rx).toBeUndefined();
+      expect(
+        seen.map(({ error }) => {
+          return error;
+        })
+      ).toEqual([null, failure, null, lookalike, null, reset]);
     });
 
     // spec 17.2.4; debugging 4.3

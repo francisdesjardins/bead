@@ -815,7 +815,7 @@ test.describe('createServiceManager', () => {
     test('reads the call’s session its router resolved, and so does the callback, whoever asks it', async () => {
       const { router } = createFakeRouter();
       const session = Object.freeze({ data: 'ada' });
-      const read: unknown[] = [];
+      const read: [string, unknown][] = [];
       const resolver = createServiceManager(router).getRequestResolver(echo, {
         beforeRequest: (request) => {
           read.push(['admission', request.session]);
@@ -842,6 +842,35 @@ test.describe('createServiceManager', () => {
         ['callback', session],
         ['admission', undefined],
       ]);
+      for (const entry of read.slice(0, 4)) {
+        expect(entry[1]).toBe(session);
+      }
+
+      const bob = Object.freeze({ data: 'bob' });
+      const admitted: unknown[] = [];
+      const received: unknown[] = [];
+      const permissive = createServiceManager(createFakeRouter().router).getRequestResolver(echo, {
+        beforeRequest: (request) => {
+          admitted.push(request.session);
+
+          return true;
+        },
+        serializer: serverSerializer,
+      })((request, response) => {
+        received.push(request.session);
+
+        return response(request.payload);
+      });
+
+      await permissive({ ...propsOf(encode({ text: 'hi' })), session });
+      await permissive(propsOf(encode({ text: 'hi' })));
+      await permissive({ ...propsOf(encode({ text: 'hi' })), isAdmitted: true, session: bob });
+
+      expect(admitted).toEqual([session, undefined]);
+      expect(received).toEqual([session, undefined, bob]);
+      expect(admitted[0]).toBe(session);
+      expect(received[0]).toBe(session);
+      expect(received[2]).toBe(bob);
     });
 
     test('is not asked again of a request its router admitted', async () => {
