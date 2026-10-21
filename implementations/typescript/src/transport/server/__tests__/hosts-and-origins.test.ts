@@ -234,6 +234,16 @@ const REFUSED_ORIGINS = [
   ' http://bead.test',
   'Null',
   '',
+  'http://bead.test/',
+  'http://bead.test/path',
+  'http://user@bead.test',
+  'HTTP://bead.test',
+  'http://Bead.Test',
+  'http://bead.test:',
+  'http://bead.test:65536',
+  'http://',
+  'http://béad.test',
+  'http://a*b.test',
 ];
 
 // an origin, and the Host of a request that comes from it: the server's own, `http://` or
@@ -386,9 +396,17 @@ test.describe('hosts and origins', () => {
     }).not.toThrow();
 
     for (const origin of REFUSED_ORIGINS) {
-      expect(() => {
-        assertOrigins([origin]);
-      }, origin).toThrow(ProgrammerError);
+      for (const origins of [[origin], ['https://bead.example', origin]]) {
+        expect(() => {
+          assertOrigins(origins);
+        }, origin).toThrow(ProgrammerError);
+        expect(() => {
+          assertOrigins(origins);
+        }).toThrow('origins');
+        expect.soft(() => {
+          assertOrigins(origins);
+        }).toThrow(origin);
+      }
     }
 
     expect(() => {
