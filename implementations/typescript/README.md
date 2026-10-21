@@ -1698,7 +1698,9 @@ first.
   words (`CREDIT · up to 2.5 MiB`, `CHUNK · at 1 MiB · more`); a subscription keeps its last 50
   notifications and counts the others. Its **Envelopes** mode lists every envelope on its own. A
   call selected shows its **Overview**, its failure whole — where it was raised, the relays it
-  crossed, its destination; its **Payload**, as a tree where it reads as one; its **Exchange**, its
+  crossed, its destination, and a PAYLOAD_INVALID's violations as a table, read by the package's
+  own reader of its detail, a row each with its field, its rule, its words and its bounds, then the
+  more its closing line counts, that its side stopped, or that the detail was cut; its **Payload**, as a tree where it reads as one; its **Exchange**, its
   envelopes as beads on its thread, a third lane for a destination behind a relay, a transfer's bytes
   against its credit; its **Diff**, a notification against the one before it, an answer against its
   procedure's last; and its **Trace**, the stack that made it, each frame opened in Sources.
@@ -1713,7 +1715,8 @@ first.
   it; a procedure's name shows its calls alone, and a client given no registry says so.
 - **Wire**: for a page whose clients announce nothing, the HTTP transport's exchanges the Network
   panel saw, read with the package's codec, a line an exchange and its envelopes beneath, each
-  procedure named where a client of the page told its name; an exchange copies as the skeleton of
+  procedure named where a client of the page told its name, a PAYLOAD_INVALID summed up on one line
+  by its first violation and their count; an exchange copies as the skeleton of
   an entry of `spec/conversations.json`.
 
 The bar filters by client and by the package's own filter, as `bead:debug` reads one
