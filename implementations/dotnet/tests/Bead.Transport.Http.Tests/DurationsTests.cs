@@ -129,6 +129,7 @@ public sealed partial class DurationsTests
         {
             ["http"] = new(nameof(HttpConnectOptions.Timeout), ConnectTimeoutByHttp),
             ["webSocket"] = new(nameof(WebSocketConnectOptions.Timeout), ConnectTimeoutByWebSocket),
+            ["memory"] = new(nameof(MemoryConnectOptions.Timeout), ConnectTimeoutByMemory),
         }),
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {

@@ -3018,6 +3018,10 @@
           "name": "a WebSocket client's connect"
         },
         {
+          "id": "memory",
+          "name": "an in-memory client's connect"
+        },
+        {
           "id": "worker",
           "name": "a Web Worker client's connect",
           "differs": [

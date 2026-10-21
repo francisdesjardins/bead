@@ -33,7 +33,12 @@ import type {
 } from '../../shared/types';
 import { createRouterServer, SERVER_FAILURES } from '../router-server';
 import { createSessionManager } from '../session-manager';
-import { type IConversation, playConversation, WALL_CLOCK } from './conversation-player';
+import {
+  type IConversation,
+  isPlayedInMemory,
+  playConversation,
+  WALL_CLOCK,
+} from './conversation-player';
 
 // interfaces
 
@@ -331,4 +336,13 @@ test.describe('the conversations', () => {
       await playConversation(conversation, {});
     });
   }
+
+  // spec 15.13: each conversation whose connections a pair of it stands for, through a real one
+  test.describe('through the in-memory transport', () => {
+    for (const conversation of CONVERSATIONS.filter(isPlayedInMemory)) {
+      test(conversation.name, async () => {
+        await playConversation(conversation, { inMemory: true });
+      });
+    }
+  });
 });

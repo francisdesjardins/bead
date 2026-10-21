@@ -387,6 +387,7 @@ places = [
         'ways': [
             way('http', "an HTTP client's connect"),
             way('webSocket', "a WebSocket client's connect"),
+            way('memory', "an in-memory client's connect"),
             way('worker', "a Web Worker client's connect", differs=('C#', WEB_WORKER)),
         ],
         'observed': 'held',

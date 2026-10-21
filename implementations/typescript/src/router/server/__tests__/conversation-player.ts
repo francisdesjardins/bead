@@ -13,9 +13,18 @@ import { interopCredentialsOf } from '../../../../interop/credentials';
 import { offerInterop } from '../../../../interop/handlers';
 import { createServer } from '../../../server/server';
 import type { IServerTransportLike } from '../../../server/types';
+import {
+  createMemoryTransportClient,
+  type MemoryTransportClient,
+} from '../../../transport/client/memory-transport-client';
+import { createMemoryTransportServer } from '../../../transport/server/memory-transport-server';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
-import { createTestClock, duesOn } from '../../../transport/shared/__tests__/fixtures';
+import {
+  createTestClock,
+  duesOn,
+  type TestClock,
+} from '../../../transport/shared/__tests__/fixtures';
 import type { Data, ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf } from '../../shared/envelope';
 import type { IMetricsRegistry } from '../../shared/metrics-registry';
@@ -144,7 +153,7 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
  * credential it is given beside it, delivers what it is given, with what its transport carried, and
  * says what each carries — a credential, and whether in the clear, as its open declared.
  */
-const createConnections = () => {
+const createScriptedConnections = () => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: TransportServerConnectionHandle];
     connection: [
@@ -254,6 +263,9 @@ const createConnections = () => {
       opened.add(handle);
       emitter.emit('connection', {}, {}, handle);
     },
+    start: (): Promise<void> => {
+      return Promise.resolve();
+    },
     transport,
     /** What was sent and not taken yet, by the name of its connection. */
     untaken: (): Record<string, (IExpected | undefined)[]> => {
@@ -272,6 +284,127 @@ const createConnections = () => {
       return untaken;
     },
   };
+};
+
+/**
+ * The connections a conversation names over a real in-memory transport server on `clock`, a client
+ * of it for each, from `127.0.0.1` and a port of its own, as the scripted transport names them: what
+ * each client's transport hears, with what came beside it, kept for the steps that expect it.
+ */
+const createMemoryConnections = (clock: TestClock) => {
+  const transport = createMemoryTransportServer({ clock });
+  const clients = new Map<string, MemoryTransportClient>();
+  const ports = new Map<string, number>();
+  // the handle the server drew for each name's connection, the one it opened last
+  const handles = new Map<string, TransportServerConnectionHandle>();
+  const heard = new Map<string, ISent[]>();
+  const queueOf = (name: string): ISent[] => {
+    const queue = heard.get(name) ?? [];
+
+    heard.set(name, queue);
+
+    return queue;
+  };
+  const clientOf = (name: string): MemoryTransportClient => {
+    const client = clients.get(name);
+
+    if (client === undefined) {
+      throw new Error(`no step opened ${name}`);
+    }
+
+    return client;
+  };
+
+  return {
+    close: async (name: string): Promise<void> => {
+      await clientOf(name).disconnect();
+    },
+    /** Closes every connection still open. */
+    closeAll: async (): Promise<void> => {
+      for (const client of clients.values()) {
+        await client[Symbol.asyncDispose]();
+      }
+    },
+    count: (): number => {
+      return [...heard.values()].reduce((total, queue) => {
+        return total + queue.length;
+      }, 0);
+    },
+    handleOf: (name: string): TransportServerConnectionHandle | undefined => {
+      return handles.get(name);
+    },
+    message: async (
+      name: string,
+      { credential, data }: { credential?: string; data: Data }
+    ): Promise<void> => {
+      await clientOf(name).send({ credential, data });
+    },
+    next: (name: string): ISent | undefined => {
+      return queueOf(name).shift();
+    },
+    // a pair of it stands for a connection secure and two-way alone, which carries no credential
+    // toward its client
+    open: async (
+      name: string,
+      _flags: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
+    ): Promise<void> => {
+      const port = ports.get(name) ?? 50_001 + ports.size;
+      const client = clients.get(name) ?? createMemoryTransportClient({ clock, server: transport });
+
+      if (!clients.has(name)) {
+        client.on('message', ({ credential, data }) => {
+          queueOf(name).push({ bytes: bytesOf(data), credential });
+        });
+      }
+
+      ports.set(name, port);
+      clients.set(name, client);
+      transport.once('connection', (...[, , connectionHandle]) => {
+        handles.set(name, connectionHandle);
+      });
+      await client.connect({ address: '127.0.0.1', port });
+    },
+    start: async (): Promise<void> => {
+      await transport.start();
+    },
+    transport,
+    untaken: (): Record<string, (IExpected | undefined)[]> => {
+      const untaken: Record<string, (IExpected | undefined)[]> = {};
+
+      for (const [name, queue] of heard) {
+        if (queue.length > 0) {
+          untaken[name] = queue.map(({ bytes }) => {
+            return expectedOf(bytes);
+          });
+        }
+      }
+
+      return untaken;
+    },
+  };
+};
+
+/**
+ * Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
+ * 15.13): every one secure and two-way, none a request its server sends expects carried toward its
+ * client, which an in-memory one never carries, and none opened again, which a real transport
+ * names by a handle it never gave, where the scripted one gives the same.
+ */
+export const isPlayedInMemory = ({ steps }: IConversation): boolean => {
+  const opened = steps.flatMap(({ open }) => {
+    return open === undefined ? [] : [open];
+  });
+
+  return (
+    new Set(opened).size === opened.length &&
+    steps.every((step) => {
+      return (
+        step.secure !== false &&
+        step.twoWay !== false &&
+        !(step.expect?.kind === EnvelopeKind.REQUEST && step.carried !== undefined)
+      );
+    })
+  );
 };
 
 /**
@@ -359,12 +492,21 @@ const seriesOf = (text: string): Map<string, string> => {
  * the last counted, every other series unmoved, none made or gone.
  */
 export const playConversation = async (
-  { limits, pacing, relay, steps }: IConversation,
-  { metricsRegistry }: { metricsRegistry?: IMetricsRegistry | undefined }
+  conversation: IConversation,
+  {
+    inMemory = false,
+    metricsRegistry,
+  }: { inMemory?: boolean | undefined; metricsRegistry?: IMetricsRegistry | undefined }
 ): Promise<void> => {
+  const { limits, pacing, relay, steps } = conversation;
   // the clock every layer runs on: only a step that moves time moves it
   const clock = createTestClock(Date.parse(WALL_CLOCK));
-  const connections = createConnections();
+
+  if (inMemory && !isPlayedInMemory(conversation)) {
+    throw new Error('an in-memory pair stands for no connection of this conversation');
+  }
+
+  const connections = inMemory ? createMemoryConnections(clock) : createScriptedConnections();
   const relayOptions: IRelayOptions = {
     ...(relay?.beforeRoute === undefined ? {} : { beforeRoute: ADMISSIONS[relay.beforeRoute] }),
     ...(relay?.verifies === undefined ? {} : { verifies: relay.verifies }),
@@ -400,6 +542,7 @@ export const playConversation = async (
     });
   });
   offerInterop(server);
+  await connections.start();
 
   // every series at 0 as the case begins, once the server is built
   let exposed = seriesOf(metricsRegistry?.exposition().text ?? '');
@@ -409,7 +552,7 @@ export const playConversation = async (
       return step.open === undefined;
     })
   ) {
-    connections.open(ONLY_CONNECTION, {
+    await connections.open(ONLY_CONNECTION, {
       carriesCredential: true,
       isSecure: true,
       isTwoWay: true,
@@ -433,7 +576,7 @@ export const playConversation = async (
       }
 
       if (step.open !== undefined) {
-        connections.open(step.open, {
+        await connections.open(step.open, {
           carriesCredential: step.carries !== false,
           isSecure: step.secure !== false,
           isTwoWay: step.twoWay !== false,
@@ -442,7 +585,7 @@ export const playConversation = async (
       }
 
       if (step.send !== undefined) {
-        connections.message(on, {
+        await connections.message(on, {
           ...(step.carried === undefined ? {} : { credential: step.carried }),
           data: fromHexadecimal(withTokens(step.send, tokens)),
         });
@@ -450,7 +593,7 @@ export const playConversation = async (
       }
 
       if (step.close === true) {
-        connections.close(on);
+        await connections.close(on);
         await settle(count);
       }
 
@@ -527,7 +670,7 @@ export const playConversation = async (
 
     expectNothingMore('at the end');
   } finally {
-    connections.closeAll();
+    await connections.closeAll();
     await server[Symbol.asyncDispose]();
   }
 };

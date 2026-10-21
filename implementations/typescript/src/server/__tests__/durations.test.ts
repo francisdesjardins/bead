@@ -25,6 +25,7 @@ import type {
 } from '../../router/shared/types';
 import { envelopeOf } from '../../router/shared/__tests__/fixtures';
 import { createHTTPTransportClient } from '../../transport/client/http-transport-client';
+import { createMemoryTransportClient } from '../../transport/client/memory-transport-client';
 import {
   createTransportClient,
   dispose,
@@ -1142,6 +1143,35 @@ const connectOfWebSocket: Way = (given) => {
   );
 };
 
+// an in-memory client's connect, its server never drawing the connection
+const connectOfMemory: Way = (given) => {
+  const clock = createTestClock();
+  const accepted: unknown[] = [];
+  const client = createMemoryTransportClient({
+    clock,
+    server: {
+      accept: (peer) => {
+        accepted.push(peer);
+
+        return new Promise(() => {});
+      },
+    },
+  });
+
+  return connectTimed(
+    { client, clock },
+    {
+      connect: (options) => {
+        return client.connect(options);
+      },
+      given,
+      hasMoved: () => {
+        return accepted.length > 0;
+      },
+    }
+  );
+};
+
 // a Web Worker client's connect, its worker never answering
 const connectOfWorker: Way = async (given) => {
   const clock = createTestClock();
@@ -1386,7 +1416,12 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
-    ways: { http: connectOfHTTP, webSocket: connectOfWebSocket, worker: connectOfWorker },
+    ways: {
+      http: connectOfHTTP,
+      memory: connectOfMemory,
+      webSocket: connectOfWebSocket,
+      worker: connectOfWorker,
+    },
   },
   'transportClient.reconnectionDelay': {
     phrase: 'a delay',

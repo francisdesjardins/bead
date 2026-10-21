@@ -49,10 +49,30 @@ public sealed class ConversationsTests
             return conversation.GetProperty("name").GetString()!;
         }));
 
+    /// <summary>
+    /// The names of every conversation a pair of the in-memory transport can stand for each
+    /// connection of (<see cref="ConversationPlayer.CanStandFor"/>).
+    /// </summary>
+    public static TheoryData<string> InMemoryNames { get; } = new(
+        Root.GetProperty("conversations").EnumerateArray().Where(ConversationPlayer.CanStandFor).Select((conversation) =>
+        {
+            return conversation.GetProperty("name").GetString()!;
+        }));
+
+    // * each conversation played through a transport the player scripts, which stands for any
+    // connection
     [Theory]
     [MemberData(nameof(Names))]
     public async Task Plays(string name)
     {
         await ConversationPlayer.Play(ConversationOf(name), new PlayerOptions { WallClock = WallClock });
+    }
+
+    // spec 15.13: each conversation whose connections a pair of it stands for, through a real one
+    [Theory]
+    [MemberData(nameof(InMemoryNames))]
+    public async Task Plays_through_the_in_memory_transport(string name)
+    {
+        await ConversationPlayer.Play(ConversationOf(name), new PlayerOptions { IsInMemory = true, WallClock = WallClock });
     }
 }
