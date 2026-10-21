@@ -171,7 +171,7 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
 
   test('carries no credential toward a connection, and is secure on a loopback host it listens on, or as its transport says', async () => {
     const securedBy = async (address: string, isSecure?: true) => {
-      const server = createTransportServer<object, undefined>(() => {
+      await using server = createTransportServer<object, undefined>(() => {
         return {
           defaults: { address: '0.0.0.0', findOpenPort: false, port: 80 },
           ...(isSecure === undefined ? {} : { isSecure }),
@@ -191,6 +191,7 @@ test.describe('@francisdesjardins/bead/transport-server', () => {
         };
       });
 
+      expect([server.carriesCredential(A), server.isSecure(A)]).toEqual([false, isSecure === true]);
       await server.start({ address });
 
       return [server.carriesCredential(A), server.isSecure(A)];
@@ -410,7 +411,12 @@ test.describe('createTransportServer', () => {
   });
 
   test('"closeAll" closes every connection, and resolves to nothing without one', async () => {
-    const { register, server } = createStubServer();
+    const { calls, register, server } = createStubServer();
+    const closed: [boolean, string][] = [];
+
+    server.on('close', (clean, connectionHandle) => {
+      closed.push([clean, connectionHandle]);
+    });
 
     await server.start();
     await expect(server.closeAll()).resolves.toEqual([]);
@@ -419,6 +425,12 @@ test.describe('createTransportServer', () => {
     register(B);
     await expect(server.closeAll()).resolves.toEqual([true, true]);
     expect(server.clients).toHaveLength(0);
+    expect(closed).toEqual([
+      [true, A],
+      [true, B],
+    ]);
+    expect(calls).toEqual(['start', `close:${A}`, `close:${B}`]);
+    expect(server.isOpen()).toBe(true);
   });
 
   test('"send" to an unknown handle resolves without reaching the transport', async () => {
@@ -477,6 +489,36 @@ test.describe('createTransportServer', () => {
       [thrown, B],
     ]);
     expect(reported[0]?.[0]).toBe(thrown);
+    const handle = 'type=WS;ip=127.0.0.1;port=1;ordinal=1';
+    const lifecycle: unknown[][] = [];
+
+    server.on('connection', () => {
+      throw thrown;
+    });
+    server.on('connection', (...[, , connectionHandle]) => {
+      lifecycle.push(['connection', connectionHandle]);
+    });
+    server.on('close', () => {
+      throw thrown;
+    });
+    server.on('close', (clean, connectionHandle) => {
+      lifecycle.push(['close', clean, connectionHandle]);
+    });
+
+    expect(defineOptions.tell('connection', [{ id: handle }, undefined, handle])).toBe(true);
+    expect(defineOptions.tell('close', [false, handle])).toBe(true);
+    expect(lifecycle).toEqual([
+      ['connection', handle],
+      ['close', false, handle],
+    ]);
+    expect(reported).toEqual([
+      [thrown, A],
+      [thrown, B],
+      [thrown, handle],
+      [thrown, handle],
+    ]);
+    server.removeAllListeners('message');
+    expect(defineOptions.tell('message', [{ data: new Uint8Array([3]) }, A])).toBe(false);
   });
 
   test('reports a throw of a listener told no connection with the empty handle', () => {

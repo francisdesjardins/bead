@@ -8,6 +8,7 @@ import {
   type ITransportClient,
   type ITransportClientAddressOptions,
   type ITransportClientInternal,
+  type ITransportClientDefineOptions,
   ProgrammerError,
   ReconnectError,
   setReadyStateClosed,
@@ -33,8 +34,10 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
   const calls: string[] = [];
   let failuresLeft = options?.failures ?? 0;
   let failureCount = 0;
+  let defineOptions: ITransportClientDefineOptions | undefined;
 
-  const client = createTransportClient<object, ITransportClientAddressOptions>((client) => {
+  const client = createTransportClient<object, ITransportClientAddressOptions>((client, given) => {
+    defineOptions = given;
     return {
       clock: options?.clock,
 
@@ -75,10 +78,42 @@ const createStubClient = (options?: { clock?: TestClock; failures?: number; hang
     };
   });
 
-  return { calls, client };
+  return { calls, client, defineOptions: defineOptions as ITransportClientDefineOptions };
 };
 
 const target = { host: 'h', port: 1 };
+
+test('calls each listener though one throws, reporting a client’s throw with no connection', async () => {
+  const { client, defineOptions } = createStubClient();
+  const thrown = new Error('a listener that throws');
+  const told: unknown[][] = [];
+  const reported: unknown[][] = [];
+
+  await client.connect(target);
+  client.on('close', () => {
+    throw thrown;
+  });
+  client.on('close', (clean, quick) => {
+    told.push(['closed', clean, quick]);
+  });
+  client.on('reconnect', () => {
+    throw thrown;
+  });
+  client.on('reconnect', () => {
+    told.push(['reconnect']);
+  });
+  client.on('error', (...args) => {
+    reported.push(args);
+  });
+
+  expect(defineOptions.tell('close', [true, false])).toBe(true);
+  await client.reconnect();
+  expect(told).toEqual([['closed', true, false], ['reconnect']]);
+  expect(reported).toEqual([[thrown], [thrown]]);
+  expect(reported[0]?.[0]).toBe(thrown);
+  expect(reported[1]?.[0]).toBe(thrown);
+  await client.disconnect();
+});
 
 test.describe('@francisdesjardins/bead/transport-client', () => {
   test('re-exports the internals as the same bindings', () => {

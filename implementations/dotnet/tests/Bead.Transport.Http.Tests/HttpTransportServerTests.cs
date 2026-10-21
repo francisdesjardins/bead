@@ -3868,6 +3868,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(
             new HashSet<(bool, string)> { (true, waitingHandle), (true, listeningHandle) },
             new HashSet<(bool, string)>(_closes));
+        Assert.Equal(2, _closes.Count);
         // a request handed on, its head out, by its body cut; a listen held, by the marked 404
         Assert.Equal("cut", await EndOf(waiting));
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(listen));
