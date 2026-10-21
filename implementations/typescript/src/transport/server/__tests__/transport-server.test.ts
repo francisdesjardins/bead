@@ -320,12 +320,16 @@ test.describe('createTransportServer', () => {
     const { server } = createStubServer({ gate: gate.promise });
 
     const starting = server.start();
-    await expect(server.stop()).rejects.toBeInstanceOf(ProgrammerError);
+    const refused = server.stop();
+
+    await expect(refused).rejects.toBeInstanceOf(ProgrammerError);
     expect(server.isConnecting()).toBe(true);
 
     gate.resolve({ address: '0.0.0.0', port: 80 });
     await starting;
     await server.stop();
+    expect(server.isClosed()).toBe(true);
+    await expect(refused).rejects.toHaveProperty('message', 'the transport server is starting');
   });
 
   test('a transport stop that throws still ends CLOSED, as a rejection', async () => {
