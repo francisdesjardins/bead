@@ -828,8 +828,8 @@ public sealed partial class ServiceManagerTests
         Assert.Equal([("echo", true)], router.UnregisteredNotifications);
     }
 
-    // the TypeScript side also says in which order the two settle; here the second's continuation
-    // runs on the thread pool, so the test says only that both wait, then both settle
+    // the TypeScript side says in which order its callbacks run; here an await resumes on the thread
+    // pool, in no order, so the test says that the first is settled once the second settles
     [Fact]
     public async Task A_registration_arriving_while_the_router_subscribes_waits_for_the_subscription()
     {
