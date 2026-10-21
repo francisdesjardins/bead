@@ -1571,6 +1571,18 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal((true, true), await SecuredBy(true));
         Assert.Equal((false, false), await SecuredBy(false));
         Assert.False(underTls.IsSecure("any"));
+
+        foreach (var (secure, expected) in new (bool? Secure, bool Expected)[] { (null, false), (true, true), (false, false) })
+        {
+            await using var wildcard = new HttpTransportServer(new HttpTransportServerOptions { Secure = secure });
+
+            await wildcard.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled);
+            Assert.Equal(expected, wildcard.IsSecure("any"));
+        }
+
+        // the explicit setting also governs a running TLS listener off the loopback
+        await underTls.Start(new HttpTransportStartOptions { Address = "0.0.0.0", FindOpenPort = true }, Cancelled);
+        Assert.False(underTls.IsSecure("any"));
     }
 
     [Fact]
@@ -2333,6 +2345,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal("cut", await EndOf(asking));
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), await heldAtTimeout);
 
+        // one envelope alone past the bound, while a listen waits
+        var overflowing = await Connect(true);
+        var heldAtOverflow = await Held(overflowing);
+
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Notification, (1, 20)), false), overflowing.ConnectionHandle).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await heldAtOverflow);
+
         // an outbox past its bound, a request's body still coming
         var (connectionToken, connectionHandle) = await Connect(true);
         var envelope = EnvelopeOf(EnvelopeKind.Request, (3, 8));
@@ -2362,6 +2382,25 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), await heldAtClose);
 
+        // a body still coming, closed by its application before its prefix is whole
+        var bodyConnection = await Connect();
+        using var body = await Wire.Open(_port);
+        var beforeBody = Count("bodyBytes");
+
+        await body.Write(PostHead(bodyConnection.ConnectionToken, "Content-Length: 8"));
+        await body.Write(EnvelopeOf(EnvelopeKind.Request, 3)[..4]);
+        await Until(() =>
+        {
+            return Count("bodyBytes") == beforeBody + 4;
+        });
+        await _server.CloseConnection(bodyConnection.ConnectionHandle).WaitAsync(Patience, Cancelled);
+        await body.Write(EnvelopeOf(EnvelopeKind.Request, 3)[4..]);
+
+        var bodyGone = await body.ReadHead();
+
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), (bodyGone.Status, bodyGone.Headers[HttpTransport.RefusalHeader]));
+        Assert.Empty(_refusals);
+
         var stopped = await Connect(true);
         var heldAtStop = await Held(stopped);
 
@@ -2378,7 +2417,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         {
             return refusal.Reason;
         }));
-        Assert.Equal(5, _closes.Count);
+        Assert.Equal(7, _closes.Count);
     }
 
     [Fact]
@@ -2526,6 +2565,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Listens_on_localhost_when_given_no_address_both_loopbacks_on_one_port_reached_by_127_0_0_1_by_the_IPv6_loopback_and_by_localhost_reports_localhost_and_is_secure_there()
     {
+        Assert.Equal("localhost", new HttpTransportStartOptions().Address);
+
         await using var server = new HttpTransportServer();
         var bound = await server.Start(new HttpTransportStartOptions { FindOpenPort = true }, Cancelled);
         var hasIPv6 = Addresses.HasIPv6Loopback();
@@ -2543,6 +2584,28 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             using var drew = await Fetch(racing, With(PostOf(new Uri($"http://{authority}/bead"), (null, null)), ("origin", $"http://{authority}")));
 
             Assert.Equal((host, 201), (host, (int)drew.StatusCode));
+
+            var client = server.Clients[^1];
+
+            if (host == "localhost")
+            {
+                Assert.True(client.Address is "127.0.0.1" or "::1");
+            }
+            else
+            {
+                Assert.Equal(host, client.Address);
+            }
+
+            Assert.True(server.IsSecure(client.ConnectionHandle));
+        }
+
+        await server.Stop().WaitAsync(Patience, Cancelled);
+
+        if (hasIPv6)
+        {
+            using var free = HeldOnIPv6(bound.Port);
+
+            Assert.True(free.IsBound);
         }
     }
 
@@ -3352,6 +3415,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             using var ended = await first;
 
             Assert.Equal((204, 1), ((int)ended.StatusCode, Count("listens")));
+            Assert.Empty(await BytesOf(ended));
             await _server.Send(new TransportMessage(envelope, false), connectionHandle).WaitAsync(Patience, Cancelled);
             second.Reset();
         }
@@ -3380,6 +3444,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         using var next = await ListenOf(connectionToken, new() { After = "1", Wait = "0" });
 
         Assert.Equal((200, "2"), ((int)next.StatusCode, HeaderOf(next, HttpTransport.SequenceHeader)));
+        Assert.Equal(Convert.ToHexString(BatchOf(envelope)), Convert.ToHexString(await BytesOf(next)));
         Assert.Empty(_closes);
     }
 
@@ -3850,6 +3915,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await _server.CloseConnection(connectionHandle).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(ListenOf(connectionToken, new() { Wait = "20000" })));
+
+        var closedDeaf = await Connect();
+
+        await _server.CloseConnection(closedDeaf.ConnectionHandle).WaitAsync(Patience, Cancelled);
+
+        Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(ListenOf(closedDeaf.ConnectionToken, new() { Wait = "20000" })));
 
         // closed between its token's lookup and its hold, here as the listen comes: gone all the same,
         // whether its client listens or not
