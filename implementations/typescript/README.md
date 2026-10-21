@@ -217,7 +217,8 @@ the server's, a service manager on its router's, and one given that differs is a
 Each transport, router and session manager exposes the one it runs on as `clock`. What bounds a
 platform's own close stays on the real clock — a ping, a WebSocket's close handshake, its client's
 and its server's, the HTTP client's disconnect. A timeout past `LONGEST_TIMER`, 2³¹ − 1
-milliseconds, is refused wherever one is taken; never is `Infinity`, which arms nothing.
+milliseconds, is refused wherever one is taken; never is `Infinity`, which arms nothing of
+Bead's own: a close over `ws` still arms `ws`'s timer, held to `LONGEST_TIMER`.
 
 The router's layer sits under `src/router/`. Both sides build on one core, under `shared/`: it
 writes the envelopes that go out and reads those that come in, pairs each result and failure with
