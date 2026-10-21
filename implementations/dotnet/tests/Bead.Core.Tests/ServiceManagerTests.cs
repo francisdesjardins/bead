@@ -839,12 +839,20 @@ public sealed partial class ServiceManagerTests
 
         router.SubscribeGate = gate.Task;
 
-        var first = notification.Register(new Text("a"), Unheard)();
+        var settled = new List<string>();
+
+        async Task Register(string value)
+        {
+            await notification.Register(new Text(value), Unheard)();
+            settled.Add(value);
+        }
+
+        var first = Register("a");
 
         // the router holds it now, and is still subscribing
         Assert.True(router.Holds(Echo.Address));
 
-        var second = notification.Register(new Text("b"), Unheard)();
+        var second = Register("b");
 
         Assert.False(first.IsCompleted);
         Assert.False(second.IsCompleted);
@@ -853,6 +861,7 @@ public sealed partial class ServiceManagerTests
         await Task.WhenAll(first, second).WaitAsync(Patience, Cancelled);
 
         Assert.Single(router.Requests);
+        Assert.Equal(["a", "b"], settled);
     }
 
     [Fact]
