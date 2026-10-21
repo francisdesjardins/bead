@@ -71,6 +71,12 @@ export const WORKER_MESSAGES = Object.freeze({
   OPEN: 'bead-open',
 });
 
+/**
+ * How long a WebSocket's close handshake may take by default, a client's or a server's: a peer that
+ * never answers is dropped after it (spec 15.3).
+ */
+export const CLOSE_TIMEOUT = 5_000;
+
 /** `'arraybuffer'` rather than `'blob'`: an envelope is read synchronously, and a `Blob` cannot be. */
 export const TRANSPORT_WEBSOCKET_BINARYTYPE = 'arraybuffer' as const;
 

@@ -43,11 +43,12 @@ a connection is alive is its transport's to know.
 
 Each end takes a message of an envelope's limit, 16,778,240 bytes, `MAXIMUM_MESSAGE_BYTES`, unless
 its `maxPayload` says otherwise, and fails a connection that sends a larger one with 1009; over the
-global `WebSocket`, its platform's bound applies. A server drains it until the peer's close or its
-`closeTimeout`, which `ws` is given, its close unclean whatever the peer answers, and each end
-reports it on `error`, naming `maximumMessageBytes` and its value, as it reports a protocol error,
-before its close; a client over the global `WebSocket`, whose `error` cannot be told from a drop,
-tells its close alone (spec 15.1, 15.3). A WebSocket server judges a request at its address in the order of spec
+global `WebSocket`, its platform's bound applies. Each end drains it until the peer's close or its
+`closeTimeout`, its close unclean whatever the peer answers, and reports it on `error`, naming
+`maximumMessageBytes` and its value, as it reports a protocol error, before its close; a client over
+the global `WebSocket`, whose `error` cannot be told from a drop, tells its close alone (spec 15.1,
+15.3). The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
+`ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A WebSocket server judges a request at its address in the order of spec
 15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
 ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
 403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a

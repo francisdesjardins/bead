@@ -4,6 +4,7 @@
 
 import {
   CLOSE_EVENT,
+  CLOSE_TIMEOUT,
   ERROR_EVENT,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
@@ -11,6 +12,7 @@ import {
   WS_ERROR_CODE_PREFIX,
   WS_TOO_BIG_CODE,
 } from '../shared/constants';
+import { assertHeld, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
   ConnectError,
@@ -47,7 +49,7 @@ import type {
   WSTransportClient,
 } from './types';
 
-export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
+export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export type {
   ICloseEventLike,
@@ -157,17 +159,19 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
  * redirect: a 3xx answered to its upgrade fails its connect, its status named (spec 15.6). It is
  * secure under `wss`, or to a loopback host. Over `ws`, a message is an envelope at most by default,
  * {@link MAXIMUM_MESSAGE_BYTES}, and a larger one closes the connection with 1009; over the global
- * `WebSocket`, its platform's bound applies. Over `ws`, an upgrade refused fails the connect with
- * its status and its reason, "the server refused the upgrade: 403 host-refused"; the global
- * `WebSocket` reads nothing of it, as the WHATWG WebSockets Standard has a page's, and names its
- * close alone, 1006.
+ * `WebSocket`, its platform's bound applies. Over `ws`, each close it begins — its `disconnect`'s,
+ * a dispose's, its 1009 — waits on the server's answer `closeTimeout` at most, which `ws` is given,
+ * then drops the socket; over the global `WebSocket`, its platform bounds its close. Over `ws`, an
+ * upgrade refused fails the connect with its status and its reason, "the server refused the
+ * upgrade: 403 host-refused"; the global `WebSocket` reads nothing of it, as the WHATWG WebSockets
+ * Standard has a page's, and names its close alone, 1006.
  *
  * Once open, over `ws`, `error` tells what this side fails its connection for of its own (spec
  * 15.1): a protocol error, `ws`'s own error, or a message past `maxPayload`, a
  * `GenericError` "the connection is closed with 1009: a message past its maximumMessageBytes,
  * N bytes" keeping `ws`'s error as its `cause`; each once, as the connection ends, before its
  * unclean `close`, so a listener that throws keeps the close told. A server gone without its
- * closing handshake, its heartbeat's drop, and `ws`'s own drop past its close timeout tell their
+ * closing handshake, its heartbeat's drop, and `ws`'s own drop past `closeTimeout` tell their
  * `close` alone; so does every unclean close over the global `WebSocket`, whose bare `error` cannot
  * be told from a drop.
  *
@@ -182,6 +186,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
     clock,
+    closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload = MAXIMUM_MESSAGE_BYTES,
     WebSocket = globalThis.WebSocket,
@@ -190,6 +195,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
     ...options,
   };
   const heartbeat = assertHeartbeat(givenHeartbeat);
+  const closeTimeout = assertHeld('a close timeout', givenCloseTimeout);
 
   return createTransportClient<IWebSocketLike, IWSTransportClientConnectOptions>(
     (client, { tell }) => {
@@ -315,11 +321,16 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                   const written = given === '' ? undefined : given;
                   let socket: IWebSocketLike;
 
+                  // ! `closeTimeout`, `ws`'s own close timer, which it arms on every close, its
+                  // 1009 among them: the transport's, so a server that never answers is dropped
+                  // after one bound; for `Infinity`, the longest a timer holds, which Node would
+                  // take for 1 ms
                   try {
                     socket =
                       opened =
                       client.socket =
                         new WebSocket(url, protocols, {
+                          closeTimeout: closeTimeout === Infinity ? LONGEST_TIMER : closeTimeout,
                           maxPayload,
                           ...(written === undefined ? {} : { headers: { authorization: written } }),
                         });

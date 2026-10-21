@@ -1257,14 +1257,15 @@ connection; a 426 names `upgrade` in its `Connection`.
 [§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
 still comes until the peer's close or its close timeout, then ends the connection, its close
 unclean whatever code the peer answers with; a side reports it, naming the bound and its value
-(section 15.1). A server's close timeout, 5 seconds by default, bounds each closing handshake it
-begins: a peer that has not answered by then is dropped, its close unclean. A side SHOULD ping its
-peer every `heartbeat` — 30 seconds by default, or never — and close a connection that left a ping
-unanswered, so a peer gone without a word ends in a close; a ping waits behind what was sent
-before it, so a peer that stops reading leaves it unanswered too. What waits for a server's socket
-is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
-each connection it holds, one whose opening handshake completes as its stop begins among them. A
-close with 1000 is the clean one.
+(section 15.1). A side's close timeout, 5 seconds by default, bounds each closing handshake it
+begins, its 1009 among them: a peer that has not answered by then is dropped, and a server tells its
+close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
+close as its platform does. A side SHOULD ping its peer every `heartbeat` — 30 seconds by default,
+or never — and close a connection that left a ping unanswered, so a peer gone without a word ends
+in a close; a ping waits behind what was sent before it, so a peer that stops reading leaves it
+unanswered too. What waits for a server's socket is held besides as section 15.12 says. A side
+that closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
+handshake completes as its stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
