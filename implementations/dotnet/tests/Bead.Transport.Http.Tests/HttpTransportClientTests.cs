@@ -362,6 +362,39 @@ public sealed class HttpTransportClientTests
         return waited;
     }
 
+    private sealed class ObservedClock(FakeTimeProvider time) : TimeProvider
+    {
+        public ConcurrentQueue<TimeSpan> Armed { get; } = new();
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return time.TimestampFrequency;
+            }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return time.GetUtcNow();
+        }
+
+        public override long GetTimestamp()
+        {
+            return time.GetTimestamp();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime > TimeSpan.Zero)
+            {
+                Armed.Enqueue(dueTime);
+            }
+
+            return time.CreateTimer(callback, state, dueTime, period);
+        }
+    }
+
     /// <summary>What a scripted exchange answers: the TypeScript side's fake response.</summary>
     private sealed record Answer
     {
@@ -2038,7 +2071,8 @@ public sealed class HttpTransportClientTests
                 Assert.Equal((false, false), await Next(closes));
                 Assert.Equal(ReadyState.Closed, client.ReadyState);
                 // released: its DELETE reached the server, which ended the connection
-                Assert.Equal(connectionHandle, (await Next(started.Closes)).ConnectionHandle);
+                Assert.Equal((true, connectionHandle), await Next(started.Closes));
+                Assert.Empty(started.Server.Clients);
                 Assert.Equal(1, origin.CountOf("DELETE"));
                 Assert.True(heard.Reader.Count == 0);
             }
@@ -2185,6 +2219,7 @@ public sealed class HttpTransportClientTests
             foreach (var isListening in new[] { false, true })
             {
                 var redirected = 0;
+                var before = target.Asked.Count;
 
                 await using var origin = new Raw((asked, token) =>
                 {
@@ -2210,9 +2245,15 @@ public sealed class HttpTransportClientTests
                     }
 
                     Assert.Equal((false, false), await Next(closes));
-                    Assert.Equal(connectionHandle, (await Next(started.Closes)).ConnectionHandle);
+                    Assert.Equal(ReadyState.Closed, client.ReadyState);
+                    Assert.Equal((true, connectionHandle), await Next(started.Closes));
+                    Assert.Empty(started.Server.Clients);
                     Assert.Equal((1, 1), (redirected, origin.CountOf("DELETE")));
                     Assert.True(heard.Reader.Count == 0);
+                    Assert.Equal([isListening || status == 302 ? "GET" : "POST"], target.Asked.Skip(before).Select((asked) =>
+                    {
+                        return asked.Method;
+                    }));
                 }
             }
 
@@ -2395,7 +2436,9 @@ public sealed class HttpTransportClientTests
     public async Task Listens_again_from_where_it_was_when_a_listen_is_lost_at_once_then_later_and_later_drawn_apart_and_one_that_reaches_the_server_ends_the_losses()
     {
         var time = new FakeTimeProvider();
-        await using var faked = await ConnectFake(ListeningOn(time));
+        var clock = new ObservedClock(time);
+        await using var faked = await ConnectFake(ListeningOn(time) with { Clock = clock });
+        var connected = clock.Armed.Count;
         var fetch = faked.Fetch;
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
         var waits = new List<TimeSpan>();
@@ -2459,13 +2502,17 @@ public sealed class HttpTransportClientTests
             return range.Waited > range.Whole / 2 + Millisecond && range.Waited < range.Whole;
         });
         Assert.False(page.Task.IsCompleted);
+        var delays = clock.Armed.Skip(connected).ToArray();
+
+        Assert.Equal((TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5), 10), (delays[0], delays[^1], delays.Length));
         Assert.Equal((ReadyState.Open, 13), (faked.Client.ReadyState, fetch.Count));
 
         // what was cut on its way comes whole at last, and is heard once
-        fetch.Calls[12].Answer(Batch(1, envelope));
+        fetch.Calls[12].Answer(Batch(1, envelope) with { Read = page });
 
         Assert.Equal("1", (await fetch.CallOf(13)).After);
         Assert.Equal([envelope], faked.Heard);
+        Assert.True(page.Task.IsCompletedSuccessfully);
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
 
