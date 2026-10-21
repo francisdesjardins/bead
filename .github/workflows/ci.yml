@@ -61,6 +61,7 @@ jobs:
       - run: python spec/generators/make_codecs.py
       - run: python spec/generators/make_identities.py
       - run: python spec/generators/make_validations.py
+      - run: python spec/generators/make_transcoding.py
       - run: git diff --exit-code -- spec
       - name: No file the generators wrote is new
         run: test -z "$(git status --porcelain -- spec)"
@@ -312,6 +313,9 @@ jobs:
       - name: Each side's validators of spec/validations.proto, what beadc generates for it
         working-directory: .
         run: node tools/check-validations.mjs
+      - name: Each side's route table and document of spec/transcoding.proto, what beadc generates for it
+        working-directory: .
+        run: node tools/check-transcoding.mjs
       # ! beadc breaking, against the last release, the interop's blueprint and examples/hello's:
       # the last release carries both, and one without fails the step, so it never passes by
       # comparing nothing. The last release is the newest
@@ -351,7 +355,8 @@ jobs:
   # their source; then examples/hello: beadc on Node from builder/ holds its generated files and
   # writes the copy of Bead's options its external builds read; buf's lint and layout over its
   # .proto; each half's gates and both its builds; then each client against each server, both
-  # modes of each half, sixteen pairs, every one writing transcript.txt, every server ending clean.
+  # modes of each half, sixteen pairs, each server's gateway asked after its client, every one
+  # writing transcript.txt, every server ending clean.
   # On the current line and on the floor the TypeScript half's engines.node declares. The wrappers
   # run over it on the builder job's image legs, where the image is.
   examples:
@@ -429,8 +434,9 @@ jobs:
 
   # ── Protobuf conformance ─────────────────────────────────────────────────────
   # Protobuf's conformance suite through each side's generated `proto` codec, the check of a
-  # payload's records in front of its library, binary, recommended enforced, every edition, at the
-  # release both libraries pin (decision 0028): the runner `tools/protobuf-conformance/runner.json`
+  # payload's records in front of its library, and its mapping of protobuf's JSON, binary and JSON,
+  # recommended enforced, every edition, at the release both libraries pin (decisions 0028 and
+  # 0037): the runner `tools/protobuf-conformance/runner.json`
   # pins, fetched and checked by its sha512 as protoc is by its sha256, against each side's testee
   # and its failure list, which the runner holds both ways, then the floor of tests run; then one
   # corpus of Probe through both testees, read alike. A job of its own: it needs both runtimes,

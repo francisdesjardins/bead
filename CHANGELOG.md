@@ -57,6 +57,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   edge where it parts.
 - Protobuf's conformance suite's JSON tests through each side's mapping of protobuf's JSON, 5,601
   tests binary and JSON, the same two failures listed on both sides.
+- `tools/check-transcoding.mjs`, which holds each side's route table and document of
+  `spec/transcoding.proto` to what beadc writes, in CI's `builder` job.
 - Each side's bench measures `transcoding.read.*` and `transcoding.write.*`: Bead's mapping of
   protobuf's JSON against its stock library's, on a message of every kind of field, and
   `--transcoding` runs those alone.

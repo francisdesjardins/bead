@@ -632,6 +632,9 @@ against each server.
 - `node tools/check-validations.mjs [typescript|csharp]`: each side's validators of
   `spec/validations.proto`, committed beside its verdicts test, are what beadc writes for it;
   `--write` writes them. It needs the builder installed.
+- `node tools/check-transcoding.mjs [typescript|csharp]`: each side's route table and document of
+  `spec/transcoding.proto`, committed beside its gateway's tests, are what beadc writes for it;
+  `--write` writes them. It needs the builder installed.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder.
 
