@@ -1148,7 +1148,8 @@ listener's throw keeps it open, and before its close, which is then unclean. It 
 drops without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops,
 nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
 server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's unclean close tells it.
+past its inactivity timeout: each one's close tells it, unclean, but for a client's own
+`disconnect` left unanswered, whose close is told as the `disconnect` asked.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
