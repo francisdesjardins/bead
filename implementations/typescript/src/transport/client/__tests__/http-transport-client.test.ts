@@ -2083,6 +2083,11 @@ test.describe('createHTTPTransportClient, redirects', () => {
 
     await client.connect({ host, port: redirecting.port });
 
+    let listensAtMessage: number | undefined;
+
+    client.once('message', () => {
+      listensAtMessage = listens;
+    });
     const message = nextEvent(client, 'message');
 
     void started.server.send({ data: envelope }, handleOf(started.server));
@@ -2090,11 +2095,12 @@ test.describe('createHTTPTransportClient, redirects', () => {
     // lost at once, listened again at once, lost, then after a wait drawn between 0.5 and 1 s heard
     const [{ data }] = (await message) as [ITransportMessage];
 
-    expect([[...new Uint8Array(data as ArrayBuffer)], client.isOpen(), listens]).toEqual([
+    expect([[...new Uint8Array(data as ArrayBuffer)], client.isOpen(), listensAtMessage]).toEqual([
       [...envelope],
       true,
       3,
     ]);
+    expect(target.heard).toEqual([]);
     await client.disconnect();
     expect(target.heard).toEqual([]);
   });

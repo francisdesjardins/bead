@@ -2130,8 +2130,14 @@ public sealed class HttpTransportClientTests
 
             return ForwardedTo(started.Port, (asked, token));
         });
-        var (client, heard) = HearingClient(new HttpTransportClientOptions());
+        var client = new HttpTransportClient();
+        var heard = Channel.CreateUnbounded<(byte[] Bytes, int Listens)>();
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+
+        client.Message += (message) =>
+        {
+            heard.Writer.TryWrite((message.Bytes.ToArray(), origin.CountOf("GET")));
+        };
 
         await using (client)
         {
@@ -2140,10 +2146,13 @@ public sealed class HttpTransportClientTests
             var connectionHandle = await Next(started.Connections);
             var sending = started.Server.Send(new TransportMessage(envelope, false), connectionHandle);
 
-            Assert.Equal(envelope, await Next(heard));
+            var received = await Next(heard);
+
+            Assert.Equal(envelope, received.Bytes);
             await sending.WaitAsync(Patience, Cancelled);
             Assert.Equal(ReadyState.Open, client.ReadyState);
-            Assert.Equal(3, origin.CountOf("GET"));
+            Assert.Equal(3, received.Listens);
+            Assert.Empty(target.Asked);
             await client.CloseConnection().WaitAsync(Patience, Cancelled);
         }
 
