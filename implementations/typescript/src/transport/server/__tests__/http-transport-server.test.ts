@@ -1110,7 +1110,10 @@ const postHTTPS = (
  * How the server ends a `POST` over HTTP/2 of `headers`: its status and its `bead-refusal`, or the
  * code its stream was reset with, nothing written.
  */
-const answerOverHTTP2 = (session: ClientHttp2Session, headers: Record<string, string>) => {
+const answerOverHTTP2 = (
+  session: ClientHttp2Session,
+  headers: Record<string, string | string[]>
+) => {
   return new Promise<[number | undefined, unknown] | number>((resolve) => {
     const stream = session.request({
       ':method': 'POST',
@@ -1225,19 +1228,55 @@ test.describe('createHTTPTransportServer, over TLS', () => {
   });
 
   test('names its host over HTTP/2 by its :authority, a host beside it ignored, for the host and the own origin', async () => {
-    await using started = await startSecure({ hosts: ['bead.test'] });
-    const { session } = started;
+    await using started = await startSecure();
+    const { session, port } = started;
+    const own = `${host}:${String(port)}`;
 
     expect(
       await Promise.all([
-        answerOverHTTP2(session, { ':authority': 'bead.test:8443', host: 'rebind.example' }),
-        answerOverHTTP2(session, { ':authority': 'rebind.example:8443', host: 'bead.test' }),
+        answerOverHTTP2(session, { ':authority': own }),
+        answerOverHTTP2(session, { ':authority': own, host: 'rebind.example:8080' }),
+        answerOverHTTP2(session, { ':authority': 'rebind.example:8080', host: own }),
         answerOverHTTP2(session, {
+          ':authority': own,
+          host: 'rebind.example:8080',
+          origin: `https://${own}`,
+        }),
+        answerOverHTTP2(session, {
+          ':authority': own,
+          host: 'rebind.example:8080',
+          origin: 'https://rebind.example:8080',
+        }),
+        answerOverHTTP2(session, {
+          ':authority': 'Bead.LocalHost:443',
+          origin: 'https://bead.localhost:443',
+        }),
+        answerOverHTTP2(session, { host: own, origin: `https://${own}` }),
+        answerOverHTTP2(session, { host: 'rebind.example:8080' }),
+      ])
+    ).toEqual([
+      [201, undefined],
+      [201, undefined],
+      [403, REFUSALS.HOST],
+      [201, undefined],
+      [403, REFUSALS.ORIGIN],
+      [201, undefined],
+      [201, undefined],
+      [403, REFUSALS.HOST],
+    ]);
+
+    await using named = await startSecure({ hosts: ['bead.test'] });
+
+    expect(
+      await Promise.all([
+        answerOverHTTP2(named.session, { ':authority': 'bead.test:8443', host: 'rebind.example' }),
+        answerOverHTTP2(named.session, { ':authority': 'rebind.example:8443', host: 'bead.test' }),
+        answerOverHTTP2(named.session, {
           ':authority': 'bead.test:8443',
           host: 'rebind.example:8443',
           origin: 'https://bead.test:8443',
         }),
-        answerOverHTTP2(session, {
+        answerOverHTTP2(named.session, {
           ':authority': 'bead.test:8443',
           host: 'rebind.example:8443',
           origin: 'https://rebind.example:8443',
@@ -1249,6 +1288,12 @@ test.describe('createHTTPTransportServer, over TLS', () => {
       [201, undefined],
       [403, REFUSALS.ORIGIN],
     ]);
+
+    // * an empty array omits :authority and suppresses Node's default authority
+    expect(
+      await answerOverHTTP2(session, { ':authority': [] }),
+      'an HTTP/2 POST without :authority or Host receives the marked host refusal'
+    ).toEqual([403, REFUSALS.HOST]);
   });
 
   test('resets over HTTP/2 the stream of a request whose :authority is no host, PROTOCOL_ERROR, nothing written', async () => {

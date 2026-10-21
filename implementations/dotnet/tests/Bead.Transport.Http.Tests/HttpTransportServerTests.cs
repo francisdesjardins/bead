@@ -1669,6 +1669,16 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 await Http2Of(("host", "rebind.example:8080"), bead),
                 await Http2Of(bead),
             ]);
+
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, Hosts = ["bead.test"] });
+        Assert.Equal(
+            [new TlsAnswer(201, null, null), new TlsAnswer(403, HttpRefusals.Host, null), new TlsAnswer(201, null, null), new TlsAnswer(403, HttpRefusals.Origin, null)],
+            [
+                await Http2Of((":authority", "bead.test:8443"), ("host", "rebind.example"), bead),
+                await Http2Of((":authority", "rebind.example:8443"), ("host", "bead.test"), bead),
+                await Http2Of((":authority", "bead.test:8443"), ("host", "rebind.example:8443"), bead, ("origin", "https://bead.test:8443")),
+                await Http2Of((":authority", "bead.test:8443"), ("host", "rebind.example:8443"), bead, ("origin", "https://rebind.example:8443")),
+            ]);
     }
 
     [Fact]
