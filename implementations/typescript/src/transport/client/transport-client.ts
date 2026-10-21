@@ -240,11 +240,7 @@ export const createTransportClient = <
 
       if (!isAttempting && !client.isUninitialized() && !client.isClosed()) {
         return Promise.reject(
-          new ProgrammerError(
-            client.isOpen()
-              ? 'transport is already opened'
-              : `transport is already ${getReadyStateName(client)}`
-          )
+          new ProgrammerError(`the transport client is already ${getReadyStateName(client)}`)
         );
       }
 

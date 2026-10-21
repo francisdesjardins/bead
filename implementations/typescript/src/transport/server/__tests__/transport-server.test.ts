@@ -263,7 +263,7 @@ test.describe('createTransportServer', () => {
     const { calls, server } = createStubServer();
 
     await server.start();
-    await expect(server.start()).rejects.toThrow('server is already open');
+    await expect(server.start()).rejects.toThrow('the transport server is already open');
     expect(calls).toEqual(['start']);
   });
 
@@ -287,7 +287,7 @@ test.describe('createTransportServer', () => {
     const { calls, server } = createStubServer({ gate: gate.promise });
 
     const starting = server.start();
-    await expect(server.start()).rejects.toThrow('server is already connecting');
+    await expect(server.start()).rejects.toThrow('the transport server is already connecting');
 
     gate.resolve({ address: '0.0.0.0', port: 80 });
     await starting;

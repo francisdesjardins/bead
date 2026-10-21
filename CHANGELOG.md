@@ -85,6 +85,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
   outcomes apart: two owners share a place where the spec names one option for both and every
   column of the file agrees (decision 0014). The file holds 25 places, by 38 ways.
+- The TypeScript side's transport client and server refuse a start or a connect in the C# side's
+  words: `the transport client is already open`, `the transport server is already connecting`,
+  `the transport server is starting`.
 
 ### Fixed
 
