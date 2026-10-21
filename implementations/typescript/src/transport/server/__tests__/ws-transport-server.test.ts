@@ -359,6 +359,11 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       test('keeps a connection whose connection listener throws, its messages heard, the throw reported with it', async () => {
         const thrown = new Error('a connection listener that throws');
         const reported = nextServerEvent(server, 'error');
+        const closes: unknown[] = [];
+
+        server.on('close', (...args) => {
+          closes.push(args);
+        });
 
         server.once('connection', () => {
           throw thrown;
@@ -367,7 +372,10 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         // the listener after it, told all the same
         const [, , connectionHandle] = await connectClient(client);
 
-        expect(await reported).toEqual([thrown, connectionHandle]);
+        const toldError = await reported;
+
+        expect(toldError).toEqual([thrown, connectionHandle]);
+        expect(toldError[0]).toBe(thrown);
 
         const heard = nextServerEvent(server, 'message');
 
@@ -377,7 +385,21 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
           { ...FROM, credential: undefined, data: 'still here' },
           connectionHandle,
         ]);
+        const binary = nextServerEvent(server, 'message');
+
+        await client.send({ data: Uint8Array.of(1) });
+
+        const binaryMessage = await binary;
+
+        expect(binaryMessage).toEqual([
+          { ...FROM, credential: undefined, data: expect.any(ArrayBuffer) },
+          connectionHandle,
+        ]);
+        expect([...new Uint8Array(binaryMessage[0].data as ArrayBuffer)]).toEqual([1]);
         expect(server.clients).toHaveLength(1);
+        expect(server.gauges().connectionHandles).toEqual(new Set([connectionHandle]));
+        expect(closes).toEqual([]);
+        expect(client.isOpen()).toBe(true);
       });
     });
 
@@ -406,31 +428,45 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       test('hears the next message after a message listener throws, the throw reported with its connection', async () => {
         const [, , connectionHandle] = await connectClient(client);
         const thrown = new Error('a message listener that throws');
+        const errors: unknown[][] = [];
+        const closes: unknown[] = [];
 
         server.once('message', () => {
           throw thrown;
         });
+        server.on('error', (...args) => {
+          errors.push(args);
+        });
+        server.on('close', (...args) => {
+          closes.push(args);
+        });
 
-        const reported = nextServerEvent(server, 'error');
-        const first = nextServerEvent(server, 'message');
+        for (const data of ['first', Uint8Array.of(1), 'second', Uint8Array.of(2)]) {
+          const heard = nextServerEvent(server, 'message');
 
-        await client.send({ data: 'first' });
+          await client.send({ data });
 
-        expect(await first).toEqual([
-          { ...FROM, credential: undefined, data: 'first' },
-          connectionHandle,
-        ]);
-        expect(await reported).toEqual([thrown, connectionHandle]);
+          const message = await heard;
 
-        const second = nextServerEvent(server, 'message');
+          expect(message).toEqual([
+            {
+              ...FROM,
+              credential: undefined,
+              data: typeof data === 'string' ? data : expect.any(ArrayBuffer),
+            },
+            connectionHandle,
+          ]);
+          if (typeof data !== 'string') {
+            expect([...new Uint8Array(message[0].data as ArrayBuffer)]).toEqual([...data]);
+          }
+        }
 
-        await client.send({ data: 'second' });
-
-        expect(await second).toEqual([
-          { ...FROM, credential: undefined, data: 'second' },
-          connectionHandle,
-        ]);
+        expect(errors).toEqual([[thrown, connectionHandle]]);
+        expect(errors[0]?.[0]).toBe(thrown);
         expect(server.clients).toHaveLength(1);
+        expect(server.gauges().connectionHandles).toEqual(new Set([connectionHandle]));
+        expect(closes).toEqual([]);
+        expect(client.isOpen()).toBe(true);
       });
     });
 
@@ -743,6 +779,12 @@ test.describe('WSTransportServer, on the wire', () => {
   });
 
   test('closes with 1009 a message past an envelope’s limit, 16,778,240 bytes, when told no bound', async () => {
+    const connection = nextServerEvent(server, 'connection');
+    const delivered: number[] = [];
+
+    server.on('message', ({ data }) => {
+      delivered.push((data as ArrayBuffer).byteLength);
+    });
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
     const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
 
@@ -757,11 +799,17 @@ test.describe('WSTransportServer, on the wire', () => {
 
     expect((data as ArrayBuffer).byteLength).toBe(16_778_240);
 
+    const [, , connectionHandle] = await connection;
+    const serverClosed = nextServerEvent(server, 'close');
     const closed = once(socket, 'close');
 
     socket.send(new Uint8Array(MAXIMUM_MESSAGE_BYTES + 1));
 
     expect((await closed)[0]).toBe(1009);
+    expect(await serverClosed).toEqual([false, connectionHandle]);
+    expect(delivered).toEqual([16_778_240]);
+    expect(server.clients).toEqual([]);
+    expect(server.gauges().connectionHandles).toEqual(new Set());
   });
 
   // spec 15.3
@@ -1381,6 +1429,16 @@ test.describe('WSTransportServer, its handshake', () => {
   test('refuses an upgrade that comes as it stops, 503 busy, told when to come back', async () => {
     await using started = await startDated({ hosts: ['bead.test'] });
     const { port, server } = started;
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const peer = new TrackedWsWebSocket(`ws://${host}:${String(port)}`, {
+      headers: { host: 'bead.test' },
+    });
+
+    await once(peer, 'open');
+
+    const connectionHandle = server.clients[0]?.connectionHandle;
+    const peerClosed = once(peer, 'close');
+    const transportClosed = nextServerEvent(server, 'close');
     const socket = await openTcp(port);
     const answer = { isClosed: false, text: '' };
     const head = requestOf('GET / HTTP/1.1');
@@ -1410,6 +1468,8 @@ test.describe('WSTransportServer, its handshake', () => {
     expect(answer).toEqual(
       refusedWith('503 Service Unavailable', { fields: ['retry-after: 1'], refusal: 'busy' })
     );
+    expect((await peerClosed)[0]).toBe(1001);
+    expect(await transportClosed).toEqual([false, connectionHandle]);
     expect(server.clients).toHaveLength(0);
   });
 
@@ -1702,37 +1762,54 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
   });
 
   test('names each connection by its peer’s port and the rank it came at, two sockets from one address and port among them, and gives no handle twice', async () => {
-    const fake = createFakeWebSocketServer();
-    const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
-    const starting = server.start(SCRIPTED);
+    for (const wasClean of [true, false]) {
+      const fake = createFakeWebSocketServer();
+      const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
+      const starting = server.start(SCRIPTED);
 
-    fake.instances[0]?.emit('listening');
-    await starting;
+      fake.instances[0]?.emit('listening');
+      await starting;
 
-    const [first, second, third] = [createFakeSocket(), createFakeSocket(), createFakeSocket()];
-    // three sockets from one address and port, the first closed before the third came
-    const firstHandle = fake.connect(first, { server });
-    const secondHandle = fake.connect(second, { server });
+      const [first, second, third] = [createFakeSocket(), createFakeSocket(), createFakeSocket()];
+      const closed: unknown[] = [];
 
-    first.terminate();
+      server.on('close', (...args) => {
+        closed.push(args);
+      });
+      // three sockets from one address and port, the first closed before the third came
+      const firstHandle = fake.connect(first, { server });
+      const secondHandle = fake.connect(second, { server });
 
-    const thirdHandle = fake.connect(third, { server });
+      if (wasClean) {
+        first.close(1000);
+      } else {
+        first.terminate();
+      }
 
-    expect([firstHandle, secondHandle, thirdHandle]).toEqual([
-      'type=WS;ip=10.0.0.1;port=40000;ordinal=1',
-      'type=WS;ip=10.0.0.1;port=40000;ordinal=2',
-      'type=WS;ip=10.0.0.1;port=40000;ordinal=3',
-    ]);
-    expect(server.clients).toMatchObject([
-      { address: '10.0.0.1', connectionHandle: secondHandle, port: 40_000 },
-      { address: '10.0.0.1', connectionHandle: thirdHandle, port: 40_000 },
-    ]);
+      expect(closed).toEqual([[wasClean, firstHandle]]);
 
-    // each its own: a close reaches its socket alone, and the first's handle names none
-    await expect(server.close(firstHandle)).resolves.toBe(false);
-    await expect(server.close(secondHandle)).resolves.toBe(true);
-    expect([second.closeCodes, third.closeCodes]).toEqual([[1000], []]);
-    await server.stop();
+      const thirdHandle = fake.connect(third, { server });
+
+      expect([firstHandle, secondHandle, thirdHandle]).toEqual([
+        'type=WS;ip=10.0.0.1;port=40000;ordinal=1',
+        'type=WS;ip=10.0.0.1;port=40000;ordinal=2',
+        'type=WS;ip=10.0.0.1;port=40000;ordinal=3',
+      ]);
+      expect(server.clients).toMatchObject([
+        { address: '10.0.0.1', connectionHandle: secondHandle, port: 40_000 },
+        { address: '10.0.0.1', connectionHandle: thirdHandle, port: 40_000 },
+      ]);
+
+      expect(server.gauges().counts['connections']).toBe(2);
+      expect(server.gauges().connectionHandles).toEqual(new Set([secondHandle, thirdHandle]));
+
+      // each its own: a close reaches its socket alone, and the first's handle names none
+      await expect(server.close(firstHandle)).resolves.toBe(false);
+      await expect(server.close(secondHandle)).resolves.toBe(true);
+      expect([second.closeCodes, third.closeCodes]).toEqual([[1000], []]);
+      expect(server.gauges().connectionHandles).toEqual(new Set([thirdHandle]));
+      await server.stop();
+    }
   });
 
   test('closes each of two sockets from one address and port on its own, each its own close told', async () => {
@@ -1936,12 +2013,19 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     fake.instances[0]?.emit('listening');
     await starting;
 
+    const closes: unknown[] = [];
+
+    server.on('close', (...args) => {
+      closes.push(args);
+    });
     const stubborn = createFakeSocket({ onClose: 'throw' });
     const connectionHandle = fake.connect(stubborn, { server });
 
     await expect(server.close(connectionHandle)).resolves.toBe(true);
     expect(stubborn.wasTerminated).toBe(true);
     expect(server.clients).toHaveLength(0);
+    expect(server.gauges().connectionHandles).toEqual(new Set());
+    expect(closes).toEqual([[false, connectionHandle]]);
     await server.stop();
   });
 });
@@ -2168,7 +2252,7 @@ const refusalsOf = (server: WSTransportServer) => {
 
 test.describe('WSTransportServer, the refusals it tells', () => {
   test('tells each refusal it judges of its own, its status, its reason, the request’s authority and origin and the client’s address and port, and nothing of HTTP’s own, at its address', async () => {
-    await using started = await startDated({ hosts: ['bead.test'] });
+    await using started = await startDated({ hosts: ['bead.test', host] });
     const { port, server } = started;
     const refusals = refusalsOf(server);
     const told = (
@@ -2184,6 +2268,7 @@ test.describe('WSTransportServer, the refusals it tells', () => {
       };
     };
     const expected: unknown[] = [];
+    const own = `${host}:${String(port)}`;
 
     // each refusal of its own, in the order of its judgement, a CONNECT's among them
     for (const [request, refusal] of [
@@ -2201,26 +2286,111 @@ test.describe('WSTransportServer, the refusals it tells', () => {
         },
       ],
       [
-        requestOf('GET http://elsewhere.test:81/ HTTP/1.1'),
-        { authority: 'elsewhere.test:81', reason: 'host-refused', status: 403 },
+        requestOf('GET http://elsewhere.test:81/ HTTP/1.1', []),
+        { authority: 'elsewhere.test:81', origin: undefined, reason: 'host-refused', status: 403 },
       ],
-      [requestOf('POST / HTTP/1.1'), { reason: 'method-refused', status: 405 }],
+      [
+        requestOf('POST / HTTP/1.1', []),
+        { authority: 'bead.test', origin: undefined, reason: 'method-refused', status: 405 },
+      ],
       [
         requestOf('CONNECT bead.test:80 HTTP/1.1', ['Host: bead.test:80']),
-        { authority: 'bead.test:80', reason: 'method-refused', status: 405 },
+        { authority: 'bead.test:80', origin: undefined, reason: 'method-refused', status: 405 },
       ],
-      [requestOf('GET / HTTP/1.1', [...NO_UPGRADE]), { reason: 'upgrade-required', status: 426 }],
+      [
+        requestOf('GET / HTTP/1.1', [
+          'Upgrade',
+          'Connection',
+          'Sec-WebSocket-Key',
+          'Sec-WebSocket-Version',
+        ]),
+        { authority: 'bead.test', origin: undefined, reason: 'upgrade-required', status: 426 },
+      ],
       [
         requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Version: 8']),
-        { reason: 'version-refused', status: 426 },
+        { authority: 'bead.test', origin: undefined, reason: 'version-refused', status: 426 },
       ],
       [
         requestOf('GET / HTTP/1.1', ['Sec-WebSocket-Key: dGVzdA==']),
-        { reason: 'malformed', status: 400 },
+        { authority: 'bead.test', origin: undefined, reason: 'malformed', status: 400 },
       ],
       [
         requestOf('GET / HTTP/1.1', ['Origin: https://elsewhere.test']),
-        { origin: 'https://elsewhere.test', reason: 'origin-refused', status: 403 },
+        {
+          authority: 'bead.test',
+          origin: 'https://elsewhere.test',
+          reason: 'origin-refused',
+          status: 403,
+        },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', [
+          'Host: rebind.example:8080',
+          'Origin: http://a.example',
+          'Origin: http://b.example',
+        ]),
+        {
+          authority: 'rebind.example:8080',
+          origin: 'http://a.example, http://b.example',
+          reason: 'host-refused',
+          status: 403,
+        },
+      ],
+      [
+        requestOf('GET http://rebind.example/ HTTP/1.1', [`Host: ${own}`]),
+        { authority: 'rebind.example', origin: undefined, reason: 'host-refused', status: 403 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', ['Host: ']),
+        { authority: '', origin: undefined, reason: 'host-refused', status: 403 },
+      ],
+      [
+        requestOf('GET / HTTP/1.0', [
+          'Host',
+          'Upgrade',
+          'Connection',
+          'Sec-WebSocket-Key',
+          'Sec-WebSocket-Version',
+        ]),
+        { authority: undefined, origin: undefined, reason: 'host-refused', status: 403 },
+      ],
+      [
+        requestOf('PUT / HTTP/1.1', [
+          `Host: ${own}`,
+          'Upgrade',
+          'Connection',
+          'Sec-WebSocket-Key',
+          'Sec-WebSocket-Version',
+          'Content-Length: 0',
+        ]),
+        { authority: own, origin: undefined, reason: 'method-refused', status: 405 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', [
+          `Host: ${own}`,
+          'Upgrade',
+          'Connection',
+          'Sec-WebSocket-Key',
+          'Sec-WebSocket-Version',
+        ]),
+        { authority: own, origin: undefined, reason: 'upgrade-required', status: 426 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', [`Host: ${own}`, 'Sec-WebSocket-Version: 8']),
+        { authority: own, origin: undefined, reason: 'version-refused', status: 426 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', [`Host: ${own}`, 'Sec-WebSocket-Key']),
+        { authority: own, origin: undefined, reason: 'malformed', status: 400 },
+      ],
+      [
+        requestOf('GET / HTTP/1.1', [`Host: ${own}`, 'Origin: http://elsewhere.example']),
+        {
+          authority: own,
+          origin: 'http://elsewhere.example',
+          reason: 'origin-refused',
+          status: 403,
+        },
       ],
     ] as const) {
       const { answer, localPort } = await answerFromOf(port, request);
@@ -2233,6 +2403,9 @@ test.describe('WSTransportServer, the refusals it tells', () => {
     for (const request of [
       requestOf('GET / HTTP/1.1', ['Host: bead.test', 'Host: elsewhere.test']),
       requestOf('GET / HTTP/1.1', ['X-Other: café']),
+      requestOf('GET / HTTP/1.1', ['Host: localhost:']),
+      requestOf('GET / HTTP/1.1', ['Host: a.test', 'Host: b.test']),
+      'GET / HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n',
     ]) {
       expect((await answerFromOf(port, request)).answer, request).toEqual([400, null]);
     }
@@ -2386,6 +2559,7 @@ test.describe('WSTransportServer, the refusals it tells', () => {
       'Origin: http://a.example\u007F',
       'Origin: http://café.example',
       'X-Other: café',
+      'X-Other: caf\u00c3\u00a9',
     ];
 
     for (const field of fields) {
@@ -2421,6 +2595,7 @@ test.describe('WSTransportServer, the refusals it tells', () => {
         status: 403,
       },
     ]);
+    expect(server.clients).toEqual([]);
   });
 
   test('refuses as it would though a refusal listener throws, the throw reported with no connection', async () => {
@@ -2505,6 +2680,7 @@ test.describe('WSTransportServer, the address it listens on', () => {
 
         clients.push(client);
         await client.connect({ host: name, port });
+        expect(client.isOpen()).toBe(true);
       }
 
       expect(

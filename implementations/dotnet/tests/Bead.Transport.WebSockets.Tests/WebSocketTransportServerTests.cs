@@ -629,29 +629,53 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Tells_each_refusal_it_judges_of_its_own_its_status_its_reason_the_request_s_authority_and_origin_and_the_client_s_address_and_port_and_nothing_of_HTTP_s_own_at_its_address()
     {
-        await Start(new WebSocketTransportServerOptions());
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test", "127.0.0.1"] });
 
         var own = $"127.0.0.1:{_port}";
         var upgrade = $"Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\n";
+        var expected = new List<TransportServerRefusal>();
 
-        // a host not taken, its Origin in two field lines joined by ", "; an absolute-form target's
-        // authority over its Host; an empty Host; HTTP/1.0 naming none; a method, an upgrade, a
-        // version, a form and an origin refused
-        var refused = new[]
+        foreach (var (request, authority, origin, reason, status) in new (string, string?, string?, string, int)[]
         {
-            await RefusalOf($"GET / HTTP/1.1\r\nHost: rebind.example:8080\r\nOrigin: http://a.example\r\nOrigin: http://b.example\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
-            await RefusalOf($"GET http://rebind.example/ HTTP/1.1\r\nHost: {own}\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
-            await RefusalOf($"GET / HTTP/1.1\r\nHost: \r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
-            await RefusalOf("GET / HTTP/1.0\r\n\r\n"),
-            await RefusalOf($"PUT / HTTP/1.1\r\nHost: {own}\r\nContent-Length: 0\r\n\r\n"),
-            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n\r\n"),
-            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\n{upgrade}Sec-WebSocket-Version: 8\r\n\r\n"),
-            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n\r\n"),
-            await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nOrigin: http://elsewhere.example\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n"),
-        };
+            ($"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nHost: elsewhere.test:8080\r\nOrigin: http://elsewhere.test:8080\r\nOrigin: null\r\n\r\n", "elsewhere.test:8080", "http://elsewhere.test:8080, null", "host-refused", 403),
+            ($"GET http://elsewhere.test:81/ HTTP/1.1\r\nHost: bead.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n", "elsewhere.test:81", null, "host-refused", 403),
+            ($"POST / HTTP/1.1\r\nHost: bead.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n", "bead.test", null, "method-refused", 405),
+            ($"CONNECT bead.test:80 HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nHost: bead.test:80\r\n\r\n", "bead.test:80", null, "method-refused", 405),
+            ("GET / HTTP/1.1\r\nHost: bead.test\r\n\r\n", "bead.test", null, "upgrade-required", 426),
+            ($"GET / HTTP/1.1\r\nHost: bead.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 8\r\n\r\n", "bead.test", null, "version-refused", 426),
+            ("GET / HTTP/1.1\r\nHost: bead.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGVzdA==\r\n\r\n", "bead.test", null, "malformed", 400),
+            ($"GET / HTTP/1.1\r\nHost: bead.test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nOrigin: https://elsewhere.test\r\n\r\n", "bead.test", "https://elsewhere.test", "origin-refused", 403),
+            ($"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nHost: rebind.example:8080\r\nOrigin: http://a.example\r\nOrigin: http://b.example\r\n\r\n", "rebind.example:8080", "http://a.example, http://b.example", "host-refused", 403),
+            ($"GET http://rebind.example/ HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nHost: {own}\r\n\r\n", "rebind.example", null, "host-refused", 403),
+            ($"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nHost: \r\n\r\n", "", null, "host-refused", 403),
+            ("GET / HTTP/1.0\r\n\r\n", null, null, "host-refused", 403),
+            ($"PUT / HTTP/1.1\r\nHost: {own}\r\nContent-Length: 0\r\n\r\n", $"{own}", null, "method-refused", 405),
+            ($"GET / HTTP/1.1\r\nHost: {own}\r\n\r\n", $"{own}", null, "upgrade-required", 426),
+            ($"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nHost: {own}\r\nSec-WebSocket-Version: 8\r\n\r\n", $"{own}", null, "version-refused", 426),
+            ($"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nHost: {own}\r\n\r\n", $"{own}", null, "malformed", 400),
+            ($"GET / HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\nHost: {own}\r\nOrigin: http://elsewhere.example\r\n\r\n", $"{own}", "http://elsewhere.example", "origin-refused", 403),
+        })
+        {
+            var refused = await RefusalOf(request);
 
-        // what HTTP refuses of its own, unmarked: an authority that is no host, two Host lines
-        Assert.Equal((400, null), ((await RefusalOf($"GET / HTTP/1.1\r\nHost: localhost:\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n")).Status, (await RefusalOf("GET / HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n")).Reason));
+            Assert.Equal((status, reason), (refused.Status, refused.Reason));
+            expected.Add(new TransportServerRefusal("127.0.0.1", authority, origin, refused.Port, reason, status));
+        }
+
+        // the HTTP parser's own refusals have no transport mark or event
+        foreach (var request in new[]
+        {
+            $"GET / HTTP/1.1\r\nHost: bead.test\r\nHost: elsewhere.test\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n",
+            $"GET / HTTP/1.1\r\nHost: bead.test\r\nX-Other: caf\u00e9\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n",
+            $"GET / HTTP/1.1\r\nHost: localhost:\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n",
+            "GET / HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n\r\n",
+            $"GET / HTTP/1.1\r\nHost: a.test\r\nHost: b.test\r\n{upgrade}Sec-WebSocket-Version: 13\r\n\r\n",
+        })
+        {
+            var refused = await RefusalOf(request);
+
+            Assert.Equal((400, (string?)null), (refused.Status, refused.Reason));
+        }
 
         // and, its stop under way, an upgrade it would take: 503, busy
         var (client, _) = await Connect();
@@ -673,31 +697,19 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         Assert.Equal((503, WebSocketRefusals.Busy), (busy!.Value.Status, busy.Value.Reason));
         await Until(() =>
         {
-            return _refusals.Count == refused.Length + 1;
+            return _refusals.Count == expected.Count + 1;
         });
 
-        Assert.Equal(
-            [
-                new("127.0.0.1", "rebind.example:8080", "http://a.example, http://b.example", refused[0].Port, WebSocketRefusals.Host, 403),
-                new("127.0.0.1", "rebind.example", null, refused[1].Port, WebSocketRefusals.Host, 403),
-                new("127.0.0.1", "", null, refused[2].Port, WebSocketRefusals.Host, 403),
-                new("127.0.0.1", null, null, refused[3].Port, WebSocketRefusals.Host, 403),
-                new("127.0.0.1", own, null, refused[4].Port, WebSocketRefusals.Method, 405),
-                new("127.0.0.1", own, null, refused[5].Port, WebSocketRefusals.Upgrade, 426),
-                new("127.0.0.1", own, null, refused[6].Port, WebSocketRefusals.Version, 426),
-                new("127.0.0.1", own, null, refused[7].Port, WebSocketRefusals.Malformed, 400),
-                new("127.0.0.1", own, "http://elsewhere.example", refused[8].Port, WebSocketRefusals.Origin, 403),
-                new TransportServerRefusal("127.0.0.1", own, null, busy.Value.Port, WebSocketRefusals.Busy, 503),
-            ],
-            _refusals);
+        expected.Add(new TransportServerRefusal("127.0.0.1", own, null, busy.Value.Port, WebSocketRefusals.Busy, 503));
+        Assert.Equal(expected, _refusals);
     }
 
     [Fact]
     public async Task Answers_400_unmarked_with_none_of_the_path_s_fields_a_field_holding_a_control_character_other_than_HTAB_or_an_octet_past_ASCII_and_tells_nothing()
     {
-        await Start(new WebSocketTransportServerOptions());
+        await Start(new WebSocketTransportServerOptions { Hosts = ["bead.test"] });
 
-        var own = $"127.0.0.1:{_port}";
+        var own = "bead.test";
         var answers = new List<(string Field, (int, string?, string) Answer)>();
 
         // each an upgrade but for one field: the octets as given, each character one octet, or, for
@@ -723,18 +735,19 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             Assert.Equal((answer.Field, (400, (string?)null, "")), answer);
         });
 
+        Assert.Empty(_refusals);
+        Assert.Empty(_server.Clients);
+
         // a tab is taken: the origin is refused as it is, and told
-        var (tabbed, tabbedReason, _) = await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nOrigin: http://a.example\tb\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n");
+        var (tabbed, tabbedReason, tabbedPort) = await RefusalOf($"GET / HTTP/1.1\r\nHost: {own}\r\nOrigin: http://a.example\tb\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {Key}\r\nSec-WebSocket-Version: 13\r\n\r\n");
 
         Assert.Equal((403, WebSocketRefusals.Origin), (tabbed, tabbedReason));
         await Until(() =>
         {
             return !_refusals.IsEmpty;
         });
-        Assert.Equal(["http://a.example\tb"], _refusals.Select((refusal) =>
-        {
-            return refusal.Origin;
-        }));
+        Assert.Equal([new TransportServerRefusal("127.0.0.1", own, "http://a.example\tb", tabbedPort, WebSocketRefusals.Origin, 403)], _refusals);
+        Assert.Empty(_server.Clients);
     }
 
     [Fact]
@@ -785,6 +798,12 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     {
         await using var server = new WebSocketTransportServer();
         var bound = await server.Start(new WebSocketTransportStartOptions { FindOpenPort = true }, Cancelled);
+        var connections = Channel.CreateUnbounded<string>();
+
+        server.Connection += (handle) =>
+        {
+            connections.Writer.TryWrite(handle);
+        };
         var hasIPv6 = Addresses.HasIPv6Loopback();
         string[] hosts = hasIPv6 ? ["127.0.0.1", "::1", "localhost"] : ["127.0.0.1", "localhost"];
 
@@ -798,6 +817,32 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             await client.Connect(new WebSocketConnectOptions { Host = host, Port = bound.Port }, Cancelled).WaitAsync(Patience, Cancelled);
             Assert.Equal((host, ReadyState.Open), (host, client.ReadyState));
+
+            var handle = await Next(connections);
+            var peer = Assert.Single(server.Clients, (entry) =>
+            {
+                return entry.ConnectionHandle == handle;
+            });
+
+            if (host == "localhost")
+            {
+                Assert.True(peer.Address is "127.0.0.1" or "::1");
+            }
+            else
+            {
+                Assert.Equal(host, peer.Address);
+            }
+
+            Assert.True(server.IsSecure(handle));
+        }
+
+        await server.Stop().WaitAsync(Patience, Cancelled);
+
+        if (hasIPv6)
+        {
+            using var free = HeldOnIPv6(bound.Port);
+
+            Assert.True(free.IsBound);
         }
     }
 
@@ -1120,9 +1165,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         await Upgraded(page);
         await Upgraded(("XN--BAD-BMA.test:8080", null));
 
-        var refusals = new[] { await AnswerOf(("xn--a.test", null)), await AnswerOf(("xn---bad-cpa.test", null)) };
+        var refusals = new[] { await AnswerOf(("xn--a.test", null)), await AnswerOf(("xn---bad-cpa.test", null)), await AnswerOf(("xn--a", null)) };
 
-        Assert.Equal([(403, "host-refused"), (403, "host-refused")], refusals.Select((refusal) =>
+        Assert.Equal([(403, "host-refused"), (403, "host-refused"), (403, "host-refused")], refusals.Select((refusal) =>
         {
             return (refusal.Status, refusal.Fields["bead-refusal"]);
         }));
@@ -1669,7 +1714,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             // what is left of the message goes, or fails as the socket goes: either way it is heard no more
             client.Abort();
             await Task.WhenAny(sending).WaitAsync(Patience, Cancelled);
-            Assert.Equal(connectionHandle, (await Next(_closes)).ConnectionHandle);
+            Assert.Equal((false, connectionHandle), await Next(_closes));
+            Assert.Empty(_server.Clients);
+            Assert.Empty(_server.ConnectionHandles);
             Assert.True(_messages.Reader.Count == 0);
         }
     }
@@ -1760,10 +1807,20 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         {
             Assert.Equal((thrown, connectionHandle), await Next(errors));
 
+            await client.SendAsync(Encoding.UTF8.GetBytes("still here"), WebSocketMessageType.Text, true, Cancelled);
+
+            var (text, textOn) = await Next(_messages);
+
+            Assert.True(text.IsText);
+            Assert.Null(text.Credential);
+            Assert.Equal("still here", Encoding.UTF8.GetString(text.Bytes.Span));
+            Assert.Equal(connectionHandle, textOn);
             await client.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
 
             var (message, heardOn) = await Next(_messages);
 
+            Assert.False(message.IsText);
+            Assert.Null(message.Credential);
             Assert.Equal(new byte[] { 1 }, message.Bytes.ToArray());
             Assert.Equal(connectionHandle, heardOn);
             Assert.Equal([connectionHandle], _server.ConnectionHandles);
@@ -1798,15 +1855,29 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         using (client)
         {
-            await client.SendAsync(new byte[] { 1 }, WebSocketMessageType.Binary, true, Cancelled);
-            await client.SendAsync(new byte[] { 2 }, WebSocketMessageType.Binary, true, Cancelled);
+            foreach (var (bytes, type) in new[]
+            {
+                (Encoding.UTF8.GetBytes("first"), WebSocketMessageType.Text),
+                (new byte[] { 1 }, WebSocketMessageType.Binary),
+                (Encoding.UTF8.GetBytes("second"), WebSocketMessageType.Text),
+                (new byte[] { 2 }, WebSocketMessageType.Binary),
+            })
+            {
+                await client.SendAsync(bytes, type, true, Cancelled);
 
-            Assert.Equal(new byte[] { 1 }, (await Next(_messages)).Message.Bytes.ToArray());
-            Assert.Equal(new byte[] { 2 }, (await Next(_messages)).Message.Bytes.ToArray());
+                var (message, heardOn) = await Next(_messages);
+
+                Assert.Equal(bytes, message.Bytes.ToArray());
+                Assert.Equal(type == WebSocketMessageType.Text, message.IsText);
+                Assert.Null(message.Credential);
+                Assert.Equal(connectionHandle, heardOn);
+            }
             Assert.Equal((thrown, connectionHandle), await Next(errors));
             Assert.True(errors.Reader.Count == 0);
             Assert.Equal([connectionHandle], _server.ConnectionHandles);
             Assert.True(_closes.Reader.Count == 0);
+            Assert.Single(_server.Clients);
+            Assert.Equal(WebSocketState.Open, client.State);
         }
     }
 
@@ -1853,6 +1924,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
             (status, FieldsOf(fields), body));
         Assert.Equal((false, connectionHandle), await Next(_closes));
         Assert.True(_connections.Reader.Count == 0);
+        Assert.Empty(_server.Clients);
     }
 
     [Fact]
@@ -2816,43 +2888,69 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
     [Fact(Skip = SamePort.Reason, SkipUnless = nameof(OpensTwoSocketsFromOnePort))]
     public async Task Names_each_connection_by_its_peer_s_port_and_the_rank_it_came_at_two_sockets_from_one_address_and_port_among_them_and_gives_no_handle_twice()
     {
-        await ListenEverywhere();
-
-        // two sockets from one address and port, to two addresses of the server, then a third from
-        // it once the first is closed
-        var (first, port) = await SamePort.Connect(new IPEndPoint(IPAddress.Loopback, _port), 0);
-        var firstHandle = await Next(_connections);
-        var (second, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.2"), _port), port);
-        var secondHandle = await Next(_connections);
-
-        using (first)
-        using (second)
+        foreach (var wasClean in new[] { true, false })
         {
-            Assert.Equal(
-                (port, port),
-                (_server.Clients[0].Port, _server.Clients[1].Port));
-            Assert.Equal([firstHandle, secondHandle], HandlesOf(_server.Clients));
-            Assert.Equal(2, _server.Gauges().Counts["connections"]);
+            await ListenEverywhere();
 
-            await first.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
-
-            Assert.Equal((true, firstHandle), await Next(_closes));
-
-            var (third, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.3"), _port), port);
-            var thirdHandle = await Next(_connections);
-
-            using (third)
+            // the previous iteration's remaining peer ends before the next server starts
+            while (_closes.Reader.TryRead(out _))
             {
-                var ordinal = OrdinalOf(firstHandle);
+            }
 
+            // two sockets from one address and port, to two addresses of the server, then a third from
+            // it once the first is closed
+            var (first, port) = await SamePort.Connect(new IPEndPoint(IPAddress.Loopback, _port), 0);
+            var firstHandle = await Next(_connections);
+            var (second, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.2"), _port), port);
+            var secondHandle = await Next(_connections);
+
+            using (first)
+            using (second)
+            {
                 Assert.Equal(
-                    [
-                        $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal}",
-                        $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal + 1}",
-                        $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal + 2}",
-                    ],
-                    new[] { firstHandle, secondHandle, thirdHandle });
-                Assert.Equal([secondHandle, thirdHandle], HandlesOf(_server.Clients));
+                    (port, port),
+                    (_server.Clients[0].Port, _server.Clients[1].Port));
+                Assert.Equal([firstHandle, secondHandle], HandlesOf(_server.Clients));
+                Assert.Equal(2, _server.Gauges().Counts["connections"]);
+
+                if (wasClean)
+                {
+                    await first.CloseAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled).WaitAsync(Patience, Cancelled);
+                }
+                else
+                {
+                    first.Abort();
+                }
+
+                Assert.Equal((wasClean, firstHandle), await Next(_closes));
+
+                var (third, _) = await SamePort.Connect(new IPEndPoint(IPAddress.Parse("127.0.0.3"), _port), port);
+                var thirdHandle = await Next(_connections);
+
+                using (third)
+                {
+                    var ordinal = OrdinalOf(firstHandle);
+
+                    Assert.Equal(1, ordinal);
+
+                    Assert.Equal(
+                        [
+                            $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal}",
+                            $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal + 1}",
+                            $"type=WS;ip=127.0.0.1;port={port};ordinal={ordinal + 2}",
+                        ],
+                        new[] { firstHandle, secondHandle, thirdHandle });
+                    Assert.Equal([secondHandle, thirdHandle], HandlesOf(_server.Clients));
+                    Assert.False(await _server.CloseConnection(firstHandle).WaitAsync(Patience, Cancelled));
+
+                    var answering = AnswerClose(second);
+
+                    Assert.True(await _server.CloseConnection(secondHandle).WaitAsync(Patience, Cancelled));
+                    Assert.Equal(WebSocketCloseStatus.NormalClosure, await answering.WaitAsync(Patience, Cancelled));
+                    Assert.Equal((true, secondHandle), await Next(_closes));
+                    Assert.Equal(WebSocketState.Open, third.State);
+                    Assert.Equal([thirdHandle], _server.ConnectionHandles);
+                }
             }
         }
     }
@@ -2935,8 +3033,11 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         using (client)
         {
-            Assert.Matches(@"^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$", connectionHandle);
-            Assert.Equal("127.0.0.1", Assert.Single(_server.Clients).Address);
+            Assert.Matches(@"^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=1$", connectionHandle);
+
+            var peer = Assert.Single(_server.Clients);
+
+            Assert.Equal(("127.0.0.1", connectionHandle), (peer.Address, peer.ConnectionHandle));
         }
     }
 
