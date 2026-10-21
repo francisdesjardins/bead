@@ -1786,12 +1786,24 @@ test.describe('createHTTPTransportServer, over TLS', () => {
         (await postHTTPS(port, { headers: { host: 'localhost:' } })).status,
       ]).toEqual([PROTOCOL_ERROR, 400]);
     } finally {
+      const before = performance.now();
+
       await server.stop();
+      expect(performance.now() - before).toBeLessThan(5_000);
     }
 
     // the HTTP/2 session the server held is closed as it stops
     await sessionClosed;
     expect(session.closed).toBe(true);
+    await expect(
+      new Promise((resolve, reject) => {
+        const stream = session.request({ ':method': 'POST', ':path': '/bead' });
+
+        stream.once('error', reject);
+        stream.once('response', resolve);
+        stream.end();
+      })
+    ).rejects.toThrow('The session has been destroyed');
   });
 
   test('draws a connection over HTTP/2 before its empty body ends', async () => {
@@ -1914,8 +1926,29 @@ test.describe('createHTTPTransportServer, its edges', () => {
         securedBy({ address: '127.0.0.1', secure: false }),
         securedBy({ address: '192.0.2.1', isTls: true, secure: false }),
         securedBy({ address: '127.0.0.1', secure: true }),
+        securedBy({ address: '0.0.0.0', isTls: true, secure: false }),
+        securedBy({ address: '0.0.0.0', secure: false }),
       ])
-    ).toEqual([true, false, true, false, false, true]);
+    ).toEqual([true, false, true, false, false, true, false, false]);
+
+    for (const [secure, expected] of [
+      [undefined, false],
+      [true, true],
+      [false, false],
+    ] as const) {
+      const unbound = createHTTPTransportServer({
+        createServer: (listener) => {
+          return createServer(listener);
+        },
+        ...(secure === undefined ? {} : { secure }),
+      });
+
+      try {
+        expect(unbound.isSecure('type=HTTP;ip=192.0.2.9;ordinal=1')).toBe(expected);
+      } finally {
+        await unbound.stop();
+      }
+    }
   });
 
   test('listens on the port it was asked for, reports it when the server reports none, takes a late error as its own, and closes its sessions as it stops', async () => {
@@ -2033,9 +2066,14 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect(drawOf('198.51.100.7')[0]).toBe(503);
     // what is no address is not taken, nor what a peer it does not name forwards
     expect(drawOf('evil;ordinal=1')).toEqual([201, 'type=HTTP;ip=127.0.0.1;ordinal=2']);
+    expect(drawOf('1')[0]).toBe(503);
+    expect(drawOf('192.0.2.1', { remoteAddress: '127.0.0.2', remotePort: 1 })).toEqual([
+      201,
+      'type=HTTP;ip=127.0.0.2;ordinal=3',
+    ]);
     expect(drawOf('192.0.2.1', { remoteAddress: '10.0.0.3', remotePort: 1 })).toEqual([
       201,
-      'type=HTTP;ip=10.0.0.3;ordinal=3',
+      'type=HTTP;ip=10.0.0.3;ordinal=4',
     ]);
 
     // a socket gone before its address was read cannot connect; one with no port is port 0
@@ -2140,17 +2178,28 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     // a cancel before its request, whose burial lapses on its clock: the request that comes after
     // goes on
-    fake.feed(exchangeOf(connectionToken).request, [
-      envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 }),
-    ]);
+    const firstCancel = exchangeOf(connectionToken);
+
+    fake.feed(firstCancel.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 5 })]);
+    expect(firstCancel.response.status).toBe(204);
+    expect(server.gauges().counts['buriedCallIds']).toBe(1);
+    expect(
+      clock.armed.filter(({ delay }) => {
+        return delay === BURIAL_MILLISECONDS;
+      })
+    ).toHaveLength(1);
     clock.tick(BURIAL_MILLISECONDS);
+    expect(server.gauges().counts['buriedCallIds']).toBe(0);
 
     // an even call id is no client's, and two burials are all a connection holds here
     for (const callId of [2, 7, 9, 11]) {
-      fake.feed(exchangeOf(connectionToken).request, [
-        envelopeOf(ENVELOPE_KINDS.CANCEL, { callId }),
-      ]);
+      const cancel = exchangeOf(connectionToken);
+
+      fake.feed(cancel.request, [envelopeOf(ENVELOPE_KINDS.CANCEL, { callId })]);
+      expect(cancel.response.status).toBe(204);
     }
+
+    expect(server.gauges().counts['buriedCallIds']).toBe(2);
 
     const burials = clock.armed.filter(({ delay }) => {
       return delay === BURIAL_MILLISECONDS;
@@ -2163,11 +2212,11 @@ test.describe('createHTTPTransportServer, its edges', () => {
     expect([late.response.status, burials]).toEqual([200, 3]);
 
     // a cancel still coming as its connection closes learns the connection is gone
-    const coming = exchangeOf(connectionToken);
+    const coming = exchangeOf(connectionToken, { 'content-length': '16' });
 
     coming.request.emit('data', envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 13 }));
     await server.close(connectionHandle);
-    coming.request.emit('end');
+    fake.feed(coming.request, [new Uint8Array(8)]);
 
     expect([
       late.response.isDestroyed,
@@ -2491,6 +2540,58 @@ test.describe('createHTTPTransportServer, its edges', () => {
       [404, REFUSALS.CONNECTION_UNKNOWN, 'close'],
     ]);
     await server.stop();
+
+    await using started = await startTransport();
+    const drawn = await connect(started.url, started.server);
+    const comingOnWire = await rawSocketOn(portOf(started.url));
+    const afterOnWire = await rawSocketOn(portOf(started.url));
+
+    try {
+      comingOnWire.socket.write(postHeadOf(drawn.connectionToken, 16));
+      comingOnWire.socket.write(envelopeOf(ENVELOPE_KINDS.CANCEL, { callId: 3 }));
+      await expect
+        .poll(() => {
+          return started.server.gauges().counts['bodyBytes'];
+        })
+        .toBe(8);
+      await started.server.close(drawn.connectionHandle);
+      comingOnWire.socket.write(new Uint8Array(8));
+      await expect
+        .poll(() => {
+          return comingOnWire.read.text.includes('\r\n\r\n');
+        })
+        .toBe(true);
+
+      afterOnWire.socket.write(postHeadOf(drawn.connectionToken, 8));
+      afterOnWire.socket.write(envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }));
+      await expect
+        .poll(() => {
+          return afterOnWire.read.isClosed;
+        })
+        .toBe(true);
+
+      for (const [wire, connection] of [
+        [comingOnWire, false],
+        [afterOnWire, true],
+      ] as const) {
+        const head = wire.read.text.split('\r\n\r\n')[0] ?? '';
+
+        expect(head).toMatch(/^HTTP\/1\.1 404/u);
+        expect(head).toContain(`${REFUSAL_HEADER}: ${REFUSALS.CONNECTION_UNKNOWN}`);
+        expect(/\r\nconnection: close\r?$/imu.test(head)).toBe(connection);
+      }
+
+      comingOnWire.socket.write(`GET /else HTTP/1.1\r\nHost: ${host}\r\n\r\n`);
+      await expect
+        .poll(() => {
+          return comingOnWire.read.text.match(/HTTP\/1\.1 404/gu)?.length;
+        })
+        .toBe(2);
+      expect(comingOnWire.read.isClosed).toBe(false);
+    } finally {
+      comingOnWire.socket.destroy();
+      afterOnWire.socket.destroy();
+    }
   });
 });
 
@@ -2584,6 +2685,8 @@ test.describe('createHTTPTransportServer, listening', () => {
     const second = listenOf(connectionToken, { wait: '20000' });
 
     expect([first.response.status, second.response.status]).toEqual([204, undefined]);
+    expect([...(first.response.body ?? [])]).toEqual([]);
+    expect(server.gauges().counts['listens']).toBe(1);
 
     // what the second brings back goes nowhere: it is lost, and brought back to the next
     const envelope = envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 1 });
@@ -2603,8 +2706,16 @@ test.describe('createHTTPTransportServer, listening', () => {
     const dropped = listenOf(connectionToken, { after: '1', wait: '20000' });
 
     dropped.response.close();
+    expect(server.gauges().counts['listens']).toBe(0);
     await server.send({ data: envelope }, connectionHandle);
 
+    const next = listenOf(connectionToken, { after: '1', wait: '0' });
+
+    expect([
+      next.response.status,
+      next.response.headers?.[SEQUENCE_HEADER],
+      [...(next.response.body ?? [])],
+    ]).toEqual([200, '2', batchOf(envelope)]);
     expect(dropped.response.status).toBeUndefined();
     expect(namesOf(events, 'close')).toEqual([]);
     await server.stop();
@@ -3063,6 +3174,16 @@ test.describe('createHTTPTransportServer, listening', () => {
       404,
       REFUSALS.CONNECTION_UNKNOWN,
     ]);
+    const deaf = connectScripted();
+
+    await server.close(deaf.connectionHandle);
+
+    const afterDeaf = listenOf(deaf.connectionToken, { wait: '20000' });
+
+    expect([afterDeaf.response.status, afterDeaf.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
     await server.stop();
   });
 });
@@ -3286,7 +3407,7 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
 
   test('tells no refusal of the 404 that ends an exchange or a listen as its connection closes, by a DELETE, a timeout, an outbox past its bound, a close and a stop', async () => {
     const clock = createTestClock();
-    const { connectScripted, exchangeOf, fake, listenOf, server } = await startScripted({
+    const { connectScripted, events, exchangeOf, fake, listenOf, server } = await startScripted({
       clock,
       exchangeTimeout: 1_000,
       maximumOutboxBytes: 20,
@@ -3309,19 +3430,22 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     // its client's DELETE
     const deleted = holding();
 
-    fake.exchange({
+    const deleting = fake.exchange({
       headers: { [CONNECTION_TOKEN_HEADER]: deleted.connectionToken },
       method: 'DELETE',
     });
+
+    expect(deleting.response.status).toBe(204);
     deleted.read();
 
     // a request unanswered past its timeout
     const timed = holding();
 
-    fake.feed(exchangeOf(timed.connectionToken).request, [
-      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
-    ]);
+    const asking = exchangeOf(timed.connectionToken);
+
+    fake.feed(asking.request, [envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 })]);
     clock.tick(1_000);
+    expect(asking.response.isDestroyed).toBe(true);
     timed.read();
 
     // an outbox past its bound, by one envelope larger than it
@@ -3330,6 +3454,24 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
 
     await server.send({ data: notification }, overflowing.connectionHandle);
     overflowing.read();
+
+    // three small envelopes pass the same bound while a request's body is still coming
+    const accumulated = connectScripted({ isListening: true });
+    const partial = exchangeOf(accumulated.connectionToken, { 'content-length': '16' });
+
+    partial.request.emit(
+      'data',
+      envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 3, extra: 8 }).subarray(0, 12)
+    );
+
+    for (let sent = 0; sent < 3; sent += 1) {
+      await server.send(
+        { data: envelopeOf(EnvelopeKind.NOTIFICATION, { callId: 5, extra: 2 }) },
+        accumulated.connectionHandle
+      );
+    }
+
+    ends.push([partial.response.status, partial.response.headers?.[REFUSAL_HEADER]]);
 
     // its application's close
     const closed = holding();
@@ -3349,15 +3491,31 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
     // a stop
     const stopped = holding();
 
+    expect(refusals).toEqual([]);
+
+    const refused = fake.exchange({
+      headers: { [CONNECTION_TOKEN_HEADER]: deleted.connectionToken },
+      method: 'DELETE',
+    });
+
+    expect([refused.response.status, refused.response.headers?.[REFUSAL_HEADER]]).toEqual([
+      404,
+      REFUSALS.CONNECTION_UNKNOWN,
+    ]);
     await server.stop();
     stopped.read();
 
     expect(ends).toEqual(
-      Array.from({ length: 6 }, () => {
+      Array.from({ length: 7 }, () => {
         return [404, REFUSALS.CONNECTION_UNKNOWN];
       })
     );
-    expect(refusals).toEqual([]);
+    expect(
+      refusals.map(({ reason }) => {
+        return reason;
+      })
+    ).toEqual([REFUSALS.CONNECTION_UNKNOWN]);
+    expect(namesOf(events, 'close')).toHaveLength(7);
   });
 
   test('refuses as it would though a refusal listener throws, the throw reported with no connection', async () => {
