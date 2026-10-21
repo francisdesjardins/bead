@@ -1383,6 +1383,10 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'a heartbeat',
     ways: { client: ofWSClient('heartbeat'), server: ofWSServer('heartbeat') },
   },
+  'webSocketTransport.closeTimeout': {
+    phrase: 'a close timeout',
+    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
+  },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
     ways: { http: connectOfHTTP, webSocket: connectOfWebSocket, worker: connectOfWorker },
@@ -1390,10 +1394,6 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'transportClient.reconnectionDelay': {
     phrase: 'a delay',
     ways: { function: reconnectionOf('function'), number: reconnectionOf('number') },
-  },
-  'webSocketTransport.closeTimeout': {
-    phrase: 'a close timeout',
-    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
   },
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',

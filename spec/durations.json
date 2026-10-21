@@ -3009,6 +3009,133 @@
       ]
     },
     {
+      "id": "webSocketTransport.closeTimeout",
+      "name": "a WebSocket's close timeout, its client's or its server's",
+      "clauses": [
+        "1.4"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "ways": [
+        {
+          "id": "client",
+          "name": "the transport client's options, as it is built"
+        },
+        {
+          "id": "server",
+          "name": "the transport server's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "taken"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
       "id": "transportClient.connectTimeout",
       "name": "a connect's timeout, on every transport",
       "clauses": [
@@ -3258,133 +3385,6 @@
           "input": "never",
           "outcome": "refused",
           "reason": "never refused"
-        },
-        {
-          "input": "-2 ms",
-          "outcome": "refused",
-          "reason": "under the floor"
-        },
-        {
-          "input": "-1 ms",
-          "outcome": "refused",
-          "reason": "under the floor",
-          "differs": [
-            {
-              "row": "A duration of -1 ms",
-              "language": "C#"
-            }
-          ]
-        },
-        {
-          "input": "NaN",
-          "outcome": "refused",
-          "reason": "not a number"
-        },
-        {
-          "input": "\"1000\"",
-          "outcome": "refused",
-          "reason": "not a number"
-        },
-        {
-          "input": "true",
-          "outcome": "refused",
-          "reason": "not a number"
-        }
-      ]
-    },
-    {
-      "id": "webSocketTransport.closeTimeout",
-      "name": "a WebSocket's close timeout, its client's or its server's",
-      "clauses": [
-        "1.4"
-      ],
-      "kind": "timeout",
-      "never": "taken",
-      "ways": [
-        {
-          "id": "client",
-          "name": "the transport client's options, as it is built"
-        },
-        {
-          "id": "server",
-          "name": "the transport server's options, as it is built"
-        }
-      ],
-      "observed": "refusal",
-      "outcomes": [
-        {
-          "input": "0",
-          "outcome": "refused",
-          "reason": "0 refused"
-        },
-        {
-          "input": "0.00001 ms, under a tick",
-          "outcome": "refused",
-          "reason": "under the floor",
-          "differs": [
-            {
-              "row": "A duration finer than a tick",
-              "language": "C#"
-            }
-          ]
-        },
-        {
-          "input": "half a millisecond",
-          "outcome": "refused",
-          "reason": "under the floor"
-        },
-        {
-          "input": "a millisecond",
-          "outcome": "taken"
-        },
-        {
-          "input": "1.4 ms",
-          "outcome": "taken"
-        },
-        {
-          "input": "1.5 ms",
-          "outcome": "taken"
-        },
-        {
-          "input": "2.5 ms",
-          "outcome": "taken"
-        },
-        {
-          "input": "0.41 s, as written",
-          "outcome": "taken"
-        },
-        {
-          "input": "2.01 s, as written",
-          "outcome": "taken"
-        },
-        {
-          "input": "the ceiling",
-          "outcome": "taken"
-        },
-        {
-          "input": "0.00001 ms past the ceiling",
-          "outcome": "refused",
-          "reason": "past the ceiling",
-          "differs": [
-            {
-              "row": "A duration finer than a tick",
-              "language": "C#"
-            }
-          ]
-        },
-        {
-          "input": "0.4 ms past the ceiling",
-          "outcome": "refused",
-          "reason": "past the ceiling"
-        },
-        {
-          "input": "half a millisecond past the ceiling",
-          "outcome": "refused",
-          "reason": "past the ceiling"
-        },
-        {
-          "input": "never",
-          "outcome": "taken"
         },
         {
           "input": "-2 ms",

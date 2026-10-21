@@ -376,6 +376,17 @@ places = [
         'observed': 'refusal',
     },
     {
+        'id': 'webSocketTransport.closeTimeout',
+        'name': "a WebSocket's close timeout, its client's or its server's",
+        'kind': 'timeout',
+        'never': 'taken',
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
+        'observed': 'refusal',
+    },
+    {
         'id': 'transportClient.connectTimeout',
         'name': "a connect's timeout, on every transport",
         'kind': 'timeout',
@@ -397,17 +408,6 @@ places = [
             way('number', 'a number', differs=('C#', DELAY_AS_A_NUMBER)),
         ],
         'observed': 'held',
-    },
-    {
-        'id': 'webSocketTransport.closeTimeout',
-        'name': "a WebSocket's close timeout, its client's or its server's",
-        'kind': 'timeout',
-        'never': 'taken',
-        'ways': [
-            way('client', "the transport client's options, as it is built"),
-            way('server', "the transport server's options, as it is built"),
-        ],
-        'observed': 'refusal',
     },
     {
         'id': 'webSocketTransportServer.sendGracePeriod',
