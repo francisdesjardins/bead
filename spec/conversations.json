@@ -6995,8 +6995,9 @@
       ]
     },
     {
-      "name": "a destination dies with its connection, whoever opens it next, until it is registered anew",
+      "name": "a destination stays registered while its connection is open, dies with it, and lives again once a connection opened since registers it anew",
       "clauses": [
+        "14.1",
         "14.3.4",
         "14.4"
       ],
@@ -7009,6 +7010,9 @@
         },
         {
           "open": "device"
+        },
+        {
+          "open": "device2"
         },
         {
           "send": "A1 10 00 03  00 00 00 01  00 01 00 0C | 7B 22 6E 61 6D 65 22 3A 22 61 64 61 22 7D",
@@ -7034,6 +7038,23 @@
             "payload": "31 32"
           },
           "on": "device"
+        },
+        {
+          "send": "A1 10 00 03  00 00 00 01  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
+          "on": "device2"
+        },
+        {
+          "expect": {
+            "kind": 18,
+            "callId": 1,
+            "failure": {
+              "code": 8,
+              "scope": 1,
+              "relays": 0,
+              "detail": "that destination is registered already"
+            }
+          },
+          "on": "device2"
         },
         {
           "close": true,
@@ -7080,37 +7101,8 @@
         },
         {
           "expect": {
-            "kind": 18,
+            "kind": 17,
             "callId": 1,
-            "failure": {
-              "code": 8,
-              "scope": 1,
-              "relays": 0,
-              "detail": "that destination is registered already"
-            }
-          },
-          "on": "device"
-        },
-        {
-          "send": "A1 10 00 03  00 00 00 03  00 01 00 10 | 6E 75 6C 6C",
-          "on": "device"
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 3,
-            "payload": "74 72 75 65"
-          },
-          "on": "device"
-        },
-        {
-          "send": "A1 10 00 03  00 00 00 05  00 01 00 0F | 7B 22 64 65 73 74 69 6E 61 74 69 6F 6E 22 3A 31 32 7D",
-          "on": "device"
-        },
-        {
-          "expect": {
-            "kind": 17,
-            "callId": 5,
             "payload": "31 32"
           },
           "on": "device"

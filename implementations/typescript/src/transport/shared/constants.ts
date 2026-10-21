@@ -64,11 +64,12 @@ export const CONNECTION_UNKNOWN = 'connection-unknown';
 /**
  * What a worker transport posts besides envelopes, which go as bytes: a connect, with the port its
  * connection takes; its acceptance, on that port; and the close of either end, which a port does not
- * tell by itself.
+ * tell by itself — clean, or, from the client, lost.
  */
 export const WORKER_MESSAGES = Object.freeze({
   CLOSE: 'bead-close',
   CONNECT: 'bead-connect',
+  LOST: 'bead-lost',
   OPEN: 'bead-open',
 });
 

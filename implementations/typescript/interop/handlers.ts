@@ -196,10 +196,11 @@ const INTEROP_PROCEDURES = Object.freeze({
  * `slow` each connection cancelled are counted per connection, for `cancellations` to answer; a
  * connection's session holds the name its `login` gave, whatever its call presents, and `whoami`
  * answers the name its call's session holds, a credential's `sub`; `ticks` and `tick` hold per
- * connection and per session, its connection's or a credential's; the destination each connection
- * registered last is kept past its close, for `unregister` to take out from whichever connection
- * takes its handle next. Its relay and its credentials are its server's, as it was built. One
- * service a server: the counts are its connections'.
+ * connection and per session, its connection's or a credential's; the destinations it registered
+ * are kept by their id, each with the connection that registered it, and one whose connection
+ * closed is registered anew in its place by the next `register` that names it. Its relay and its
+ * credentials are its server's, as it was built. One service a server: the counts are its
+ * connections'.
  */
 export const offerInterop = (
   server: IServer<IServerTransportLike, string>
@@ -218,8 +219,11 @@ export const offerInterop = (
     },
   });
   const cancellations = new Map<TransportServerConnectionHandle, number>();
-  // by connection, the destination it registered last
-  const destinations = new Map<TransportServerConnectionHandle, IDestinationRegistration>();
+  // by destination, its registration and the connection that registered it, in the order registered
+  const destinations = new Map<
+    number,
+    { connectionHandle: TransportServerConnectionHandle; registration: IDestinationRegistration }
+  >();
   // by connection and session, the ticks answers held, in the order they came
   const holds = new Map<string, IHold[]>();
 
@@ -410,8 +414,10 @@ export const offerInterop = (
     return response(time);
   });
 
-  // its caller's connection, as the destination it names, with the audience it verifies: one
-  // registered already, closed or not, is the caller's to hear about, not a mistake of the server's
+  // its caller's connection, as the destination it names, with the audience it verifies, whoever
+  // calls: one registered already whose connection is open, or that is no connection's, is the
+  // caller's to hear about, not a mistake of the server's; one whose connection closed is
+  // registered anew, in its place at once
   interop.on('register', (request, response) => {
     const {
       audience,
@@ -427,31 +433,48 @@ export const offerInterop = (
     const isRegistered = router.destinations().some(({ destinationId }) => {
       return destinationId === destination;
     });
+    const replaced = destinations.get(destination)?.registration;
 
-    if (isRegistered) {
+    if (isRegistered && replaced?.isClosed !== true) {
       return response(
         null,
         InteropFailures.of('REGISTERED_ALREADY', 'that destination is registered already')
       );
     }
 
-    destinations.set(
-      connectionHandle,
-      router.registerDestination(
-        { connectionHandle },
-        { audience, destinationId: destination, timeout }
-      )
+    const registration = router.registerDestination(
+      { connectionHandle },
+      {
+        audience,
+        destinationId: destination,
+        replaces: isRegistered ? replaced : undefined,
+        timeout,
+      }
     );
+
+    // ! taken out first, so the order kept is the order registered, the last one its connection's
+    destinations.delete(destination);
+    destinations.set(destination, { connectionHandle, registration });
 
     return response(destination);
   });
 
+  // the destination its caller's connection registered last, taken out and forgotten
   interop.on('unregister', (request, response) => {
-    const registration = destinations.get(request.connectionHandle);
+    const [destination, held] =
+      [...destinations]
+        .filter(([, { connectionHandle }]) => {
+          return connectionHandle === request.connectionHandle;
+        })
+        .at(-1) ?? [];
 
-    destinations.delete(request.connectionHandle);
+    if (destination === undefined || held === undefined) {
+      return response(false);
+    }
 
-    return response(registration?.unregister() ?? false);
+    destinations.delete(destination);
+
+    return response(held.registration.unregister());
   });
 
   // ends a credential's session by its identifier on every connection that keeps it, and nothing

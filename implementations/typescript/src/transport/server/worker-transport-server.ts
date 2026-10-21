@@ -44,8 +44,9 @@ export const START_DEFAULTS = Object.freeze({
  * A client connects by posting `bead-connect` to the worker with one end of a `MessageChannel`: that
  * port is the connection, named `type=WORKER;ip=local;ordinal=n`, and the server says `bead-open` on
  * it. Envelopes go both ways as bytes, each buffer transferred; either end ends the connection by
- * posting `bead-close`, since a port does not tell its close. Any other message the worker hears is
- * the application's, and left to it.
+ * posting `bead-close`, since a port does not tell its close, and a client whose close is not clean,
+ * its worker's error among them, by posting `bead-lost`, told unclean. Any other message the worker
+ * hears is the application's, and left to it.
  *
  * `start` listens at once, before anything is awaited, so no connect a worker hears early is lost.
  * A worker terminated takes its connections with it, and a port does not say so. A worker carries no
@@ -64,13 +65,17 @@ export const createWorkerTransportServer = ({
   return createTransportServer<IWorkerPortLike, undefined>((server, connections, { tell }) => {
     let ordinal = 0;
 
-    // a connection held ends: its port closes, and what it still had queued goes unheard
-    const end = (connection: ITransportServerClientAware<IWorkerPortLike>): void => {
+    // a connection held ends, as clean as the end that closes it says: its port closes, and what it
+    // still had queued goes unheard
+    const end = (
+      connection: ITransportServerClientAware<IWorkerPortLike>,
+      isClean: boolean
+    ): void => {
       const { connectionHandle, socket: port } = connection;
 
       port.close();
       connections.delete(connectionHandle);
-      tell(CLOSE_EVENT, [true, connectionHandle]);
+      tell(CLOSE_EVENT, [isClean, connectionHandle]);
     };
 
     // a connect: the port it carries is the connection, accepted on it
@@ -103,8 +108,8 @@ export const createWorkerTransportServer = ({
           );
         }
 
-        if (data === WORKER_MESSAGES.CLOSE) {
-          end(connection);
+        if (data === WORKER_MESSAGES.CLOSE || data === WORKER_MESSAGES.LOST) {
+          end(connection, data === WORKER_MESSAGES.CLOSE);
         }
       };
 
@@ -129,7 +134,7 @@ export const createWorkerTransportServer = ({
 
       close: (connection) => {
         connection.socket.postMessage(WORKER_MESSAGES.CLOSE);
-        end(connection);
+        end(connection, true);
 
         return Promise.resolve();
       },
@@ -158,7 +163,7 @@ export const createWorkerTransportServer = ({
 
         for (const connection of connections.values()) {
           connection.socket.postMessage(WORKER_MESSAGES.CLOSE);
-          end(connection);
+          end(connection, true);
         }
 
         return Promise.resolve();

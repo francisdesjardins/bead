@@ -535,13 +535,25 @@ export type MemoryTransportClient = ITransportClient<
 // interfaces
 
 /**
+ * What a worker's `error` says, the shape of HTML's `ErrorEvent`: each member where it is given, none
+ * for a script that failed to load.
+ */
+export interface IWorkerErrorEventLike {
+  readonly colno?: number;
+  readonly filename?: string;
+  readonly lineno?: number;
+  readonly message?: string;
+}
+
+/**
  * What a page posts its connects to: a `Worker`, or any port to one. Its `error`, when it has one,
- * loses the connection.
+ * fails the connect under way, or closes the connection, unclean, told first on the client's
+ * `error`.
  */
 export interface IWorkerLike {
-  addEventListener?(type: 'error', listener: () => void): void;
+  addEventListener?(type: 'error', listener: (event: IWorkerErrorEventLike) => void): void;
   postMessage(message: unknown, transfer: readonly unknown[]): void;
-  removeEventListener?(type: 'error', listener: () => void): void;
+  removeEventListener?(type: 'error', listener: (event: IWorkerErrorEventLike) => void): void;
 }
 
 /** A connection's two ends: the client's own, and the one it hands the worker. */

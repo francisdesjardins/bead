@@ -41,6 +41,8 @@ type Handle = TransportServerConnectionHandle;
 
 const first: Handle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 const device: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
+// the connection the device opened next, under a handle its transport never gave
+const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=2';
 
 /** What a leg B request was asked with. */
 interface IAsked {
@@ -147,7 +149,8 @@ const createTarget = (limits: Partial<IRouterLimits> = {}) => {
 /**
  * A relay under `options` — admitting every request unless they say otherwise — which records each
  * answer it writes, with the header it answers, each request of its own router's it makes, and
- * each error it reports, as its message and whether leg A's connection came with it.
+ * each error it reports, as its message and whether leg A's connection came with it; `close` closes
+ * a connection as its router does, which holds it no longer.
  */
 const createTestRelay = (
   options: IRelayOptions = {
@@ -162,8 +165,12 @@ const createTestRelay = (
   const control = {
     settle: answering(Uint8Array.of(8)),
   };
+  const closed = new Set<Handle>();
   const relay = createRelay({
     failures: SERVER_FAILURES,
+    isOpen: (connectionHandle) => {
+      return !closed.has(connectionHandle);
+    },
     limits: LIMIT_DEFAULTS,
     options,
     report: (error, connectionHandle) => {
@@ -186,7 +193,12 @@ const createTestRelay = (
     },
   });
 
-  return { answers, control, own, relay, reports };
+  const close = (connectionHandle: Handle): void => {
+    closed.add(connectionHandle);
+    relay.closeConnection(connectionHandle);
+  };
+
+  return { answers, close, control, own, relay, reports };
 };
 
 /** The failures of the answers written, as their codes, relays crossed and details. */
@@ -953,8 +965,8 @@ test.describe('createRelay', () => {
     }
 
     expect(relay.destinations()).toEqual([
-      { destinationId: 7, label: 'north' },
-      { destinationId: drawn.destinationId, label: undefined },
+      { destinationId: 7, isClosed: false, label: 'north' },
+      { destinationId: drawn.destinationId, isClosed: false, label: undefined },
     ]);
 
     // taken out, then registered again: the first registration's own no longer takes it out
@@ -964,8 +976,8 @@ test.describe('createRelay', () => {
 
     expect(seven.unregister()).toBe(false);
     expect(relay.destinations()).toEqual([
-      { destinationId: drawn.destinationId, label: undefined },
-      { destinationId: 7, label: undefined },
+      { destinationId: drawn.destinationId, isClosed: false, label: undefined },
+      { destinationId: 7, isClosed: false, label: undefined },
     ]);
     expect(again.unregister()).toBe(true);
   });
@@ -1055,8 +1067,8 @@ test.describe('createRelay', () => {
     expect(own).toHaveLength(1);
   });
 
-  test('leaves a connection of its own unreachable once it closed, whoever takes its handle next, until registered anew', async () => {
-    const { answers, own, relay } = createTestRelay();
+  test('leaves a connection of its own unreachable once it closed, until registered anew on another connection', async () => {
+    const { answers, close, own, relay } = createTestRelay();
     const { asked, target } = createTarget();
     const closed = relay.register({ connectionHandle: device }, { destinationId: 7 });
 
@@ -1066,7 +1078,7 @@ test.describe('createRelay', () => {
     // admitted as its payload came, then its connection closed: nothing is handed over
     const admitted = relay.handlerOf(7);
 
-    relay.closeConnection(device);
+    close(device);
 
     const unreachable = {
       ...SERVER_FAILURES.destinationUnreachable,
@@ -1088,20 +1100,138 @@ test.describe('createRelay', () => {
     ]);
     expect(own).toMatchObject([{ options: { connectionHandle: first } }]);
     expect(asked).toHaveLength(1);
-    // it stays registered, and listed, until the application takes it out: its id is not free
-    expect(relay.destinations()).toContainEqual({ destinationId: 7, label: undefined });
+    // it stays registered, and listed closed, until the application takes it out: its id is not
+    // free
+    expect(relay.destinations()).toContainEqual({
+      destinationId: 7,
+      isClosed: true,
+      label: undefined,
+    });
     expect(() => {
-      return relay.register({ connectionHandle: device }, { destinationId: 7 });
+      return relay.register({ connectionHandle: second }, { destinationId: 7 });
     }).toThrow(ProgrammerError);
     expect(closed.unregister()).toBe(true);
 
-    relay.register({ connectionHandle: device }, { destinationId: 7 });
+    // registered anew, on another connection, it is asked
+    relay.register({ connectionHandle: second }, { destinationId: 7 });
     await relay.handlerOf(7)?.(propsOf(headerOf(9)));
 
     expect(own).toMatchObject([
       { options: { connectionHandle: first } },
-      { options: { connectionHandle: device } },
+      { options: { connectionHandle: second } },
     ]);
+  });
+
+  test('lists whether each destination’s connection closed, as its registration says it now', () => {
+    const { close, relay } = createTestRelay();
+    const onDevice = relay.register({ connectionHandle: device }, { destinationId: 3 });
+    const onFirst = relay.register({ connectionHandle: first }, { destinationId: 5 });
+    const behind = relay.register(createTarget().target, { destinationId: 7, label: 'behind' });
+
+    expect([onDevice.isClosed, onFirst.isClosed, behind.isClosed]).toEqual([false, false, false]);
+
+    close(device);
+
+    expect(relay.destinations()).toEqual([
+      { destinationId: 3, isClosed: true, label: undefined },
+      { destinationId: 5, isClosed: false, label: undefined },
+      { destinationId: 7, isClosed: false, label: 'behind' },
+    ]);
+    expect([onDevice.isClosed, onFirst.isClosed, behind.isClosed]).toEqual([true, false, false]);
+  });
+
+  test('takes the place of the registration it replaces at once, which takes nothing out after, and refuses one that does not hold its destination', async () => {
+    const { answers, close, own, relay } = createTestRelay();
+    const replaced = relay.register({ connectionHandle: device }, { destinationId: 7, label: 'a' });
+
+    close(device);
+
+    // bound to the one replaced, a call finishes with it; the next goes to the one in its place,
+    // and none in between finds the destination unknown
+    const bound = relay.handlerOf(7);
+    const replacing = relay.register(
+      { connectionHandle: second },
+      { label: 'b', replaces: replaced }
+    );
+
+    await bound?.(propsOf(headerOf(1)));
+    await relay.handlerOf(7)?.(propsOf(headerOf(3)));
+
+    expect(replacing.destinationId).toBe(7);
+    expect(failuresOf(answers)).toEqual([
+      [
+        ProtocolCode.DESTINATION_UNREACHABLE,
+        undefined,
+        'destination 7 is unreachable: its connection closed',
+      ],
+      [8],
+    ]);
+    expect(own).toMatchObject([{ options: { connectionHandle: second } }]);
+    expect(relay.destinations()).toEqual([{ destinationId: 7, isClosed: false, label: 'b' }]);
+    expect(replaced.unregister()).toBe(false);
+
+    // one open is replaced as well: whether to is the application's
+    const again = relay.register({ connectionHandle: first }, { replaces: replacing });
+
+    // a registration replaced already, or named beside another destination, holds nothing to replace
+    for (const options of [
+      { replaces: replaced },
+      { replaces: replacing },
+      { destinationId: 9, replaces: again },
+    ]) {
+      expect(() => {
+        return relay.register({ connectionHandle: first }, options);
+      }).toThrow(ProgrammerError);
+    }
+
+    // nor one taken out
+    expect(again.unregister()).toBe(true);
+    expect(() => {
+      return relay.register({ connectionHandle: first }, { replaces: again });
+    }).toThrow(ProgrammerError);
+    expect(relay.destinations()).toEqual([]);
+  });
+
+  test('registers a connection its router no longer holds closed, and forwards nothing to it', async () => {
+    const { answers, close, own, relay } = createTestRelay();
+
+    close(device);
+
+    const registration = relay.register({ connectionHandle: device }, { destinationId: 7 });
+    const unreachable = {
+      ...SERVER_FAILURES.destinationUnreachable,
+      detail: 'destination 7 is unreachable: its connection closed',
+    };
+
+    expect(registration.isClosed).toBe(true);
+    expect(relay.destinations()).toEqual([{ destinationId: 7, isClosed: true, label: undefined }]);
+    expect(relay.handlerOf(7)?.admit?.({ connectionHandle: first, header: headerOf(1) })).toEqual(
+      unreachable
+    );
+
+    await relay.handlerOf(7)?.(propsOf(headerOf(3)));
+
+    expect(failuresOf(answers)).toEqual([[unreachable.code, undefined, unreachable.detail]]);
+    expect(own).toEqual([]);
+    expect(relay.gauges().counts).toEqual({ closedDestinations: 1, destinations: 1 });
+  });
+
+  test('refuses an id taken while the close of its connection is not heard yet, and closes with it a registration that replaced it then', () => {
+    const { close, relay } = createTestRelay();
+    const taken = relay.register({ connectionHandle: device }, { destinationId: 7 });
+
+    // its connection gone, its router not told yet: the destination is open, and taken
+    expect(() => {
+      return relay.register({ connectionHandle: second }, { destinationId: 7 });
+    }).toThrow(ProgrammerError);
+    expect(taken.isClosed).toBe(false);
+
+    const replacing = relay.register({ connectionHandle: device }, { replaces: taken });
+
+    close(device);
+
+    expect([taken.isClosed, replacing.isClosed]).toEqual([false, true]);
+    expect(relay.destinations()).toEqual([{ destinationId: 7, isClosed: true, label: undefined }]);
   });
 
   test('takes the audience each destination verifies, gives the set of them, and refuses one not of well-formed Unicode', () => {
