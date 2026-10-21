@@ -13,11 +13,11 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Twenty-six places take such a duration, from a call's timeout to a WebSocket's close timeout.
+Twenty-five places take such a duration, from a call's timeout to a WebSocket's close timeout.
 Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
-destination's, every transport's connect, a WebSocket's client and its server. Few inputs tell two
-readings of 1.4 apart — a half up from a half to the even, a value as given from as rounded at the
-ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
+destination's, every transport's connect, a client and its server over HTTP and over WebSocket. Few
+inputs tell two readings of 1.4 apart — a half up from a half to the even, a value as given from as
+rounded at the ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
 
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
@@ -87,11 +87,20 @@ and the key stays. A place carries besides:
 - `clauses`, the units of the spec it checks, each for what it observes of it, and nothing else:
   1.4, which holds and refuses its durations; its `neverClause`; and its default's clause.
 
+**Two owners share a place, as its ways, when the spec names one option for both and every column
+the file holds agrees**: its kind, its never and that clause, its default and its clause, what is
+observed of it, and so its outcomes. The place's owner is then what both are, and its ways `client`
+and `server`: `httpTransport.inactivityTimeout` (15.12), `webSocketTransport.heartbeat` and
+`webSocketTransport.closeTimeout` (15.3). A place's ways share what the file observes, not
+everything the duration bounds: an HTTP client's inactivity ends its listens and a server's a
+connection drawn, and each way's harness reads its own side's timer. Where one column differs, each
+owner keeps a place of its own.
+
 `server.connectionInactivityTimeout` is the server layer's option, which 13.7 leaves without end
 when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transports.json`'s
 `defaults` holds and both sides check, and the place's `state` says so.
-`httpTransportClient.inactivityTimeout` is the HTTP client's inactivity timeout, which 15.12 names
-for both sides: 5 minutes by default, and without end if given so. `httpTransportClient.pause`'s at
+`httpTransport.inactivityTimeout` is an HTTP connection's inactivity timeout, which 15.12 names for
+both sides: 5 minutes by default, and without end if given so, its client's and its server's alike. `httpTransportClient.pause`'s at
 once is 15.10's "listen again at once", stated with a schedule no file checks: the file leaves it
 out, as it leaves out the defaults no clause states. `webSocketTransport.closeTimeout` is a
 WebSocket's close timeout by two ways, its client's and its server's, as

@@ -12,9 +12,10 @@ using Bead.Transport.WebSockets;
 namespace Bead.Transport.Http.Tests;
 
 /// <summary>
-/// The places of the transports: an HTTP server's three bounds, read from the timers it arms on
-/// its clock as a client of the tests' own drives it; an HTTP client's three durations, against a
-/// handler of the tests' own; a WebSocket's heartbeat and its close timeout, its client's and its
+/// The places of the transports: an HTTP server's exchange timeout, its longest wait and its way of
+/// an HTTP connection's inactivity timeout, read from the timers it arms on its clock as a client of
+/// the tests' own drives it; an HTTP client's way of that inactivity timeout, its wait and its pause,
+/// against a handler of the tests' own; a WebSocket's heartbeat and its close timeout, its client's and its
 /// server's, taken or refused as each is built, on the real clock; and every client's connect
 /// timeout and reconnection delay.
 /// </summary>
@@ -29,7 +30,7 @@ public sealed partial class DurationsTests
 
     private static readonly string Token = new('T', 22);
 
-    // httpTransportServer.exchangeTimeout, httpTransportServer.inactivityTimeout, httpTransportServer.maximumWait
+    // httpTransportServer.exchangeTimeout, httpTransport.inactivityTimeout by its server, httpTransportServer.maximumWait
 
     // the transport server's options, as it is built: the due of the timer it arms for an exchange
     // handed on, waiting its answer; never, none armed; refused, no server built
@@ -48,8 +49,9 @@ public sealed partial class DurationsTests
         });
     }
 
-    // the due of the timer it arms for a connection drawn with no exchange under way
-    private static Task<Observed> ServerIdleByOptions(TimeSpan? given)
+    // the transport server's options, as it is built: the due of the timer it arms for a
+    // connection drawn with no exchange under way
+    private static Task<Observed> InactivityTimeoutByServer(TimeSpan? given)
     {
         return HttpServerOf(given is { } timeout ? new HttpTransportServerOptions { InactivityTimeout = timeout } : new HttpTransportServerOptions(), async (drive) =>
         {
@@ -140,11 +142,11 @@ public sealed partial class DurationsTests
         return bytes;
     }
 
-    // httpTransportClient.inactivityTimeout, httpTransportClient.wait, httpTransportClient.pause
+    // httpTransport.inactivityTimeout by its client, httpTransportClient.wait, httpTransportClient.pause
 
     // the transport client's options, as it is built: the due of the timer it arms at a listen's
     // first loss, as it listens again at once; never, none armed; refused, no client built
-    private static Task<Observed> ClientInactivityByOptions(TimeSpan? given)
+    private static Task<Observed> InactivityTimeoutByClient(TimeSpan? given)
     {
         return HttpClientOf(given is { } timeout ? new HttpTransportClientOptions { InactivityTimeout = timeout } : new HttpTransportClientOptions(), async (drive) =>
         {
