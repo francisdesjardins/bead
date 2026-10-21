@@ -88,6 +88,9 @@ test.describe('trusted proxies', () => {
     expect(() => {
       return trustedProxiesOf(['nginx']);
     }).toThrow(ProgrammerError);
+    expect(() => {
+      assertTrustedProxies(['[::1]']);
+    }).toThrow('write ::1, not [::1]');
   });
 
   // spec 15.12
