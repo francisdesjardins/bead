@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Bead.Validations.V1;
+using Google.Protobuf;
 
 namespace Bead.Protobuf.Tests;
 
@@ -14,6 +15,13 @@ public sealed class ValidatorsTests
     // constants
 
     private static readonly JsonElement Root = Load();
+
+    private static readonly ViolationRule Empty = new()
+    {
+        Bounds = Validators.BoundsOf("{\"min_len\":\"1\"}"),
+        Message = "must be at least 1 characters",
+        RuleId = "string.min_len",
+    };
 
     // * each message of the verdicts, judged as a server judges a request: its payload read by its
     // binding's codec, then its rules
@@ -227,5 +235,132 @@ public sealed class ValidatorsTests
         Assert.Equal(["count int32.gt", "title string.min_len", "port uint32.lte"], PathsOf(set));
         Assert.Equal((object)0, set.Violations[0].Value);
         Assert.Same(Judged.None, taken);
+    }
+
+    [Fact]
+    public void Keeps_the_value_a_violation_broke_on_the_side_that_judged()
+    {
+        var judged = JudgedBy(ValidationsProcedures.JudgeNumbers, (new Numbers { AtMostTen = 11 }, new ValidateOptions()));
+        var violation = Assert.Single(judged.Violations);
+
+        Assert.Equal("int32.lte | at_most_ten | False | must be less than or equal to 10 | {\"lte\":10}", Shown(violation));
+        Assert.Equal((object)11, violation.Value);
+    }
+
+    [Fact]
+    public void Holds_every_violation_without_a_bound_and_stops_where_its_rules_say_so_under_FailFast()
+    {
+        bool Rules(object request, IViolationSink sink)
+        {
+            foreach (var index in new[] { 0, 1, 2 })
+            {
+                sink.EnterIndex("names", index);
+
+                if (sink.Add(Empty, ""))
+                {
+                    return true;
+                }
+
+                sink.Leave();
+            }
+
+            return false;
+        }
+
+        var validate = Validators.Of<object>(Rules);
+        var stopped = validate(new object(), new ValidateOptions { FailFast = true });
+
+        Assert.Equal(["names[0] string.min_len", "names[1] string.min_len", "names[2] string.min_len"], PathsOf(validate(new object(), new ValidateOptions())));
+        Assert.Equal(["names[0] string.min_len"], PathsOf(stopped));
+        Assert.Equal(0, stopped.More);
+        Assert.True(stopped.Stopped);
+
+        // a bound that holds no line of it: counted, and stopped all the same
+        var counted = validate(new object(), new ValidateOptions { FailFast = true, MaximumBytes = 0 });
+
+        Assert.Empty(counted.Violations);
+        Assert.Equal(1, counted.More);
+        Assert.True(counted.Stopped);
+    }
+
+    [Fact]
+    public void Renders_a_key_as_spec_18_4_does_whole_within_64_bytes_else_cut_on_a_character_and_marked()
+    {
+        string? PathOf(Action<IViolationSink> enter)
+        {
+            var validate = Validators.Of<object>((request, sink) =>
+            {
+                enter(sink);
+
+                return sink.Add(Empty, null);
+            });
+
+            return validate(new object(), new ValidateOptions()).Violations[0].FieldPath;
+        }
+
+        Assert.Equal("keyed[\"a\\tb\\u0001\"]", PathOf((sink) =>
+        {
+            sink.EnterKey("keyed", "a\tb\u0001");
+        }));
+        Assert.Equal("keyed[-1]", PathOf((sink) =>
+        {
+            sink.EnterKey("keyed", -1L);
+        }));
+        Assert.Equal("keyed[18446744073709551615]", PathOf((sink) =>
+        {
+            sink.EnterKey("keyed", ulong.MaxValue);
+        }));
+        Assert.Equal("keyed[true]", PathOf((sink) =>
+        {
+            sink.EnterKey("keyed", true);
+        }));
+        Assert.Equal($"keyed[\"{new string('k', 63)}\"...]", PathOf((sink) =>
+        {
+            sink.EnterKey("keyed", new string('k', 63) + "é");
+        }));
+        Assert.Equal("keyed[\"�\"]", PathOf((sink) =>
+        {
+            sink.EnterKey("keyed", "\uD800");
+        }));
+    }
+
+    [Fact]
+    public void Counts_a_string_in_code_points_and_in_UTF_8_bytes()
+    {
+        Assert.Equal(3, Validators.CodePointLength("😀ab"));
+        Assert.Equal(6, Validators.Utf8Length("😀ab"));
+        Assert.Equal(3, Validators.Utf8Length("\uD800"));
+    }
+
+    [Fact]
+    public void Holds_items_unique_as_equals_equals_compares_them_0_and_minus_0_one_two_NaN_two_bytes_by_their_bytes()
+    {
+        Assert.False(Validators.IsUnique([0d, -0d]));
+        Assert.True(Validators.IsUnique([double.NaN, double.NaN]));
+        Assert.False(Validators.IsUnique([double.NaN, double.NaN, 1d, 1d]));
+        Assert.False(Validators.IsUnique([0f, -0f]));
+        Assert.True(Validators.IsUnique([float.NaN, float.NaN]));
+        Assert.False(Validators.IsUnique([float.NaN, float.NaN, 1f, 1f]));
+        Assert.False(Validators.IsUnique<long>([1L, 1L]));
+        Assert.False(Validators.IsUnique([ByteString.CopyFrom(1), ByteString.CopyFrom(1)]));
+        Assert.True(Validators.IsUnique([ByteString.CopyFrom(1), ByteString.CopyFrom(2)]));
+    }
+
+    [Fact]
+    public void Orders_a_map_s_entries_by_key_integers_ascending_false_before_true_strings_by_code_points()
+    {
+        IEnumerable<TKey> KeysOf<TKey>(Dictionary<TKey, int> map)
+            where TKey : notnull
+        {
+            return Validators.ByKey(map).Select((entry) =>
+            {
+                return entry.Key;
+            });
+        }
+
+        Assert.Equal([-1L, 3L, 10L], KeysOf(new Dictionary<long, int> { [10] = 0, [3] = 0, [-1] = 0 }));
+        Assert.Equal([false, true], KeysOf(new Dictionary<bool, int> { [true] = 0, [false] = 0 }));
+        Assert.Equal(["a", "zz", "", "😀"], KeysOf(new Dictionary<string, int> { [""] = 0, ["😀"] = 0, ["zz"] = 0, ["a"] = 0 }));
+        Assert.Empty(KeysOf(new Dictionary<string, int>()));
     }
 }

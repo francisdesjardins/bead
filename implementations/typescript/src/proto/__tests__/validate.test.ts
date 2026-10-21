@@ -340,5 +340,6 @@ test.describe('the readings', () => {
     expect(keys({ '10': 0, '3': 0, '-1': 0 }, 'integer')).toEqual(['-1', '3', '10']);
     expect(keys({ true: 0, false: 0 }, 'bool')).toEqual(['false', 'true']);
     expect(keys({ '': 0, '😀': 0, zz: 0, a: 0 }, 'string')).toEqual(['a', 'zz', '', '😀']);
+    expect(keys({}, 'string')).toEqual([]);
   });
 });

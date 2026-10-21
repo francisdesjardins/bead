@@ -44,11 +44,20 @@ interface IDetailEntry {
   write?: IWrite;
 }
 
+/** A verdict, of which the words of its violations are read here. */
+interface IVerdict {
+  name: string;
+  violations: IViolation[];
+}
+
 // constants
 
-const { details: DETAILS } = JSON.parse(
+const { details: DETAILS, verdicts: VERDICTS } = JSON.parse(
   readFileSync(new URL('../../../../../../spec/validations.json', import.meta.url), 'utf8')
-) as { details: IDetailEntry[] };
+) as { details: IDetailEntry[]; verdicts: IVerdict[] };
+
+// the rules whose words depend on what was judged, which their id and bounds do not give (18.8.6)
+const JUDGED_WORDS: ReadonlySet<string> = new Set(['message.oneof', 'required']);
 
 const FROM: IViolation = Object.freeze({
   bounds: { lte: 10 },
@@ -125,6 +134,13 @@ test.describe('violationsOf', () => {
     expect(readOf('{"bounds":{"lte"')).toEqual({ violations: [] });
     expect(readOf('the request is invalid')).toEqual({ violations: [] });
     expect(readOf('{"error":"invalid"}\n{"more":0}')).toEqual({ violations: [] });
+    expect(readOf('[1,2,3]')).toEqual({ violations: [] });
+    // a line of 18.3's members but its ruleId, which every violation has, or with one of another type
+    expect(readOf('{"fieldPath":"from"}\n{"more":0}')).toEqual({ violations: [] });
+    expect(readOf('{"bounds":[10],"ruleId":"int32.lte"}\n{"more":0}')).toEqual({ violations: [] });
+    expect(readOf('{"message":10,"ruleId":"int32.lte"}\n{"more":0}')).toEqual({ violations: [] });
+    expect(readOf('{"forKey":false,"ruleId":"required"}\n{"more":0}')).toEqual({ violations: [] });
+    expect(readOf('{"stopped":false}')).toEqual({ violations: [] });
     expect(readOf('﻿{"ruleId":"required"}')).toEqual({ violations: [] });
     // a failure of another code carries none, whatever its detail
     expect(
@@ -136,11 +152,43 @@ test.describe('violationsOf', () => {
     ).toEqual({ violations: [] });
     expect(
       violationsOf({
+        code: ProtocolCode.PAYLOAD_UNDECODABLE,
+        detail: '{"ruleId":"required"}\n{"more":0}',
+        scope: FailureScope.PROTOCOL,
+      })
+    ).toEqual({ violations: [] });
+    expect(
+      violationsOf({
         code: ProtocolCode.PAYLOAD_INVALID,
         detail: '{"ruleId":"required"}\n{"more":0}',
         scope: FailureScope.APPLICATION,
       })
     ).toEqual({ violations: [] });
+  });
+
+  test('reads forKey on the violation of a map key, its other members beside it', () => {
+    const key: IViolation = {
+      bounds: { min_len: '2' },
+      fieldPath: 'labels["a"]',
+      forKey: true,
+      message: 'must be at least 2 characters',
+      ruleId: 'string.min_len',
+    };
+
+    expect(
+      readOf(
+        violationsDetailOf({ more: 0, stopped: false, violations: [key] }, { maximumBytes: 1_024 })
+      )
+    ).toEqual({
+      more: 0,
+      violations: [key],
+    });
+    // * without its words, it takes those its rule and bounds give, a key's as a value's
+    expect(
+      readOf(
+        '{"bounds":{"min_len":"2"},"fieldPath":"labels[\\"a\\"]","forKey":true,"ruleId":"string.min_len"}'
+      )
+    ).toEqual({ violations: [key] });
   });
 });
 
@@ -177,6 +225,70 @@ test.describe('wordsOf', () => {
     expect(wordsOf({ ruleId: 'required' })).toBeUndefined();
     expect(wordsOf({ bounds: { fields: ['x', 'y'] }, ruleId: 'message.oneof' })).toBeUndefined();
     expect(wordsOf({ bounds: {}, ruleId: 'int32.lte' })).toBeUndefined();
+  });
+
+  test('gives every violation of the verdicts the words of its rule and its bounds, and none where they depend on what was judged', () => {
+    const violations = VERDICTS.flatMap(({ violations: judged }) => {
+      return judged;
+    });
+
+    expect(violations.length).toBeGreaterThan(0);
+
+    for (const { bounds, message, ruleId } of violations) {
+      expect(wordsOf({ bounds, ruleId }), ruleId).toBe(
+        JUDGED_WORDS.has(ruleId) ? undefined : message
+      );
+    }
+  });
+
+  test('gives no words where the bounds lack what its rule needs, or its rule is none it renders', () => {
+    const none: Pick<IViolation, 'bounds' | 'ruleId'>[] = [
+      // a member its words need, missing
+      { bounds: {}, ruleId: 'string.const' },
+      { bounds: {}, ruleId: 'string.min_len' },
+      { bounds: {}, ruleId: 'string.prefix' },
+      { bounds: {}, ruleId: 'string.in' },
+      { bounds: {}, ruleId: 'bytes.const' },
+      { bounds: {}, ruleId: 'bytes.max_len' },
+      { bounds: {}, ruleId: 'bool.const' },
+      { bounds: {}, ruleId: 'enum.in' },
+      { bounds: {}, ruleId: 'int32.const' },
+      { bounds: {}, ruleId: 'int32.gt' },
+      { bounds: {}, ruleId: 'int32.not_in' },
+      { bounds: {}, ruleId: 'repeated.min_items' },
+      { bounds: {}, ruleId: 'map.max_pairs' },
+      { bounds: { gte: 0 }, ruleId: 'int32.gte_lte' },
+      { bounds: { lt: 5 }, ruleId: 'double.gt_lt_exclusive' },
+      // a member its words cannot write: a list's item, bytes that are no base64, a null
+      { bounds: { in: [1, {}] }, ruleId: 'int32.in' },
+      { bounds: { not_in: [null] }, ruleId: 'string.not_in' },
+      { bounds: { prefix: '!!!' }, ruleId: 'bytes.prefix' },
+      { bounds: { const: '!!!' }, ruleId: 'bytes.const' },
+      { bounds: { lte: null }, ruleId: 'uint64.lte' },
+      { bounds: { const: { value: 1 } }, ruleId: 'string.const' },
+      // a rule it renders none of: an unknown member, an unknown kind, a rule of no kind
+      { bounds: { email: true }, ruleId: 'string.email' },
+      { bounds: { ip: true }, ruleId: 'bytes.ip' },
+      { bounds: { items: { min_len: '1' } }, ruleId: 'repeated.items' },
+      { bounds: { keys: { min_len: '1' } }, ruleId: 'map.keys' },
+      { bounds: { finite: true }, ruleId: 'int32.finite' },
+      { bounds: { lt: 1, gt: 2 }, ruleId: 'int32.lt_gt' },
+      { bounds: { gt: '1s' }, ruleId: 'duration.gt' },
+      { bounds: { lt_now: true }, ruleId: 'timestamp.lt_now' },
+      { bounds: { fields: ['x'] }, ruleId: 'oneof' },
+      { bounds: {}, ruleId: 'bool.in' },
+      { bounds: {}, ruleId: 'enum.lt' },
+    ];
+
+    for (const violation of none) {
+      expect(wordsOf(violation), violation.ruleId).toBeUndefined();
+    }
+
+    // * a bound of a scalar is written as `%s` writes it, a flag among them
+    expect(wordsOf({ bounds: { lte: true }, ruleId: 'int32.lte' })).toBe(
+      'must be less than or equal to true'
+    );
+    expect(wordsOf({ bounds: { const: false }, ruleId: 'bool.const' })).toBe('must equal false');
   });
 });
 
