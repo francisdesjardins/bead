@@ -657,6 +657,8 @@ test.describe('createHTTPTransportClient', () => {
   });
 
   test('lets go of a connection drawn as its connect gave up, and closes even when the server cannot hear its DELETE', async () => {
+    expect(DISCONNECT_TIMEOUT).toBe(5_000);
+
     const drawn = createFakeFetch();
     const client = createHTTPTransportClient({ isListening: false, fetch: drawn.fetch });
     const connecting = client.connect({ host, port: 80 });
@@ -824,9 +826,10 @@ test.describe('createHTTPTransportClient', () => {
     const slow = createFakeFetch();
     const late = createHTTPTransportClient({ isListening: false, fetch: slow.fetch });
 
-    await expect(late.connect({ host, port: 80, timeout: 20 })).rejects.toBeInstanceOf(
-      TimeoutError
-    );
+    const lateConnecting = late.connect({ host, port: 80, timeout: 20 });
+
+    await expect(lateConnecting).rejects.toBeInstanceOf(TimeoutError);
+    await expect(lateConnecting).rejects.toThrow(new TimeoutError(20));
     expect(slow.calls[0]?.init.signal?.aborted).toBe(true);
     expect(CONNECT_DEFAULTS.pathname).toBe('/bead');
   });
@@ -863,9 +866,14 @@ test.describe('createHTTPTransportClient', () => {
 
   test('reconnects to a connection drawn anew', async () => {
     await using started = await startServer();
-    const { port, server } = started;
+    const { closes, port, server } = started;
     const client = createHTTPTransportClient({ isListening: false });
 
+    const clientCloses: unknown[] = [];
+
+    client.on('close', (...args) => {
+      clientCloses.push(args);
+    });
     await client.connect({ host, port });
 
     const first = handleOf(server);
@@ -874,6 +882,15 @@ test.describe('createHTTPTransportClient', () => {
 
     expect(client.isOpen()).toBe(true);
     expect(handleOf(server)).not.toBe(first);
+    const opened = handleOf(server);
+
+    await expect
+      .poll(() => {
+        return closes;
+      })
+      .toEqual([[true, first]]);
+    expect(server.gauges().connectionHandles).toEqual(new Set([opened]));
+    expect(clientCloses).toEqual([]);
     await client.disconnect();
   });
 
@@ -882,10 +899,11 @@ test.describe('createHTTPTransportClient', () => {
     const { port, server } = started;
     const client = createHTTPTransportClient({ isListening: false });
     const reported: Error[] = [];
+    const thrown = new Error('a reconnect listener that throws');
     let told = 0;
 
     client.on('reconnect', () => {
-      throw new Error('a reconnect listener that throws');
+      throw thrown;
     });
     client.on('reconnect', () => {
       told += 1;
@@ -902,6 +920,8 @@ test.describe('createHTTPTransportClient', () => {
     expect(client.isOpen()).toBe(true);
     expect(handleOf(server)).not.toBe(first);
     expect(told).toBe(1);
+    expect(reported).toEqual([thrown]);
+    expect(reported[0]).toBe(thrown);
     expect(
       reported.map((error) => {
         return error.message;
@@ -1206,14 +1226,21 @@ test.describe('createHTTPTransportClient, listening', () => {
         return marks.length;
       })
       .toBe(1);
-    (await callBy('GET'))?.answer(batch(1, envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 })));
+    (await callBy('GET'))?.answer(
+      batch(
+        1,
+        envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 3 }),
+        envelopeOf(ENVELOPE_KINDS.FAILURE, { callId: 3 }),
+        envelopeOf(0x13, { callId: 1 })
+      )
+    );
     await expect
       .poll(() => {
         return marks.length;
       })
-      .toBe(2);
+      .toBe(4);
 
-    expect(marks).toEqual([undefined, true]);
+    expect(marks).toEqual([undefined, true, true, true]);
     await client.disconnect({ isQuick: true });
   });
 
@@ -1648,16 +1675,25 @@ test.describe('createHTTPTransportClient, listening', () => {
   });
 
   test('pauses between listens that bring nothing, and listens no more once its connection went', async () => {
-    const { callOf, client, fake } = await connectListening({ pause: 60, wait: 0 });
+    const clock = createTestClock();
+    const { callOf, client, fake, heard } = await connectListening({ clock, pause: 60, wait: 0 });
 
     expect((await callOf(1))?.init.headers).toMatchObject({ [WAIT_HEADER]: '0' });
     (await callOf(1))?.answer({ status: 204 });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 20);
-    });
+    await expect
+      .poll(() => {
+        return clock.armed.some(({ delay }) => {
+          return delay === 60;
+        });
+      })
+      .toBe(true);
+    await clock.tickAsync(20);
+    expect(fake.calls).toHaveLength(2);
+    await clock.tickAsync(39);
 
     // not yet
     expect(fake.calls).toHaveLength(2);
+    await clock.tickAsync(1);
     await callOf(2);
 
     // gone while it listens: what its listen brings back is heard by nobody, and it listens no more
@@ -1677,6 +1713,7 @@ test.describe('createHTTPTransportClient, listening', () => {
         return init.method;
       })
     ).toEqual(['POST', 'GET', 'GET', 'POST', 'DELETE']);
+    expect(heard).toEqual([]);
   });
 
   test('hears the rest of a batch when a listener throws, the throw reported', async () => {
@@ -1710,6 +1747,8 @@ test.describe('createHTTPTransportClient, listening', () => {
       .toBe(2);
 
     // the listener after it told of both, the throw reported once, as it was thrown
+    expect((await callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '2' });
+    expect(heard).toHaveLength(2);
     expect(told).toHaveLength(2);
     expect(reported).toHaveLength(1);
     expect(reported[0]).toBe(thrown);
@@ -2078,6 +2117,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
 
       await client.connect({ host, port: redirecting.port });
 
+      const connectionHandle = handleOf(started.server);
       const closed = nextEvent(client, 'close');
 
       await expect(
@@ -2089,6 +2129,11 @@ test.describe('createHTTPTransportClient, redirects', () => {
           return redirecting.forwarded;
         })
         .toEqual(['POST', 'DELETE']);
+      await expect
+        .poll(() => {
+          return started.closes;
+        })
+        .toEqual([[true, connectionHandle]]);
     }
 
     // a listen: listened again, its connection kept
