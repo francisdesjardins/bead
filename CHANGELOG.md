@@ -119,6 +119,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript WebSocket client over `ws` offers no `permessage-deflate`, as the C# client does,
+  so a third-party server cannot negotiate compression on one side alone.
 - The demo's relay forwards a listen's `bead-after` and `bead-wait`, which the HTTP server needs:
   the page over `?transport=http` connects again, where every listen was refused 400 `malformed`.
 - The TypeScript servers report a server not yet started as insecure unless its application says

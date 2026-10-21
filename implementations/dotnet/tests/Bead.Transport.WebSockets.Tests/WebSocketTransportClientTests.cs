@@ -692,6 +692,22 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Offers_no_extension_in_its_upgrade_permessage_deflate_among_them()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        Assert.DoesNotContain("\r\nSec-WebSocket-Extensions:", Encoding.ASCII.GetString(head), StringComparison.OrdinalIgnoreCase);
+        await Listener.Refuse(peer, 503);
+        await Assert.ThrowsAsync<WebSocketException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+    }
+
+    [Fact]
     public async Task Asks_for_wss_when_secured()
     {
         await Assert.ThrowsAsync<WebSocketException>(() =>

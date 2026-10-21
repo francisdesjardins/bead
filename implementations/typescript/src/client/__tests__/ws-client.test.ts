@@ -144,7 +144,7 @@ test('createWSClient takes a message of an envelope at most, more when the trans
       function (
         _url: string,
         _protocols: unknown,
-        options?: { closeTimeout?: number; maxPayload?: number }
+        options?: { closeTimeout?: number; maxPayload?: number; perMessageDeflate?: false }
       ) {
         given.push(options);
 
@@ -158,7 +158,9 @@ test('createWSClient takes a message of an envelope at most, more when the trans
     sockets.at(-1)?.fireOpen();
     await connecting;
 
-    expect(given).toEqual([{ closeTimeout: CLOSE_TIMEOUT, maxPayload: expected }]);
+    expect(given).toEqual([
+      { closeTimeout: CLOSE_TIMEOUT, maxPayload: expected, perMessageDeflate: false },
+    ]);
     await client[Symbol.asyncDispose]();
   }
 
