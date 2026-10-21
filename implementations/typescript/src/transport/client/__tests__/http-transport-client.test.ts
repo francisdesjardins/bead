@@ -74,6 +74,11 @@ const startServer = async () => {
   });
   const { port } = await server.start({ address: host, findOpenPort: true });
   const closes: [boolean, TransportServerConnectionHandle][] = [];
+  const connections: TransportServerConnectionHandle[] = [];
+
+  server.on('connection', (...[, , connectionHandle]) => {
+    connections.push(connectionHandle);
+  });
 
   server.on('close', (wasClean, connectionHandle) => {
     closes.push([wasClean, connectionHandle]);
@@ -81,6 +86,7 @@ const startServer = async () => {
 
   return {
     closes,
+    connections,
     port,
     server,
     [Symbol.asyncDispose]: () => {
@@ -1255,9 +1261,14 @@ test.describe('createHTTPTransportClient, listening', () => {
     }
 
     // a 200 of another type — a proxy's page — is lost too, its body unread
+    let reads = 0;
+
     fake.calls.at(-1)?.answer({
       body: new TextEncoder().encode('<html>'),
       headers: { 'content-type': 'text/html' },
+      onRead: () => {
+        reads += 1;
+      },
       status: 200,
     });
     await waitOut(30_000);
@@ -1290,13 +1301,27 @@ test.describe('createHTTPTransportClient, listening', () => {
         return true;
       })
     );
+    expect(
+      delays.slice(1, -1).some((delay, index) => {
+        const wait = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000][index] ?? 0;
+
+        return delay > wait / 2 + 1 && delay < wait;
+      })
+    ).toBe(true);
+    expect(reads).toBe(0);
     expect([client.isOpen(), fake.calls.length]).toEqual([true, 13]);
 
     // what was cut on its way comes whole at last, and is heard once
-    (await callOf(12))?.answer(batch(1, envelope));
+    (await callOf(12))?.answer({
+      ...batch(1, envelope),
+      onRead: () => {
+        reads += 1;
+      },
+    });
 
     expect((await callOf(13))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect(heard).toEqual([[...envelope]]);
+    expect(reads).toBeGreaterThan(0);
     expect(RETRY_DELAYS).toEqual({ ceiling: 30_000, first: 1_000 });
     await client.disconnect({ isQuick: true });
   });
@@ -1964,9 +1989,15 @@ test.describe('createHTTPTransportClient, redirects', () => {
         upstream: started.port,
       });
       const client = createHTTPTransportClient({ isListening: false });
+      const heard: unknown[] = [];
+
+      client.on('message', ({ data }) => {
+        heard.push(data);
+      });
 
       await client.connect({ host, port: redirecting.port });
 
+      const connectionHandle = started.connections[0];
       const closed = nextEvent(client, 'close');
 
       await expect(
@@ -1980,6 +2011,12 @@ test.describe('createHTTPTransportClient, redirects', () => {
           return redirecting.forwarded;
         })
         .toEqual(['POST', 'DELETE']);
+      await expect
+        .poll(() => {
+          return started.closes;
+        })
+        .toEqual([[true, connectionHandle]]);
+      expect([client.isClosed(), started.server.clients, heard]).toEqual([true, [], []]);
     }
 
     expect(target.heard).toEqual([]);
@@ -2093,6 +2130,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
   });
 
   test('catches a redirect followed all the same: its connect fails, and a send or a listen loses its connection', async () => {
+    const exchanges: string[] = [];
     // a 302 turns a POST into a GET, a 307 keeps it a POST
     for (const [status, method] of [
       [302, 'GET'],
@@ -2113,6 +2151,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
           new ConnectError('the server drew no connection: a redirect followed')
         );
         expect([client.isClosed(), target.heard]).toEqual([true, [method]]);
+        exchanges.push(...target.heard);
       }
 
       // a send: the target's answer unheard, and the connection released at the origin
@@ -2134,6 +2173,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
         });
         await client.connect({ host, port: redirecting.port });
 
+        const connectionHandle = started.connections[0];
         const closed = nextEvent(client, 'close');
 
         await expect(
@@ -2146,6 +2186,13 @@ test.describe('createHTTPTransportClient, redirects', () => {
           })
           .toEqual(['POST', 'DELETE']);
         expect([heard, target.heard]).toEqual([[], [method]]);
+        await expect
+          .poll(() => {
+            return started.closes;
+          })
+          .toEqual([[true, connectionHandle]]);
+        expect([client.isClosed(), started.server.clients]).toEqual([true, []]);
+        exchanges.push(...target.heard);
       }
 
       // a listen, a GET either way: the target's batch unheard, and the connection released at
@@ -2171,6 +2218,7 @@ test.describe('createHTTPTransportClient, redirects', () => {
 
         await client.connect({ host, port: redirecting.port });
 
+        const connectionHandle = started.connections[0];
         expect(await closed).toEqual([false, false]);
         await expect
           .poll(() => {
@@ -2178,8 +2226,21 @@ test.describe('createHTTPTransportClient, redirects', () => {
           })
           .toEqual(['POST', 'DELETE']);
         expect([heard, target.heard]).toEqual([[], ['GET']]);
+        await expect
+          .poll(() => {
+            return started.closes;
+          })
+          .toEqual([[true, connectionHandle]]);
+        expect([client.isClosed(), started.server.clients]).toEqual([true, []]);
+        exchanges.push(...target.heard);
       }
     }
+    expect(exchanges).toEqual(['GET', 'GET', 'GET', 'POST', 'POST', 'GET']);
+    expect(
+      exchanges.filter((method) => {
+        return method === 'DELETE';
+      })
+    ).toHaveLength(0);
   });
 
   test('judges a redirect before its mark, and a status of 0, a page’s opaque redirect, as one: its connect fails, a send is lost and a listen listened again', async () => {

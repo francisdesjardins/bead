@@ -546,6 +546,48 @@ test.describe('createHTTPTransportServer', () => {
     expect(heavy).toEqual([503, REFUSALS.BUSY]);
   });
 
+  test('"closeAll" closes every connection cleanly, and gives nothing without one', async () => {
+    await using started = await startTransport();
+    const { events, server, url } = started;
+
+    await expect(server.closeAll()).resolves.toEqual([]);
+
+    const waitingConnection = await connect(url, server);
+    const response = await post(url, { headers: { [LISTEN_HEADER]: '?1' } });
+    const listeningToken = response.headers.get(CONNECTION_TOKEN_HEADER) ?? '';
+    const listeningHandle = server.clients.at(-1)!.connectionHandle;
+    const waiting = await post(url, {
+      body: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }),
+      connectionToken: waitingConnection.connectionToken,
+    });
+    const listen = fetch(url, {
+      headers: {
+        [CONNECTION_TOKEN_HEADER]: listeningToken,
+        [AFTER_HEADER]: '0',
+        [WAIT_HEADER]: '20000',
+      },
+    });
+
+    await expect
+      .poll(() => {
+        return server.gauges().counts['listens'];
+      })
+      .toBe(1);
+    await expect(server.closeAll()).resolves.toEqual([true, true]);
+    expect(server.clients).toEqual([]);
+    expect(server.gauges().connectionHandles).toEqual(new Set());
+    expect(namesOf(events, 'close')).toHaveLength(2);
+    expect(namesOf(events, 'close')).toEqual(
+      expect.arrayContaining([
+        ['close', true, waitingConnection.connectionHandle],
+        ['close', true, listeningHandle],
+      ])
+    );
+    await expect(waiting.arrayBuffer()).rejects.toThrow();
+    expect(await refusalOf(listen)).toEqual([404, REFUSALS.CONNECTION_UNKNOWN]);
+    expect(server.isOpen()).toBe(true);
+  });
+
   test('closes a connection on its DELETE; a request handed on learns it by its exchange cut', async () => {
     await using started = await startTransport();
     const { events, server, url } = started;

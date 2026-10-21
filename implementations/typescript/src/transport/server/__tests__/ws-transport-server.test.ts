@@ -543,6 +543,31 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
     });
 
     test.describe('WSTransportServer #stop', () => {
+      test('"await using" stops it, closing with 1001 and refusing what comes after', async () => {
+        const [socket] = await connectClient(client);
+        const clientClosed = nextClientEvent(client, 'close');
+        const code = new Promise<number>((resolve) => {
+          socket.on('close', (status) => {
+            resolve(status);
+          });
+        });
+
+        {
+          await using disposing = server;
+
+          expect(disposing.isOpen()).toBe(true);
+        }
+
+        expect(await code).toBe(1001);
+        expect(await clientClosed).toEqual([false, false]);
+        expect(server.isClosed()).toBe(true);
+        expect(server.clients).toEqual([]);
+
+        const late = createWSTransportClient({ WebSocket: Tracked });
+
+        await expect(late.connect({ host, port })).rejects.toBeInstanceOf(ConnectError);
+      });
+
       test('closes every connection, each emitting its close, before it resolves, and stops listening', async () => {
         const second = createWSTransportClient({ WebSocket: Tracked });
         const closeEvents: [boolean, string][] = [];

@@ -568,6 +568,40 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         // bound to the loopback, it never leaves the machine; nothing bound, nothing is
         Assert.Equal((false, true), (_server.CarriesCredential("any"), _server.IsSecure("any")));
         Assert.Equal((false, false), (unstarted.CarriesCredential("any"), unstarted.IsSecure("any")));
+
+        var external = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .Where((network) =>
+            {
+                return network.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up;
+            })
+            .SelectMany((network) =>
+            {
+                return network.GetIPProperties().UnicastAddresses;
+            })
+            .FirstOrDefault((address) =>
+            {
+                return address.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address.Address);
+            })?.Address.ToString() ?? "0.0.0.0";
+        var bindings = new List<(string Address, bool? Secure, bool Expected)>
+        {
+            ("127.0.0.1", null, true), ("localhost", null, true), ("0.0.0.0", null, false),
+            (external, null, false), (external, true, true),
+        };
+
+        if (Addresses.HasIPv6Loopback())
+        {
+            bindings.Add(("::1", null, true));
+        }
+
+        foreach (var (address, secure, expected) in bindings)
+        {
+            await using var bound = new WebSocketTransportServer(new WebSocketTransportServerOptions { Secure = secure });
+
+            Assert.Equal((false, secure ?? false), (bound.CarriesCredential("any"), bound.IsSecure("any")));
+            await bound.Start(new WebSocketTransportStartOptions { Address = address, FindOpenPort = true }, Cancelled).WaitAsync(Patience, Cancelled);
+            Assert.Equal((false, expected), (bound.CarriesCredential("any"), bound.IsSecure("any")));
+            Assert.Equal(ReadyState.Open, bound.ReadyState);
+        }
     }
 
     [Fact]
@@ -2336,6 +2370,16 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         using var client = new ClientWebSocket();
         var connected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = new WebSocketTransportServer();
+        var calls = new List<string>();
+
+        server.Built += (_) =>
+        {
+            calls.Add("start");
+        };
+        server.Stopped += () =>
+        {
+            calls.Add("stop");
+        };
         Task<WebSocketCloseStatus?> answering;
         int port;
 
@@ -2353,6 +2397,7 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
         Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, await answering.WaitAsync(Patience, Cancelled));
         Assert.Equal(ReadyState.Closed, server.ReadyState);
+        Assert.Equal(["start", "stop"], calls);
         await AssertRefused(port);
     }
 
