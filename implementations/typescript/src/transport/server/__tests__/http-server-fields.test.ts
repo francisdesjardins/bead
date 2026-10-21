@@ -114,6 +114,7 @@ test.describe('createHTTPTransportServer', () => {
     for (const hosts of [undefined, ['bead.test']]) {
       await using started = await startTransport({ hosts });
       const port = Number(new URL(started.url).port);
+      const refusals = refusalsOf(started.server);
 
       expect(
         await Promise.all(
@@ -133,6 +134,7 @@ test.describe('createHTTPTransportServer', () => {
         })
       );
       expect(namesOf(started.events, 'connection')).toEqual([]);
+      expect(refusals).toEqual([]);
     }
   });
 });
@@ -480,12 +482,14 @@ test.describe('createHTTPTransportServer, CORS', () => {
     // method the server does not take, which its browser refuses against the answer
     const asked = [
       'bead-listen,content-type,traceparent',
+      'bead-listen,content-type,traceparent,sentry-trace,baggage',
       'bead-after,bead-connection-token,bead-wait',
       undefined,
     ];
     const answers = [
       await preflight(url, { fields: asked[0], method: 'POST' }),
-      await preflight(url, { fields: asked[1], method: 'GET' }),
+      await preflight(url, { fields: asked[1], method: 'POST' }),
+      await preflight(url, { fields: asked[2], method: 'GET' }),
       await preflight(url, { method: 'PUT' }),
     ];
 
@@ -518,9 +522,51 @@ test.describe('createHTTPTransportServer, CORS', () => {
       preflightScripted(['']).headers?.['access-control-allow-headers'],
     ]).toEqual(['authorization, bead-after, bead-wait, *', 'authorization, *']);
     await scripted.server.stop();
+
+    const port = Number(new URL(url).port);
+
+    for (const lines of [
+      'Access-Control-Request-Headers: bead-after\r\nAccess-Control-Request-Headers: bead-wait\r\n',
+      'Access-Control-Request-Headers:\r\n',
+    ]) {
+      const answered = await rawAnswerOf(
+        port,
+        `OPTIONS /bead HTTP/1.1\r\nHost: ${host}:${String(port)}\r\nOrigin: ${PAGE}\r\nAccess-Control-Request-Method: GET\r\n${lines}\r\n`
+      );
+      const expected = preflightAnswerOf(
+        lines.includes('bead-after') ? 'bead-after, bead-wait' : undefined
+      );
+
+      expect(answered.answer).toEqual([204, null]);
+      expect(
+        fieldsOf(
+          {
+            get: (name) => {
+              return answered.fields.get(name);
+            },
+          },
+          expected
+        )
+      ).toEqual(expected);
+    }
     // no refusal, and no connection drawn
     expect(refusals).toEqual([]);
     expect([namesOf(events, 'connection'), server.clients]).toEqual([[], []]);
+
+    const bare = await fetch(url, { headers: { origin: PAGE }, method: 'OPTIONS' });
+
+    expect([bare.status, bare.headers.get(REFUSAL_HEADER)]).toEqual([405, REFUSALS.METHOD]);
+    expect(await bytesOf(bare)).toEqual([]);
+    await expect
+      .poll(() => {
+        return refusals.length;
+      })
+      .toBe(1);
+    expect(
+      refusals.map(({ reason }) => {
+        return reason;
+      })
+    ).toEqual([REFUSALS.METHOD]);
   });
 
   // spec 15.4, 15.9, 15.12
@@ -799,61 +845,74 @@ test.describe('createHTTPTransportServer, the refusals it tells', () => {
   });
 
   test('answers 400 unmarked, with none of the path’s fields, a field holding a control character other than HTAB or an octet past ASCII, and tells nothing', async () => {
-    await using started = await startTransport({ origins: ['http://a.example'] });
-    const refusals = refusalsOf(started.server);
-    const port = Number(new URL(started.url).port);
-    const authority = `${host}:${String(port)}`;
-    // in Origin and in a field the transport never reads: an escape sequence, BEL, DEL, and an
-    // octet past ASCII, written as the one octet 0xE9; Node's parser answers the first three
-    const fields = [
-      'Origin: http://a.example\u001B[2J\r\n',
-      'X-Other: a\u0007b\r\n',
-      'Origin: http://a.example\u007F\r\n',
-      'Origin: http://café.example\r\n',
-      'X-Other: café\r\n',
-    ];
-    const answers: unknown[] = [];
+    for (const origins of [undefined, ['http://a.example']]) {
+      await using started = await startTransport({ origins });
+      const refusals = refusalsOf(started.server);
+      const port = Number(new URL(started.url).port);
+      const authority = `${host}:${String(port)}`;
+      // in Origin and in a field the transport never reads: an escape sequence, BEL, DEL, and an
+      // octet past ASCII, written as the one octet 0xE9; Node's parser answers the first three
+      const fields = [
+        'Origin: http://a.example\u001B[2J\r\n',
+        'X-Other: a\u0007b\r\n',
+        'Origin: http://a.example\u007F\r\n',
+        'Origin: http://café.example\r\n',
+        'X-Other: café\r\n',
+        `X-Other: ${Buffer.from('café', 'utf8').toString('latin1')}\r\n`,
+      ];
+      const answers: unknown[] = [];
 
-    // each from a page the server names besides, which none of them names
-    for (const field of fields) {
-      const { answer, fields: carried } = await rawAnswerOf(
+      // each from a page the server names besides, which none of them names
+      for (const field of fields) {
+        for (const origin of ['', 'Origin: http://a.example\r\n']) {
+          const { answer, fields: carried } = await rawAnswerOf(
+            port,
+            rawConnectOf(authority, `${origin}${field}`)
+          );
+
+          answers.push([
+            ...answer,
+            ...PATH_FIELDS.filter((name) => {
+              return carried.has(name);
+            }),
+          ]);
+        }
+      }
+
+      expect(answers).toEqual(
+        fields.flatMap(() => {
+          return [
+            [400, null],
+            [400, null],
+          ];
+        })
+      );
+      expect(refusals).toEqual([]);
+      expect(namesOf(started.events, 'connection')).toEqual([]);
+
+      // a tab is taken, and the origin judged as any other
+      const tabbed = await rawAnswerOf(
         port,
-        rawConnectOf(authority, `Origin: http://a.example\r\n${field}`)
+        rawConnectOf(authority, 'Origin: http://a.example\tb\r\n')
       );
 
-      answers.push([
-        ...answer,
-        ...PATH_FIELDS.filter((name) => {
-          return carried.has(name);
-        }),
+      expect(tabbed.answer).toEqual([403, REFUSALS.ORIGIN]);
+      expect(
+        PATH_FIELDS.filter((name) => {
+          return tabbed.fields.has(name);
+        })
+      ).toEqual(['cache-control', 'vary', 'x-content-type-options']);
+      expect(refusals).toEqual([
+        {
+          address: host,
+          authority,
+          origin: 'http://a.example\tb',
+          port: tabbed.localPort,
+          reason: REFUSALS.ORIGIN,
+          status: 403,
+        },
       ]);
     }
-
-    expect(answers).toEqual(
-      fields.map(() => {
-        return [400, null];
-      })
-    );
-    expect(refusals).toEqual([]);
-    expect(namesOf(started.events, 'connection')).toEqual([]);
-
-    // a tab is taken, and the origin judged as any other
-    const tabbed = await rawAnswerOf(
-      port,
-      rawConnectOf(authority, 'Origin: http://a.example\tb\r\n')
-    );
-
-    expect(tabbed.answer).toEqual([403, REFUSALS.ORIGIN]);
-    expect(refusals).toEqual([
-      {
-        address: host,
-        authority,
-        origin: 'http://a.example\tb',
-        port: tabbed.localPort,
-        reason: REFUSALS.ORIGIN,
-        status: 403,
-      },
-    ]);
   });
 });
 

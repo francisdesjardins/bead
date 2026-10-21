@@ -13,7 +13,17 @@ public sealed class HostsAndOriginsTests
     private static readonly string[] Origins = ["https://bead.example"];
 
     // hosts listed, taken by the host alone, the request's port aside, a default one among them
-    private static readonly string[] ListedHosts = ["bead.test", "Bead.Test", "BEAD.TEST:8443", "bead.test:80", "bead.test:443", "XN--BAD-BMA.test:8080"];
+    private static readonly string[] ListedHosts =
+    [
+        "bead.test",
+        "Bead.Test",
+        "BEAD.TEST:8443",
+        "bead.test:80",
+        "XN--BAD-BMA.test",
+        "elsewhere.example:1",
+        "bead.test:443",
+        "XN--BAD-BMA.test:8080",
+    ];
 
     // an origins entry no browser writes as an origin: a wildcard, a URL in place of an origin, a
     // form a browser does not serialize, no origin at all
@@ -22,23 +32,23 @@ public sealed class HostsAndOriginsTests
         "*",
         "null",
         "http://*.bead.test",
-        "http://bead.test/",
-        "http://bead.test/path",
+        "https://bead.test/",
+        "https://bead.test/path",
         "http://bead.test?query",
-        "http://user@bead.test",
-        "HTTP://bead.test",
-        "http://Bead.Test",
-        "http://bead.test:80",
+        "https://user@bead.test",
+        "HTTPS://bead.test",
+        "https://Bead.test",
         "https://bead.test:443",
+        "http://bead.test:80",
         "ws://bead.test:80",
         "wss://bead.test:443",
-        "http://bead.test:",
+        "https://bead.test:",
         "https://bead.test:0443",
         "http://bead.test:080",
-        "http://bead.test:65536",
-        "http://",
-        "http://béad.test",
-        "http://a*b.test",
+        "https://bead.test:65536",
+        "https://",
+        "https://béad.test",
+        "https://a*b.test",
         "https://[::1",
         "bead.test",
         "//bead.test",
@@ -47,6 +57,16 @@ public sealed class HostsAndOriginsTests
         " http://bead.test",
         "Null",
         "",
+        "http://bead.test/",
+        "http://bead.test/path",
+        "http://user@bead.test",
+        "HTTP://bead.test",
+        "http://Bead.Test",
+        "http://bead.test:",
+        "http://bead.test:65536",
+        "http://",
+        "http://béad.test",
+        "http://a*b.test",
     ];
 
     // the long forms of an IPv6 address, the loopback's and another, and a mapped one's, then one
@@ -54,12 +74,42 @@ public sealed class HostsAndOriginsTests
     private static readonly string[] LongIPv6Forms = ["0:0:0:0:0:0:0:1", "FE80::A", "::ffff:7f00:1", "0:0:0:0:0:ffff:127.0.0.1", "::1:"];
 
     // RFC 3986's IPv4address, four dec-octet
-    private static readonly string[] IPv4Addresses = ["0.0.0.0", "127.0.0.1", "192.0.2.1", "10.0.0.255", "255.255.255.255", "1.22.199.249"];
+    private static readonly string[] IPv4Addresses =
+    [
+        "0.0.0.0",
+        "127.0.0.1",
+        "10.0.0.10",
+        "192.0.2.1",
+        "255.255.255.255",
+        "10.0.0.255",
+        "1.22.199.249",
+    ];
 
     // what the platform's parser takes and RFC 3986's dec-octet does not: fewer parts, octal,
     // hexadecimal, a single number, a leading zero; and an octet past 255, a part too many or
     // empty, a sign, a space
-    private static readonly string[] OtherIPv4Addresses = ["127.1", "127.0.1", "0177.0.0.1", "0x7f.0.0.1", "2130706433", "127.0.0.01", "00.0.0.0", "256.0.0.1", "1.2.3.4.5", "1.2.3.", ".1.2.3", "1..2.3", "+1.2.3.4", "1.2.3.4 ", "", "localhost"];
+    private static readonly string[] OtherIPv4Addresses =
+    [
+        "127.1",
+        "0177.0.0.1",
+        "0x7f.0.0.1",
+        "2130706433",
+        "256.0.0.1",
+        "127.0.0.01",
+        "127.0.0.1.",
+        "1.2.3.4.5",
+        " 127.0.0.1",
+        "127.0.0.1:80",
+        "127.0.1",
+        "00.0.0.0",
+        "1.2.3.",
+        ".1.2.3",
+        "1..2.3",
+        "+1.2.3.4",
+        "1.2.3.4 ",
+        "",
+        "localhost",
+    ];
 
     // the hosts every server takes, each by its host on any port or none: localhost and the names
     // under .localhost in any ASCII case, an IPv6 address in brackets, an IPv4 address
@@ -128,6 +178,7 @@ public sealed class HostsAndOriginsTests
         ":8080",
         "127.0.0.1",
         "127.0.0.1:8080",
+        "127.1",
         "[::1]",
         "[::1]:8080",
         "[2001:db8::7]",
@@ -257,14 +308,17 @@ public sealed class HostsAndOriginsTests
     [Fact]
     public void Takes_a_Host_HTTP_takes_one_line_none_in_a_request_that_needs_none_its_value_uri_host_and_an_optional_port_without_the_whitespace_around_it_and_none_of_a_percent_encoded_octet_star_plus_comma_semicolon_or_equals_in_a_name_an_IPvFuture_literal_or_a_colon_with_no_port()
     {
-        Assert.All(WellFormedHosts, (host) =>
+        foreach (var required in new[] { false, true })
         {
-            Assert.True(HostsAndOrigins.IsWellFormedHost([host], true), host);
-        });
-        Assert.All(OtherHostValues, (host) =>
-        {
-            Assert.False(HostsAndOrigins.IsWellFormedHost([host], true), host);
-        });
+            Assert.All(WellFormedHosts, (host) =>
+            {
+                Assert.True(HostsAndOrigins.IsWellFormedHost([host], required), host);
+            });
+            Assert.All(OtherHostValues, (host) =>
+            {
+                Assert.False(HostsAndOrigins.IsWellFormedHost([host], required), host);
+            });
+        }
 
         // none, which an HTTP/1.1 request must send and an HTTP/1.0 one need not; two, even alike
         Assert.False(HostsAndOrigins.IsWellFormedHost([], true));
@@ -298,19 +352,21 @@ public sealed class HostsAndOriginsTests
     [Fact]
     public void Takes_the_hosts_given_besides_each_by_its_host_on_any_port_in_any_ASCII_case_and_every_host_and_none_under_a_star()
     {
+        string[] hosts = [.. Hosts, "Elsewhere.Example"];
+
         Assert.All(ListedHosts, (host) =>
         {
-            Assert.True(HostsAndOrigins.IsTakenHost(host, Hosts), host);
+            Assert.True(HostsAndOrigins.IsTakenHost(host, hosts), host);
         });
 
         // and no other: a name besides, one that holds a listed one, its Unicode form, an empty one, none
-        Assert.All(new[] { "elsewhere.test", "bead.test.", "sub.bead.test", "bead.testing", "béad.test", "xn--a.test", "", ":8080", null }, (host) =>
+        Assert.All(new string?[] { null, "", ":80", "sub.bead.test", "bead.test.", "bead.testx", "béad.test", "xn--a.test", ":8080", "elsewhere.test", "bead.testing" }, (host) =>
         {
-            Assert.False(HostsAndOrigins.IsTakenHost(host, Hosts), host);
+            Assert.False(HostsAndOrigins.IsTakenHost(host, hosts), host);
         });
 
         // every host under * alone, an empty one and none among them
-        Assert.All(new[] { "elsewhere.test", "rebind.example:8080", "xn--a", "", ":8080", null }, (host) =>
+        Assert.All(new string?[] { null, "", ":80", "sub.bead.test", "bead.test.", "bead.testx", "béad.test", "xn--a.test", ":8080", "elsewhere.test", "bead.testing", "rebind.example:8080", "xn--a" }, (host) =>
         {
             Assert.True(HostsAndOrigins.IsTakenHost(host, ["*"]), host);
         });
@@ -319,7 +375,7 @@ public sealed class HostsAndOriginsTests
     [Fact]
     public void Refuses_a_hosts_entry_with_a_port_an_empty_one_one_that_is_no_host_and_a_star_beside_another()
     {
-        Assert.All(new string[]?[] { null, [], ["*"], ["bead.test"], ["Bead.Test", "xn--bad-bma.test", "127.0.0.1", "[::1]", "localhost"] }, (hosts) =>
+        Assert.All(new string[]?[] { null, [], ["*"], ["bead.test"], ["Bead.Test", "127.0.0.1", "[::1]", "localhost", "xn--a", "bead.localhost"], ["Bead.Test", "xn--bad-bma.test", "127.0.0.1", "[::1]", "localhost"] }, (hosts) =>
         {
             HostsAndOrigins.AssertHosts(hosts, "Hosts");
         });
@@ -328,22 +384,25 @@ public sealed class HostsAndOriginsTests
         Assert.All(new (string[] Hosts, string Entry)[]
         {
             (["bead.test:8080"], "bead.test:8080"),
-            (["bead.test:"], "bead.test:"),
-            (["127.0.0.1:8080"], "127.0.0.1:8080"),
-            (["[::1]:8443"], "[::1]:8443"),
+            (["bead.test", "127.0.0.1:8080"], "127.0.0.1:8080"),
+            (["[::1]:80"], "[::1]:80"),
+            (["localhost:"], "localhost:"),
             ([""], ""),
             (["bead.test", ""], ""),
-            ([":8080"], ":8080"),
             (["béad.test"], "béad.test"),
             (["bad host"], "bad host"),
             (["a*b.test"], "a*b.test"),
+            (["[v1.bead]"], "[v1.bead]"),
             (["bead.test/"], "bead.test/"),
             (["http://bead.test"], "http://bead.test"),
-            (["[v1.bead]"], "[v1.bead]"),
-            (["*.bead.test"], "*.bead.test"),
             (["*", "bead.test"], "*"),
             (["bead.test", "*"], "*"),
             (["*", "*"], "*"),
+            (["bead.test:"], "bead.test:"),
+            (["127.0.0.1:8080"], "127.0.0.1:8080"),
+            (["[::1]:8443"], "[::1]:8443"),
+            ([":8080"], ":8080"),
+            (["*.bead.test"], "*.bead.test"),
         }, (refusal) =>
         {
             var refused = Assert.Throws<ArgumentException>(() =>
@@ -354,6 +413,11 @@ public sealed class HostsAndOriginsTests
             Assert.Equal("Hosts", refused.ParamName);
             Assert.Contains($"\"{refusal.Entry}\"", refused.Message, StringComparison.Ordinal);
         });
+
+        Assert.Contains("bead.test, not bead.test:8080", Assert.Throws<ArgumentException>(() =>
+        {
+            HostsAndOrigins.AssertHosts(["bead.test:8080"], "Hosts");
+        }).Message, StringComparison.Ordinal);
     }
 
     // spec 15.12
@@ -361,6 +425,7 @@ public sealed class HostsAndOriginsTests
     public void Refuses_an_origins_entry_that_is_a_star_or_null_or_not_an_origin_as_RFC_6454_serializes_it()
     {
         HostsAndOrigins.AssertOrigins(null, "Origins");
+        HostsAndOrigins.AssertOrigins([], "Origins");
         HostsAndOrigins.AssertOrigins(
             [
                 "http://bead.test",
@@ -381,13 +446,16 @@ public sealed class HostsAndOriginsTests
 
         Assert.All(OtherOrigins, (origin) =>
         {
-            var refused = Assert.Throws<ArgumentException>(() =>
+            foreach (var entries in new[] { new[] { origin }, new[] { "https://bead.example", origin } })
             {
-                HostsAndOrigins.AssertOrigins(["https://bead.example", origin], "Origins");
-            });
+                var refused = Assert.Throws<ArgumentException>(() =>
+                {
+                    HostsAndOrigins.AssertOrigins(entries, "Origins");
+                });
 
-            Assert.Equal("Origins", refused.ParamName);
-            Assert.Contains($"\"{origin}\"", refused.Message, StringComparison.Ordinal);
+                Assert.Equal("Origins", refused.ParamName);
+                Assert.Contains($"\"{origin}\"", refused.Message, StringComparison.Ordinal);
+            }
         });
 
         // * told that no wildcard of origins exists
@@ -416,6 +484,10 @@ public sealed class HostsAndOriginsTests
             Assert.False(HostsAndOrigins.IsIPv4Address(address), address);
         });
         Assert.True(System.Net.IPAddress.TryParse("127.1", out _));
+        Assert.Equal([.. IPv4Addresses, "127.0.0.1:80", "localhost"], IPv4Addresses.Concat(OtherIPv4Addresses).Where((host) =>
+        {
+            return HostsAndOrigins.IsTakenHost(host, []);
+        }));
     }
 
     [Fact]
@@ -562,6 +634,11 @@ public sealed class HostsAndOriginsTests
         Assert.False(HostsAndOrigins.IsListedOrigin("Null", Origins));
         Assert.False(HostsAndOrigins.IsListedOrigin(null, Origins));
         Assert.False(HostsAndOrigins.IsListedOrigin(null, ["null"]));
+        Assert.False(HostsAndOrigins.IsListedOrigin("http://bead.example", Origins));
+        Assert.False(HostsAndOrigins.IsListedOrigin("https://bead.test", Origins));
+        Assert.True(HostsAndOrigins.IsListedOrigin("https://bead.test", ["https://bead.test"]));
+        Assert.False(HostsAndOrigins.IsListedOrigin(null, []));
+        Assert.False(HostsAndOrigins.IsListedOrigin("null", []));
 
         // the server's own, taken by IsTakenOrigin, is listed only when named
         Assert.All(Own, (own) =>
@@ -581,6 +658,7 @@ public sealed class HostsAndOriginsTests
         Assert.False(HostsAndOrigins.IsTakenHost("bead.ıo", ["bead.io"]));
         Assert.False(HostsAndOrigins.IsTakenHost("bÉad.test", ["béad.test"]));
         Assert.True(HostsAndOrigins.IsTakenHost("BéAD.test", ["béad.test"]));
+        Assert.True(HostsAndOrigins.IsTakenHost("LOCALHOST", []));
         Assert.False(HostsAndOrigins.IsTakenOrigin("http://key.test", ("Key.test", [])));
         Assert.False(HostsAndOrigins.IsTakenOrigin("http://item.test", ("İtem.test", [])));
         Assert.False(HostsAndOrigins.IsTakenOrigin("http://bead.io", ("BEAD.ıO", [])));

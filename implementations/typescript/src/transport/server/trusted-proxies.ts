@@ -174,8 +174,12 @@ export const assertTrustedProxies = (entries: readonly string[] | undefined): vo
     const { address = entry, prefix } = NETWORK.exec(entry)?.groups ?? {};
 
     if (!isIPAddress(address)) {
+      // a bracketed address, as a URL writes one, is named in the bare form a proxy is written in
+      const { inner: bare } = /^\[(?<inner>.+)\]$/u.exec(address)?.groups ?? {};
+      const hint = bare !== undefined && isIPAddress(bare) ? `; write ${bare}, not ${address}` : '';
+
       throw new ProgrammerError(
-        `a trustedProxies entry is an IP address, bare, or a network, address/prefix: not ${entry}`
+        `a trustedProxies entry is an IP address, bare, or a network, address/prefix: not ${entry}${hint}`
       );
     }
 

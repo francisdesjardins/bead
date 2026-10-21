@@ -78,7 +78,7 @@ public sealed partial class HttpTransportServerTests
     public async Task Answers_a_request_without_a_Host_with_two_or_with_one_that_is_no_host_400_as_HTTP_does_unmarked()
     {
         // a connect with the Host field lines given: none, two in either order, or one that is no host
-        var hosts = new[] { "", "Host: bead.test\r\nHost: elsewhere.test\r\n", "Host: elsewhere.test\r\nHost: bead.test\r\n", "Host: bad host\r\n" };
+        var hosts = new[] { "", "Host: bead.test\r\nHost: elsewhere.test\r\n", "Host: elsewhere.test\r\nHost: bead.test\r\n", "Host: bead.test\r\nHost: bead.test\r\n", "Host: bad host\r\n" };
 
         // its head is the HTTP server's own, whether the server takes every host or names some
         foreach (var options in new[] { new HttpTransportServerOptions(), new HttpTransportServerOptions { Hosts = ["bead.test"] } })
@@ -95,6 +95,7 @@ public sealed partial class HttpTransportServerTests
 
                 Assert.Equal((host, 400, false, 0), (host, head.Status, head.Headers.ContainsKey(HttpTransport.RefusalHeader), body.Length));
             }
+            Assert.Empty(_refusals);
         }
 
         Assert.Empty(_connections);
@@ -357,16 +358,20 @@ public sealed partial class HttpTransportServerTests
         // Authorization, then what it asks as it came, its lines joined by ", ", then any other
         Assert.Equal(
             [
+                AnswerOf("authorization, bead-listen,content-type,traceparent, *"),
                 AnswerOf("authorization, bead-listen,content-type,traceparent,sentry-trace,baggage, *"),
                 AnswerOf("authorization, bead-after,bead-connection-token,bead-wait, *"),
                 AnswerOf("authorization, bead-after, bead-wait, *"),
                 AnswerOf("authorization, *"),
+                AnswerOf("authorization, *"),
             ],
             [
+                await Preflighted(("POST", "bead-listen,content-type,traceparent")),
                 await Preflighted(("POST", "bead-listen,content-type,traceparent,sentry-trace,baggage")),
                 await Preflighted(("GET", "bead-after,bead-connection-token,bead-wait")),
                 await PreflightedInLines("GET"),
                 await Preflighted(("PUT", null)),
+                await Preflighted(("GET", "")),
             ]);
         Assert.Empty(_connections);
         Assert.Empty(_refusals);
@@ -375,6 +380,7 @@ public sealed partial class HttpTransportServerTests
         using (var bare = await Fetch(With(new HttpRequestMessage(HttpMethod.Options, Url), ("origin", Page))))
         {
             Assert.Equal((405, HttpRefusals.Method), ((int)bare.StatusCode, HeaderOf(bare, HttpTransport.RefusalHeader)));
+            Assert.Empty(await BytesOf(bare));
         }
 
         await Until(() =>
@@ -551,56 +557,70 @@ public sealed partial class HttpTransportServerTests
     [Fact]
     public async Task Answers_400_unmarked_with_none_of_the_path_s_fields_a_field_holding_a_control_character_other_than_HTAB_or_an_octet_past_ASCII_and_tells_nothing()
     {
-        await Start();
-
-        var own = $"{Host}:{_port}";
-
-        // each a connect but for one field, over HTTP/1.1 by hand: the octets as given, each
-        // character one octet, or, for the UTF-8 one, its two; its status, its mark, and the fields
-        // of the path it carries
-        async Task<(int Status, string? Reason, string Stamped)> Answered(string field)
+        foreach (var options in new[] { new HttpTransportServerOptions(), new HttpTransportServerOptions { Origins = ["http://a.example"] } })
         {
-            using var wire = await Wire.Open(_port);
+            _refusals.Clear();
+            await Start(options);
 
-            await wire.Write($"POST /bead HTTP/1.1\r\nHost: {own}\r\n{field}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+            var own = $"{Host}:{_port}";
+            var peerPort = 0;
 
-            var (head, _) = await wire.Read();
+            // each a connect but for one field, over HTTP/1.1 by hand: the octets as given, each
+            // character one octet, or, for the UTF-8 one, its two; its status, its mark, and the fields
+            // of the path it carries
+            async Task<(int Status, string? Reason, string Stamped)> Answered(string field, bool namedPage = true)
+            {
+                using var wire = await Wire.Open(_port);
+                peerPort = wire.Port;
 
-            return (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), StampedOf(head.Headers));
+                var origin = namedPage ? "Origin: http://a.example\r\n" : "";
+
+                await wire.Write($"POST /bead HTTP/1.1\r\nHost: {own}\r\n{origin}{field}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+
+                var (head, _) = await wire.Read();
+
+                Assert.False(head.Headers.ContainsKey("access-control-allow-origin"));
+
+                return (head.Status, head.Headers.GetValueOrDefault(HttpTransport.RefusalHeader), StampedOf(head.Headers));
+            }
+
+            var answers = new List<(string Field, (int, string?, string) Answer)>();
+
+            foreach (var field in new[]
+            {
+                "Origin: http://a.example\u001b[2J",
+                "X-Other: a\u0007b",
+                "Origin: http://a.example\u007f",
+                "Origin: http://caf\u00e9.example",
+                "X-Other: caf\u00e9",
+                $"X-Other: {Encoding.Latin1.GetString(Encoding.UTF8.GetBytes("caf\u00e9"))}",
+            })
+            {
+                foreach (var namedPage in new[] { false, true })
+                {
+                    answers.Add((field, await Answered(field, namedPage)));
+                }
+            }
+
+            Assert.All(answers, (answer) =>
+            {
+                Assert.Equal((answer.Field, (400, (string?)null, "")), answer);
+            });
+            Assert.Empty(_refusals);
+            Assert.Empty(_connections);
+
+            // a tab is taken: the origin is refused as it is, with the path's fields, and told
+            Assert.Equal((403, HttpRefusals.Origin, "cache-control x-content-type-options vary"), await Answered("Origin: http://a.example\tb", false));
+            await Until(() =>
+            {
+                return !_refusals.IsEmpty;
+            });
+
+            Assert.Equal(["http://a.example\tb"], _refusals.Select((refusal) =>
+            {
+                return refusal.Origin;
+            }));
+            Assert.Equal([new TransportServerRefusal(Host, own, "http://a.example\tb", peerPort, HttpRefusals.Origin, 403)], _refusals);
         }
-
-        var answers = new List<(string Field, (int, string?, string) Answer)>();
-
-        foreach (var field in new[]
-        {
-            "Origin: http://a.example\u001b[2J",
-            "X-Other: a\u0007b",
-            "Origin: http://a.example\u007f",
-            "Origin: http://caf\u00e9.example",
-            "X-Other: caf\u00e9",
-            $"X-Other: {Encoding.Latin1.GetString(Encoding.UTF8.GetBytes("caf\u00e9"))}",
-        })
-        {
-            answers.Add((field, await Answered(field)));
-        }
-
-        Assert.All(answers, (answer) =>
-        {
-            Assert.Equal((answer.Field, (400, (string?)null, "")), answer);
-        });
-        Assert.Empty(_refusals);
-        Assert.Empty(_connections);
-
-        // a tab is taken: the origin is refused as it is, with the path's fields, and told
-        Assert.Equal((403, HttpRefusals.Origin, "cache-control x-content-type-options vary"), await Answered("Origin: http://a.example\tb"));
-        await Until(() =>
-        {
-            return !_refusals.IsEmpty;
-        });
-
-        Assert.Equal(["http://a.example\tb"], _refusals.Select((refusal) =>
-        {
-            return refusal.Origin;
-        }));
     }
 }
