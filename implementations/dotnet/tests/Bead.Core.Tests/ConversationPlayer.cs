@@ -571,6 +571,14 @@ internal static class ConversationPlayer
 
         public event Action<bool, string>? Close;
 
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public string HandleOf(string name)
         {
             if (!_handles.TryGetValue(name, out var handle))

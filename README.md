@@ -16,11 +16,11 @@ anything else whether it can read the rest.
 This repository holds the protocol and its implementations, side by side:
 
 - **the specification**, and the conformance files every implementation plays;
-- **a TypeScript implementation**: WebSocket, HTTP and Web Worker transports, each a client and a
-  server, the client and server routers, the service, session and notification managers, and a
-  demo;
+- **a TypeScript implementation**: WebSocket, HTTP, Web Worker and in-memory transports, each a
+  client and a server, a server's transports joined into one, the client and server routers, the
+  service, session and notification managers, and a demo;
 - **a C# implementation** at behavioural parity with it: the same envelope, the same routers, the
-  WebSocket and HTTP transports;
+  WebSocket, HTTP and in-memory transports, and the joined one;
 - **an interop service** each side offers, which the other side's client calls over both
   transports.
 
@@ -78,8 +78,9 @@ client must keep up with. A large file goes up while other calls carry on. A cal
 halfway. A call presents its own credential — a signed token, say — which outlives a dropped
 connection and crosses a relay to the server that verifies it, and the server sometimes has to ask
 the client something. Bead carries all of it in one small binary envelope, whatever carries the
-envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, and, ahead,
-a topic-based publish/subscribe broker ([Where Bead goes](#where-bead-goes)).
+envelope: WebSocket, plain HTTP where WebSocket cannot pass, a Web Worker in the page, memory
+between two routers of one process, and, ahead, a topic-based publish/subscribe broker
+([Where Bead goes](#where-bead-goes)).
 
 - **Read without decoding.** A fixed 8-byte prefix and fixed offsets say what an envelope is, which
   call it belongs to and how long it is. A router or a relay acts on it without parsing its payload,
@@ -127,10 +128,11 @@ own ([0008](docs/decisions/0008-three-version-axes-and-names-qualified-by-their-
   conformance, a relay across languages in the interop, the DevTools extension on Firefox, a counted
   call's cost measured against an uncounted one, and a constrained C side, each bound by the records
   that [the index](docs/decisions/README.md#where-bead-goes) names, with what else is ahead.
-- **An idea, with no version**: one router over several transports, then HTTP and WebSocket on
-  one port, mounted in an application's own web server, which would take the place of the
-  small local proxy that couples the two transports
-  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)).
+- **An idea, with no version**: HTTP and WebSocket on one port, mounted in an application's own
+  web server, which would take the place of the small local proxy that couples the two transports
+  ([0004](docs/decisions/0004-one-behaviour-in-every-language.md)); one server takes its
+  connections from both through a joined transport
+  ([0036](docs/decisions/0036-an-in-memory-transport-joins-two-routers-of-one-process-and-a-server-takes-several-transports-through-one.md)).
 
 ## Layout
 

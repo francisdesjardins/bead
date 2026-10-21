@@ -741,6 +741,14 @@ public sealed partial class DurationsTests
     // to close, and counts the handlers on its events
     private sealed class ServerTransport : IServerTransport
     {
+        public string? Type
+        {
+            get
+            {
+                return TransportTypes.WebSocket;
+            }
+        }
+
         public required TimeProvider Clock { get; init; }
 
         public event Action<string>? Connection;

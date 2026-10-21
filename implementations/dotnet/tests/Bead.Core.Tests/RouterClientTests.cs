@@ -183,7 +183,7 @@ public sealed partial class RouterClientTests
     [Fact]
     public async Task Offers_every_procedure_of_the_interop_service_s_API_on_the_side_its_kind_names()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
 
         var server = new InterceptedServer(link.Server);
         var client = new InterceptedClient(link.Client);
@@ -2238,6 +2238,14 @@ public sealed partial class RouterClientTests
 
         private sealed class ServerEnd : IServerTransport
         {
+            public string? Type
+            {
+                get
+                {
+                    return TransportTypes.WebSocket;
+                }
+            }
+
             public TimeProvider Clock { get; init; } = TimeProvider.System;
 
             public event Action<string>? Connection;

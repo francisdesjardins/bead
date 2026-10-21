@@ -50,7 +50,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Admits_a_command_by_its_rule()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, link.Client);
 
@@ -92,7 +92,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Refuses_a_command_admitted_by_a_hook_which_a_client_side_is_given_none_of()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var clock = new CommandProcedure<GreeterProcedures, string, string, NoFailure>(
             new Procedure { ServiceId = 8, ProcedureId = 9, ProcedureName = "clock", ServiceRevision = 1 },
             new ProcedureBindings<string, string> { Admission = AdmissionRule.Hook("loud"), Request = PayloadCodecs.Text, Result = PayloadCodecs.Text });
@@ -110,7 +110,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Makes_each_requester_and_notification_once_at_its_window()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var intercepted = new InterceptedClient(link.Client);
         var windows = new GreeterWindows { News = 4 };
         var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, intercepted, new ServiceClientOptions<GreeterProcedures> { Windows = windows });
@@ -136,7 +136,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task A_request_to_a_procedure_that_notifies_opens_no_subscription()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var greeter = GreeterOf();
         var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, link.Client);
         var opened = new List<bool>();
@@ -157,7 +157,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Refuses_a_window_for_a_procedure_that_does_not_notify()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
 
         Assert.Throws<ArgumentException>(() =>
         {
@@ -178,7 +178,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Fails_a_call_before_it_goes_with_PAYLOAD_INVALID_when_its_options_say_so_and_sends_nothing()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
         var sent = new List<string>();
 
@@ -210,7 +210,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Validates_a_subscribing_request_as_a_plain_one_when_its_options_say_so()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
         var sent = new List<string>();
 
@@ -240,7 +240,7 @@ public sealed class ServiceClientTests
     [Fact]
     public async Task Answers_PAYLOAD_INVALID_to_a_command_its_rules_refuse_before_its_resolver()
     {
-        await using var link = new ServiceLink();
+        await using var link = await ServiceLink.Open();
         var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
         var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
         var heard = new List<string>();
@@ -272,7 +272,7 @@ public sealed class ServiceClientTests
     {
         var registry = new MetricsRegistry();
 
-        await using var link = new ServiceLink(registry);
+        await using var link = await ServiceLink.Open(registry);
         var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
 
         server.On(CheckedProcedures.Echo, (request, response) =>

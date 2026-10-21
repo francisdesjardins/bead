@@ -481,6 +481,15 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
     }
 
+    /// <summary>Its type, <see cref="TransportTypes.Http"/>, which every handle it draws begins with.</summary>
+    public string Type
+    {
+        get
+        {
+            return TransportTypes.Http;
+        }
+    }
+
     /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
     public TimeProvider Clock
     {

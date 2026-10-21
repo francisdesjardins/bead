@@ -377,6 +377,15 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
         }
     }
 
+    /// <summary>Its type, <see cref="TransportTypes.WebSocket"/>, which every handle it draws begins with.</summary>
+    public string Type
+    {
+        get
+        {
+            return TransportTypes.WebSocket;
+        }
+    }
+
     /// <summary>What the stack built on it runs on: the clock its options gave, the system's when none.</summary>
     public TimeProvider Clock
     {

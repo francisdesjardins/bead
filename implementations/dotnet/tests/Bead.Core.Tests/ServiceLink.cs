@@ -1,25 +1,25 @@
 namespace Bead.Tests;
 
 /// <summary>
-/// A server and a client of Bead linked in memory, one connection between them, for the service
-/// layer's tests: a <see cref="Server{TData}"/> of string sessions, and an <see cref="IClient"/>
-/// over a client's router, its transport secure, so a call may present any credential.
+/// A server and a client of Bead linked through a pair of the in-memory transport (spec 15.13), one
+/// connection between them, for the service layer's tests: a <see cref="Server{TData}"/> of string
+/// sessions over a <see cref="MemoryTransportServer"/>, and an <see cref="IClient"/> over a client's
+/// router on a <see cref="MemoryTransportClient"/>, secure, so a call may present any credential.
 /// </summary>
 internal sealed class ServiceLink : IAsyncDisposable
 {
-    /// <summary>The one connection's handle on the server.</summary>
-    public const string Handle = "type=WS;ip=127.0.0.1;port=50001;ordinal=1";
+    /// <summary>The one connection's handle on the server: the first its transport drew, of a client that gave no address.</summary>
+    public const string Handle = "type=MEMORY;ip=local;ordinal=1";
 
-    private readonly ClientEnd _client = new();
-    private readonly ServerEnd _server = new();
+    private readonly MemoryTransportClient _client;
     private readonly TaskCompletionSource<Exception> _reported = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    /// <summary>A link whose routers count into <paramref name="registry"/>, when given.</summary>
-    public ServiceLink(MetricsRegistry? registry = null)
+    // a link whose routers count into the registry given, when given, not yet connected
+    private ServiceLink(MemoryTransportServer transport, MetricsRegistry? registry)
     {
-        _client.Peer = _server;
-        _server.Peer = _client;
-        Server = new Server<string>(_server, new ServerOptions { MetricsRegistry = registry });
+        _client = new MemoryTransportClient();
+        Transport = transport;
+        Server = new Server<string>(transport, new ServerOptions { MetricsRegistry = registry });
         Client = new LinkedClient(new RouterClient(_client, new RouterClientOptions { MetricsRegistry = registry }));
         Server.Router.Error += (reason, _) =>
         {
@@ -30,8 +30,10 @@ internal sealed class ServiceLink : IAsyncDisposable
 
             _reported.TrySetResult(reason);
         };
-        _server.Open();
     }
+
+    /// <summary>The server's transport.</summary>
+    public MemoryTransportServer Transport { get; }
 
     /// <summary>The server.</summary>
     public Server<string> Server { get; }
@@ -54,11 +56,24 @@ internal sealed class ServiceLink : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// A link whose routers count into <paramref name="registry"/>, when given: its server's
+    /// transport started, and its client connected.
+    /// </summary>
+    public static async Task<ServiceLink> Open(MetricsRegistry? registry = null)
+    {
+        var link = new ServiceLink(new MemoryTransportServer(), registry);
+
+        await link.Transport.Start();
+        await link._client.Connect(new MemoryConnectOptions { Server = link.Transport });
+
+        return link;
+    }
+
     /// <summary>Closes the connection, then disposes both ends.</summary>
     public async ValueTask DisposeAsync()
     {
-        _server.Closed();
-        _client.CloseConnection();
+        await _client.DisposeAsync();
         await Server.DisposeAsync();
         await Client.DisposeAsync();
     }
@@ -91,88 +106,6 @@ internal sealed class ServiceLink : IAsyncDisposable
             Router.Dispose();
 
             return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class ClientEnd : IRouterClientTransport
-    {
-        public TimeProvider Clock { get; } = TimeProvider.System;
-
-        public event Action<TransportMessage>? Message;
-
-        public event Action<bool, bool>? Close;
-
-        public ServerEnd? Peer { get; set; }
-
-        // as the loopback is: a JWT may go over it
-        public bool IsSecure
-        {
-            get
-            {
-                return true;
-            }
-        }
-
-        public void Deliver(ReadOnlyMemory<byte> bytes)
-        {
-            Message?.Invoke(new TransportMessage(bytes.ToArray(), false));
-        }
-
-        public void CloseConnection()
-        {
-            Close?.Invoke(false, false);
-        }
-
-        public Task Send(TransportMessage message)
-        {
-            Peer!.Deliver(message.Bytes);
-
-            return Task.CompletedTask;
-        }
-    }
-
-    private sealed class ServerEnd : IServerTransport
-    {
-        public TimeProvider Clock { get; } = TimeProvider.System;
-
-        public event Action<string>? Connection;
-
-        public event Action<TransportMessage, string>? Message;
-
-        public event Action<bool, string>? Close;
-
-        public ClientEnd? Peer { get; set; }
-
-        public void Open()
-        {
-            Connection?.Invoke(Handle);
-        }
-
-        public void Deliver(ReadOnlyMemory<byte> bytes)
-        {
-            Message?.Invoke(new TransportMessage(bytes.ToArray(), false), Handle);
-        }
-
-        public void Closed()
-        {
-            Close?.Invoke(false, Handle);
-        }
-
-        public Task<bool> CloseConnection(string connectionHandle)
-        {
-            return Task.FromResult(false);
-        }
-
-        public Task Shutdown()
-        {
-            return Task.CompletedTask;
-        }
-
-        public Task Send(TransportMessage message, string connectionHandle)
-        {
-            Peer!.Deliver(message.Bytes);
-
-            return Task.CompletedTask;
         }
     }
 }

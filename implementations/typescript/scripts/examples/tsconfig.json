@@ -42,6 +42,15 @@
       "@francisdesjardins/bead/http-transport-server": [
         "../../src/transport/server/http-transport-server.ts"
       ],
+      "@francisdesjardins/bead/joined-transport-server": [
+        "../../src/transport/server/joined-transport-server.ts"
+      ],
+      "@francisdesjardins/bead/memory-transport-client": [
+        "../../src/transport/client/memory-transport-client.ts"
+      ],
+      "@francisdesjardins/bead/memory-transport-server": [
+        "../../src/transport/server/memory-transport-server.ts"
+      ],
       "@francisdesjardins/bead/notification-manager": [
         "../../src/router/server/notification-manager.ts"
       ],
