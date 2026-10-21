@@ -30,6 +30,21 @@ export const toError = (reason: unknown): Error => {
   return reason instanceof Error ? reason : wrapReason(GenericError, reason);
 };
 
+/**
+ * A connection a side failed with 1009, a message past its bound, as its transport reports it on
+ * `error` (spec 15.1, 15.3): `subject`, a server's handle or a client's connection, then the bound
+ * in the spec's spelling and its value, the platform's own error kept as `cause`.
+ */
+export const tooBigOf = (
+  subject: string,
+  { cause, maximumMessageBytes }: { cause: unknown; maximumMessageBytes: number }
+): GenericError => {
+  return new GenericError(
+    `${subject} is closed with 1009: a message past its maximumMessageBytes, ${String(maximumMessageBytes)} bytes`,
+    { cause }
+  );
+};
+
 // definition
 
 /**

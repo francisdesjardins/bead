@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -29,6 +30,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     private const int EnvelopeLimit = 16_778_240;
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
+
+    // a frame of an opcode RFC 6455 reserves, which fails the connection that reads it (§5.2)
+    private static readonly byte[] ReservedFrame = [0x83, 0x01, 0x78];
 
     private readonly WebSocketTransportServer _server = new();
     private readonly Channel<(bool WasClean, string ConnectionHandle)> _closes = Channel.CreateUnbounded<(bool, string)>();
@@ -106,6 +110,50 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         };
 
         return closes;
+    }
+
+    // what a client tells as its connection ends, in order: each error, then its close, which ends it
+    private static (List<object> Told, Task Closed) EndOf(WebSocketTransportClient client)
+    {
+        var told = new List<object>();
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        client.Error += (reason) =>
+        {
+            lock (told)
+            {
+                told.Add(reason);
+            }
+        };
+        client.Close += (wasClean, wasQuick) =>
+        {
+            lock (told)
+            {
+                told.Add((wasClean, wasQuick));
+            }
+
+            closed.TrySetResult();
+        };
+
+        return (told, closed.Task);
+    }
+
+    // what it told, each error by its type and its message, or kept whole, each close as it came
+    private static object[] Described(List<object> told, bool isWorded = true)
+    {
+        lock (told)
+        {
+            return [.. told.Select((each) =>
+            {
+                return isWorded && each is Exception reason ? $"{reason.GetType().Name}: {reason.Message}" : each;
+            })];
+        }
+    }
+
+    // a client's 1009, as its Error tells it
+    private static string TooBig(int maximumMessageBytes)
+    {
+        return string.Create(CultureInfo.InvariantCulture, $"InvalidDataException: the connection is closed with 1009: a message past its maximumMessageBytes, {maximumMessageBytes} bytes");
     }
 
     // the Authorization lines of a request's head, their values as they came
@@ -1077,6 +1125,154 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tells_a_server_that_drops_without_its_closing_handshake_by_a_FIN_or_a_reset_by_its_unclean_close_alone_no_error()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+
+        foreach (var isReset in new[] { false, true })
+        {
+            await using var client = new WebSocketTransportClient();
+            var (told, closed) = EndOf(client);
+            var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+            var (peer, head) = await listener.Next();
+
+            using (peer)
+            {
+                await Listener.Upgrade(peer, head);
+                await connecting.WaitAsync(Patience, Cancelled);
+
+                if (isReset)
+                {
+                    // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+                    peer.Client.LingerState = new LingerOption(true, 0);
+                    peer.Client.Close();
+                }
+                else
+                {
+                    peer.Client.Shutdown(SocketShutdown.Send);
+                }
+
+                await closed.WaitAsync(Patience, Cancelled);
+
+                Assert.Equal(new object[] { (false, false) }, Described(told));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Tells_a_protocol_error_on_its_connection_once_then_its_unclean_close()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var (told, closed) = EndOf(_client);
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+            await peer.GetStream().WriteAsync(ReservedFrame, Cancelled);
+            await peer.GetStream().WriteAsync(ReservedFrame, Cancelled);
+            await closed.WaitAsync(Patience, Cancelled);
+
+            Assert.Collection(
+                Described(told, false),
+                (error) =>
+                {
+                    Assert.Equal(WebSocketError.Faulted, Assert.IsType<WebSocketException>(error).WebSocketErrorCode);
+                },
+                (close) =>
+                {
+                    Assert.Equal((false, false), close);
+                });
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        }
+    }
+
+    [Fact]
+    public async Task Fails_with_1009_a_message_past_its_bound_telling_one_error_that_names_maximumMessageBytes_then_an_unclean_close_even_when_its_server_answers_its_close()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { MaximumMessageBytes = 1024 });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var sending = server.SendAsync(new byte[4096], WebSocketMessageType.Binary, true, Cancelled);
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.MessageTooBig), (received.MessageType, received.CloseStatus));
+
+            // its close answered with a 1009 of its own
+            await server.CloseOutputAsync(WebSocketCloseStatus.MessageTooBig, null, Cancelled);
+            await closed.WaitAsync(Patience, Cancelled);
+            await Task.WhenAny(sending).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(new object[] { TooBig(1024), (false, false) }, Described(told));
+        }
+    }
+
+    [Fact]
+    public async Task Fails_with_1009_a_message_past_its_bound_for_a_server_that_never_answers_telling_one_error_then_an_unclean_close_once_its_close_timeout_passed()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { MaximumMessageBytes = 1024, CloseTimeout = TimeSpan.FromMilliseconds(200) });
+        var (told, closed) = EndOf(client);
+        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var sending = server.SendAsync(new byte[4096], WebSocketMessageType.Binary, true, Cancelled);
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+            var began = TimeProvider.System.GetTimestamp();
+
+            // it reads its close and answers nothing, its socket held open
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.MessageTooBig), (received.MessageType, received.CloseStatus));
+
+            await closed.WaitAsync(Patience, Cancelled);
+            await Task.WhenAny(sending).WaitAsync(Patience, Cancelled);
+
+            Assert.True(TimeProvider.System.GetElapsedTime(began) >= TimeSpan.FromMilliseconds(150));
+            Assert.Equal(new object[] { TooBig(1024), (false, false) }, Described(told));
+        }
+    }
+
+    [Fact]
+    public async Task Fails_its_connection_on_a_protocol_error_whose_error_listener_throws_telling_its_close_all_the_same()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        var closes = ClosesOf(_client);
+
+        _client.Error += (_) =>
+        {
+            throw new InvalidOperationException("an error listener that throws");
+        };
+
+        var connecting = _client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        {
+            await Listener.Upgrade(peer, head);
+            await connecting.WaitAsync(Patience, Cancelled);
+            await peer.GetStream().WriteAsync(ReservedFrame, Cancelled);
+
+            // what the listener threw goes on to the task no one awaits, the platform's
+            Assert.Equal((false, false), await Next(closes));
+            Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        }
+    }
+
+    [Fact]
     public async Task Raises_no_message_for_what_comes_after_it_sent_its_close()
     {
         using var listener = new Listener(IPAddress.Loopback);
@@ -1158,11 +1354,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Closes_when_its_server_leaves_its_pings_unanswered()
+    public async Task Closes_when_its_server_leaves_its_pings_unanswered_telling_no_error()
     {
         using var listener = new Listener(IPAddress.Loopback);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Heartbeat = TimeSpan.FromMilliseconds(500) });
-        var closes = ClosesOf(client);
+        var (told, closed) = EndOf(client);
         var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
         var (peer, head) = await listener.Next();
 
@@ -1172,7 +1368,9 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             await connecting.WaitAsync(Patience, Cancelled);
 
             // the server's end reads nothing, so it answers no ping
-            Assert.Equal((false, false), await Next(closes, TimeSpan.FromSeconds(5)));
+            await closed.WaitAsync(TimeSpan.FromSeconds(5), Cancelled);
+
+            Assert.Equal(new object[] { (false, false) }, Described(told));
             Assert.Equal(ReadyState.Closed, client.ReadyState);
         }
     }

@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer as createNodeServer } from 'node:http';
-import type { AddressInfo } from 'node:net';
+import type { AddressInfo, Socket } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
 import {
@@ -30,6 +31,7 @@ import {
   spyIntervals,
   startServer,
   stopServer,
+  trapUncaught,
 } from '../../shared/__tests__/fixtures';
 import {
   createWSTransportClient,
@@ -1284,6 +1286,308 @@ test.describe('WSTransportClient, its message limit', () => {
   });
 });
 
+// a frame as a server writes it, unmasked, whole: its opcode, then its payload, up to 64 KiB
+const frameOf = (opcode: number, payload: Uint8Array): Buffer => {
+  const head =
+    payload.length < 126
+      ? [0x80 | opcode, payload.length]
+      : [0x80 | opcode, 126, payload.length >> 8, payload.length & 0xff];
+
+  return Buffer.concat([Buffer.from(head), payload]);
+};
+
+// a frame of an opcode RFC 6455 reserves, which fails the connection that reads it (§5.2)
+const RESERVED_FRAME = frameOf(0x3, Uint8Array.of(0x78));
+
+// a close with 1009, as a server answers one
+const CLOSE_1009 = frameOf(0x8, Uint8Array.of(0x03, 0xf1));
+
+// the code of a close a client sent, its payload masked, once it came; none for any other frame
+const closeCodeOfMasked = (frame: Buffer): number | undefined => {
+  if (((frame[0] ?? 0) & 0x0f) !== 0x8 || frame.length < 8) {
+    return undefined;
+  }
+
+  return (((frame[6] ?? 0) ^ (frame[2] ?? 0)) << 8) | ((frame[7] ?? 0) ^ (frame[3] ?? 0));
+};
+
+// a server that ends its socket, a FIN, once the client's close came, answering no close of its own
+const endOnClose = (socket: Socket): void => {
+  socket.on('data', (frame: Buffer) => {
+    if (closeCodeOfMasked(frame) !== undefined) {
+      socket.end();
+    }
+  });
+};
+
+/**
+ * An HTTP server that completes each upgrade by hand and hands the test its socket, raw: what goes
+ * after its 101 is the test's to write, and so is its end, its socket left half open once the client
+ * ended its own, as Node's HTTP server leaves it.
+ */
+const startRaw = async () => {
+  const http = createNodeServer();
+  const upgraded = new Set<Socket>();
+
+  // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+  http.on('upgrade', (request, socket) => {
+    const accept = createHash('sha1')
+      .update(`${String(request.headers['sec-websocket-key'])}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest('base64');
+
+    upgraded.add(socket as Socket);
+    socket.on('error', () => {});
+    socket.write(
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`
+    );
+  });
+  http.listen(0, host);
+  await once(http, 'listening');
+
+  return {
+    // the next socket it upgrades, its 101 written
+    next: () => {
+      return new Promise<Socket>((resolve) => {
+        // oxlint-disable-next-line bead/options-last -- Node's own, an `upgrade` listener's
+        http.once('upgrade', (_request, socket) => {
+          resolve(socket as Socket);
+        });
+      });
+    },
+    port: (http.address() as AddressInfo).port,
+    [Symbol.asyncDispose]: async () => {
+      for (const socket of upgraded) {
+        socket.destroy();
+      }
+
+      await new Promise((resolve) => {
+        http.close(resolve);
+      });
+      await allClosed();
+    },
+  };
+};
+
+// what a client tells once open, in order: each error's message, then its close
+const toldBy = (client: WSTransportClient): unknown[][] => {
+  const told: unknown[][] = [];
+
+  client.on('error', (error) => {
+    told.push(['error', error.message]);
+  });
+  client.on('close', (wasClean, wasQuick) => {
+    told.push(['close', wasClean, wasQuick]);
+  });
+
+  return told;
+};
+
+// spec 15.1
+test.describe('WSTransportClient, what its error tells', () => {
+  const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
+
+  // `ws`'s own close timeout, which the client's options do not reach, held to 200 ms
+  const QuickWs = new Proxy(TrackedWs, {
+    construct: (target, [url, protocols, options]: unknown[]) => {
+      return Reflect.construct(target, [
+        url,
+        protocols,
+        { ...(options as object), closeTimeout: 200 },
+      ]) as object;
+    },
+  });
+
+  test('tells a server that drops without its closing handshake, by a FIN or a reset, by its unclean close alone, no error', async () => {
+    await using raw = await startRaw();
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      // a linger of 0: its close an abort, a reset sent rather than a FIN (RFC 9293 §3.10.5)
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+    ];
+
+    for (const drop of drops) {
+      const client = createWSTransportClient({ WebSocket: TrackedWs });
+      const told = toldBy(client);
+      const upgraded = raw.next();
+
+      await client.connect({ host, port: raw.port });
+
+      const closed = nextEvent(client, 'close');
+
+      drop(await upgraded);
+      await closed;
+
+      expect(told).toEqual([['close', false, false]]);
+    }
+  });
+
+  test('tells a protocol error on its connection once, then its unclean close', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ WebSocket: TrackedWs });
+    const told: unknown[][] = [];
+    const upgraded = raw.next();
+
+    client.on('error', (error) => {
+      told.push(['error', (error as Error & { code?: string }).code]);
+    });
+    client.on('close', (wasClean, wasQuick) => {
+      told.push(['close', wasClean, wasQuick]);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+    const closed = nextEvent(client, 'close');
+
+    // it ends its socket once the client's close came
+    endOnClose(socket);
+    socket.write(RESERVED_FRAME);
+    socket.write(RESERVED_FRAME);
+    await closed;
+
+    expect(told).toEqual([
+      ['error', 'WS_ERR_INVALID_OPCODE'],
+      ['close', false, false],
+    ]);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('fails with 1009 a message past its bound, telling one error that names maximumMessageBytes, then an unclean close, even when its server answers its close', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ maxPayload: 1_024, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const causes: unknown[] = [];
+    const sent: (number | undefined)[] = [];
+    const upgraded = raw.next();
+
+    client.on('error', (error) => {
+      causes.push((error.cause as { code?: string } | undefined)?.code);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+    const closed = nextEvent(client, 'close');
+
+    // its close answered with a 1009 of its own, then its end
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+        socket.end(CLOSE_1009);
+      }
+    });
+    socket.write(frameOf(0x2, new Uint8Array(4_096)));
+    await closed;
+
+    expect(told).toEqual([
+      [
+        'error',
+        'the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes',
+      ],
+      ['close', false, false],
+    ]);
+    expect([causes, sent]).toEqual([['WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'], [1009]]);
+  });
+
+  test('fails with 1009 a message past its bound for a server that never answers, telling one error, then an unclean close once its close timeout passed', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({
+      maxPayload: 1_024,
+      WebSocket: QuickWs as unknown as IWebSocketConstructor,
+    });
+    const told = toldBy(client);
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+    const closed = nextEvent(client, 'close');
+    const began = performance.now();
+
+    // it reads its close and answers nothing, its socket held open
+    socket.write(frameOf(0x2, new Uint8Array(4_096)));
+    await closed;
+
+    expect(performance.now() - began).toBeGreaterThanOrEqual(150);
+    expect(told).toEqual([
+      [
+        'error',
+        'the connection is closed with 1009: a message past its maximumMessageBytes, 1024 bytes',
+      ],
+      ['close', false, false],
+    ]);
+  });
+
+  test('fails its connection on a protocol error whose error listener throws, telling its close all the same', async () => {
+    using uncaught = trapUncaught();
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ WebSocket: TrackedWs });
+    const closes: unknown[][] = [];
+    const upgraded = raw.next();
+
+    client.on('error', () => {
+      throw new Error('an error listener that throws');
+    });
+    client.on('close', (wasClean, wasQuick) => {
+      closes.push([wasClean, wasQuick]);
+    });
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    endOnClose(socket);
+    socket.write(RESERVED_FRAME);
+
+    await expect
+      .poll(() => {
+        return closes;
+      })
+      .toEqual([[false, false]]);
+    // what the listener threw was Node's, once
+    expect(
+      uncaught.thrown.map((error) => {
+        return (error as Error).message;
+      })
+    ).toEqual(['an error listener that throws']);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('tells no error once open over the global WebSocket, its close alone, for a FIN, a reset or a protocol error', async () => {
+    await using raw = await startRaw();
+    const drops = [
+      (socket: Socket) => {
+        socket.end();
+      },
+      (socket: Socket) => {
+        socket.resetAndDestroy();
+      },
+      (socket: Socket) => {
+        endOnClose(socket);
+        socket.write(RESERVED_FRAME);
+      },
+    ];
+
+    for (const drop of drops) {
+      const client = createWSTransportClient({ WebSocket: TrackedGlobal });
+      const told = toldBy(client);
+      const upgraded = raw.next();
+
+      await client.connect({ host, port: raw.port });
+
+      const closed = nextEvent(client, 'close');
+
+      drop(await upgraded);
+      await closed;
+
+      expect(told).toEqual([['close', false, false]]);
+    }
+  });
+});
+
 test.describe('WSTransportClient, heartbeat', () => {
   test('pings its server every heartbeat over a socket that can, and closes at the beat after a ping it left unanswered', async () => {
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
@@ -1391,18 +1695,24 @@ test.describe('WSTransportClient, heartbeat', () => {
     ]);
   });
 
-  test('closes when its server leaves its pings unanswered, over ws', async () => {
+  test('closes when its server leaves its pings unanswered, telling no error', async () => {
     const server = await startServer({ autoPong: false });
     const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
     const client = createWSTransportClient({
       heartbeat: 40,
       WebSocket: TrackedWsWebSocket as unknown as IWebSocketConstructor,
     });
+    const errors: Error[] = [];
+
+    client.on('error', (error) => {
+      errors.push(error);
+    });
 
     try {
       await client.connect({ host, port: portOf(server) });
 
       expect(await nextEvent(client, 'close')).toEqual([false, false]);
+      expect(errors).toEqual([]);
     } finally {
       await stopServer(server);
       await allClosed();

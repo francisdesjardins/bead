@@ -18,11 +18,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Spec 15.3 states that a side fails a connection with 1009 past its `maximumMessageBytes` (RFC
   6455 §7.1.7): it drains until the peer's close or its close timeout, 5 seconds by default on a
-  server, its close unclean whatever code the peer answers with, and a server reports it naming the
-  bound and its value. Spec 15.1 states what a server transport's `error` reports: a protocol
-  error, a drop or a 1009, each a connection's own once, as it ends, before its close, and a
-  listener's throw; never a peer gone without its closing handshake, one its heartbeat drops, or
-  the server's own abort past its close timeout.
+  server, its close unclean whatever code the peer answers with, and the side reports it naming the
+  bound and its value. Spec 15.1 states what a side's transport, a client's as a server's, reports
+  on its `error`: what it ends a connection for of its own — a protocol error, a 1009, a drop, or
+  over HTTP an envelope past `maximumBodyBytes` and a batch that does not read — each once, as the
+  connection ends, before its close, and a listener's throw; never a peer gone without its closing
+  handshake, one its heartbeat drops, its own abort past its close timeout, nor over HTTP a server
+  gone, a refusal of its own, an exchange lost or its inactivity timeout.
 - Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
   `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
   where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name
@@ -52,6 +54,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Both HTTP servers report a drop once its connection's end began, its exchanges cut, then tell
   its close all the same, so a listener of `error` that throws keeps no connection open; a
   connection two late answers drop is reported once.
+- Both WebSocket clients tell, once open, a protocol error on `error`, and a message past their
+  `maximumMessageBytes` as `the connection is closed with 1009: a message past its
+  maximumMessageBytes, N bytes`, a `GenericError` keeping `ws`'s error as its `cause` on the
+  TypeScript side, an `InvalidDataException` on the C# side, then their unclean close: the
+  TypeScript client told none once open, and the C# client told its own 1009 only when its server
+  never answered, as its abort. Over the global `WebSocket`, whose `error` cannot be told from a
+  drop, the TypeScript client tells none.
+- The C# WebSocket client tells no error for a server gone without its closing handshake, its
+  heartbeat's drop or its own abort past `CloseTimeout`, and tells its close all the same when a
+  listener of `Error` throws, where the close was lost.
+- Both HTTP clients tell, before their close, an envelope past `maximumBodyBytes`, an answer's or a
+  batch's, as `the connection is closed: an envelope past its maximumBodyBytes, N bytes`, and a
+  batch that does not read as `the connection is closed: a batch that does not read, …`, saying
+  what of it does not, each an error of their own, where they told their close alone.
 
 ## [0.6.0] - 2026-10-20
 

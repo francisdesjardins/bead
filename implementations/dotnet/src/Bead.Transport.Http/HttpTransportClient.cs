@@ -182,9 +182,15 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     public event Action<bool, bool>? Close;
 
     /// <summary>
-    /// What a listener of its messages, its close or its reconnection threw: the client went on as
-    /// if it returned (spec 15.1), as the WebSocket transport client's own <c>Error</c> tells what
-    /// broke its socket.
+    /// What this side closed its connection for of its own, once, before its close (spec 15.1), an
+    /// <see cref="InvalidDataException"/>: an envelope past
+    /// <see cref="HttpTransportClientOptions.MaximumBodyBytes"/>, an answer's or a batch's, "the
+    /// connection is closed: an envelope past its maximumBodyBytes, N bytes"; a batch that does not
+    /// read, "the connection is closed: a batch that does not read, …", saying what of it does not;
+    /// a listener that throws keeps the close told. A server gone, a refusal of its own, a redirect,
+    /// a timeout, an answer of another type and a network that failed tell their close alone. And
+    /// what a listener of its messages, its close or its reconnection threw: the client went on as
+    /// if it returned.
     /// </summary>
     public event Action<Exception>? Error;
 
@@ -514,6 +520,19 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         http?.Dispose();
     }
 
+    // * what this side closes a connection for of its own, as its Error tells it before its close
+    // (spec 15.1): an envelope past its bound, named with its value, as a WebSocket's 1009 is
+    private static InvalidDataException PastBoundOf(int maximumBodyBytes)
+    {
+        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"the connection is closed: an envelope past its maximumBodyBytes, {maximumBodyBytes} bytes"));
+    }
+
+    // and a batch that does not read, saying what of it does not, as a WebSocket's protocol error
+    private static (Listened, InvalidDataException?) UnreadOf(string why)
+    {
+        return (Listened.Broken, new InvalidDataException($"the connection is closed: a batch that does not read, {why}"));
+    }
+
     // a state as a message words it: "open", "closing"…
     private static string NameOf(ReadyState readyState)
     {
@@ -670,6 +689,21 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
     // the connection is gone: its exchanges abort, and the client closes, as over a socket dropped
     private void Lose(Drawn connection, bool isReleased)
     {
+        Ended(connection, (isReleased, null));
+    }
+
+    // the connection this side closes of its own, released: why goes to Error before its close
+    private void Fail(Drawn connection, InvalidDataException failure)
+    {
+        Ended(connection, (true, failure));
+    }
+
+    // * its end: its exchanges cut, the server told when it is released, then its one error, then
+    // its close, told even when a listener of Error throws, which goes on to the task no one awaits,
+    // the platform's (spec 15.1)
+    private void Ended(Drawn connection, (bool IsReleased, InvalidDataException? Failure) end)
+    {
+        var (isReleased, failure) = end;
         bool isClosing;
 
         lock (_gate)
@@ -697,7 +731,17 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
         if (isClosing)
         {
-            _listeners.Tell(Close, (false, false));
+            try
+            {
+                if (failure is not null)
+                {
+                    Error?.Invoke(failure);
+                }
+            }
+            finally
+            {
+                _listeners.Tell(Close, (false, false));
+            }
         }
     }
 
@@ -943,9 +987,16 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
                 return;
             }
 
-            if (TypeOf(response) != HttpTransport.MediaType || response.Content.Headers.ContentLength > _maximumBodyBytes)
+            if (TypeOf(response) != HttpTransport.MediaType)
             {
                 Lose(connection, true);
+
+                return;
+            }
+
+            if (response.Content.Headers.ContentLength > _maximumBodyBytes)
+            {
+                Fail(connection, PastBoundOf(_maximumBodyBytes));
 
                 return;
             }
@@ -965,7 +1016,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
             if (body.Length > _maximumBodyBytes)
             {
-                Lose(connection, true);
+                Fail(connection, PastBoundOf(_maximumBodyBytes));
 
                 return;
             }
@@ -996,7 +1047,14 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         {
             while (_drawn == connection)
             {
-                var listened = await ListenOnce((connection, cursor));
+                var (listened, failure) = await ListenOnce((connection, cursor));
+
+                if (failure is not null)
+                {
+                    Fail(connection, failure);
+
+                    return;
+                }
 
                 if (listened == Listened.Lost)
                 {
@@ -1073,10 +1131,9 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
     }
 
-    // one listen: each envelope it brings back heard as it comes whole, the cursor advanced before —
-    // or what came instead: nothing, the connection gone, a refusal of the server's, a batch that
-    // does not read, or the listen lost before it brought anything whole
-    private async Task<Listened> ListenOnce((Drawn Connection, Cursor Cursor) listen)
+    // one listen: each envelope heard as it comes whole, the cursor advanced before — or what came
+    // instead, the error that fails the connection among it
+    private async Task<(Listened Outcome, InvalidDataException? Failure)> ListenOnce((Drawn Connection, Cursor Cursor) listen)
     {
         var (connection, cursor) = listen;
         HttpResponseMessage response;
@@ -1092,7 +1149,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         }
         catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
         {
-            return Listened.Lost;
+            return (Listened.Lost, null);
         }
 
         using (response)
@@ -1101,31 +1158,31 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             // would go through the same handler
             if (IsFollowed((response, connection.Uri)))
             {
-                return Listened.Broken;
+                return (Listened.Followed, null);
             }
 
             if (response.StatusCode != HttpStatusCode.OK || TypeOf(response) != HttpTransport.BatchMediaType)
             {
                 if (response.StatusCode == HttpStatusCode.NoContent)
                 {
-                    return Listened.Nothing;
+                    return (Listened.Nothing, null);
                 }
 
                 // a redirect, its mark unread, is lost as any status nothing marks
                 if (IsRedirect(response))
                 {
-                    return Listened.Lost;
+                    return (Listened.Lost, null);
                 }
 
                 var refusal = HeaderOf(response, HttpTransport.RefusalHeader);
 
-                return refusal is null ? Listened.Lost : refusal == HttpRefusals.ConnectionUnknown ? Listened.Gone : Listened.Refused;
+                return (refusal is null ? Listened.Lost : refusal == HttpRefusals.ConnectionUnknown ? Listened.Gone : Listened.Refused, null);
             }
 
             // numbered from the one after the last it heard, or it is no batch of this listen's
             if (ItemOf(response, HttpTransport.SequenceHeader)?.BareItem as long? != cursor.After + 1)
             {
-                return Listened.Broken;
+                return UnreadOf(string.Create(CultureInfo.InvariantCulture, $"its bead-sequence not {cursor.After + 1}"));
             }
 
             var heard = 0;
@@ -1147,22 +1204,32 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
                     var bytes = BinaryPrimitives.ReadUInt32BigEndian(length);
 
-                    if (lengthRead < LengthBytes || bytes == 0 || bytes > _maximumBodyBytes)
+                    if (lengthRead < LengthBytes)
                     {
-                        return Listened.Broken;
+                        return UnreadOf("it ends within an envelope");
+                    }
+
+                    if (bytes == 0)
+                    {
+                        return UnreadOf("an envelope of 0 bytes");
+                    }
+
+                    if (bytes > _maximumBodyBytes)
+                    {
+                        return (Listened.Broken, PastBoundOf(_maximumBodyBytes));
                     }
 
                     var envelope = new byte[bytes];
 
                     if (await stream.ReadAtLeastAsync(envelope, envelope.Length, false, connection.Exchanges.Token) < envelope.Length)
                     {
-                        return Listened.Broken;
+                        return UnreadOf("it ends within an envelope");
                     }
 
                     // gone as it was heard: what is left goes unheard
                     if (_drawn != connection)
                     {
-                        return Listened.Heard;
+                        return (Listened.Heard, null);
                     }
 
                     cursor.After += 1;
@@ -1173,10 +1240,10 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             catch (Exception reason) when (reason is HttpRequestException or OperationCanceledException or IOException or ObjectDisposedException)
             {
                 // cut on its way: what came whole was heard, and the rest comes again
-                return heard > 0 ? Listened.Heard : Listened.Lost;
+                return (heard > 0 ? Listened.Heard : Listened.Lost, null);
             }
 
-            return heard > 0 ? Listened.Heard : Listened.Broken;
+            return heard > 0 ? (Listened.Heard, null) : UnreadOf("it holds no envelope");
         }
     }
 
@@ -1188,6 +1255,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
         Lost,
         Gone,
         Refused,
+        Followed,
         Broken,
     }
 

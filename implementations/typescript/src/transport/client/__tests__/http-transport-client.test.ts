@@ -999,6 +999,20 @@ const methodsOf = (fake: ReturnType<typeof createFakeFetch>) => {
   return { last: methods.at(-1), listens };
 };
 
+/** What `client` tells as its connection ends, in order: each error's message, then its close. */
+const endOf = (client: HTTPTransportClient): unknown[][] => {
+  const told: unknown[][] = [];
+
+  client.on('error', (error) => {
+    told.push(['error', error.message]);
+  });
+  client.on('close', (wasClean, wasQuick) => {
+    told.push(['close', wasClean, wasQuick]);
+  });
+
+  return told;
+};
+
 /** The closes `client` tells, as they come: read when wanted, never waited on. */
 const closesOf = (client: HTTPTransportClient) => {
   const closes: unknown[][] = [];
@@ -1487,6 +1501,118 @@ test.describe('createHTTPTransportClient, listening', () => {
     expect((await atLimit.callOf(2))?.init.headers).toMatchObject({ [AFTER_HEADER]: '1' });
     expect(atLimit.heard).toEqual([[...largest]]);
     await atLimit.client.disconnect({ isQuick: true });
+  });
+
+  // spec 15.1
+  test('tells an envelope past maximumBodyBytes, an answer’s or a batch’s, on error before its close, naming the bound and its value', async () => {
+    const answers = [
+      {
+        body: new Uint8Array(17),
+        headers: { 'content-length': '17', 'content-type': BEAD_MEDIA_TYPE },
+      },
+      { body: new Uint8Array(17), headers: { 'content-type': BEAD_MEDIA_TYPE } },
+      // an answer of another type, a gateway's: its close alone
+      { body: new TextEncoder().encode('<html>'), headers: { 'content-type': 'text/html' } },
+    ];
+    const toldOf: unknown[][][] = [];
+
+    for (const answer of answers) {
+      const fake = createFakeFetch();
+      const client = createHTTPTransportClient({
+        fetch: fake.fetch,
+        isListening: false,
+        maximumBodyBytes: 16,
+      });
+      const connecting = client.connect({ host, port: 80 });
+
+      fake.calls[0]?.answer({
+        headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
+        status: 201,
+      });
+      await connecting;
+
+      const told = endOf(client);
+      const closed = nextEvent(client, 'close');
+      const sending = client.send({ data: envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 }) });
+
+      fake.calls[1]?.answer({ ...answer, status: 200 });
+      await sending;
+      await closed;
+      toldOf.push(told);
+    }
+
+    const listening = await connectListening({ maximumBodyBytes: 24 });
+    const told = endOf(listening.client);
+    const closed = nextEvent(listening.client, 'close');
+
+    (await listening.callOf(1))?.answer({
+      ...batch(1),
+      body: Uint8Array.of(0, 0, 0, 25, ...new Uint8Array(25)),
+    });
+    await closed;
+    toldOf.push(told);
+
+    const pastOf = (bytes: number) => {
+      return [
+        [
+          'error',
+          `the connection is closed: an envelope past its maximumBodyBytes, ${String(bytes)} bytes`,
+        ],
+        ['close', false, false],
+      ];
+    };
+
+    expect(toldOf).toEqual([pastOf(16), pastOf(16), [['close', false, false]], pastOf(24)]);
+  });
+
+  // spec 15.1
+  test('tells a batch that does not read on error before its close, saying what of it does not, and a refusal of its listen by its close alone', async () => {
+    const envelope = envelopeOf(0x13, { callId: 1 });
+    const framed = batchOf(envelope);
+    const answers = [
+      { ...batch(1, envelope), headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE } },
+      {
+        ...batch(1, envelope),
+        headers: { 'content-type': BEAD_BATCH_MEDIA_TYPE, [SEQUENCE_HEADER]: '2' },
+      },
+      { ...batch(1), body: Uint8Array.of(0, 0, 0, 0, ...framed) },
+      { ...batch(1), body: new Uint8Array(0) },
+      { ...batch(1), isBodiless: true },
+      { ...batch(1), body: Uint8Array.of(...framed, 0, 0) },
+      { ...batch(1), body: Uint8Array.of(...framed, ...framed.slice(0, 6)) },
+      { headers: { [REFUSAL_HEADER]: 'listen-undeclared' }, status: 409 },
+      { headers: { [REFUSAL_HEADER]: CONNECTION_UNKNOWN }, status: 404 },
+    ];
+    const toldOf: unknown[][][] = [];
+
+    for (const answer of answers) {
+      const { callOf, client } = await connectListening({ maximumBodyBytes: 24 });
+      const told = endOf(client);
+      const closed = nextEvent(client, 'close');
+
+      (await callOf(1))?.answer(answer);
+      await closed;
+      toldOf.push(told);
+    }
+
+    const unread = (why: string) => {
+      return [
+        ['error', `the connection is closed: a batch that does not read, ${why}`],
+        ['close', false, false],
+      ];
+    };
+
+    expect(toldOf).toEqual([
+      unread('its bead-sequence not 1'),
+      unread('its bead-sequence not 1'),
+      unread('an envelope of 0 bytes'),
+      unread('it holds no envelope'),
+      unread('it holds no envelope'),
+      unread('it ends within an envelope'),
+      unread('it ends within an envelope'),
+      [['close', false, false]],
+      [['close', false, false]],
+    ]);
   });
 
   test('asks the server to wait its wait held, a fraction rounded to the nearest whole millisecond', async () => {

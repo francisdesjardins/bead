@@ -178,8 +178,14 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     public event Action<bool, bool>? Close;
 
     /// <summary>
-    /// What broke the connection, before its close; or what a listener of its messages, its close or
-    /// its reconnection threw, the client going on as if it returned (spec 15.1).
+    /// What this side failed its open connection for of its own, once, as it ends, before its
+    /// unclean close (spec 15.1): a protocol error, the <see cref="WebSocketException"/> its socket
+    /// threw, or a message past <see cref="WebSocketTransportClientOptions.MaximumMessageBytes"/>, an
+    /// <see cref="InvalidDataException"/>, "the connection is closed with 1009: a message past its
+    /// maximumMessageBytes, N bytes"; a listener that throws keeps the close told. A server gone
+    /// without its closing handshake, the heartbeat's drop and this side's own abort past its close
+    /// timeout tell their close alone. And what a listener of its messages, its close or its
+    /// reconnection threw, the client going on as if it returned.
     /// </summary>
     public event Action<Exception>? Error;
 
@@ -775,10 +781,11 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
     }
 
     // reads the connection until it ends, then tells its end: to the close under way, which tells
-    // it, or as a close of the server's or the network's; a connection dropped tells nothing
+    // it, or as a close of the server's or the network's, with the one error this side failed it
+    // for of its own first, when it did; a connection dropped tells nothing
     private async Task Follow(WebSocketConnection connection)
     {
-        Exception? broken = null;
+        Exception? failure = null;
 
         try
         {
@@ -793,7 +800,15 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
         catch (Exception reason) when (reason is WebSocketException or OperationCanceledException or IOException)
         {
-            broken = reason;
+            // ! a protocol error alone, which .NET 10 raises as Faulted: a server gone without its
+            // closing handshake, its TCP connection ended or reset, is ConnectionClosedPrematurely; its
+            // heartbeat's drop an OperationCanceledException around the KeepAliveTimeout's; and once
+            // this side ended it of its own, failed with 1009 or aborted past its close timeout, what
+            // its socket meets says nothing more (spec 15.1)
+            if (!connection.IsEndedHere && reason is WebSocketException { WebSocketErrorCode: WebSocketError.Faulted })
+            {
+                failure = reason;
+            }
         }
 
         connection.Socket.Dispose();
@@ -827,11 +842,21 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
             return;
         }
 
-        if (broken is not null)
-        {
-            Error?.Invoke(broken);
-        }
+        // * its end: its one error, a message past its bound named by it and its value, then its
+        // close, told even when a listener of Error throws, which goes on to the task no one awaits,
+        // the platform's (spec 15.1)
+        failure ??= connection.IsTooBig ? connection.TooBigOf("the connection") : null;
 
-        _listeners.Tell(Close, (false, false));
+        try
+        {
+            if (failure is not null)
+            {
+                Error?.Invoke(failure);
+            }
+        }
+        finally
+        {
+            _listeners.Tell(Close, (false, false));
+        }
     }
 }

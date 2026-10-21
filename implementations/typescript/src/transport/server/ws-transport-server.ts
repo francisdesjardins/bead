@@ -17,10 +17,11 @@ import {
   REFUSAL_EVENT,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
   TRANSPORT_WS,
+  WS_TOO_BIG_CODE,
 } from '../shared/constants';
 import { assertHeld, assertHeldFinite, LONGEST_TIMER } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
-import { GenericError } from '../shared/errors';
+import { tooBigOf } from '../shared/errors';
 import { gaugesOf } from '../shared/gauges';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT } from '../shared/heartbeat';
 import { ReadyState } from '../shared/ready-state';
@@ -191,7 +192,7 @@ const upgradeCredentialOf = (request: IIncomingMessageLike): string | undefined 
  * A text message is delivered as a `string` and a binary one per `binaryType`. `error` tells, with
  * a connection's handle (spec 15.1): a protocol error on it; a bound it is dropped behind, or a
  * message past `maxPayload`, the spec's `maximumMessageBytes`, it is failed with 1009 for, each a
- * {@link GenericError} naming the bound in the spec's spelling and its value, the 1009's keeping
+ * `GenericError` naming the bound in the spec's spelling and its value, the 1009's keeping
  * `ws`'s own error as its `cause`; each told once, as its connection ends, its close begun, before
  * its unclean `close`, so a listener that throws keeps nothing open; and what a listener of its
  * events threw, as it threw. A peer that drops without its closing handshake, its TCP connection
@@ -593,11 +594,8 @@ export const createWSTransportServer = (options: IWSTransportServerOptions): WST
         socket.on(ERROR_EVENT, (error) => {
           fail(
             socket,
-            (error as NodeJS.ErrnoException).code === 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH'
-              ? new GenericError(
-                  `${connectionHandle} is closed with 1009: a message past its maximumMessageBytes, ${String(maxPayload)} bytes`,
-                  { cause: error }
-                )
+            (error as NodeJS.ErrnoException).code === WS_TOO_BIG_CODE
+              ? tooBigOf(connectionHandle, { cause: error, maximumMessageBytes: maxPayload })
               : error
           );
         });

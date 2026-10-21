@@ -1138,13 +1138,17 @@ what one throws is reported, as section 9.0 reports an error, by its transport w
 it was told of; the listeners after it are called all the same, and the transport goes on as if it
 returned. A side awaits nothing a listener returns: what it settles to later is its platform's, as
 is what a listener of the transport's own `error` throws. A listener's throw refuses no connection,
-fails no exchange and closes nothing. What a server's transport reports on its `error` is a protocol
-error on a connection, a connection it drops behind a bound or fails with 1009, each naming the
-bound and its value (sections 15.3, 15.12), and what a listener throws, as it throws: a
-connection's own once, as it ends, its close or its drop begun, so that no listener's throw keeps
-it open, and before its close, which is then unclean. It reports no peer that drops without its
-closing handshake, its TCP connection ended or reset, nor one its heartbeat drops, nor its own drop
-of a peer that never answered a close within its close timeout: each one's unclean close tells it.
+fails no exchange and closes nothing. What a side's transport reports on its `error`, a client's as
+a server's, is what it ends a connection for of its own — a protocol error on it; a message it fails
+with 1009, or over HTTP an envelope past its `maximumBodyBytes`, an answer's or a batch's, and a
+connection a server drops behind a bound, each naming the bound and its value (sections 15.3,
+15.12); a batch that does not read, saying what of it does not (section 15.9) — and what a listener
+throws, as it throws: a connection's own once, as it ends, its close or its drop begun, so that no
+listener's throw keeps it open, and before its close, which is then unclean. It reports no peer that
+drops without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops,
+nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
+server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
+past its inactivity timeout: each one's unclean close tells it.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
@@ -1252,7 +1256,7 @@ connection; a 426 names `upgrade` in its `Connection`.
 [§7.4.1](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.1),
 [§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
 still comes until the peer's close or its close timeout, then ends the connection, its close
-unclean whatever code the peer answers with; a server reports it, naming the bound and its value
+unclean whatever code the peer answers with; a side reports it, naming the bound and its value
 (section 15.1). A server's close timeout, 5 seconds by default, bounds each closing handshake it
 begins: a peer that has not answered by then is dropped, its close unclean. A side SHOULD ping its
 peer every `heartbeat` — 30 seconds by default, or never — and close a connection that left a ping

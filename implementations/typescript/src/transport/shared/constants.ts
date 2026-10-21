@@ -74,6 +74,15 @@ export const WORKER_MESSAGES = Object.freeze({
 /** `'arraybuffer'` rather than `'blob'`: an envelope is read synchronously, and a `Blob` cannot be. */
 export const TRANSPORT_WEBSOCKET_BINARYTYPE = 'arraybuffer' as const;
 
+/**
+ * What `ws` codes the errors of what it reads by: each a protocol error, or a message past its
+ * `maxPayload`, {@link WS_TOO_BIG_CODE}, each failing its connection (RFC 6455 §7.1.7).
+ */
+export const WS_ERROR_CODE_PREFIX = 'WS_ERR_';
+
+/** The code `ws` gives a message past its `maxPayload`, which fails its connection with 1009. */
+export const WS_TOO_BIG_CODE = 'WS_ERR_UNSUPPORTED_MESSAGE_LENGTH';
+
 // types
 
 export type CLOSE_EVENT = typeof CLOSE_EVENT;

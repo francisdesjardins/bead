@@ -4,12 +4,21 @@
 
 import {
   CLOSE_EVENT,
+  ERROR_EVENT,
   MESSAGE_EVENT,
   REFUSAL_HEADER,
   TRANSPORT_WEBSOCKET_BINARYTYPE,
+  WS_ERROR_CODE_PREFIX,
+  WS_TOO_BIG_CODE,
 } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
-import { ConnectError, ProgrammerError, ReadyStateError, wrapReason } from '../shared/errors';
+import {
+  ConnectError,
+  ProgrammerError,
+  ReadyStateError,
+  tooBigOf,
+  wrapReason,
+} from '../shared/errors';
 import { assertHeartbeat, createHeartbeat, HEARTBEAT, type IHeartbeat } from '../shared/heartbeat';
 import { noop } from '../shared/noop';
 import { isSecureUrl } from '../shared/secure';
@@ -70,6 +79,19 @@ export const CONNECT_DEFAULTS = Object.freeze({
 /** The error an `error` event carries, when the implementation gives one. */
 const errorOf = (event: unknown): unknown => {
   return typeof event === 'object' && event !== null && 'error' in event ? event.error : undefined;
+};
+
+/**
+ * Whether an error fails the connection of this side's own: one `ws` codes, a protocol error or a
+ * message past its bound, as its receiver emits them. Its sender's own, a socket's and the global
+ * `WebSocket`'s carry no such code.
+ */
+const isOwnFailure = (error: unknown): error is Error & { code: string } => {
+  if (!(error instanceof Error) || !('code' in error)) {
+    return false;
+  }
+
+  return typeof error.code === 'string' && error.code.startsWith(WS_ERROR_CODE_PREFIX);
 };
 
 /**
@@ -139,6 +161,15 @@ const refusalOf = ({ headers, statusCode }: IUpgradeResponseLike): string => {
  * its status and its reason, "the server refused the upgrade: 403 host-refused"; the global
  * `WebSocket` reads nothing of it, as the WHATWG WebSockets Standard has a page's, and names its
  * close alone, 1006.
+ *
+ * Once open, over `ws`, `error` tells what this side fails its connection for of its own (spec
+ * 15.1): a protocol error, `ws`'s own error, or a message past `maxPayload`, a
+ * `GenericError` "the connection is closed with 1009: a message past its maximumMessageBytes,
+ * N bytes" keeping `ws`'s error as its `cause`; each once, as the connection ends, before its
+ * unclean `close`, so a listener that throws keeps the close told. A server gone without its
+ * closing handshake, its heartbeat's drop, and `ws`'s own drop past its close timeout tell their
+ * `close` alone; so does every unclean close over the global `WebSocket`, whose bare `error` cannot
+ * be told from a drop.
  *
  * @example
  * const client = createWSTransportClient();
@@ -327,8 +358,25 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                     );
                   };
                   socket.onopen = () => {
-                    // an error is always followed by its close, and once open the close is what reports it
-                    socket.onerror = noop;
+                    // * what this side fails the connection for of its own, `ws`'s alone: a protocol
+                    // error, or a message past `maxPayload`, told by the bound and its value; a drop
+                    // emits none, and the global `WebSocket`'s bare `error` cannot be told from one
+                    // (spec 15.1)
+                    let failure: Error | undefined;
+
+                    socket.onerror = (event) => {
+                      const error = errorOf(event);
+
+                      if (failure === undefined && isOwnFailure(error)) {
+                        failure =
+                          error.code === WS_TOO_BIG_CODE
+                            ? tooBigOf('the connection', {
+                                cause: error,
+                                maximumMessageBytes: maxPayload,
+                              })
+                            : error;
+                      }
+                    };
                     socket.onmessage = ({ data }) => {
                       if (client.isClosing()) {
                         return undefined;
@@ -340,13 +388,21 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
                       );
                     };
 
+                    // * its end: its one error, then its close, told even when a listener of
+                    // `error` throws, which is Node's or the page's (spec 15.1)
                     socket.onclose = () => {
                       stopBeating();
 
                       if (!client.isReconnecting()) {
                         setReadyStateClosed(client);
 
-                        tell(CLOSE_EVENT, [false, false]);
+                        try {
+                          if (failure !== undefined) {
+                            client.emit(ERROR_EVENT, failure);
+                          }
+                        } finally {
+                          tell(CLOSE_EVENT, [false, false]);
+                        }
                       }
                     };
 

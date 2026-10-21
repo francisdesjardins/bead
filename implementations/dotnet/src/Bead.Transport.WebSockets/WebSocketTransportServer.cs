@@ -910,16 +910,14 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
     // and its value (spec 15.3, 15.12): a drop, the socket aborted, its I/O cut short; a message
     // past its bound, data it does not take, as SignalR reports a message past its own; none
     // otherwise
-    private Exception? FailureOf(WebSocketConnection connection, string connectionHandle)
+    private static Exception? FailureOf(WebSocketConnection connection, string connectionHandle)
     {
         if (connection.Dropped is { } why)
         {
             return ServerBounds.DroppedOf(connectionHandle, why);
         }
 
-        return connection.IsTooBig
-            ? new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"{connectionHandle} is closed with 1009: a message past its maximumMessageBytes, {MaximumMessageBytes} bytes"))
-            : null;
+        return connection.IsTooBig ? connection.TooBigOf(connectionHandle) : null;
     }
 
     // * a connection's end, told once its read ended, its close or its abort begun: its one error,

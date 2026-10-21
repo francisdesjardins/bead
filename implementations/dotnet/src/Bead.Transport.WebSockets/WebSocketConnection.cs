@@ -77,6 +77,17 @@ internal sealed class WebSocketConnection
     }
 
     /// <summary>
+    /// Its failure with 1009, a message past its bound, as its side reports it through its
+    /// <c>Error</c> (spec 15.1, 15.3): <paramref name="subject"/>, a server's handle or a client's
+    /// connection, then the bound in the spec's spelling and its value; data it does not take, as
+    /// SignalR reports a message past its own.
+    /// </summary>
+    public InvalidDataException TooBigOf(string subject)
+    {
+        return new InvalidDataException(string.Create(CultureInfo.InvariantCulture, $"{subject} is closed with 1009: a message past its maximumMessageBytes, {_bounds.MaximumMessageBytes} bytes"));
+    }
+
+    /// <summary>
     /// Whether this side ended it of its own: dropped behind a bound, failed with 1009, or aborted
     /// past its close timeout. What its socket meets after says nothing more, and its close is
     /// unclean, whatever the peer answers.
