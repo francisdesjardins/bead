@@ -593,6 +593,8 @@ export interface IHTTPRequestLike {
   /** `1.0`, `1.1` or `2.0`: an HTTP/1.1 request names its host, which an HTTP/1.0 one may not. */
   readonly httpVersion: string;
   readonly httpVersionMajor: number;
+  /** Whether its body came whole; Node's has it, and HTTP/2's compatibility one. */
+  readonly complete?: boolean | undefined;
   readonly method?: string | undefined;
   /**
    * Its fields as they came, each name before its value: what counts an `Authorization` or a

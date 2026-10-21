@@ -48,6 +48,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The TypeScript HTTP server writes an answer that comes before its request's body is whole with
+  `connection: close`, its connection closed in stages, as spec 15.12 states and the C# side does,
+  where it kept the connection alive.
 - The C# HTTP server resets, over HTTP/2, the stream of a request with neither `:authority` nor
   `host`, `PROTOCOL_ERROR`, under any hosts, `*` among them (RFC 9113 §8.3.1), as the TypeScript
   side's does, where it answered 403 `host-refused`.

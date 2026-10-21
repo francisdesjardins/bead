@@ -249,6 +249,26 @@ export const endClosing = ({ request, response }: IExchangeIn, end: IEnd): void 
   return undefined;
 };
 
+/**
+ * The fields of an answer written while its request's body still comes: over HTTP/1,
+ * `connection: close`, its socket closing in stages as `endClosing`'s, so what still comes is
+ * dropped, never read as a next request (RFC 9112 §9.6), as Kestrel closes it; none over HTTP/2,
+ * whose stream ends alone, or once the body came whole.
+ */
+export const closingOf = ({ request, response }: IExchangeIn): Readonly<Record<string, string>> => {
+  if (request.httpVersionMajor !== 1 || request.complete !== false) {
+    return {};
+  }
+
+  const { socket } = request;
+
+  if (typeof socket.removeListener === 'function' && typeof socket.destroy === 'function') {
+    lingerOn(socket as Parameters<typeof lingerOn>[0], response);
+  }
+
+  return { connection: 'close' };
+};
+
 // a malformed HTTP/2 request's end: its stream reset, nothing written (RFC 9113 §8.1.1)
 const reset = (response: IHTTPResponseLike): void => {
   if (response.stream === undefined) {
