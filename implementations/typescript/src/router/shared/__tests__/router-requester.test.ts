@@ -879,27 +879,43 @@ test.describe('createRouterCore', () => {
 
   test.describe('cancels', () => {
     test('cancel a request that times out before its caller hears of it, so a call made again goes out behind', async () => {
-      const { port, sent } = createPort();
-      using core = createRouterCore(port);
-      const call = () => {
-        return core.request(new Uint8Array(0), {
-          connectionHandle: 'a',
-          options: { timeout: 20 },
-          procedure: echo,
-        });
-      };
-
-      await expect(
-        call().catch(() => {
-          return call();
-        })
-      ).rejects.toBeInstanceOf(TimeoutError);
-      expect(answersOf(sent)).toEqual([
-        ['a', EnvelopeKind.REQUEST, 2],
-        ['a', EnvelopeKind.CANCEL, 2],
-        ['a', EnvelopeKind.REQUEST, 4],
-        ['a', EnvelopeKind.CANCEL, 4],
-      ]);
+      for (const side of ['client', 'server'] as const) {
+        for (const timeout of [20, 1_000]) {
+          const clock = createTestClock();
+          const { port, sent } = createPort({
+            failures: side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES,
+          });
+          using core = createRouterCore(port, { clock });
+          const firstId = side === 'client' ? 1 : 2;
+          const call = () => {
+            return core.request(side === 'client' ? Uint8Array.of(1) : new Uint8Array(0), {
+              connectionHandle: 'a',
+              options: { timeout },
+              procedure: echo,
+            });
+          };
+          const asking = call().catch((reason: unknown) => {
+            expect(reason).toBeInstanceOf(TimeoutError);
+            expect(reason).toMatchObject({ timeout });
+            return call();
+          });
+          clock.tick(timeout);
+          await sleep(0);
+          expect(answersOf(sent)).toEqual([
+            ['a', EnvelopeKind.REQUEST, firstId],
+            ['a', EnvelopeKind.CANCEL, firstId],
+            ['a', EnvelopeKind.REQUEST, firstId + 2],
+          ]);
+          clock.tick(timeout);
+          await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout });
+          expect(answersOf(sent)).toEqual([
+            ['a', EnvelopeKind.REQUEST, firstId],
+            ['a', EnvelopeKind.CANCEL, firstId],
+            ['a', EnvelopeKind.REQUEST, firstId + 2],
+            ['a', EnvelopeKind.CANCEL, firstId + 2],
+          ]);
+        }
+      }
     });
 
     test('take an answer too late in silence while its call id is reserved, then report it', async () => {
@@ -1353,23 +1369,37 @@ test.describe('createRouterCore', () => {
     });
 
     test('report a second result on a call whose result comes in a transfer, and go on receiving it', async () => {
-      const { port, reported } = createPort();
-      using core = createRouterCore(port, { limits });
-      const payload = patternOf(80);
-      const answering = core.request(new Uint8Array(0), {
-        connectionHandle: 'a',
-        options,
-        procedure: echo,
-      });
+      for (const side of ['client', 'server'] as const) {
+        for (const total of [80, 100]) {
+          const { port, reported } = createPort({
+            failures: side === 'client' ? CLIENT_FAILURES : SERVER_FAILURES,
+          });
+          const callId = side === 'client' ? 1 : 2;
+          using core = createRouterCore(port, { limits });
+          const payload = patternOf(total);
+          const answering = core.request(side === 'client' ? Uint8Array.of(1) : new Uint8Array(0), {
+            connectionHandle: 'a',
+            options: { timeout: side === 'client' ? 5_000 : 1_000 },
+            procedure: echo,
+          });
 
-      await sleep(0);
-      core.receive(resultOpeningOf(2, { payload: payload.subarray(0, 32), total: 80 }), 'a');
-      core.receive(resultOf(2, Uint8Array.of(9)), 'a');
-      core.receive(chunkOf(2, { offset: 32, payload: payload.subarray(32), total: 80 }), 'a');
+          await sleep(0);
+          core.receive(resultOpeningOf(callId, { payload: payload.subarray(0, 32), total }), 'a');
+          core.receive(resultOf(callId, Uint8Array.of(9)), 'a');
+          for (let offset = 32; offset < total; offset += 48) {
+            core.receive(
+              chunkOf(callId, { offset, payload: payload.subarray(offset, offset + 48), total }),
+              'a'
+            );
+          }
 
-      await expect(answering).resolves.toMatchObject({ payload });
-      expect(codesOf(reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
-      expect(reported[0]?.[0].message).toContain('call 2 is answered already, by a transfer');
+          await expect(answering).resolves.toMatchObject({ payload });
+          expect(codesOf(reported)).toEqual([[ProtocolCode.ENVELOPE_MALFORMED, 'a']]);
+          expect(reported[0]?.[0].message).toContain(
+            `call ${String(callId)} is answered already, by a transfer`
+          );
+        }
+      }
     });
 
     test('reserve the call id of a result it received in part as long as the peer keeps its call abandoned, or its timeout when longer', async () => {

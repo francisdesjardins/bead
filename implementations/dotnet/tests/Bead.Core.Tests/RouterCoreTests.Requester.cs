@@ -512,21 +512,41 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Cancels_a_request_that_timed_out_before_its_caller_hears_so_one_made_again_goes_out_behind()
     {
-        var client = new Peer(RouterSide.Client);
-        var asked = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(1));
+        foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
+        {
+            foreach (var milliseconds in new[] { 20, 1_000 })
+            {
+                var client = new Peer(side);
+                var firstId = side == RouterSide.Client ? 1u : 2u;
+                var timeout = TimeSpan.FromMilliseconds(milliseconds);
+                var payload = side == RouterSide.Client ? new byte[] { 1 } : Array.Empty<byte>();
+                var asked = client.Request(payload, timeout);
 
-        await client.Settle();
-        await client.Advance(TimeSpan.FromSeconds(1));
-        await Assert.ThrowsAsync<TimeoutException>(() =>
-        {
-            return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
-        });
-        _ = client.Request(new byte[] { 1 }, TimeSpan.FromSeconds(1));
-        await client.Settle();
-        Assert.Equal([(EnvelopeKind.Request, 1u), (EnvelopeKind.Cancel, 1u), (EnvelopeKind.Request, 3u)], client.Sent.Select((envelope) =>
-        {
-            return (envelope.Kind, envelope.Header.CallId);
-        }));
+                await client.Settle();
+                await client.Advance(timeout);
+                var first = await Assert.ThrowsAsync<TimeoutException>(() =>
+                {
+                    return asked.WaitAsync(Patience, TestContext.Current.CancellationToken);
+                });
+                Assert.Equal($"no answer came in {milliseconds} milliseconds", first.Message);
+                var retried = client.Request(payload, timeout);
+                await client.Settle();
+                Assert.Equal([(EnvelopeKind.Request, firstId), (EnvelopeKind.Cancel, firstId), (EnvelopeKind.Request, firstId + 2)], client.Sent.Select((envelope) =>
+                {
+                    return (envelope.Kind, envelope.Header.CallId);
+                }));
+                await client.Advance(timeout);
+                var second = await Assert.ThrowsAsync<TimeoutException>(() =>
+                {
+                    return retried.WaitAsync(Patience, TestContext.Current.CancellationToken);
+                });
+                Assert.Equal($"no answer came in {milliseconds} milliseconds", second.Message);
+                Assert.Equal([(EnvelopeKind.Request, firstId), (EnvelopeKind.Cancel, firstId), (EnvelopeKind.Request, firstId + 2), (EnvelopeKind.Cancel, firstId + 2)], client.Sent.Select((envelope) =>
+                {
+                    return (envelope.Kind, envelope.Header.CallId);
+                }));
+            }
+        }
     }
 
     [Fact]
@@ -798,17 +818,29 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task Reports_a_second_result_on_a_call_whose_result_comes_in_a_transfer_and_goes_on_receiving_it()
     {
-        var peer = new Peer(RouterSide.Client);
-        var payload = PatternOf(100);
-        var asked = peer.Request(new byte[] { 1 }, TimeSpan.FromSeconds(5));
+        foreach (var side in new[] { RouterSide.Client, RouterSide.Server })
+        {
+            foreach (var total in new[] { 80, 100 })
+            {
+                var peer = new Peer(side);
+                var callId = side == RouterSide.Client ? 1u : 2u;
+                var payload = PatternOf(total);
+                var asked = peer.Request(side == RouterSide.Client ? new byte[] { 1 } : Array.Empty<byte>(), TimeSpan.FromSeconds(side == RouterSide.Client ? 5 : 1));
 
-        await peer.Settle();
-        await peer.Deliver(ResultOpeningOf(1, (payload, 32)));
-        await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = 1 }, Payload = new byte[] { 9 } });
-        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, Assert.IsType<FailureException>(Assert.Single(peer.Reports)).Code);
-        await peer.Deliver(ChunkOf(1, (payload, 32, 48)));
-        await peer.Deliver(ChunkOf(1, (payload, 80, 20)));
-        Assert.Equal(payload, (await asked.WaitAsync(Patience, TestContext.Current.CancellationToken)).Payload.ToArray());
+                await peer.Settle();
+                await peer.Deliver(ResultOpeningOf(callId, (payload, 32)));
+                await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId }, Payload = new byte[] { 9 } });
+                var reported = Assert.IsType<FailureException>(Assert.Single(peer.Reports));
+                Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, reported.Code);
+                Assert.Contains($"call {callId} is answered already, by a transfer", reported.Message, StringComparison.Ordinal);
+                Assert.Equal([Handle], peer.ReportedOn);
+                for (var offset = 32; offset < total; offset += 48)
+                {
+                    await peer.Deliver(ChunkOf(callId, (payload, offset, Math.Min(48, total - offset))));
+                }
+                Assert.Equal(payload, (await asked.WaitAsync(Patience, TestContext.Current.CancellationToken)).Payload.ToArray());
+            }
+        }
     }
 
     [Fact]
@@ -1413,10 +1445,11 @@ public sealed partial class RouterCoreTests
         });
 
         port.Refusal = new IOException("refused");
-        await Assert.ThrowsAsync<IOException>(() =>
+        var refused = await Assert.ThrowsAsync<IOException>(() =>
         {
             return core.Request(new byte[1], CountedCallOf((series, Timeout.InfiniteTimeSpan))).WaitAsync(Patience, TestContext.Current.CancellationToken);
         });
+        Assert.Equal("refused", refused.Message);
         await result.WaitAsync(Patience, TestContext.Current.CancellationToken);
         await Assert.ThrowsAsync<FailureException>(() =>
         {

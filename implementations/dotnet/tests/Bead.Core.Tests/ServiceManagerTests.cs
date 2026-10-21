@@ -828,8 +828,8 @@ public sealed partial class ServiceManagerTests
         Assert.Equal([("echo", true)], router.UnregisteredNotifications);
     }
 
-    // the TypeScript side also says in which order the two settle; here the second's continuation
-    // runs on the thread pool, so the test says only that both wait, then both settle
+    // the TypeScript side says in which order its callbacks run; here an await resumes on the thread
+    // pool, in no order, so the test says that the first is settled once the second settles
     [Fact]
     public async Task A_registration_arriving_while_the_router_subscribes_waits_for_the_subscription()
     {
@@ -845,12 +845,17 @@ public sealed partial class ServiceManagerTests
         Assert.True(router.Holds(Echo.Address));
 
         var second = notification.Register(new Text("b"), Unheard)();
+        var ordered = second.ContinueWith((completed) =>
+        {
+            Assert.True(completed.IsCompletedSuccessfully);
+            Assert.True(first.IsCompletedSuccessfully, "the first registration settles before the second");
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
         Assert.False(first.IsCompleted);
         Assert.False(second.IsCompleted);
 
         gate.SetResult();
-        await Task.WhenAll(first, second).WaitAsync(Patience, Cancelled);
+        await Task.WhenAll(first, second, ordered).WaitAsync(Patience, Cancelled);
 
         Assert.Single(router.Requests);
     }
@@ -1020,6 +1025,7 @@ public sealed partial class ServiceManagerTests
         Assert.Empty(heard);
         Assert.Equal([(DebugDirection.Rx, DebugType.Notification)], StepsOf(seen));
         Assert.Same(failure, Assert.Single(seen).Error);
+        Assert.IsType<JsonException>(failure.InnerException);
     }
 
     [Fact]
