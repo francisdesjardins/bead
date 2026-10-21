@@ -1,5 +1,7 @@
-import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, type MessageInitShape, toBinary } from '@bufbuild/protobuf';
+import { Int64ValueSchema, ValueSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
+import { PresenceSchema } from '../../proto/__tests__/generated/validations_pb';
 import {
   base64Of,
   JsonFormError,
@@ -22,6 +24,8 @@ import {
 // constants
 
 const REGISTRY = typeRegistryOf([EdgesSchema, EverythingSchema]);
+
+const INT64_VALUE_URL = 'type.googleapis.com/google.protobuf.Int64Value';
 
 const ENCODER = new TextEncoder();
 
@@ -51,6 +55,32 @@ const refusalOf = (body: string): string | undefined => {
   }
 
   return undefined;
+};
+
+/** Why `text` is refused as a JSON text, in the words of transcoding 5. */
+const textRefusalOf = (text: string): string | undefined => {
+  try {
+    readJsonText(ENCODER.encode(text));
+  } catch (error) {
+    if (error instanceof JsonFormError) {
+      return error.reason;
+    }
+
+    throw error;
+  }
+
+  return undefined;
+};
+
+/** `count` messages each the `child` of the one around it. */
+const nestedEdges = (count: number): MessageInitShape<typeof EdgesSchema> => {
+  let init: MessageInitShape<typeof EdgesSchema> = {};
+
+  for (let index = 0; index < count; index += 1) {
+    init = { child: init };
+  }
+
+  return init;
 };
 
 const writeEdges = (init: Parameters<typeof create<typeof EdgesSchema>>[1]): string => {
@@ -222,4 +252,148 @@ test('writes an aliased enum by its first name, a float at its shortest, and a -
   expect(writeEdges({ aFloat: -0 })).toBe('{}');
   expect(writeEdges({ maybeDouble: -0 })).toBe('{"maybeDouble":0}');
   expect(base64Of(Uint8Array.of(0, 0xff, 0xfe))).toBe('AP/+');
+});
+
+test('refuses a text that is no JSON: a string left open or wrongly escaped, a comma or a colon missing', () => {
+  expect(textRefusalOf('{"a')).toBe('not JSON');
+  expect(textRefusalOf('{"a":"\\q"}')).toBe('not JSON');
+  expect(textRefusalOf('[1 2]')).toBe('not JSON');
+  expect(textRefusalOf('{"a" 1}')).toBe('not JSON');
+  expect(textRefusalOf('{"a":1 "b":2}')).toBe('not JSON');
+  expect(textRefusalOf('{"a":[1,2],"b":{}}')).toBeUndefined();
+});
+
+test('refuses a value its field’s type holds none of, each by its reason', () => {
+  expect(refusalOf('{"anInt32":"0.5"}')).toBe('an int32 that is no integer');
+  expect(refusalOf('{"anInt32":1e30}')).toBe('an int32 past its range');
+  expect(refusalOf('{"aDouble":"1e400"}')).toBe('a double past its range');
+  expect(refusalOf('{"someBytes":1}')).toBe('no bytes');
+  expect(refusalOf('{"aliased":true}')).toBe('no Aliased');
+  expect(refusalOf('{"aliased":2147483648}')).toBe('an enum number past its range');
+  expect(refusalOf('{"at":1}')).toBe('a Timestamp that is no string');
+  expect(refusalOf('{"extra":1}')).toBe('a Struct that is no object');
+  expect(refusalOf('{"any":1}')).toBe('an Any that is no object');
+  expect(refusalOf('{"labels":1}')).toBe('a map that is no object');
+  expect(
+    refusalOf('{"any":{"@type":"type.googleapis.com/google.protobuf.ListValue","value":1}}')
+  ).toBe('a ListValue that is no array');
+});
+
+test('reads and writes an Any of a wrapper by its value, and a wrapper alone as its scalar', () => {
+  const edges = readEdges(`{"any":{"@type":"${INT64_VALUE_URL}","value":"7"}}`);
+
+  expect(edges.any?.typeUrl).toBe(INT64_VALUE_URL);
+  expect(fromBinary(Int64ValueSchema, edges.any?.value ?? new Uint8Array()).value).toBe(7n);
+  expect(
+    writeEdges({
+      any: {
+        typeUrl: INT64_VALUE_URL,
+        value: toBinary(Int64ValueSchema, create(Int64ValueSchema, { value: 7n })),
+      },
+    })
+  ).toBe(`{"any":{"@type":"${INT64_VALUE_URL}","value":"7"}}`);
+  expect(
+    writeProtoJson(Int64ValueSchema, {
+      message: create(Int64ValueSchema, { value: -3n }),
+      registry: REGISTRY,
+    })
+  ).toBe('"-3"');
+});
+
+test('writes each kind of Value, and a Struct within a Struct, in its own form', () => {
+  expect(writeEdges({ value: { kind: { case: 'nullValue', value: 0 } } })).toBe('{"value":null}');
+  expect(writeEdges({ value: { kind: { case: 'boolValue', value: false } } })).toBe(
+    '{"value":false}'
+  );
+  expect(
+    writeEdges({
+      value: {
+        kind: {
+          case: 'structValue',
+          value: { fields: { b: { kind: { case: 'stringValue', value: 'x' } } } },
+        },
+      },
+    })
+  ).toBe('{"value":{"b":"x"}}');
+  expect(writeEdges({ extra: { a: { b: 1, c: [] } } })).toBe('{"extra":{"a":{"b":1,"c":[]}}}');
+});
+
+test('writes a message nested 100 deep, and refuses one nested past 100', () => {
+  expect(
+    writeProtoJson(EdgesSchema, {
+      message: create(EdgesSchema, nestedEdges(100)),
+      registry: REGISTRY,
+    })
+  ).toMatch(/^\{"child":/u);
+  expect(() => {
+    return writeProtoJson(EdgesSchema, {
+      message: create(EdgesSchema, nestedEdges(101)),
+      registry: REGISTRY,
+    });
+  }).toThrow('a message nested past 100');
+});
+
+test('writes a response body’s field at its default where its oneof holds another member or none', () => {
+  const chosen = create(EverythingSchema, { choice: { case: 'choiceText', value: 'x' } });
+  const empty = create(EverythingSchema);
+
+  expect(
+    writeFieldJson(EverythingSchema, { message: chosen, name: 'choice_text', registry: REGISTRY })
+  ).toBe('"x"');
+  expect(
+    writeFieldJson(EverythingSchema, { message: chosen, name: 'choiceInner', registry: REGISTRY })
+  ).toBe('{}');
+  expect(
+    writeFieldJson(EverythingSchema, { message: empty, name: 'choiceText', registry: REGISTRY })
+  ).toBe('""');
+  expect(
+    writeFieldJson(EverythingSchema, { message: empty, name: 'inner', registry: REGISTRY })
+  ).toBe('{}');
+  expect(
+    writeFieldJson(EdgesSchema, {
+      message: create(EdgesSchema),
+      name: 'nullMember',
+      registry: REGISTRY,
+    })
+  ).toBe('null');
+  expect(
+    writeFieldJson(ValueSchema, {
+      message: create(ValueSchema),
+      name: 'numberValue',
+      registry: REGISTRY,
+    })
+  ).toBe('0');
+  expect(
+    writeFieldJson(ValueSchema, {
+      message: create(ValueSchema),
+      name: 'bool_value',
+      registry: REGISTRY,
+    })
+  ).toBe('false');
+  expect(() => {
+    return writeFieldJson(EverythingSchema, { message: empty, name: 'nope', registry: REGISTRY });
+  }).toThrow('a response body that names no field of its result');
+});
+
+test('writes a field of its own presence where it is set, at its default too, and leaves it out unset', () => {
+  const registry = typeRegistryOf([PresenceSchema]);
+
+  // * `explicit` and `needed` of edition 2023's explicit presence, `implicit` of its own
+  expect(writeProtoJson(PresenceSchema, { message: create(PresenceSchema), registry })).toBe('{}');
+  expect(
+    writeProtoJson(PresenceSchema, {
+      message: create(PresenceSchema, { explicit: '', implicit: '' }),
+      registry,
+    })
+  ).toBe('{"explicit":""}');
+});
+
+// TypeScript alone: a JavaScript number is a double, which a float field may hold unrounded
+test('writes a float field that holds what no 32-bit float holds as the double it holds', () => {
+  expect(
+    writeProtoJson(EdgesSchema, {
+      message: create(EdgesSchema, { aFloat: 0.1 }),
+      registry: REGISTRY,
+    })
+  ).toBe('{"aFloat":0.1}');
 });

@@ -215,4 +215,40 @@ test.describe('createMemoryTransportServer', () => {
     expect(crossed).toBeGreaterThan(64);
     expect(router.gauges().counts).toMatchObject({ receivingTransfers: 0, sendingTransfers: 0 });
   });
+
+  // spec 15.13
+  test('drops what an end it no longer holds receives, and refuses to send what is no bytes', async () => {
+    await using server = createMemoryTransportServer();
+    const heard: unknown[] = [];
+    const told: boolean[] = [];
+
+    server.on('message', ({ data }) => {
+      heard.push([...new Uint8Array(data as ArrayBuffer)]);
+    });
+    await server.start();
+
+    const end = await server.accept({
+      address: 'local',
+      close: (wasClean) => {
+        told.push(wasClean);
+      },
+      port: undefined,
+      receive: () => {},
+    });
+    const [{ connectionHandle } = { connectionHandle: undefined }] = server.clients;
+
+    if (connectionHandle === undefined) {
+      throw new Error('the server holds no connection');
+    }
+
+    await expect(server.send({ data: 'text' }, connectionHandle)).rejects.toThrow(
+      'an in-memory connection carries envelopes, as bytes'
+    );
+    end.receive({ data: new Uint8Array([1]) });
+    expect(await server.close(connectionHandle)).toBe(true);
+    end.receive({ data: new Uint8Array([2]) });
+    await turn();
+
+    expect([heard, told, server.clients]).toEqual([[[1]], [true], []]);
+  });
 });

@@ -162,3 +162,10 @@ test('splits the verb at the last colon its last segment holds unencoded', () =>
   expect(answerOf(templates, '/v1/books/2:frobnicate').index).toBeUndefined();
   expect(answerOf(['/v1/books/{name}'], '/v1/books/a:b').index).toBeUndefined();
 });
+
+test('answers a path two tying templates match by the first of them', () => {
+  const templates = ['/v1/{a}/x', '/v1/{b=*}/x'].map(templateOf);
+
+  expect(routeIndexOf(templates, pathOf('/v1/q/x'))).toBe(0);
+  expect(routeIndexOf(templates.toReversed(), pathOf('/v1/q/x'))).toBe(0);
+});

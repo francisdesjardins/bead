@@ -6,7 +6,9 @@ import { expect, test } from '@playwright/test';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
 import type { IClock } from '../../transport/shared/clock';
+import { ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPGateway, type IHTTPGateway } from '../http-gateway';
+import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema } from './generated/transcoding_pb';
@@ -186,6 +188,19 @@ const until = async (condition: () => boolean, within = 2_000): Promise<void> =>
 
     await sleep(5);
   }
+};
+
+/** The route table, raw's route told its result is an Edges: what it echoes read as one. */
+const rawAsEdges = (): readonly IHttpRouteInit[] => {
+  return HTTP_ROUTES.map((init) => {
+    return init.procedure === TranscodingProcedures.raw
+      ? {
+          ...init,
+          procedure: { ...init.procedure, result: TranscodingProcedures.echoEdges.result },
+          result: EdgesSchema,
+        }
+      : init;
+  });
 };
 
 // tests
@@ -540,18 +555,8 @@ test('holds each caller’s calls and streams to bounds of their own', async () 
 });
 
 test('answers a result the stock library refuses 502, reported, none of its words in the problem', async () => {
-  // * raw's route told its result is an Edges: the bytes its server echoes, `x`, a varint cut short
-  await using fixture = await startTranscoding({
-    routes: HTTP_ROUTES.map((init) => {
-      return init.procedure === TranscodingProcedures.raw
-        ? {
-            ...init,
-            procedure: { ...init.procedure, result: TranscodingProcedures.echoEdges.result },
-            result: EdgesSchema,
-          }
-        : init;
-    }),
-  });
+  // * the bytes its server echoes, `x`, a varint cut short
+  await using fixture = await startTranscoding({ routes: rawAsEdges() });
   const reported = reportedBy(fixture.gateway);
   const answered = await send(fixture.port, {
     body: 'x',
@@ -840,4 +845,105 @@ test('words each refusal of its bounds exactly', async () => {
   await meet(timed, { ...hang, status: 504, words: 'no answer within 50 ms' });
 
   expect(parted).toEqual([]);
+});
+
+test('refuses an authorization but elsewhere or bearer-jwt, and a bound that is no whole number above 0', () => {
+  const transport = createMemoryTransportServer();
+
+  expect(() => {
+    return createHTTPGateway({
+      authorization: 'basic' as 'elsewhere',
+      routes: HTTP_ROUTES,
+      transport,
+    });
+  }).toThrow(new ProgrammerError("a gateway's authorization is elsewhere or bearer-jwt"));
+  expect(() => {
+    return createHTTPGateway({ maximumBodyBytes: 0, routes: HTTP_ROUTES, transport });
+  }).toThrow(new ProgrammerError('maximumBodyBytes is a whole number above 0, not 0'));
+  expect(() => {
+    return createHTTPGateway({ routes: HTTP_ROUTES, transport, window: 1.5 });
+  }).toThrow(new ProgrammerError('window is a whole number above 0, not 1.5'));
+});
+
+test('listens on none of its own when built with no createServer, and reports to a handler until it is off', async () => {
+  {
+    await using silent = createHTTPGateway({
+      routes: HTTP_ROUTES,
+      transport: createMemoryTransportServer(),
+    });
+
+    await expect(silent.start()).rejects.toThrow(
+      new ProgrammerError('a gateway built with no createServer listens on none of its own')
+    );
+  }
+
+  await using fixture = await startTranscoding();
+  const reported = reportedBy(fixture.gateway);
+  const off: unknown[] = [];
+  const handler = (error: Error): void => {
+    off.push(error);
+  };
+
+  fixture.gateway.on('error', handler);
+  fixture.gateway.off('error', handler);
+  await fixture.memory.stop();
+
+  expect((await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' })).status).toBe(
+    503
+  );
+  expect([reported.length, off]).toEqual([1, []]);
+});
+
+test('answers 500 a result its mapping holds no form of, reported, in the mapping’s words', async () => {
+  // * an Edges whose mask holds `foo_`, a path whose lowerCamelCase does not read back
+  await using fixture = await startTranscoding({ routes: rawAsEdges() });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, {
+    body: '\u001a\u0006\u000a\u0004foo_',
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(answered).toMatchObject({
+    body: '{"detail":"a FieldMask path whose lowerCamelCase does not read back","status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(reported).toEqual(['a FieldMask path whose lowerCamelCase does not read back']);
+});
+
+test('refuses a query beside a body of a json, text or raw route, and a variable that does not decode, 400', async () => {
+  await using fixture = await startTranscoding();
+  const raw = await send(fixture.port, {
+    body: 'x',
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw?a=1',
+  });
+  const undecoded = await send(fixture.port, { method: 'GET', path: '/v1/shelves/%FF/books/2' });
+
+  const undecodable = (detail: string): string => {
+    return `{"code":50,"detail":"${detail}","scope":"protocol","status":400,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}`;
+  };
+
+  expect(raw).toMatchObject({
+    body: undecodable('a query beside a body of the whole request'),
+    status: 400,
+  });
+  expect(undecoded).toMatchObject({
+    body: undecodable('a value whose bytes are not UTF-8'),
+    status: 400,
+  });
+});
+
+test('answers 304 a request for the document under an if-none-match of any entity tag', async () => {
+  await using fixture = await startTranscoding();
+
+  expect(
+    (
+      await send(fixture.port, {
+        headers: { 'if-none-match': ' * ' },
+        method: 'GET',
+        path: '/openapi.json',
+      })
+    ).status
+  ).toBe(304);
 });

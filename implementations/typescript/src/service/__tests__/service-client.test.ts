@@ -13,6 +13,7 @@ import {
   CONNECTION,
   connectWorker,
   deprecationsIn,
+  GreeterFailures,
   GreeterProcedures,
   NOT_EMPTY,
   NOT_EMPTY_DETAIL,
@@ -359,5 +360,56 @@ test.describe('createServiceClient', () => {
       files: 1,
       reports: [],
     });
+  });
+
+  test('refuses to answer what is no command of its service, a command twice, and a window of what it does not hold', async () => {
+    await using connected = await connectWorker();
+    const client = createServiceClient(GreeterProcedures, connected.client);
+    const answer = (_request: unknown, response: (result: string) => Promise<void>) => {
+      return response('noon');
+    };
+
+    expect(() => {
+      client.on('sayHello' as 'clock', answer);
+    }).toThrow(new ProgrammerError("sayHello is no command this service's client answers"));
+    expect(() => {
+      client.on('toString' as 'clock', answer);
+    }).toThrow(new ProgrammerError("toString is no command this service's client answers"));
+    client.on('clock', answer);
+    expect(() => {
+      client.on('clock', answer);
+    }).toThrow(new ProgrammerError('clock has a resolver already'));
+    expect(() => {
+      return createServiceClient(GreeterProcedures, connected.client, {
+        windows: { toString: 1 } as never,
+      });
+    }).toThrow(new ProgrammerError('toString does not notify, and takes no window'));
+  });
+
+  test('sends a command’s unlisted code as written, and reports it', async () => {
+    await using connected = await connectWorker();
+    const greeter = createServiceServer<typeof GreeterProcedures, string>(GreeterProcedures, {
+      admissions: { loud },
+    });
+    const client = createServiceClient(GreeterProcedures, connected.client);
+    const reported: unknown[] = [];
+
+    connected.client.router.on('error', (error) => {
+      reported.push(error);
+    });
+    client.on('clock', (_request, response) => {
+      // ! a cast alone reaches a failure its procedure does not list
+      return response(null, GreeterFailures.of('TOO_LOUD') as never);
+    });
+    greeter.offer(connected.server);
+
+    const failure = await failureOf(
+      greeter.command.clock('now')({ connectionHandle: CONNECTION, timeout: 1_000 })
+    );
+
+    expect(GreeterFailures.is(failure, 'TOO_LOUD')).toBe(true);
+    expect(reported).toEqual([
+      new ProgrammerError('clock answers failure 2, which it does not list'),
+    ]);
   });
 });

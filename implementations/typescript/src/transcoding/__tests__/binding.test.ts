@@ -1,16 +1,19 @@
 import { expect, test } from '@playwright/test';
+import { ProgrammerError } from '../../transport/shared/errors';
 import { bindRequest, type IBindingOptions } from '../binding';
 import { JsonFormError, typeRegistryOf } from '../json-form';
 import {
+  EverythingSchema,
   GetBookRequestSchema,
   UpdateBookRequestSchema,
+  type Everything,
   type GetBookRequest,
   type UpdateBookRequest,
 } from './generated/transcoding_pb';
 
 // constants
 
-const REGISTRY = typeRegistryOf([GetBookRequestSchema, UpdateBookRequestSchema]);
+const REGISTRY = typeRegistryOf([EverythingSchema, GetBookRequestSchema, UpdateBookRequestSchema]);
 
 const ENCODER = new TextEncoder();
 
@@ -31,10 +34,14 @@ const updateBook = (body: string, query?: string): UpdateBookRequest => {
   }) as UpdateBookRequest;
 };
 
-/** Why binding `query` to `getBook`'s default `GET` is refused. */
-const refusalOf = (query: string): string | undefined => {
+const everything = (options: Omit<IBindingOptions, 'registry'>): Everything => {
+  return bindRequest(EverythingSchema, { ...options, registry: REGISTRY }) as Everything;
+};
+
+/** Why `bind` is refused, in the words of transcoding 4 and 5. */
+const reasonOf = (bind: () => unknown): string | undefined => {
   try {
-    getBook({ query, variables: {} });
+    bind();
   } catch (error) {
     if (error instanceof JsonFormError) {
       return error.reason;
@@ -44,6 +51,13 @@ const refusalOf = (query: string): string | undefined => {
   }
 
   return undefined;
+};
+
+/** Why binding `query` to `getBook`'s default `GET` is refused. */
+const refusalOf = (query: string): string | undefined => {
+  return reasonOf(() => {
+    return getBook({ query, variables: {} });
+  });
 };
 
 // tests
@@ -132,4 +146,85 @@ test('fills a PATCH’s update_mask with the keys its body holds', () => {
     return updateBook('{"name":"other"}');
   }).toThrow('a field that two of the request set');
   expect(updateBook('{"title":"x"}').book?.name).toBe('shelves/1/books/2');
+});
+
+test('binds a wrapper and a well-known type of a string form from a variable or a parameter, never a Struct, a Value or a ListValue', () => {
+  const read = everything({
+    query: 'wrappedInt64=7&wrappedBool=true&took=1.5s',
+    variables: { at: '1970-01-01T00:00:01Z', wrapped_string: 'x' },
+  });
+
+  expect(read).toMatchObject({ wrappedBool: true, wrappedInt64: 7n, wrappedString: 'x' });
+  expect(read.at?.seconds).toBe(1n);
+  expect(read.took).toMatchObject({ nanos: 500_000_000, seconds: 1n });
+  expect(
+    reasonOf(() => {
+      return everything({ query: 'extra=x', variables: {} });
+    })
+  ).toBe('a parameter of a message');
+  expect(
+    reasonOf(() => {
+      return everything({ query: 'anyValue=x', variables: {} });
+    })
+  ).toBe('a parameter of a message');
+  expect(
+    reasonOf(() => {
+      return everything({ query: 'list=x', variables: {} });
+    })
+  ).toBe('a parameter of a message');
+});
+
+test('reads a parameter without its = as an empty value, and an enum’s by its name or its number', () => {
+  expect(getBook({ query: 'name&revision=2&color=COLOR_GREEN', variables: {} })).toMatchObject({
+    color: 2,
+    name: '',
+    revision: 2n,
+  });
+  expect(getBook({ query: 'color=1', variables: {} }).color).toBe(1);
+  expect(refusalOf('flag')).toBe('no bool');
+});
+
+test('refuses a body that is no object as the request whole, or under a field a variable sets inside', () => {
+  expect(
+    reasonOf(() => {
+      return getBook({
+        body: ENCODER.encode('1'),
+        routeBody: '*',
+        variables: { name: 'shelves/1/books/2' },
+      });
+    })
+  ).toBe('a GetBookRequest that is no object');
+  expect(
+    reasonOf(() => {
+      return getBook({
+        body: ENCODER.encode('1'),
+        routeBody: 'sub',
+        variables: { 'sub.name': 'x' },
+      });
+    })
+  ).toBe('a field that two of the request set');
+});
+
+test('fills no update_mask path of a PATCH’s body that is no object, and refuses a member of it that names no field', () => {
+  const read = bindRequest(UpdateBookRequestSchema, {
+    body: ENCODER.encode('null'),
+    isPatch: true,
+    registry: REGISTRY,
+    routeBody: 'book',
+    variables: {},
+  }) as UpdateBookRequest;
+
+  expect(read.book).toBeUndefined();
+  expect(read.updateMask?.paths).toEqual([]);
+  expect(
+    reasonOf(() => {
+      return updateBook('{"title":"t","nope":1}');
+    })
+  ).toBe('a key no field names');
+});
+
+test('throws a programmer’s error for a variable that names no field', () => {
+  expect(() => {
+    return getBook({ variables: { 'sub.nope': 'x' } });
+  }).toThrow(ProgrammerError);
 });

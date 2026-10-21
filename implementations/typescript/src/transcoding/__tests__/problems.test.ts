@@ -175,3 +175,46 @@ test('writes PAYLOAD_INVALID’s violations as errors, each pointer by JSON name
     stopped: true,
   });
 });
+
+test('places a violation off 18.4’s field path grammar at the body whole, or nowhere under a body of one field, and one below a scalar at that scalar', () => {
+  const errorsOf = (detail: string, route?: Parameters<typeof problemOfFailure>[1]): unknown => {
+    const { body } = problemOfFailure(
+      { arose: 'server', code: ProtocolCode.PAYLOAD_INVALID, detail, scope: 'protocol' },
+      route
+    );
+
+    return (JSON.parse(body) as { errors: unknown }).errors;
+  };
+  const violationOf = (fieldPath: string): string => {
+    return JSON.stringify({ fieldPath, message: 'm', ruleId: 'string.min_len' });
+  };
+
+  expect(
+    errorsOf(
+      [violationOf('!bad'), violationOf('a_string[0]x'), violationOf('a_string.inner')].join('\n'),
+      {
+        route: { body: '*', request: EverythingSchema, variables: [] },
+      }
+    )
+  ).toEqual([
+    { detail: 'm', fieldPath: '!bad', pointer: '#', ruleId: 'string.min_len' },
+    { detail: 'm', fieldPath: 'a_string[0]x', pointer: '#', ruleId: 'string.min_len' },
+    { detail: 'm', fieldPath: 'a_string.inner', pointer: '#/aString', ruleId: 'string.min_len' },
+  ]);
+  expect(
+    errorsOf([violationOf('!bad'), violationOf('book.title[0]x')].join('\n'), {
+      route: { body: 'book', request: UpdateBookRequestSchema, variables: [] },
+    })
+  ).toEqual([
+    { detail: 'm', fieldPath: '!bad', ruleId: 'string.min_len' },
+    { detail: 'm', fieldPath: 'book.title[0]x', ruleId: 'string.min_len' },
+  ]);
+  // without its route, no violation is placed; without its message, none is told
+  expect(errorsOf('{"fieldPath":"a_string","ruleId":"x.y"}')).toEqual([
+    { fieldPath: 'a_string', ruleId: 'x.y' },
+  ]);
+});
+
+test('answers a refusal of a status without a phrase by its number, and one without words with no detail', () => {
+  expect(problemOfRefusal(599, '').body).toBe('{"status":599,"title":"599","type":"about:blank"}');
+});

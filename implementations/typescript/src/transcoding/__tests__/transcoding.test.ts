@@ -1,8 +1,8 @@
 // ── Transcoding ───────────────────────────────────────────────────────────────
 
 // Bead's HTTP/JSON transcoding, `spec/transcoding.json`, played against the TypeScript side's
-// modules, and its exchanges against its gateway over a real socket, in process with a server of the
-// `Transcoding` service, joined. The C# side plays the same file.
+// entry, `./transcoding`, and its exchanges against its gateway over a real socket, in process with
+// a server of the `Transcoding` service, joined. The C# side plays the same file.
 
 // dependencies
 
@@ -13,24 +13,28 @@ import { type DescMessage, equals, fromBinary, type Message, toBinary } from '@b
 import { expect, test } from '@playwright/test';
 import { fromHexadecimal } from '../../router/shared/__tests__/vectors';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
-import { bindRequest } from '../binding';
-import { createEventStream, EVENT_STREAM_MEDIA_TYPE, eventDataOf, HEARTBEAT } from '../events';
-import { JsonFormError, readProtoJson, typeRegistryOf, writeProtoJson } from '../json-form';
+import { HEARTBEAT } from '../events';
 import {
   type Arose,
+  bindRequest,
+  createEventStream,
   type Encoding,
+  EVENT_STREAM_MEDIA_TYPE,
+  eventDataOf,
+  isTie,
+  JsonFormError,
   type OwnFailure,
+  parseTemplate,
   problemOfFailure,
   problemOfOwn,
-} from '../problems';
-import {
-  isTie,
-  parseTemplate,
   rawPathOf,
+  readProtoJson,
   routeIndexOf,
   templateOf,
+  typeRegistryOf,
   variablesOf,
-} from '../templates';
+  writeProtoJson,
+} from '../transcoding';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { EdgesSchema, EverythingSchema } from './generated/transcoding_pb';
 import { startTranscoding } from './transcoding-service';

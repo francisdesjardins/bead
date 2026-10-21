@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { createMemoryTransportServer } from '../../server/memory-transport-server';
 import type { MemoryTransportServer } from '../../server/types';
-import type { ITransportMessage } from '../../shared/types';
+import { ProgrammerError, ReadyStateError } from '../../shared/errors';
+import type {
+  IMemoryEndLike,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
+  ITransportMessage,
+} from '../../shared/types';
 import { createMemoryTransportClient } from '../memory-transport-client';
 import { dispose } from '../transport-client';
 import type { ITransportClientInternal } from '../types';
@@ -65,6 +71,33 @@ const connected = async () => {
       await server.stop();
     },
   };
+};
+
+/**
+ * A server of the test's own, which accepts each connect once the test resolves it: each peer it
+ * met, each accept it holds, and each close its end was told, clean or not.
+ */
+const createHeldServer = () => {
+  const accepts: { reject: (reason: Error) => void; resolve: (end: IMemoryEndLike) => void }[] = [];
+  const closes: boolean[] = [];
+  const peers: IMemoryPeerLike[] = [];
+  const end: IMemoryEndLike = {
+    close: (wasClean) => {
+      closes.push(wasClean);
+    },
+    receive: () => {},
+  };
+  const server: IMemoryTransportServerLike = {
+    accept: (peer) => {
+      peers.push(peer);
+
+      return new Promise((resolve, reject) => {
+        accepts.push({ reject, resolve });
+      });
+    },
+  };
+
+  return { accepts, closes, end, peers, server };
 };
 
 // definition
@@ -231,6 +264,96 @@ test.describe('createMemoryTransportClient', () => {
       await turn();
 
       expect(atServer).toEqual([['close', false, connectionHandle]]);
+    }
+  });
+
+  // spec 15.13
+  test('hears what its server sent before the connection opened once it has, in its order', async () => {
+    const held = createHeldServer();
+    await using client = createMemoryTransportClient({ server: held.server });
+    const heard: number[][] = [];
+
+    client.on('message', ({ data }) => {
+      heard.push([...new Uint8Array(data as ArrayBuffer)]);
+    });
+
+    const connecting = client.connect({});
+
+    await turn();
+    held.peers[0]?.receive({ data: new Uint8Array([1]) });
+    held.peers[0]?.receive({ data: new Uint8Array([2]) });
+    expect(heard).toEqual([]);
+    held.accepts[0]?.resolve(held.end);
+    await connecting;
+
+    expect([heard, client.isOpen()]).toEqual([[[1], [2]], true]);
+  });
+
+  // spec 15.13
+  test('fails a connect its server closed as it opened, what it sent before unheard', async () => {
+    const held = createHeldServer();
+    await using client = createMemoryTransportClient({ server: held.server });
+    const heard: unknown[] = [];
+
+    client.on('message', (message) => {
+      heard.push(message);
+    });
+
+    const connecting = client.connect({});
+
+    await turn();
+    held.peers[0]?.close(false);
+    held.peers[0]?.receive({ data: new Uint8Array([1]) });
+    held.accepts[0]?.resolve(held.end);
+
+    await expect(connecting).rejects.toThrow(
+      'the in-memory transport server closed the connection as it opened'
+    );
+    expect([heard, client.isClosed()]).toEqual([[], true]);
+  });
+
+  // spec 15.13
+  test('closes at once, unclean, a connection its server draws once a dispose gave up on its connect', async () => {
+    const held = createHeldServer();
+    const client = createMemoryTransportClient({ server: held.server });
+    const heard: unknown[] = [];
+
+    client.on('message', (message) => {
+      heard.push(message);
+    });
+
+    const connecting = client.connect({});
+
+    await turn();
+    (client as unknown as ITransportClientInternal)[dispose]();
+    await expect(connecting).rejects.toThrow('disposed while connecting');
+    expect(client.isClosed()).toBe(true);
+
+    held.accepts[0]?.resolve(held.end);
+    held.peers[0]?.receive({ data: new Uint8Array([1]) });
+    await turn();
+
+    expect([held.closes, heard]).toEqual([[false], []]);
+  });
+
+  test('refuses a send or a disconnect unless open, and a send of what is no bytes', async () => {
+    {
+      await using client = createMemoryTransportClient({ server: createHeldServer().server });
+
+      await expect(client.send({ data: new Uint8Array([1]) })).rejects.toThrow(ReadyStateError);
+      await expect(client.disconnect()).rejects.toThrow(ReadyStateError);
+    }
+
+    {
+      await using pair = await connected();
+      const { atServer, client } = pair;
+
+      await expect(client.send({ data: 'text' })).rejects.toThrow(
+        new ProgrammerError('an in-memory connection carries envelopes, as bytes')
+      );
+      await turn();
+
+      expect([atServer, client.isOpen()]).toEqual([[], true]);
     }
   });
 });

@@ -123,3 +123,28 @@ test('credits each notification once the event before it was taken', async () =>
   expect(await isSettled(stream.notification('{}'))).toBe(true);
   expect(pending.length).toBe(3);
 });
+
+test('writes one result alone, and nothing once the stream ended', () => {
+  const clock = createTestClock();
+  const { sink, told, written } = createSink();
+  const stream = createEventStream(sink, { clock, heartbeat: Number.POSITIVE_INFINITY });
+
+  stream.result('{"ticks":1}');
+  stream.result('{"ticks":2}');
+  expect(told).toEqual(['open']);
+  expect(written).toEqual(['event: result\nid: 1\ndata: {"ticks":1}\n\n']);
+
+  // a failure after the end, as a result, writes and tells nothing
+  stream.close();
+  stream.failure({ body: '{"status":500}', fields: {}, status: 500 });
+  expect(told).toEqual(['open']);
+
+  const closed = createSink();
+  const early = createEventStream(closed.sink, { clock, heartbeat: Number.POSITIVE_INFINITY });
+
+  early.close();
+  early.result('{}');
+  early.failure({ body: '{"status":500}', fields: {}, status: 500 });
+  expect(closed.told).toEqual([]);
+  expect(closed.written).toEqual([]);
+});
