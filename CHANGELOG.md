@@ -109,6 +109,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The demo's relay forwards a listen's `bead-after` and `bead-wait`, which the HTTP server needs:
+  the page over `?transport=http` connects again, where every listen was refused 400 `malformed`.
 - The TypeScript servers report a server not yet started as insecure unless its application says
   otherwise or it has TLS, as the C# servers do.
 - The TypeScript HTTP server writes an answer that comes before its request's body is whole with
