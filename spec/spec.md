@@ -1148,7 +1148,8 @@ listener's throw keeps it open, and before its close, which is then unclean. It 
 drops without its closing handshake, its TCP connection ended or reset, nor one its heartbeat drops,
 nor its own drop of a peer that never answered a close within its close timeout, nor, over HTTP, a
 server gone, a refusal of its own, an answer of another type, an exchange lost or a listen given up
-past its inactivity timeout: each one's unclean close tells it.
+past its inactivity timeout: each one's close tells it, unclean, but for a client's own
+`disconnect` left unanswered, whose close is told as the `disconnect` asked.
 A server's transport tells each refusal it judges of its own: a request it refuses as it arrives,
 in section 15.6's order, or whose body it refuses as it comes, marked in `bead-refusal`. It never
 tells the 404 that ends an exchange or a listen it had taken as their connection closes (section
@@ -1257,14 +1258,15 @@ connection; a 426 names `upgrade` in its `Connection`.
 [§10.4](https://www.rfc-editor.org/rfc/rfc6455#section-10.4)): it sends its close, drains what
 still comes until the peer's close or its close timeout, then ends the connection, its close
 unclean whatever code the peer answers with; a side reports it, naming the bound and its value
-(section 15.1). A server's close timeout, 5 seconds by default, bounds each closing handshake it
-begins: a peer that has not answered by then is dropped, its close unclean. A side SHOULD ping its
-peer every `heartbeat` — 30 seconds by default, or never — and close a connection that left a ping
-unanswered, so a peer gone without a word ends in a close; a ping waits behind what was sent
-before it, so a peer that stops reading leaves it unanswered too. What waits for a server's socket
-is held besides as section 15.12 says. A side that closes says 1000; a server that stops, 1001, to
-each connection it holds, one whose opening handshake completes as its stop begins among them. A
-close with 1000 is the clean one.
+(section 15.1). A side's close timeout, 5 seconds by default, bounds each closing handshake it
+begins, its 1009 among them: a peer that has not answered by then is dropped, and a server tells its
+close unclean. A client SHOULD hold one where its platform lets it: a page's `WebSocket` bounds its
+close as its platform does. A side SHOULD ping its peer every `heartbeat` — 30 seconds by default,
+or never — and close a connection that left a ping unanswered, so a peer gone without a word ends
+in a close; a ping waits behind what was sent before it, so a peer that stops reading leaves it
+unanswered too. What waits for a server's socket is held besides as section 15.12 says. A side
+that closes says 1000; a server that stops, 1001, to each connection it holds, one whose opening
+handshake completes as its stop begins among them. A close with 1000 is the clean one.
 
 ### HTTP
 
@@ -1440,8 +1442,9 @@ come back. Both sides of an HTTP connection set `maximumTransfers` to 0, and a p
 envelope holds.
 
 15.12. A server bounds what its clients hold, and times what is under way, by these names; a client
-times its own inactivity by `inactivityTimeout`, its default and whether it may be without end
-alike (section 15.10):
+bounds what it reads, an answer or an envelope a batch brings, by `maximumBodyBytes`, its default
+alike, and times its own inactivity by `inactivityTimeout`, its default and whether it may be
+without end alike (section 15.10):
 
 | Bound                          | By default                                                                                                     | Bounds                                                                               | Transports      |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------- |

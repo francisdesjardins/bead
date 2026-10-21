@@ -315,13 +315,14 @@ export interface IWebSocketLike {
 /** `CONNECTING` and `OPEN` are read from the injected constructor, so `ws` and the global agree. */
 export interface IWebSocketConstructor {
   /**
-   * `options` is `ws`'s alone, its `headers` written on the upgrade; the global `WebSocket` takes
+   * `options` is `ws`'s alone, its `headers` written on the upgrade, its `closeTimeout` what it
+   * waits on a close within, its own 1009's among them, from ws 8.22; the global `WebSocket` takes
    * two parameters, and still meets it.
    */
   new (
     url: string,
     protocols?: string | string[],
-    options?: { headers?: Record<string, string>; maxPayload?: number }
+    options?: { closeTimeout?: number; headers?: Record<string, string>; maxPayload?: number }
   ): IWebSocketLike;
   readonly CONNECTING: number;
   readonly OPEN: number;
@@ -363,6 +364,16 @@ export interface IWSTransportClientOptions extends ITransportClientOptions {
    * WebSocket ignores it and keeps delivering Blobs.
    */
   binaryType?: 'arraybuffer' | 'blob' | 'nodebuffer' | undefined;
+  /**
+   * Milliseconds the server gets to answer a close before it is dropped, which bounds `disconnect`,
+   * a dispose's close and the 1009 a message past `maxPayload` fails it with, on the real clock
+   * whatever `clock` is: it bounds the platform's own close handshake, and is given to `ws` as its
+   * own. From 1 to 2³¹ − 1, rounded to the nearest whole one, or `Infinity` to wait without end,
+   * which the timer `ws` arms on every close holds to 2³¹ − 1; any other, 0 among them, is a
+   * {@link ProgrammerError}. The global `WebSocket` takes none, its platform's bound applying.
+   * Defaults to {@link CLOSE_TIMEOUT}.
+   */
+  closeTimeout?: number | undefined;
   /**
    * Milliseconds between two pings of the server, rounded to the nearest whole one, from 1 to
    * 2³¹ − 1, and `Infinity` for none; 0 is refused: a server that has not answered one by the next

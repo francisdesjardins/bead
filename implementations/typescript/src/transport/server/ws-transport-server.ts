@@ -11,6 +11,7 @@ import {
 } from 'node:http';
 import {
   CLOSE_EVENT,
+  CLOSE_TIMEOUT,
   CONNECTION_EVENT,
   ERROR_EVENT,
   MESSAGE_EVENT,
@@ -72,7 +73,7 @@ import {
   toldOfHandshake,
 } from './ws-handshake';
 
-export { TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
+export { CLOSE_TIMEOUT, TRANSPORT_WEBSOCKET_BINARYTYPE } from '../shared/constants';
 export { HEARTBEAT } from '../shared/heartbeat';
 export { HOST_REFUSAL, ORIGIN_REFUSAL } from './hosts-and-origins';
 export {
@@ -95,9 +96,6 @@ export type {
 export { WS_REFUSALS } from './ws-handshake';
 
 // constants
-
-/** How long a close handshake may take by default: a peer that never answers is dropped after it. */
-export const CLOSE_TIMEOUT = 5_000;
 
 /** The largest message by default: a router's largest envelope by default (spec 15.3). */
 export const MAXIMUM_MESSAGE_BYTES = 16_778_240;

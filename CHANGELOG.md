@@ -17,14 +17,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Spec 15.3 states that a side fails a connection with 1009 past its `maximumMessageBytes` (RFC
-  6455 §7.1.7): it drains until the peer's close or its close timeout, 5 seconds by default on a
-  server, its close unclean whatever code the peer answers with, and the side reports it naming the
-  bound and its value. Spec 15.1 states what a side's transport, a client's as a server's, reports
+  6455 §7.1.7): it drains until the peer's close or its close timeout, its close unclean whatever
+  code the peer answers with, and the side reports it naming the bound and its value. A side's close
+  timeout, 5 seconds by default, bounds each closing handshake it begins, which a client SHOULD hold
+  where its platform lets it. Spec 15.1 states what a side's transport, a client's as a server's, reports
   on its `error`: what it ends a connection for of its own — a protocol error, a 1009, a drop, or
   over HTTP an envelope past `maximumBodyBytes` and a batch that does not read — each once, as the
   connection ends, before its close, and a listener's throw; never a peer gone without its closing
   handshake, one its heartbeat drops, its own abort past its close timeout, nor over HTTP a server
   gone, a refusal of its own, an exchange lost or its inactivity timeout.
+- Spec 15.12 states that a client bounds what it reads, an answer or an envelope a batch brings, by
+  `maximumBodyBytes`, as both HTTP clients do.
 - Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
   `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
   where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name
@@ -51,6 +54,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   abort after `CloseTimeout`, or its heartbeat's drop.
 - The TypeScript WebSocket server gives `ws` its `closeTimeout`, so a peer that never answers its
   1009 is dropped after it rather than after `ws`'s own 30 seconds.
+- The TypeScript WebSocket client takes `closeTimeout`, `CLOSE_TIMEOUT` by default, 5 seconds, held
+  as the server's, and gives it to `ws`, so a server that never answers its `disconnect` or its 1009
+  is dropped after it, as the C# client's `CloseTimeout` drops it, rather than after `ws`'s own 30
+  seconds; over the global `WebSocket`, its platform bounds its close.
 - Both HTTP servers report a drop once its connection's end began, its exchanges cut, then tell
   its close all the same, so a listener of `error` that throws keeps no connection open; a
   connection two late answers drop is reported once.

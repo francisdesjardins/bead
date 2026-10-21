@@ -1414,9 +1414,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
-    // the TypeScript side's client has no close timeout of its own: its platform's bounds its close
-    // (docs/support.md). Until the transports' client part decides, it plays the outcomes of the
-    // server's close timeout, a place of the durations' file
+    // the server's close timeout's place of the durations' file, whose outcomes a WebSocket's close
+    // timeout has, a client's as a server's, as the TypeScript side's client plays them
     [Fact]
     public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_and_runs_on_the_clock_it_is_given()
     {
@@ -1446,6 +1445,36 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             {
                 await using var taken = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = given });
             }
+        }
+    }
+
+    [Fact]
+    public async Task Drops_a_server_that_never_answers_its_disconnect_once_its_close_timeout_passed_telling_no_error_its_close_as_the_disconnect_said()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = TimeSpan.FromMilliseconds(200) });
+        var (told, _) = EndOf(client);
+        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var began = TimeProvider.System.GetTimestamp();
+            var closing = client.CloseConnection();
+
+            // it reads its close and answers nothing, its socket held open
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.NormalClosure), (received.MessageType, received.CloseStatus));
+
+            await closing.WaitAsync(Patience, Cancelled);
+
+            Assert.True(TimeProvider.System.GetElapsedTime(began) >= TimeSpan.FromMilliseconds(150));
+            Assert.Equal(new object[] { (true, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
         }
     }
 

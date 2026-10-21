@@ -11,6 +11,7 @@ import {
   dispose,
   type ITransportClient,
   type ITransportClientInternal,
+  PLATFORM_CLOCK,
   ProgrammerError,
   ReadyState,
   ReadyStateError,
@@ -21,8 +22,16 @@ import {
 } from '../transport-client';
 import * as constants from '../../shared/constants';
 import {
+  DURATIONS,
+  givenOf,
+  isExcused,
+  outcomeOf,
+  refusalOf,
+} from '../../shared/__tests__/durations';
+import {
   allClosed,
   closedPort,
+  createTestClock,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -34,6 +43,7 @@ import {
   trapUncaught,
 } from '../../shared/__tests__/fixtures';
 import {
+  CLOSE_TIMEOUT,
   createWSTransportClient,
   HEARTBEAT,
   MAXIMUM_MESSAGE_BYTES,
@@ -1386,17 +1396,6 @@ const toldBy = (client: WSTransportClient): unknown[][] => {
 test.describe('WSTransportClient, what its error tells', () => {
   const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
 
-  // `ws`'s own close timeout, which the client's options do not reach, held to 200 ms
-  const QuickWs = new Proxy(TrackedWs, {
-    construct: (target, [url, protocols, options]: unknown[]) => {
-      return Reflect.construct(target, [
-        url,
-        protocols,
-        { ...(options as object), closeTimeout: 200 },
-      ]) as object;
-    },
-  });
-
   test('tells a server that drops without its closing handshake, by a FIN or a reset, by its unclean close alone, no error', async () => {
     await using raw = await startRaw();
     const drops = [
@@ -1496,8 +1495,9 @@ test.describe('WSTransportClient, what its error tells', () => {
   test('fails with 1009 a message past its bound for a server that never answers, telling one error, then an unclean close once its close timeout passed', async () => {
     await using raw = await startRaw();
     const client = createWSTransportClient({
+      closeTimeout: 200,
       maxPayload: 1_024,
-      WebSocket: QuickWs as unknown as IWebSocketConstructor,
+      WebSocket: TrackedWs,
     });
     const told = toldBy(client);
     const upgraded = raw.next();
@@ -1585,6 +1585,111 @@ test.describe('WSTransportClient, what its error tells', () => {
 
       expect(told).toEqual([['close', false, false]]);
     }
+  });
+});
+
+// spec 15.3
+test.describe('WSTransportClient, its close timeout', () => {
+  const [, [, TrackedWs]] = IMPLEMENTATIONS;
+
+  test('hands `maxPayload` and its close timeout to ws, an envelope’s limit and CLOSE_TIMEOUT when not given', async () => {
+    const given: unknown[] = [];
+    const client = createWSTransportClient({
+      // no socket at all, refused as it is made: what the constructor is handed is all it reads
+      WebSocket: function (_url: string, _protocols: unknown, options: { closeTimeout?: number }) {
+        given.push(options);
+
+        throw new Error('no socket');
+      } as unknown as IWebSocketConstructor,
+    });
+
+    await client.connect({ host, port: 8_080 }).catch(() => {});
+
+    expect(CLOSE_TIMEOUT).toBe(5_000);
+    expect(given).toEqual([{ closeTimeout: CLOSE_TIMEOUT, maxPayload: MAXIMUM_MESSAGE_BYTES }]);
+  });
+
+  test('holds its close timeout to a whole number of milliseconds, rounded, refusing zero, and runs on the clock it is given', async () => {
+    const clock = createTestClock();
+
+    expect(createWSTransportClient({ clock }).clock).toBe(clock);
+    expect(createWSTransportClient().clock).toBe(PLATFORM_CLOCK);
+
+    // the server's place, whose outcomes a WebSocket's close timeout has, a client's as a server's
+    const place = DURATIONS.places.find(({ id }) => {
+      return id === 'webSocketTransportServer.closeTimeout';
+    });
+
+    expect(place).toBeDefined();
+
+    for (const input of DURATIONS.inputs) {
+      if (place === undefined || isExcused(place, { input })) {
+        continue;
+      }
+
+      const duration = givenOf(input);
+      const given: unknown[] = [];
+      const building = (): WSTransportClient => {
+        return createWSTransportClient({
+          closeTimeout: duration,
+          WebSocket: function (
+            _url: string,
+            _protocols: unknown,
+            { closeTimeout }: { closeTimeout?: number }
+          ) {
+            given.push(closeTimeout);
+
+            throw new Error('no socket');
+          } as unknown as IWebSocketConstructor,
+        });
+      };
+
+      if (outcomeOf(place, input).outcome === 'refused') {
+        expect(building, input.name).toThrow(
+          new ProgrammerError(refusalOf(place, { given: duration, phrase: 'a close timeout' }))
+        );
+
+        continue;
+      }
+
+      await building()
+        .connect({ host, port: 8_080 })
+        .catch(() => {});
+
+      // `ws`'s timer holds what the transport holds, and never as the longest a timer holds
+      expect(given, input.name).toEqual([
+        duration === Infinity ? 2 ** 31 - 1 : Math.round(duration),
+      ]);
+    }
+  });
+
+  test('drops a server that never answers its disconnect once its close timeout passed, telling no error, its close as the disconnect said', async () => {
+    await using raw = await startRaw();
+    const client = createWSTransportClient({ closeTimeout: 200, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    // it reads its close and answers nothing, its socket held open
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    const began = performance.now();
+
+    await client.disconnect();
+
+    expect(performance.now() - began).toBeGreaterThanOrEqual(150);
+    expect([told, sent]).toEqual([[['close', true, false]], [1000]]);
+    expect(client.isClosed()).toBe(true);
   });
 });
 

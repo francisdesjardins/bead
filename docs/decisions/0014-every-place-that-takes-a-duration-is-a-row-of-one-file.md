@@ -92,8 +92,8 @@ when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transp
 for both sides: 5 minutes by default, and without end if given so. `httpTransportClient.pause`'s at
 once is 15.10's "listen again at once", stated with a schedule no file checks: the file leaves it
 out, as it leaves out the defaults no clause states. `webSocketTransportServer.closeTimeout` is the
-server's alone: the C# client's close timeout is the client part's to align with the TypeScript
-client, which has none, and stays an open row of the matrix (0011).
+server's place, and its outcomes a client's close timeout's too: each WebSocket client's tests play
+it.
 
 **One table of inputs serves every place.** An input is given in one of five forms, each a value a
 user writes on every platform:
