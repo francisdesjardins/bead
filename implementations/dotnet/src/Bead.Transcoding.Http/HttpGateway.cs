@@ -1280,23 +1280,22 @@ public sealed class HttpGateway : IAsyncDisposable
     // it refused, checked once as the policy's are
     private static Resolved PolicyOf(HttpGatewayOptions options)
     {
-        var defaults = new HttpGatewayOptions { Transport = options.Transport, Routes = options.Routes };
         var policy = options.Policy;
         var checkedOnce = HttpPolicy.Of(new HttpPolicyOptions
         {
-            Hosts = HttpPolicy.Taken(nameof(HttpGatewayOptions.Hosts), (options.Hosts, defaults.Hosts, policy?.Hosts)),
-            Origins = HttpPolicy.Taken(nameof(HttpGatewayOptions.Origins), (options.Origins, defaults.Origins, policy?.Origins)),
-            TrustedProxies = HttpPolicy.Taken(nameof(HttpGatewayOptions.TrustedProxies), (options.TrustedProxies, defaults.TrustedProxies, policy?.TrustedProxies)),
-            UnnamedProxies = HttpPolicy.Taken(nameof(HttpGatewayOptions.UnnamedProxies), (options.UnnamedProxies, defaults.UnnamedProxies, policy?.UnnamedProxies)),
-            BodyBytesBudget = HttpPolicy.Taken(nameof(HttpGatewayOptions.BodyBytesBudget), (options.BodyBytesBudget, defaults.BodyBytesBudget, policy?.BodyBytesBudget)),
-            MaximumBodyBytes = HttpPolicy.Taken(nameof(HttpGatewayOptions.MaximumBodyBytes), (options.MaximumBodyBytes, defaults.MaximumBodyBytes, policy?.MaximumBodyBytes)),
-            HeadersTimeout = HttpPolicy.Taken(nameof(HttpGatewayOptions.HeadersTimeout), (options.HeadersTimeout, defaults.HeadersTimeout, policy?.HeadersTimeout)),
-            MinimumBodyBytesPerSecond = HttpPolicy.Taken(nameof(HttpGatewayOptions.MinimumBodyBytesPerSecond), (options.MinimumBodyBytesPerSecond, defaults.MinimumBodyBytesPerSecond, policy?.MinimumBodyBytesPerSecond)),
-            BodyGracePeriod = HttpPolicy.Taken(nameof(HttpGatewayOptions.BodyGracePeriod), (options.BodyGracePeriod, defaults.BodyGracePeriod, policy?.BodyGracePeriod)),
-            MinimumSendBytesPerSecond = HttpPolicy.Taken(nameof(HttpGatewayOptions.MinimumSendBytesPerSecond), (options.MinimumSendBytesPerSecond, defaults.MinimumSendBytesPerSecond, policy?.MinimumSendBytesPerSecond)),
-            SendGracePeriod = HttpPolicy.Taken(nameof(HttpGatewayOptions.SendGracePeriod), (options.SendGracePeriod, defaults.SendGracePeriod, policy?.SendGracePeriod)),
-            MaximumConnections = HttpPolicy.Taken(nameof(HttpGatewayOptions.MaximumConnections), (options.MaximumConnections, defaults.MaximumConnections, policy?.MaximumConnections)),
-            MaximumConnectionsPerAddress = HttpPolicy.Taken(nameof(HttpGatewayOptions.MaximumConnectionsPerAddress), (options.MaximumConnectionsPerAddress, defaults.MaximumConnectionsPerAddress, policy?.MaximumConnectionsPerAddress)),
+            Hosts = HttpPolicy.Taken(nameof(HttpGatewayOptions.Hosts), (options.Hosts, options.IsGiven(HttpPolicyMembers.Hosts), policy?.Hosts)),
+            Origins = HttpPolicy.Taken(nameof(HttpGatewayOptions.Origins), (options.Origins, options.IsGiven(HttpPolicyMembers.Origins), policy?.Origins)),
+            TrustedProxies = HttpPolicy.Taken(nameof(HttpGatewayOptions.TrustedProxies), (options.TrustedProxies, options.IsGiven(HttpPolicyMembers.TrustedProxies), policy?.TrustedProxies)),
+            UnnamedProxies = HttpPolicy.Taken(nameof(HttpGatewayOptions.UnnamedProxies), (options.UnnamedProxies, options.IsGiven(HttpPolicyMembers.UnnamedProxies), policy?.UnnamedProxies)),
+            BodyBytesBudget = HttpPolicy.Taken(nameof(HttpGatewayOptions.BodyBytesBudget), (options.BodyBytesBudget, options.IsGiven(HttpPolicyMembers.BodyBytesBudget), policy?.BodyBytesBudget)),
+            MaximumBodyBytes = HttpPolicy.Taken(nameof(HttpGatewayOptions.MaximumBodyBytes), (options.MaximumBodyBytes, options.IsGiven(HttpPolicyMembers.MaximumBodyBytes), policy?.MaximumBodyBytes)),
+            HeadersTimeout = HttpPolicy.Taken(nameof(HttpGatewayOptions.HeadersTimeout), (options.HeadersTimeout, options.IsGiven(HttpPolicyMembers.HeadersTimeout), policy?.HeadersTimeout)),
+            MinimumBodyBytesPerSecond = HttpPolicy.Taken(nameof(HttpGatewayOptions.MinimumBodyBytesPerSecond), (options.MinimumBodyBytesPerSecond, options.IsGiven(HttpPolicyMembers.MinimumBodyBytesPerSecond), policy?.MinimumBodyBytesPerSecond)),
+            BodyGracePeriod = HttpPolicy.Taken(nameof(HttpGatewayOptions.BodyGracePeriod), (options.BodyGracePeriod, options.IsGiven(HttpPolicyMembers.BodyGracePeriod), policy?.BodyGracePeriod)),
+            MinimumSendBytesPerSecond = HttpPolicy.Taken(nameof(HttpGatewayOptions.MinimumSendBytesPerSecond), (options.MinimumSendBytesPerSecond, options.IsGiven(HttpPolicyMembers.MinimumSendBytesPerSecond), policy?.MinimumSendBytesPerSecond)),
+            SendGracePeriod = HttpPolicy.Taken(nameof(HttpGatewayOptions.SendGracePeriod), (options.SendGracePeriod, options.IsGiven(HttpPolicyMembers.SendGracePeriod), policy?.SendGracePeriod)),
+            MaximumConnections = HttpPolicy.Taken(nameof(HttpGatewayOptions.MaximumConnections), (options.MaximumConnections, options.IsGiven(HttpPolicyMembers.MaximumConnections), policy?.MaximumConnections)),
+            MaximumConnectionsPerAddress = HttpPolicy.Taken(nameof(HttpGatewayOptions.MaximumConnectionsPerAddress), (options.MaximumConnectionsPerAddress, options.IsGiven(HttpPolicyMembers.MaximumConnectionsPerAddress), policy?.MaximumConnectionsPerAddress)),
         });
 
         return new Resolved

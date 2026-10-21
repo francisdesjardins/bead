@@ -108,7 +108,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `GeneratedCode.SupportsVersion5`; the runtimes carry 4 and 5, so a project that generates no route
   table regenerates nothing.
 - The HTTP transport's options take one policy object of hosts, origins, proxies and bounds, which a
-  gateway takes too.
+  gateway takes too; a member given in it and beside it is refused, whatever its value.
 - Decision 0008's axis carries the transcoding's companion beside the debugging one: its file repeats
   its `transcodingVersion`, and a release whose transcoding moved tags `transcoding-v`;
   `tools/release.mjs prepare` takes `--transcoding <move>`, and `tools/check-versions.mjs` holds its

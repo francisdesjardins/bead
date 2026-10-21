@@ -114,18 +114,18 @@ public sealed record HttpPolicy
 
     /// <summary>
     /// A listener's member of <paramref name="name"/>: its policy's, where the policy gives one and
-    /// the listener's own is at its default; its own, where the policy gives none. One given in the
-    /// policy and beside it, away from its default, is an <see cref="ArgumentException"/>, so that a
-    /// listener never takes one value of two in silence.
+    /// the listener gives none beside it; its own, where the policy gives none. One given in the
+    /// policy and beside it, whatever its value, its default among them, is an
+    /// <see cref="ArgumentException"/>, so that a listener never takes one value of two in silence.
     /// </summary>
-    internal static IReadOnlyList<string>? Taken(string name, (IReadOnlyList<string>? Own, IReadOnlyList<string>? Default, IReadOnlyList<string>? Policy) member)
+    internal static IReadOnlyList<string>? Taken(string name, (IReadOnlyList<string>? Own, bool IsGiven, IReadOnlyList<string>? Policy) member)
     {
         if (member.Policy is not { } given)
         {
             return member.Own;
         }
 
-        if (!(member.Own ?? []).SequenceEqual(member.Default ?? [], StringComparer.Ordinal))
+        if (member.IsGiven)
         {
             throw new ArgumentException($"{name} is given in the policy and beside it: give it once", name);
         }
@@ -134,7 +134,7 @@ public sealed record HttpPolicy
     }
 
     /// <summary>A listener's member that is a value, as a list's is taken.</summary>
-    internal static T Taken<T>(string name, (T Own, T Default, T? Policy) member)
+    internal static T Taken<T>(string name, (T Own, bool IsGiven, T? Policy) member)
         where T : struct
     {
         if (member.Policy is not { } given)
@@ -142,7 +142,7 @@ public sealed record HttpPolicy
             return member.Own;
         }
 
-        if (!EqualityComparer<T>.Default.Equals(member.Own, member.Default))
+        if (member.IsGiven)
         {
             throw new ArgumentException($"{name} is given in the policy and beside it: give it once", name);
         }
@@ -154,6 +154,29 @@ public sealed record HttpPolicy
     {
         return given.Duration is { } duration ? Clocks.AssertHeldFinite((given.Name, given.Name), duration) : null;
     }
+}
+
+/// <summary>
+/// The members a policy may give, each a flag, by which a listener's options mark those given
+/// beside it: an <c>init</c> marks its member given, whatever its value, its default among them.
+/// </summary>
+[Flags]
+internal enum HttpPolicyMembers
+{
+    None = 0,
+    Hosts = 1 << 0,
+    Origins = 1 << 1,
+    TrustedProxies = 1 << 2,
+    UnnamedProxies = 1 << 3,
+    BodyBytesBudget = 1 << 4,
+    MaximumBodyBytes = 1 << 5,
+    HeadersTimeout = 1 << 6,
+    MinimumBodyBytesPerSecond = 1 << 7,
+    BodyGracePeriod = 1 << 8,
+    MinimumSendBytesPerSecond = 1 << 9,
+    SendGracePeriod = 1 << 10,
+    MaximumConnections = 1 << 11,
+    MaximumConnectionsPerAddress = 1 << 12,
 }
 
 /// <summary>What an <see cref="HttpPolicy"/> is built of: each member the listeners' option of its name, none where it is not given.</summary>

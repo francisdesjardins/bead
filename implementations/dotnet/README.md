@@ -122,7 +122,7 @@ notifications as Server-Sent Events, paced by what the response takes. **The rou
 a procedure answers its default route whatever rules map it, and what guards it is its admission.
 Each exchange draws one Bead connection, closed as its response ends. It judges a request by the
 HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
-too; a member given in the policy and beside it, where it differs from its default, is refused.
+too; a member given in the policy and beside it, at its default as at any value, is refused.
 It listens on its own port, or answers in the application's own Kestrel pipeline,
 `endpoints.MapBeadGateway(gateway)`, its fallback endpoint; one origin for `/bead` and `/api/…`
 comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its

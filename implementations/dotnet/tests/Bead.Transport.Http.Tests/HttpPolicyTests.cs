@@ -63,6 +63,22 @@ public sealed class HttpPolicyTests
                 new HttpTransportServerOptions { Hosts = ["other.example"], Policy = policy }.PolicyApplied();
             }).Message);
 
+        // a member given beside its policy is given, at its default as at any other value
+        var proxied = HttpPolicy.Of(new HttpPolicyOptions { UnnamedProxies = 1 });
+
+        Assert.Equal(1, new HttpTransportServerOptions { Policy = proxied }.PolicyApplied().UnnamedProxies);
+        Assert.Equal(
+            "UnnamedProxies is given in the policy and beside it: give it once (Parameter 'UnnamedProxies')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                new HttpTransportServerOptions { UnnamedProxies = 0, Policy = proxied }.PolicyApplied();
+            }).Message);
+
+        // a list written as none is none given
+        var hosted = HttpPolicy.Of(new HttpPolicyOptions { Hosts = ["api.example"] });
+
+        Assert.Equal(["api.example"], new HttpTransportServerOptions { Hosts = null, Policy = hosted }.PolicyApplied().Hosts);
+
         // * the HTTP transport takes one, as a gateway does
         await using var transport = new HttpTransportServer(new HttpTransportServerOptions { Policy = policy });
 

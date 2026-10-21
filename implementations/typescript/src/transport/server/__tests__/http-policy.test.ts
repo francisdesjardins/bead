@@ -54,6 +54,19 @@ test('gives a listener its members from its policy, and refuses one given in it 
   expect(() => {
     return withPolicy({ hosts: ['other.example'], policy });
   }).toThrow('hosts is given in the policy and beside it: give it once');
+
+  // a member given beside its policy is given, at its default as at any other value
+  const proxied = httpPolicyOf({ unnamedProxies: 1 });
+
+  expect(withPolicy({ policy: proxied })).toEqual({ unnamedProxies: 1 });
+  expect(() => {
+    return withPolicy({ policy: proxied, unnamedProxies: 0 });
+  }).toThrow('unnamedProxies is given in the policy and beside it: give it once');
+
+  // a list written as none is none given
+  const hosted = httpPolicyOf({ hosts: ['api.example'] });
+
+  expect(withPolicy({ policy: hosted, hosts: undefined }).hosts).toEqual(['api.example']);
   expect(() => {
     return withPolicy({ policy: { hosts: [] } as unknown as ReturnType<typeof httpPolicyOf> });
   }).toThrow('a policy is what httpPolicyOf builds');
