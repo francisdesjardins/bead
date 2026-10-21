@@ -3335,8 +3335,8 @@ EXCHANGES = [
     exchange("two authorization fields, 400 malformed", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
               refused_own(400, 'malformed')]),
-    exchange("a command to an exchange's connection is answered PROCEDURE_UNKNOWN", ['2.6'],
-             [json_post('/api/Transcoding/ask', '{}'), answered(result('AskResponse', {'code': 19}))]),
+    exchange("a command to an exchange's connection is answered SERVICE_UNKNOWN", ['2.6', 'spec:9.2.5'],
+             [json_post('/api/Transcoding/ask', '{}'), answered(result('AskResponse', {'code': 18}))]),
     exchange("the gateway's call timeout, 504, its call cancelled", ['9.2', '7.6.22'],
              [json_post('/api/Transcoding/hang', '{}'),
               {'expect': {'status': 504, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
@@ -3476,6 +3476,13 @@ SERVICE_TEXT = {
 }
 
 
+def unit_order(unit):
+    """A unit's place among an entry's: the companion's own in its order, then the spec's behind spec:."""
+    document, _, number = unit.rpartition(':')
+
+    return document, tuple(int(part) for part in number.split('.'))
+
+
 def ordered(entries, group):
     """A group's entries, each name once, each entry's units once and in the companion's order."""
     names = [entry['name'] for entry in entries]
@@ -3485,7 +3492,7 @@ def ordered(entries, group):
         raise SystemExit(f'{group}: two entries named {", ".join(twice)}')
 
     for entry in entries:
-        entry['clauses'] = sorted(set(entry['clauses']), key=lambda unit: tuple(int(part) for part in unit.split('.')))
+        entry['clauses'] = sorted(set(entry['clauses']), key=unit_order)
 
     return entries
 
@@ -3506,7 +3513,7 @@ DOCUMENT_JSON = {
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
         "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {words} stands for one JSON string, the side's own words, and {document} for the document beadc wrote of spec/transcoding.proto, byte for byte. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
-        "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8.",
+        "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],
     'transcodingVersion': transcoding_version(),
     'defaults': GATEWAY_DEFAULTS,

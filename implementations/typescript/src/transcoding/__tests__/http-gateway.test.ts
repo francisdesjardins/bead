@@ -317,13 +317,14 @@ test('cancels the call of a request aborted', async () => {
   });
 });
 
-test('answers a command to an exchange’s connection PROCEDURE_UNKNOWN', async () => {
+test('answers a command to an exchange’s connection SERVICE_UNKNOWN', async () => {
   await using fixture = await startTranscoding();
 
   expect(await send(fixture.port, { body: '{}', path: '/api/Transcoding/ask' })).toMatchObject({
-    body: '{"code":19}',
+    body: '{"code":18}',
     status: 200,
   });
+  expect(fixture.refused).toEqual(['no service 1']);
 });
 
 test('serves the document beadc wrote, byte for byte', async () => {

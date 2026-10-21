@@ -104,8 +104,10 @@ client, and ends as its exchange's connection closes (section 13.7). A gateway r
 from a cookie or from a request's query, as section 15.2 has every server read none from them.
 
 2.6. A gateway's client offers no command: a command its server sends on an exchange's connection
-is answered `PROCEDURE_UNKNOWN` (section 9.2, step 5, of `spec.md`), as any client that offers none
-answers it.
+is answered `SERVICE_UNKNOWN` (section 9.2, step 5, of `spec.md`), since that client declares no
+resolver of any service, so step 5 stops at the service. The code follows what the gateway's client
+declares: a gateway that offers a command of a service has that service's other commands answered
+`PROCEDURE_UNKNOWN`, by the same step.
 
 ## 3. Routes
 

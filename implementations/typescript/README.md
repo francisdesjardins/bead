@@ -1255,7 +1255,7 @@ stops rather than calls again.
 Each exchange draws one Bead connection, closed as its response ends: a connection's session, a
 subscription, a bound of the calls it answers, are one caller's, never every caller's. Its
 `authorization` is presented whole as `ELSEWHERE`, or under `authorization: 'bearer-jwt'` its
-`Bearer` token as a `JWT`; a command its server sends is answered `PROCEDURE_UNKNOWN`, and a
+`Bearer` token as a `JWT`; a command its server sends is answered `SERVICE_UNKNOWN`, and a
 connection's session ends with its exchange. It judges a request in the order of `transcoding.md`
 10.1 by the HTTP transport's own gates — hosts, origins and CORS, Fetch Metadata, its bounds, calls
 and streams counted apart — from one policy object, `httpPolicyOf`, which `createHTTPTransportServer`

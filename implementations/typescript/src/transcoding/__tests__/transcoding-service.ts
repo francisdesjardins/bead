@@ -25,6 +25,8 @@ export interface ITranscodingFixture extends AsyncDisposable {
   readonly gateway: IHTTPGateway;
   /** The gateway's own listener's port, on 127.0.0.1. */
   readonly port: number;
+  /** The detail of each command of `ask` that failed, in their order. */
+  readonly refused: string[];
   readonly server: ReturnType<typeof createServer>;
 }
 
@@ -59,6 +61,7 @@ export const startTranscoding = async (
     }
   );
   const counts = { cancelled: 0, hanging: 0 };
+  const refused: string[] = [];
   const service = new TranscodingServer();
 
   service.on('echo', (request, response) => {
@@ -147,7 +150,10 @@ export const startTranscoding = async (
     try {
       await service.command.answer({})({ connectionHandle: request.connectionHandle });
     } catch (error) {
-      code = (error as { code?: number }).code ?? 0;
+      const failed = error as { code?: number; detail?: string };
+
+      code = failed.code ?? 0;
+      refused.push(failed.detail ?? '');
     }
 
     await response({ code });
@@ -188,6 +194,7 @@ export const startTranscoding = async (
     counts,
     gateway,
     port,
+    refused,
     server,
     [Symbol.asyncDispose]: async () => {
       await gateway.stop();

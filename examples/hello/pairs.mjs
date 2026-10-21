@@ -30,7 +30,7 @@ const DOCUMENT = readFileSync(new URL('gen/openapi.json', HELLO));
 
 // what a person asks the gateway with curl, in this order, each its own exchange and its own Bead
 // connection (decision 0037): a greeting; one given no name, whose command the gateway's connection
-// answers PROCEDURE_UNKNOWN, so its resolver fails; a count past its rule and one within it, which
+// answers SERVICE_UNKNOWN, so its resolver fails; a count past its rule and one within it, which
 // the hook refuses first, since no exchange's connection was greeted; and the document
 const ASKED = [
   ['POST', '/api/Hello/sayHello', '{"name":"Ada"}'],
@@ -43,7 +43,7 @@ const ASKED = [
 // ! what the server writes as the nameless call's resolver fails, by the router's error event: its
 // gateway's second exchange, its connection's handle the in-memory transport's second
 const GATEWAY_STDERR =
-  'type=MEMORY;ip=127.0.0.1;ordinal=2: client protocol failure 19 PROCEDURE_UNKNOWN: no procedure 3 in service 1\n';
+  'type=MEMORY;ip=127.0.0.1;ordinal=2: client protocol failure 18 SERVICE_UNKNOWN: no service 1\n';
 
 // what a server's start, a client's call, and a server's end once its input closed may each take
 const LIMIT_MS = 30_000;

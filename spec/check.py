@@ -846,17 +846,21 @@ citeable = {document: {key for key, each in found.items() if each['kind'] in ('c
 citing = {document: {} for document in LEDGERS}
 
 # the clock cases cite none: they hold the test clocks to one meaning of advance, which the spec does
-# not state; each companion's groups cite its units, and every other group the spec's
+# not state; each companion's groups cite its units, and every other group the spec's; a transcoding
+# entry cites the spec's behind spec:, the core's step a gateway's client plays (0037)
 for group, entries in named.items():
-    document = ('debugging' if group in COMPANION_GROUPS else 'transcoding' if group in TRANSCODING_GROUPS
-                else 'spec')
+    own = ('debugging' if group in COMPANION_GROUPS else 'transcoding' if group in TRANSCODING_GROUPS
+           else 'spec')
 
     for entry in entries if group != 'clocks' else ():
-        for unit in entry['clauses']:
-            if unit not in citeable[document]:
-                problems.append(f'{group}: {entry["name"]!r} cites {unit}, which {document}.md does not have')
+        for cited_unit in entry['clauses']:
+            document, _, unit = cited_unit.rpartition(':')
+            document = document or own
 
-            citing[document].setdefault(unit, []).append(f'{group} {entry["name"]!r}')
+            if unit not in citeable.get(document, ()):
+                problems.append(f'{group}: {entry["name"]!r} cites {cited_unit}, which {document}.md does not have')
+
+            citing.setdefault(document, {}).setdefault(unit, []).append(f'{group} {entry["name"]!r}')
 
 # a place cites the spec's units, and a gateway's the transcoding's behind transcoding: (0037)
 for place in places:

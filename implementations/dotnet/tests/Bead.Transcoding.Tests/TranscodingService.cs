@@ -12,6 +12,7 @@ namespace Bead.Transcoding.Tests;
 internal sealed class TranscodingService : IAsyncDisposable
 {
     private readonly Lock _gate = new();
+    private readonly List<string> _refused = [];
     private int _hanging;
     private int _cancelled;
 
@@ -35,6 +36,18 @@ internal sealed class TranscodingService : IAsyncDisposable
             lock (_gate)
             {
                 return _hanging;
+            }
+        }
+    }
+
+    /// <summary>The detail of each command of ask that failed, in their order.</summary>
+    public IReadOnlyList<string> Refused
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _refused];
             }
         }
     }
@@ -202,6 +215,11 @@ internal sealed class TranscodingService : IAsyncDisposable
             catch (FailureException failed)
             {
                 code = failed.Code;
+
+                lock (_gate)
+                {
+                    _refused.Add(failed.Detail);
+                }
             }
 
             await response.Answer(new AskResponse { Code = code });

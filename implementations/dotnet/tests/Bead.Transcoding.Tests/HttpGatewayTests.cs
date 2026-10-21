@@ -310,7 +310,7 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
-    public async Task Answers_a_command_to_an_exchange_s_connection_PROCEDURE_UNKNOWN()
+    public async Task Answers_a_command_to_an_exchange_s_connection_SERVICE_UNKNOWN()
     {
         var started = await Started();
 
@@ -318,7 +318,8 @@ public sealed class HttpGatewayTests
         {
             using var asked = await started.Client.SendAsync(Json("/api/Transcoding/ask", "{}"), Cancelled);
 
-            Assert.Equal("{\"code\":19}", await asked.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal("{\"code\":18}", await asked.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(["no service 1"], started.Service.Refused);
         }
         finally
         {

@@ -49,7 +49,6 @@ public sealed class HttpGateway : IAsyncDisposable
     private readonly List<Served> _served = [];
     private readonly JsonForm _form;
     private readonly HttpBinding _binding;
-    private readonly IReadOnlyList<ushort> _services;
     private readonly byte[]? _document;
     private readonly string? _etag;
 
@@ -115,10 +114,6 @@ public sealed class HttpGateway : IAsyncDisposable
             }).OfType<Google.Protobuf.Reflection.MessageDescriptor>();
         }));
         _binding = new HttpBinding(_form);
-        _services = [.. options.Routes.Select((route) =>
-        {
-            return route.Procedure.ServiceId;
-        }).Distinct()];
 
         if (options.Document is { } document)
         {
@@ -772,14 +767,9 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
+        // its client declares no resolver: a command its server sends is answered SERVICE_UNKNOWN
+        // (transcoding 2.6)
         using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock });
-
-        // ! a command its server sends answers PROCEDURE_UNKNOWN: its client offers none, of a
-        // service it knows (transcoding 2.6)
-        foreach (var service in _services)
-        {
-            router.RegisterResolver(new CommandRefusal(router, service));
-        }
 
         using var aborted = context.RequestAborted.Register(() =>
         {
@@ -1468,40 +1458,6 @@ public sealed class HttpGateway : IAsyncDisposable
                 CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously,
                 TaskScheduler.Default);
-        }
-    }
-
-    // what makes its client know each service it calls, so that a command its server sends answers
-    // PROCEDURE_UNKNOWN (transcoding 2.6): a resolver of a command of the service's last number
-    private sealed class CommandRefusal(RouterClient router, ushort serviceId) : IRequestResolver
-    {
-        public Procedure Procedure { get; } = new()
-        {
-            ServiceId = serviceId,
-            ProcedureId = ushort.MaxValue,
-            ProcedureName = "gateway",
-            ServiceRevision = 1,
-            ProcedureKind = ProcedureKind.Command,
-        };
-
-        public int? MaximumPayloadBytes
-        {
-            get
-            {
-                return null;
-            }
-        }
-
-        public Task Handle(RequestResolverProps props)
-        {
-            return router.Respond(
-                RouterAnswer.OfFailure(Failure.OfProtocol(ProtocolCode.ProcedureUnknown, "a gateway's client offers no command")),
-                new AnswerTarget(props.ConnectionHandle, props.Header));
-        }
-
-        public Failure? Admit(AdmissionRequest request)
-        {
-            return null;
         }
     }
 }

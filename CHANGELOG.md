@@ -54,7 +54,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which `spec/check.py` holds as it holds the spec's; `spec/transcoding.proto` and
   `spec/transcoding.json`, written by `spec/generators/make_transcoding.py`, which reads and writes
   every body beside protobuf's own Python library, pinned in `spec/requirements.txt`, and names each
-  edge where it parts.
+  edge where it parts; an entry cites `spec.md`'s units behind `spec:`, `spec:9.2.5`.
 - Protobuf's conformance suite's JSON tests through each side's mapping of protobuf's JSON, 5,601
   tests binary and JSON, the same two failures listed on both sides.
 - `tools/check-transcoding.mjs`, which holds each side's route table and document of

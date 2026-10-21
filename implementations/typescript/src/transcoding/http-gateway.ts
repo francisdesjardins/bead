@@ -12,7 +12,6 @@ import { createClient } from '../client/client';
 import { DisconnectError, FailureError } from '../router/client/router-client';
 import { credentialBytesAt, MAXIMUM_HEADER_BYTES } from '../router/shared/header';
 import {
-  CLIENT_FAILURES,
   CredentialScheme,
   EnvelopeKind,
   FailureScope,
@@ -20,9 +19,7 @@ import {
 } from '../router/shared/constants';
 import type {
   INotificationLike,
-  IProcedure,
   IReceivedFailure,
-  IRequestResolver,
   RequestCredential,
   RouterLimitsOptions,
 } from '../router/shared/types';
@@ -485,38 +482,6 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       });
     })
   );
-  // * one procedure of each service the table holds, which each exchange's client knows its service
-  // by: a command its server sends is answered PROCEDURE_UNKNOWN, as a client that offers none of a
-  // service it knows answers it (transcoding 2.6, spec 9.2 step 5)
-  const known = new Map<number, IProcedure>();
-
-  for (const { procedure } of routes) {
-    const { procedureId, procedureName, serviceId, serviceRevision } = procedure.procedure;
-
-    if (!known.has(serviceId)) {
-      known.set(serviceId, { procedureId, procedureName, serviceId, serviceRevision });
-    }
-  }
-
-  /** What knows a service on a client: it refuses whatever comes to it, PROCEDURE_UNKNOWN. */
-  const knowing = (procedure: IProcedure): IRequestResolver<'server'> => {
-    const refusal = {
-      ...CLIENT_FAILURES.procedureUnknown,
-      detail: `the gateway's client answers no procedure of service ${String(procedure.serviceId)}`,
-    };
-
-    return Object.assign(
-      () => {
-        return Promise.resolve();
-      },
-      {
-        ...procedure,
-        admit: () => {
-          return refusal;
-        },
-      }
-    );
-  };
   const documentBytes = document === undefined ? undefined : ENCODER.encode(document);
   const etag =
     documentBytes === undefined
@@ -1040,7 +1005,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       );
     }
 
-    // * one Bead connection for this exchange, closed as its response ends (2.1)
+    // * one Bead connection for this exchange, closed as its response ends (2.1); its client
+    // declares no resolver: a command its server sends is answered SERVICE_UNKNOWN (2.6)
     const client = createClient(
       { transport: createMemoryTransportClient({ clock, server: transport }) },
       { devtools: false, limits }
@@ -1054,10 +1020,6 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         void client[Symbol.asyncDispose]();
       }
     };
-
-    for (const procedure of known.values()) {
-      client.router.registerResolver(knowing(procedure));
-    }
 
     live.add(close);
     response.on('close', () => {

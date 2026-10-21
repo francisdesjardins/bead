@@ -66,7 +66,7 @@ answering an empty name the second time it is asked.
 Then what a person asks the gateway with curl, each request its own exchange and its own Bead
 connection, which ends with it, as `docs/support.md`'s "Leveled down" has it: a greeting, its
 result as JSON; one given no name, whose command `askName` the gateway's connection answers
-`PROCEDURE_UNKNOWN`, since an HTTP exchange has no way back to its caller while its request waits,
+`SERVICE_UNKNOWN`, since an HTTP exchange has no way back to its caller while its request waits,
 so its resolver fails, `PROCEDURE_FAILED`, 500, the server writing that line to its standard error;
 a count past its rule and one within it, both refused by the hook, `ACCESS_DENIED`, 403, before the
 rule is judged, since no exchange's connection was ever greeted, a connection's session ending
