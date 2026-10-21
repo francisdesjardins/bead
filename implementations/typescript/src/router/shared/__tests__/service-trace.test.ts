@@ -70,6 +70,43 @@ test.describe('createServiceManager', () => {
         serviceId: 2,
         serviceRevision: 3,
       });
+
+      const clock = createTestClock(1_000);
+      const { control, router } = createFakeRouter('server', clock);
+      const timed = createServiceManager(router);
+      const steps = recordDebug(timed);
+
+      control.answer = (bytes) => {
+        clock.tick(30);
+
+        return Promise.resolve(answerOf(bytes));
+      };
+
+      await timed.getRequest(echo, { serializer })({ text: 'hello' })();
+
+      const sent = {
+        callId: 7,
+        connectionHandle: undefined,
+        direction: 'tx',
+        duration: undefined,
+        options: { timeout: 5_000 },
+        procedureId: 1,
+        procedureName: 'echo',
+        rx: undefined,
+        serviceId: 2,
+        serviceRevision: 3,
+        startedAt: 1_000,
+        tx: { text: 'hello' },
+        type: 'request',
+      };
+
+      expect(steps).toEqual([
+        { error: null, info: sent },
+        {
+          error: null,
+          info: { ...sent, direction: 'rx', duration: 30, rx: { text: 'hello' } },
+        },
+      ]);
     });
 
     // debugging 4.1.10, 4.2.1 and 4.2.2
