@@ -60,6 +60,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Each side's bench measures `transcoding.read.*` and `transcoding.write.*`: Bead's mapping of
   protobuf's JSON against its stock library's, on a message of every kind of field, and
   `--transcoding` runs those alone.
+- `examples/hello` serves its service over HTTP too, by a gateway on a port of its own beside its
+  WebSocket one, one server joined; `pairs.mjs` asks each server's gateway what a person asks with
+  curl, and `transcript.txt` holds its answers.
 - `spec/durations.json`'s places `gateway.timeout` and `gateway.heartbeat`, and the way `gateway` of
   `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
   `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites

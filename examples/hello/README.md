@@ -10,7 +10,11 @@ writes the same lines, [`transcript.txt`](transcript.txt), against either server
 failure of its catalogue, `NAMELESS`, and, given no name, asks its caller's by `askName`, a command
 the client answers; and `countDown`, whose request a rule of its `.proto` holds to 10 at most,
 notifies a `Tick` a step to a client that asks for them at a window of 1, and is admitted by its
-hook, `greeted`, once the connection said hello. Both halves serve and call it over WebSocket.
+hook, `greeted`, once the connection said hello. Both halves serve and call it over WebSocket, and
+both serve it over HTTP too, by a gateway on a port of its own: one server, `HelloService` offered
+on it once, takes its connections from its WebSocket transport and from an in-memory one, joined,
+which the gateway crosses as one more client of it, one Bead connection an HTTP exchange
+([`spec/transcoding.md`](../../spec/transcoding.md)).
 
 A rule is protovalidate's, `[(buf.validate.field).int32.lte = 10]`, which beadc compiles into each
 half's validator: the server judges every request once it reads, before its resolver, and answers
@@ -30,11 +34,12 @@ connect to, and refuses a page that rebinds its name to it (spec 15.12).
 | `beadc.yaml`, `proto/`, `buf.yaml` | what `beadc init hello` writes, each language's output split in two: its messages beadc's, or the platform's own       |
 | `beadc.sh`, `beadc.ps1`            | the wrappers that run beadc's image, as `beadc wrapper` prints them                                                    |
 | `gen/hello.blueprint.json`         | the blueprint beadc resolves the `.proto` into                                                                         |
+| `gen/openapi.json`                 | the OpenAPI document beadc writes of the blueprint, which each half embeds and its gateway serves byte for byte        |
 | `typescript/`                      | the TypeScript half, a Yarn project: `src/`, and `gen/`, beadc's output                                                |
 | `dotnet/`                          | the C# half, one project, `Hello.csproj`, under the C# side's rules by import: its sources, and `gen/`, beadc's output |
-| `pairs.mjs`, `transcript.txt`      | each client against each server, both message modes of each half, and what every client writes                         |
+| `pairs.mjs`, `transcript.txt`      | each client against each server, both message modes of each half, and what every client writes and its gateway answers |
 
-## What each client writes
+## What each client writes, and its gateway answers
 
 ```
 countDown before sayHello: ACCESS_DENIED, say hello first
@@ -44,6 +49,11 @@ countDown from 11: PAYLOAD_INVALID, {"bounds":{"lte":10},"fieldPath":"from","mes
 {"more":0}
 countDown from 3: 3 2 1 0, one at a time
 sayHello, nameless again: NAMELESS, nobody to greet
+POST /api/Hello/sayHello {"name":"Ada"}: 200 application/json, {"greeting":"Hello, Ada!"}
+POST /api/Hello/sayHello {}: 500 application/problem+json, {"code":64,"scope":"protocol","status":500,"title":"PROCEDURE_FAILED","type":"tag:francisdesjardins.ca,2026:bead/PROCEDURE_FAILED"}
+POST /api/Hello/countDown {"from":11}: 403 application/problem+json, {"code":33,"detail":"say hello first","scope":"protocol","status":403,"title":"ACCESS_DENIED","type":"tag:francisdesjardins.ca,2026:bead/ACCESS_DENIED"}
+POST /api/Hello/countDown {"from":3}: 403 application/problem+json, {"code":33,"detail":"say hello first","scope":"protocol","status":403,"title":"ACCESS_DENIED","type":"tag:francisdesjardins.ca,2026:bead/ACCESS_DENIED"}
+GET /openapi.json: 200 application/json, gen/openapi.json, beadc's, byte for byte
 ```
 
 The hook's refusal and its detail; a request and its answer; the server's command to its client
@@ -52,6 +62,16 @@ a violation a line of canonical JSON, then the count of those it left out; the f
 order, and how many of the client's callbacks ran at once, each holding itself 10 ms: at a window
 of 1, one, and without it, the ticks overlap; then the catalogue's failure by its name, the client
 answering an empty name the second time it is asked.
+
+Then what a person asks the gateway with curl, each request its own exchange and its own Bead
+connection, which ends with it, as `docs/support.md`'s "Leveled down" has it: a greeting, its
+result as JSON; one given no name, whose command `askName` the gateway's connection answers
+`PROCEDURE_UNKNOWN`, since an HTTP exchange has no way back to its caller while its request waits,
+so its resolver fails, `PROCEDURE_FAILED`, 500, the server writing that line to its standard error;
+a count past its rule and one within it, both refused by the hook, `ACCESS_DENIED`, 403, before the
+rule is judged, since no exchange's connection was ever greeted, a connection's session ending
+with its exchange; and the document, as beadc wrote it. Each failure is a problem, RFC 9457's, its
+type a `tag:` URI of its code.
 
 ## Generating
 
@@ -101,7 +121,7 @@ yarn install --immutable
 yarn check                # types in both modes and as a consumer, lint, format
 yarn build                # dist/generate/hello.mjs: the messages beadc generated
 yarn build:external       # dist/external/hello.mjs: the messages buf generate writes with protoc-gen-es
-node dist/generate/hello.mjs serve        # {"port":n}, then serves until its input ends
+node dist/generate/hello.mjs serve        # {"port":n,"gateway":m}, then serves until its input ends
 node dist/generate/hello.mjs call <port>
 ```
 
@@ -117,9 +137,10 @@ dotnet bin/generate/Debug/net10.0/Hello.dll call <port>
 
 Each half takes `serve`, `serve <port>` or `call <port>`, a port its digits alone, at most 65535,
 and refuses any other arguments with its usage, exit 2. Each half in both modes built,
-`node pairs.mjs` plays each client against each server, sixteen pairs: a pair passes when its
-client writes `transcript.txt` byte for byte and exits 0, its server exits 0 once its input ends,
-and neither writes to its standard error. CI's `examples` job runs all of it, on Node 26 and on
+`node pairs.mjs` plays each client against each server, sixteen pairs, then asks that server's
+gateway: a pair passes when its client exits 0 and what it writes, then the gateway's answers, are
+`transcript.txt` byte for byte, its server exits 0 once its input ends, the client writes nothing
+to its standard error, and the server only the line of its nameless gateway call. CI's `examples` job runs all of it, on Node 26 and on
 24.9, the floor the TypeScript half declares.
 
 ## What a project outside this repository writes instead

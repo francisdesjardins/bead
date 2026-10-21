@@ -375,14 +375,16 @@ own generator. The C# half's external build compiles Grpc.Tools' messages, from 
 under beadc's service code; the TypeScript half's runs protoc-gen-es under `buf generate` at the pin
 beadc runs, so it proves the project's own generation and `messagesOut`'s import, not another
 generator's output. Each client calls each server over WebSocket and writes
-[`transcript.txt`](../examples/hello/transcript.txt): CI's `examples` job, through
-`examples/hello/pairs.mjs`. What a consumer of the TypeScript runtime's sources must set, which the
+[`transcript.txt`](../examples/hello/transcript.txt), then each server's gateway answers what a
+person asks it with curl over HTTP/1.1, through the in-memory transport joined to its WebSocket
+one: CI's `examples` job, through `examples/hello/pairs.mjs`. What a consumer of the TypeScript runtime's sources must set, which the
 C# half never meets, is a row of the [differences](#differences).
 
-| Client         | Server         | Messages                | Transport | Pairs | Test                                                              |
-| -------------- | -------------- | ----------------------- | --------- | ----: | ----------------------------------------------------------------- |
-| TypeScript, C# | TypeScript, C# | beadc's, the platform's | WebSocket |    16 | `examples/hello/pairs.mjs`                                        |
-| either         | either         | either                  | HTTP/1.1  |     0 | not run: the interop holds HTTP; the example serves one transport |
+| Client          | Server         | Messages                | Transport                    | Pairs | Test                                                                          |
+| --------------- | -------------- | ----------------------- | ---------------------------- | ----: | ----------------------------------------------------------------------------- |
+| TypeScript, C#  | TypeScript, C# | beadc's, the platform's | WebSocket                    |    16 | `examples/hello/pairs.mjs`                                                    |
+| curl's requests | TypeScript, C# | beadc's, the platform's | HTTP/1.1, the gateway        |    16 | `examples/hello/pairs.mjs`, the gateway's lines of `transcript.txt`           |
+| either          | either         | either                  | HTTP/1.1, the HTTP transport |     0 | not run: the interop holds HTTP; the example serves Bead over WebSocket alone |
 
 ## beadc's wrappers
 
