@@ -812,8 +812,8 @@ const exchangeOfOptions: Way = (given) => {
   );
 };
 
-// a connection drawn, with no exchange under way
-const restOfOptions: Way = (given) => {
+// an HTTP server's inactivity: a connection drawn, with no exchange under way
+const inactivityOfServer: Way = (given) => {
   return heldByHTTPServer(
     {
       drawn: () => {
@@ -926,8 +926,8 @@ const listeningOf = async (options: Record<string, number>) => {
   return { client, clock, fake };
 };
 
-// a client's own inactivity: the timer armed at its listens' first loss
-const clientRestOfOptions: Way = async (given) => {
+// an HTTP client's own inactivity: the timer armed at its listens' first loss
+const inactivityOfClient: Way = async (given) => {
   const listening = await listeningOf(optionOf('inactivityTimeout', given));
 
   if ('refusal' in listening) {
@@ -999,18 +999,20 @@ const pauseOfOptions: Way = async (given) => {
   return { held };
 };
 
-// a WebSocket client's heartbeat, as it is built
-const heartbeatOfClient: Way = (given) => {
-  const { FakeWebSocket, sockets } = createFakeWebSocket();
-  const building = attempt(() => {
-    return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf('heartbeat', given) });
-  });
+// a WebSocket client's option `name`, as it is built
+const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
+  return (given) => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const building = attempt(() => {
+      return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
+    });
 
-  return Promise.resolve(
-    'refusal' in building
-      ? { moved: movedOf({ 'a socket opened': sockets.length > 0 }), refusal: building.refusal }
-      : {}
-  );
+    return Promise.resolve(
+      'refusal' in building
+        ? { moved: movedOf({ 'a socket opened': sockets.length > 0 }), refusal: building.refusal }
+        : {}
+    );
+  };
 };
 
 // a WebSocket server's option `name`, as it is built
@@ -1345,10 +1347,6 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'exchangeTimeout',
     ways: { options: exchangeOfOptions },
   },
-  'httpTransportServer.inactivityTimeout': {
-    phrase: 'inactivityTimeout',
-    ways: { options: restOfOptions },
-  },
   'httpTransportServer.maximumWait': {
     phrase: 'maximumWait',
     ways: { options: maximumWaitOfOptions },
@@ -1365,9 +1363,9 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'bodyGracePeriod',
     ways: { options: bodyGraceOfOptions },
   },
-  'httpTransportClient.inactivityTimeout': {
+  'httpTransport.inactivityTimeout': {
     phrase: 'inactivityTimeout',
-    ways: { options: clientRestOfOptions },
+    ways: { client: inactivityOfClient, server: inactivityOfServer },
   },
   'httpTransportClient.wait': {
     phrase: 'wait',
@@ -1379,7 +1377,11 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransport.heartbeat': {
     phrase: 'a heartbeat',
-    ways: { client: heartbeatOfClient, server: ofWSServer('heartbeat') },
+    ways: { client: ofWSClient('heartbeat'), server: ofWSServer('heartbeat') },
+  },
+  'webSocketTransport.closeTimeout': {
+    phrase: 'a close timeout',
+    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
   },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
@@ -1388,10 +1390,6 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   'transportClient.reconnectionDelay': {
     phrase: 'a delay',
     ways: { function: reconnectionOf('function'), number: reconnectionOf('number') },
-  },
-  'webSocketTransportServer.closeTimeout': {
-    phrase: 'a close timeout',
-    ways: { options: ofWSServer('closeTimeout') },
   },
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',

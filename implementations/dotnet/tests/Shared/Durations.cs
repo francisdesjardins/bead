@@ -172,6 +172,23 @@ internal static class Durations
     }
 
     /// <summary>
+    /// What this side plays of a place by one of its ways, which the place has: none where a row of
+    /// the support matrix excuses this side from that way, else what <see cref="Played(DurationPlace)"/>
+    /// plays.
+    /// </summary>
+    public static IReadOnlyList<(DurationInput Input, PlaceOutcome Outcome)> Played(DurationPlace place, string way)
+    {
+        ArgumentNullException.ThrowIfNull(place);
+
+        var played = place.Ways.Single((each) =>
+        {
+            return each.Id == way;
+        });
+
+        return played.IsExcused ? [] : Played(place);
+    }
+
+    /// <summary>
     /// The words of this side's refusal of a duration at a place, the one sentence for every
     /// reason: the place's phrase, then what it takes — 0 for at once at a delay, and infinite for
     /// never where never is not refused — then the duration as given, a fraction written with a dot

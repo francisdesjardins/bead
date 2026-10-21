@@ -36,6 +36,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `maximumOutboxBytes`, or `minimumSendBytesPerSecond` and `sendGracePeriod`, with their values,
   the pace's sentence the WebSocket's own, where the TypeScript side wrote `the client fell
   behind: …` and the C# side `<handle> is dropped behind its <Option>`, no value.
+- `spec/durations.json` names a WebSocket's close timeout `webSocketTransport.closeTimeout`, by two
+  ways, `client` and `server`, as `webSocketTransport.heartbeat` is, and both sides' harnesses play
+  each, where `webSocketTransportServer.closeTimeout` was the server's place alone, its outcomes
+  played by each client's tests.
+- `spec/durations.json` holds an HTTP connection's inactivity timeout as one place,
+  `httpTransport.inactivityTimeout`, by two ways, `client` and `server`, where
+  `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
+  outcomes apart: two owners share a place where the spec names one option for both and every
+  column of the file agrees (decision 0014). The file holds 25 places, by 37 ways.
 
 ### Fixed
 

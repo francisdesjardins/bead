@@ -1615,15 +1615,19 @@ test.describe('WSTransportClient, its close timeout', () => {
     expect(createWSTransportClient({ clock }).clock).toBe(clock);
     expect(createWSTransportClient().clock).toBe(PLATFORM_CLOCK);
 
-    // the server's place, whose outcomes a WebSocket's close timeout has, a client's as a server's
+    // a WebSocket's close timeout, its client's way, which the durations' harness plays by its
+    // refusal; this loop holds, besides, what `ws` is handed
     const place = DURATIONS.places.find(({ id }) => {
-      return id === 'webSocketTransportServer.closeTimeout';
+      return id === 'webSocketTransport.closeTimeout';
+    });
+    const way = place?.ways.find(({ id }) => {
+      return id === 'client';
     });
 
-    expect(place).toBeDefined();
+    expect(way).toBeDefined();
 
     for (const input of DURATIONS.inputs) {
-      if (place === undefined || isExcused(place, { input })) {
+      if (place === undefined || way === undefined || isExcused(place, { input, way })) {
         continue;
       }
 
@@ -1689,6 +1693,46 @@ test.describe('WSTransportClient, its close timeout', () => {
 
     expect(performance.now() - began).toBeGreaterThanOrEqual(150);
     expect([told, sent]).toEqual([[['close', true, false]], [1000]]);
+    expect(client.isClosed()).toBe(true);
+  });
+
+  test('waits on its server without end for a close timeout of Infinity, closing once it answers', async () => {
+    await using raw = await startRaw();
+    // ! `ws` is handed the longest a timer holds, 2³¹ − 1 ms, which it arms on every close
+    const client = createWSTransportClient({ closeTimeout: Infinity, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    // it reads its close and answers nothing, for longer than any close timeout of these tests
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    let isSettled = false;
+    const closing = client.disconnect().then(() => {
+      isSettled = true;
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 300);
+    });
+
+    expect([sent, isSettled]).toEqual([[1000], false]);
+
+    // its answer, then its end, as a server ends the closing handshake
+    socket.end(frameOf(0x8, Uint8Array.of(0x03, 0xe8)));
+    await closing;
+
+    expect(told).toEqual([['close', true, false]]);
     expect(client.isClosed()).toBe(true);
   });
 });

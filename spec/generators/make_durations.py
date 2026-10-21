@@ -290,16 +290,6 @@ places = [
         'observed': 'held',
     },
     {
-        'id': 'httpTransportServer.inactivityTimeout',
-        'name': "an HTTP server's inactivity timeout",
-        'kind': 'timeout',
-        'never': 'taken',
-        'neverClause': '15.12',
-        'ways': [way('options', "the transport server's options, as it is built")],
-        'default': default('15.12.9', milliseconds=DEFAULTS['inactivityTimeout'], ways=['options']),
-        'observed': 'held',
-    },
-    {
         'id': 'httpTransportServer.maximumWait',
         'name': 'the longest an HTTP server holds a listen',
         'kind': 'timeout',
@@ -338,13 +328,16 @@ places = [
         'observed': 'held',
     },
     {
-        'id': 'httpTransportClient.inactivityTimeout',
-        'name': "an HTTP client's inactivity timeout",
+        'id': 'httpTransport.inactivityTimeout',
+        'name': "an HTTP connection's inactivity timeout, its client's or its server's",
         'kind': 'timeout',
         'never': 'taken',
         'neverClause': '15.12',
-        'ways': [way('options', "the transport client's options, as it is built")],
-        'default': default('15.12.9', milliseconds=DEFAULTS['inactivityTimeout'], ways=['options']),
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
+        'default': default('15.12.9', milliseconds=DEFAULTS['inactivityTimeout'], ways=['client', 'server']),
         'observed': 'held',
     },
     {
@@ -376,6 +369,17 @@ places = [
         'observed': 'refusal',
     },
     {
+        'id': 'webSocketTransport.closeTimeout',
+        'name': "a WebSocket's close timeout, its client's or its server's",
+        'kind': 'timeout',
+        'never': 'taken',
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
+        'observed': 'refusal',
+    },
+    {
         'id': 'transportClient.connectTimeout',
         'name': "a connect's timeout, on every transport",
         'kind': 'timeout',
@@ -397,14 +401,6 @@ places = [
             way('number', 'a number', differs=('C#', DELAY_AS_A_NUMBER)),
         ],
         'observed': 'held',
-    },
-    {
-        'id': 'webSocketTransportServer.closeTimeout',
-        'name': "a WebSocket server's close timeout",
-        'kind': 'timeout',
-        'never': 'taken',
-        'ways': [way('options', "the transport server's options, as it is built")],
-        'observed': 'refusal',
     },
     {
         'id': 'webSocketTransportServer.sendGracePeriod',

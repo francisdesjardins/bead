@@ -86,10 +86,6 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.ExchangeTimeout), ExchangeTimeoutByOptions),
         }),
-        ["httpTransportServer.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
-        {
-            ["options"] = new(nameof(HttpTransportServerOptions.InactivityTimeout), ServerIdleByOptions),
-        }),
         ["httpTransportServer.maximumWait"] = (nameof(HttpTransportServerOptions.MaximumWait), new()
         {
             ["options"] = new(nameof(HttpTransportServerOptions.MaximumWait), MaximumWaitByOptions),
@@ -106,9 +102,10 @@ public sealed partial class DurationsTests
         {
             ["options"] = new(nameof(HttpTransportServerOptions.BodyGracePeriod), BodyGracePeriodByOptions),
         }),
-        ["httpTransportClient.inactivityTimeout"] = (nameof(HttpTransportClientOptions.InactivityTimeout), new()
+        ["httpTransport.inactivityTimeout"] = (nameof(HttpTransportServerOptions.InactivityTimeout), new()
         {
-            ["options"] = new(nameof(HttpTransportClientOptions.InactivityTimeout), ClientInactivityByOptions),
+            ["client"] = new(nameof(HttpTransportClientOptions.InactivityTimeout), InactivityTimeoutByClient),
+            ["server"] = new(nameof(HttpTransportServerOptions.InactivityTimeout), InactivityTimeoutByServer),
         }),
         ["httpTransportClient.wait"] = (nameof(HttpTransportClientOptions.Wait), new()
         {
@@ -123,6 +120,11 @@ public sealed partial class DurationsTests
             ["client"] = new(nameof(WebSocketTransportClientOptions.Heartbeat), HeartbeatByClient),
             ["server"] = new(nameof(WebSocketTransportServerOptions.Heartbeat), HeartbeatByServer),
         }),
+        ["webSocketTransport.closeTimeout"] = ("a close timeout", new()
+        {
+            ["client"] = new(nameof(WebSocketTransportClientOptions.CloseTimeout), CloseTimeoutByClient),
+            ["server"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByServer),
+        }),
         ["transportClient.connectTimeout"] = ("a connect's timeout", new()
         {
             ["http"] = new(nameof(HttpConnectOptions.Timeout), ConnectTimeoutByHttp),
@@ -131,10 +133,6 @@ public sealed partial class DurationsTests
         ["transportClient.reconnectionDelay"] = ("a delay", new()
         {
             ["function"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByFunction),
-        }),
-        ["webSocketTransportServer.closeTimeout"] = ("a close timeout", new()
-        {
-            ["options"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByOptions),
         }),
         ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
         {

@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- what reads the durations, for the client's close timeout, which plays the server's place -->
+    <!-- what reads the durations, for the client's way of a WebSocket's close timeout, which its tests play -->
     <Compile Include="../Shared/Durations.cs" Link="Durations.cs" />
     <!-- JSON as a service manager's accessor takes it, for the calls no generated client makes -->
     <Compile Include="../Shared/JsonPayloads.cs" Link="JsonPayloads.cs" />
