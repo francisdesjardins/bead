@@ -23,6 +23,14 @@
           "Bead.Core": "[0.6.0, )",
           "Google.Protobuf": "[3.36.2, )"
         }
+      },
+      "bead.transcoding": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Core": "[0.6.0, )",
+          "Bead.Protobuf": "[0.6.0, )",
+          "Google.Protobuf": "[3.36.2, )"
+        }
       }
     }
   }

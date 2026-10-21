@@ -43,9 +43,9 @@ const summaryLine = (state, counts) => {
   return `CONFORMANCE SUITE ${state}: ${String(counts[0])} successes, ${String(counts[1])} skipped, ${String(counts[2])} expected failures, ${String(counts[3])} unexpected failures.\n`;
 };
 const TEXT_FORMAT = summaryLine('PASSED', [0, 909, 0, 0]);
-const PASSED_CSHARP = `CONFORMANCE TEST BEGIN ====================================\n\n${summaryLine('PASSED', [2828, 2816, 5, 0])}${TEXT_FORMAT}`;
-const PASSED_TYPESCRIPT = `${summaryLine('PASSED', [2832, 2816, 1, 0])}${TEXT_FORMAT}`;
-const FAILED = `${summaryLine('FAILED', [2832, 2816, 0, 1])}${TEXT_FORMAT}`;
+const PASSED_CSHARP = `CONFORMANCE TEST BEGIN ====================================\n\n${summaryLine('PASSED', [5594, 48, 7, 0])}${TEXT_FORMAT}`;
+const PASSED_TYPESCRIPT = `${summaryLine('PASSED', [5598, 48, 3, 0])}${TEXT_FORMAT}`;
+const FAILED = `${summaryLine('FAILED', [5598, 48, 2, 1])}${TEXT_FORMAT}`;
 
 const bytesOf = (...parts) => {
   return Uint8Array.from(parts.flat());
@@ -59,7 +59,7 @@ describe('the pin', () => {
     assert.match(PIN.tarball, /^https:\/\/registry\.npmjs\.org\/protobuf-conformance\/-\//u);
     assert.match(PIN.integrity, /^sha512-/u);
     assert.deepEqual(PIN.floor, [
-      { suite: 'binary and JSON', tests: 2833, skipped: 2816 },
+      { suite: 'binary and JSON', tests: 5601, skipped: 48 },
       { suite: 'text format', tests: 0, skipped: 909 },
     ]);
     assert.throws(() => {
@@ -67,7 +67,7 @@ describe('the pin', () => {
     }, /npm's sha512/u);
     assert.throws(() => {
       return readPin(
-        JSON.stringify({ ...PIN, floor: [{ suite: 'binary and JSON', tests: 2833 }] })
+        JSON.stringify({ ...PIN, floor: [{ suite: 'binary and JSON', tests: 5601 }] })
       );
     }, /floor/u);
   });
@@ -109,7 +109,7 @@ describe('the pin', () => {
 describe('the floor', () => {
   test("reads each suite's summary, in the runner's order", () => {
     assert.deepEqual(summariesOf(PASSED_CSHARP), [
-      { passed: true, successes: 2828, skipped: 2816, expected: 5, unexpected: 0 },
+      { passed: true, successes: 5594, skipped: 48, expected: 7, unexpected: 0 },
       { passed: true, successes: 0, skipped: 909, expected: 0, unexpected: 0 },
     ]);
     assert.deepEqual(summariesOf('no summary'), []);
@@ -120,7 +120,7 @@ describe('the floor', () => {
     assert.deepEqual(floorBreaches(summariesOf(PASSED_TYPESCRIPT), PIN.floor), []);
     assert.deepEqual(floorBreaches(summariesOf(FAILED), PIN.floor), [
       'the binary and JSON suite: failed: 1 unexpected failures',
-      'the binary and JSON suite: 2832 successes and 0 expected failures, where the floor is 2833 tests',
+      'the binary and JSON suite: 5598 successes and 2 expected failures, where the floor is 5601 tests',
     ]);
     // * a testee that lacks the messages passes the runner, and fails the floor
     assert.deepEqual(
@@ -129,8 +129,8 @@ describe('the floor', () => {
         PIN.floor
       ),
       [
-        'the binary and JSON suite: 0 successes and 0 expected failures, where the floor is 2833 tests',
-        'the binary and JSON suite: 909 tests skipped, where the floor is 2816',
+        'the binary and JSON suite: 0 successes and 0 expected failures, where the floor is 5601 tests',
+        'the binary and JSON suite: 909 tests skipped, where the floor is 48',
       ]
     );
     assert.deepEqual(floorBreaches([], PIN.floor), [

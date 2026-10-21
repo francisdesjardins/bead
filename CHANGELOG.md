@@ -55,6 +55,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `spec/transcoding.json`, written by `spec/generators/make_transcoding.py`, which reads and writes
   every body beside protobuf's own Python library, pinned in `spec/requirements.txt`, and names each
   edge where it parts.
+- Protobuf's conformance suite's JSON tests through each side's mapping of protobuf's JSON, 5,601
+  tests binary and JSON, the same two failures listed on both sides.
 - `spec/durations.json`'s places `gateway.timeout` and `gateway.heartbeat`, and the way `gateway` of
   `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
   `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites
