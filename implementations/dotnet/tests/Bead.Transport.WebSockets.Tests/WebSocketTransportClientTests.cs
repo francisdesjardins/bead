@@ -1415,7 +1415,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     // a WebSocket's close timeout, its client's way of the durations' file, which the durations'
-    // harness plays by its refusal, as the TypeScript side's client plays it
+    // harness plays by its refusal; this loop holds, besides, what its connections are built with
     [Fact]
     public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_and_runs_on_the_clock_it_is_given()
     {
@@ -1427,7 +1427,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         var place = Durations.PlaceOf("webSocketTransport.closeTimeout");
 
-        foreach (var (input, outcome) in Durations.Played(place))
+        foreach (var (input, outcome) in Durations.Played(place, "client"))
         {
             var given = input.Given!.Value;
 
@@ -1444,6 +1444,13 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             else
             {
                 await using var taken = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = given });
+
+                // rounded a half away from zero, as spec 1.4 rounds, and infinite kept as it is
+                var held = given == Timeout.InfiniteTimeSpan
+                    ? given
+                    : TimeSpan.FromMilliseconds(Math.Round(given.TotalMilliseconds, MidpointRounding.AwayFromZero));
+
+                Assert.Equal((input.Name, held), (input.Name, taken.CloseTimeout));
             }
         }
     }
@@ -1473,6 +1480,41 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
             await closing.WaitAsync(Patience, Cancelled);
 
             Assert.True(TimeProvider.System.GetElapsedTime(began) >= TimeSpan.FromMilliseconds(150));
+            Assert.Equal(new object[] { (true, false) }, Described(told));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+    }
+
+    // an infinite close timeout arms no timer: a server that does not answer its disconnect is
+    // waited on without end, and its answer ends the close
+    [Fact]
+    public async Task Waits_on_its_server_without_end_for_a_close_timeout_of_infinity_closing_once_it_answers()
+    {
+        using var listener = new Listener(IPAddress.Loopback);
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = Timeout.InfiniteTimeSpan });
+        var (told, _) = EndOf(client);
+        var connecting = client.Connect(new WebSocketConnectOptions { Host = Host, Port = listener.Port }, Cancelled);
+        var (peer, head) = await listener.Next();
+
+        using (peer)
+        using (var server = await Listener.Answer(peer, head))
+        {
+            await connecting.WaitAsync(Patience, Cancelled);
+
+            var closing = client.CloseConnection();
+
+            // it reads its close and answers nothing, for longer than any close timeout of these tests
+            var received = await server.ReceiveAsync(new byte[16], Cancelled).WaitAsync(Patience, Cancelled);
+
+            Assert.Equal((WebSocketMessageType.Close, WebSocketCloseStatus.NormalClosure), (received.MessageType, received.CloseStatus));
+
+            await Task.Delay(TimeSpan.FromMilliseconds(300), Cancelled);
+
+            Assert.False(closing.IsCompleted);
+
+            await server.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, null, Cancelled);
+            await closing.WaitAsync(Patience, Cancelled);
+
             Assert.Equal(new object[] { (true, false) }, Described(told));
             Assert.Equal(ReadyState.Closed, client.ReadyState);
         }

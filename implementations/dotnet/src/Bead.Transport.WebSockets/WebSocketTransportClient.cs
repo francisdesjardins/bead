@@ -233,6 +233,18 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
         }
     }
 
+    /// <summary>
+    /// The close timeout its connections are built with: the option given, rounded to the nearest
+    /// whole millisecond, or <see cref="Timeout.InfiniteTimeSpan"/> to wait on the server without end.
+    /// </summary>
+    internal TimeSpan CloseTimeout
+    {
+        get
+        {
+            return _options.CloseTimeout;
+        }
+    }
+
     /// <summary>Where it is in its life: Uninitialized until its first connect.</summary>
     public ReadyState ReadyState
     {
@@ -718,7 +730,7 @@ public sealed class WebSocketTransportClient : IRouterClientTransport, IAsyncDis
                 }
 
                 _connecting = null;
-                _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, _options.CloseTimeout));
+                _connection = connection = new WebSocketConnection(socket, (MaximumMessageBytes, CloseTimeout));
                 _carried = credential is null ? null : (connection, credential);
                 _readyState = ReadyState.Open;
             }

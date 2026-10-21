@@ -14,9 +14,9 @@ namespace Bead.Transport.Http.Tests;
 /// <summary>
 /// The places of the transports: an HTTP server's three bounds, read from the timers it arms on
 /// its clock as a client of the tests' own drives it; an HTTP client's three durations, against a
-/// handler of the tests' own; a WebSocket's heartbeat and a WebSocket server's close timeout, taken
-/// or refused as each is built, on the real clock; and every client's connect timeout and
-/// reconnection delay.
+/// handler of the tests' own; a WebSocket's heartbeat and its close timeout, its client's and its
+/// server's, taken or refused as each is built, on the real clock; and every client's connect
+/// timeout and reconnection delay.
 /// </summary>
 public sealed partial class DurationsTests
 {

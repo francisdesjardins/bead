@@ -1695,6 +1695,46 @@ test.describe('WSTransportClient, its close timeout', () => {
     expect([told, sent]).toEqual([[['close', true, false]], [1000]]);
     expect(client.isClosed()).toBe(true);
   });
+
+  test('waits on its server without end for a close timeout of Infinity, closing once it answers', async () => {
+    await using raw = await startRaw();
+    // ! `ws` is handed the longest a timer holds, 2³¹ − 1 ms, which it arms on every close
+    const client = createWSTransportClient({ closeTimeout: Infinity, WebSocket: TrackedWs });
+    const told = toldBy(client);
+    const sent: number[] = [];
+    const upgraded = raw.next();
+
+    await client.connect({ host, port: raw.port });
+
+    const socket = await upgraded;
+
+    // it reads its close and answers nothing, for longer than any close timeout of these tests
+    socket.on('data', (frame: Buffer) => {
+      const code = closeCodeOfMasked(frame);
+
+      if (code !== undefined) {
+        sent.push(code);
+      }
+    });
+
+    let isSettled = false;
+    const closing = client.disconnect().then(() => {
+      isSettled = true;
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 300);
+    });
+
+    expect([sent, isSettled]).toEqual([[1000], false]);
+
+    // its answer, then its end, as a server ends the closing handshake
+    socket.end(frameOf(0x8, Uint8Array.of(0x03, 0xe8)));
+    await closing;
+
+    expect(told).toEqual([['close', true, false]]);
+    expect(client.isClosed()).toBe(true);
+  });
 });
 
 test.describe('WSTransportClient, heartbeat', () => {
