@@ -10,8 +10,9 @@ namespace Bead.Transcoding.Tests;
 /// <summary>
 /// <see cref="HttpGateway"/>: a gateway of the Transcoding service in process, its server joined,
 /// called over a real socket: one Bead connection per exchange, the credential it presents, the
-/// gates of Fetch Metadata and CORS, a stream's reconnection, an abort, a command, the document, and
-/// the bounds of calls and streams apart (transcoding 2 to 11). The twins of the TypeScript side's
+/// gates of Fetch Metadata and CORS, a stream's reconnection, an abort, a command, the document, the
+/// bounds of calls and streams apart, and what it reports, none of its words in a problem
+/// (transcoding 2 to 11, spec 9.0). The twins of the TypeScript side's
 /// <c>http-gateway.test.ts</c>.
 /// </summary>
 public sealed class HttpGatewayTests
@@ -51,6 +52,22 @@ public sealed class HttpGatewayTests
     private static HttpRequestMessage Json(string path, string body)
     {
         return new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, Encoding.UTF8, new MediaTypeHeaderValue("application/json")) };
+    }
+
+    // the messages of every error the gateway reports, as it reports them
+    private static List<string> ReportedBy(HttpGateway gateway)
+    {
+        var reported = new List<string>();
+
+        gateway.Error += (reason) =>
+        {
+            lock (reported)
+            {
+                reported.Add(reason.Message);
+            }
+        };
+
+        return reported;
     }
 
     private static async Task Until(Func<bool> condition)
@@ -142,6 +159,7 @@ public sealed class HttpGatewayTests
             Assert.Equal("{\"session\":\"ada\"}", await who.Content.ReadAsStringAsync(Cancelled));
 
             // under bearer-jwt, a token presented as a JWT, which a server with no JWT verifier refuses
+            var reported = ReportedBy(jwt.Gateway);
             var token = Json("/api/Transcoding/whoAmI", "{}");
 
             token.Headers.TryAddWithoutValidation("authorization", "bearer a.b.c");
@@ -150,6 +168,7 @@ public sealed class HttpGatewayTests
 
             Assert.Equal(HttpStatusCode.InternalServerError, unsupported.StatusCode);
             Assert.Contains("\"code\":36", await unsupported.Content.ReadAsStringAsync(Cancelled), StringComparison.Ordinal);
+            Assert.StartsWith("the server takes none of the scheme this gateway presents: ", Assert.Single(reported), StringComparison.Ordinal);
 
             var basic = Json("/api/Transcoding/whoAmI", "{}");
 
@@ -399,6 +418,97 @@ public sealed class HttpGatewayTests
         finally
         {
             await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_a_result_the_stock_library_refuses_502_reported_none_of_its_words_in_the_problem()
+    {
+        // * raw's route told its result is an Edges: the bytes its server echoes, `x`, a varint cut short
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.Raw.Procedure ? route with { Result = HttpPayload.Of(Edges.Descriptor) } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            var raw = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/raw") { Content = new ByteArrayContent("x"u8.ToArray()) };
+
+            raw.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            using var answered = await started.Client.SendAsync(raw, Cancelled);
+            var body = await answered.Content.ReadAsStringAsync(Cancelled);
+
+            Assert.Equal(HttpStatusCode.BadGateway, answered.StatusCode);
+            Assert.Equal("{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}", body);
+            Assert.DoesNotContain(Assert.Single(reported), body, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_503_DESTINATION_UNREACHABLE_when_its_connection_cannot_be_drawn_reported_none_of_its_words_in_the_problem()
+    {
+        var started = await Started();
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            await started.Service.Memory.Stop();
+
+            using var answered = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, answered.StatusCode);
+            Assert.Equal("1", answered.Headers.RetryAfter?.ToString());
+            Assert.Equal("{\"code\":17,\"detail\":\"the connection is gone\",\"scope\":\"protocol\",\"status\":503,\"title\":\"DESTINATION_UNREACHABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.EndsWith(", not open", Assert.Single(reported), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_what_no_gate_foresaw_500_reported_none_of_its_words_in_the_problem()
+    {
+        // * a clock that breaks as a body is read, past every gate
+        var started = await Started((options) =>
+        {
+            return options with { Clock = new BrokenClock() };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            using var answered = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
+            Assert.Equal("{\"detail\":\"the gateway failed\",\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(["the clock broke"], reported);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // a clock whose time breaks as it is read
+    private sealed class BrokenClock : TimeProvider
+    {
+        public override long GetTimestamp()
+        {
+            throw new InvalidOperationException("the clock broke");
         }
     }
 }

@@ -42,9 +42,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   per exchange through the in-memory transport into the application's own server, joined;
   protobuf's JSON mapping read and written by Bead's own mapping, one form on both sides, the binary
   payload its stock library's; failures as `application/problem+json`, a status by where its code
-  arose, `PAYLOAD_INVALID` 422 with its violations; notifications as Server-Sent Events at the
-  reader's pace, each event an id, a reconnection answered 204 (`spec/transcoding.md` 0.1.0,
-  decision 0037).
+  arose, `PAYLOAD_INVALID` 422 with its violations, what no caller can mend reported on the
+  gateway's `error` and none of an exception's words in a problem (spec 9.0); notifications as
+  Server-Sent Events at the reader's pace, each event an id, a reconnection answered 204
+  (`spec/transcoding.md` 0.1.0, decision 0037).
 - beadc reads `google.api.http` and `idempotency_level` into the blueprint's routes and messages'
   shapes, under no feature, and writes one OpenAPI 3.1.1 document a blueprint, embedded byte for byte
   with a route table in each output with `http: true`; its rules `HTTP_*`; `beadc breaking`'s

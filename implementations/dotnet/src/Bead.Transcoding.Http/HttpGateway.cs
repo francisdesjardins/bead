@@ -123,8 +123,10 @@ public sealed class HttpGateway : IAsyncDisposable
     }
 
     /// <summary>
-    /// What went wrong that no caller can mend, reported: a result Bead's proto JSON form holds none
-    /// of, a scheme its server takes none of (transcoding 7.6), a listener's throw.
+    /// What went wrong that no caller can mend, reported, its words never in a problem (spec 9.0): a
+    /// result Bead's proto JSON form holds none of, a scheme its server takes none of (transcoding
+    /// 7.6), an answer its stock library refuses, a connection it could not draw, what no gate foresaw.
+    /// What a listener throws goes no further, and the exchange answers on.
     /// </summary>
     public event Action<Exception>? Error;
 
@@ -192,6 +194,16 @@ public sealed class HttpGateway : IAsyncDisposable
         catch (Exception reason) when (reason is IOException or OperationCanceledException)
         {
             // its client went: nothing to write it to
+        }
+        catch (Exception reason) when (reason is not OutOfMemoryException)
+        {
+            // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
+            Report(reason);
+
+            if (!context.Response.HasStarted)
+            {
+                await Answer(context, HttpProblems.Own(OwnFailure.Unwritable, ("the gateway failed", _options.Challenge)));
+            }
         }
     }
 
@@ -746,6 +758,7 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (FormatException refused)
         {
+            // * the mapping's own words of the client's own request, fixed in transcoding.json
             await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, refused.Message), problems));
 
             return;
@@ -762,7 +775,9 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (Exception reason) when (reason is ConnectException or TimeoutException or InvalidOperationException)
         {
-            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.DestinationUnreachable, reason.Message), problems with { Arose = FailureArising.Client }));
+            // ! the in-memory transport's words tell of the gateway's inside, never its client's request
+            Report(reason);
+            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "the connection is gone"), problems with { Arose = FailureArising.Client }));
 
             return;
         }
@@ -881,7 +896,10 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (InvalidProtocolBufferException reason)
         {
-            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message), problems with { Arose = FailureArising.Answer }));
+            // the stock library's refusal of the result its server answered: its words are the
+            // library's, reported, and its code alone answers (spec 9.0)
+            Report(reason);
+            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), problems with { Arose = FailureArising.Answer }));
 
             return;
         }
@@ -894,6 +912,7 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (FormatException reason)
         {
+            // * the mapping's own words of the result it holds no form of, fixed in transcoding.json
             Report(reason);
             await Answer(context, HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, _options.Challenge)));
 
@@ -966,9 +985,11 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
         {
+            Report(reason);
+
             var problem = reason is FormatException
                 ? HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, _options.Challenge))
-                : HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message), problems with { Arose = FailureArising.Answer });
+                : HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), problems with { Arose = FailureArising.Answer });
 
             events.Failure(problem.Body, out _);
             await Answer(context, problem);
@@ -1421,9 +1442,11 @@ public sealed class HttpGateway : IAsyncDisposable
             }
             catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
             {
+                stream.Gateway.Report(reason);
+
                 var problem = reason is FormatException
                     ? HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, stream.Gateway._options.Challenge))
-                    : HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message), stream.Problems with { Arose = FailureArising.Answer });
+                    : HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), stream.Problems with { Arose = FailureArising.Answer });
 
                 End(problem.Body);
 

@@ -59,6 +59,11 @@ export const serve = async (port: number): Promise<number> => {
     transport: memory,
   });
 
+  gateway.on('error', (error) => {
+    process.stderr.write(`gateway: ${error.message}
+`);
+  });
+
   await memory.start();
 
   const address = await webSocket.start({

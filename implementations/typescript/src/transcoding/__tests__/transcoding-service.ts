@@ -23,6 +23,8 @@ export interface ITranscodingFixture extends AsyncDisposable {
   /** The calls of `hang` its resolver took, and those that ended cancelled. */
   readonly counts: { cancelled: number; hanging: number };
   readonly gateway: IHTTPGateway;
+  /** The in-memory transport its gateway's connections cross. */
+  readonly memory: ReturnType<typeof createMemoryTransportServer>;
   /** The gateway's own listener's port, on 127.0.0.1. */
   readonly port: number;
   /** The detail of each command of `ask` that failed, in their order. */
@@ -43,11 +45,12 @@ const CANCELS_PATIENCE = 1_000;
 
 /**
  * A server of the `Transcoding` service, its in-memory transport joined, and a gateway of its route
- * table listening on 127.0.0.1 in front of it, of `options` beside the table, the transport, the
- * document and the problem types beadc wrote.
+ * table listening on 127.0.0.1 in front of it, of `options` beside the transport, the document, the
+ * problem types and the table beadc wrote, unless `options` gives one.
  */
 export const startTranscoding = async (
-  options: Omit<IHTTPGatewayOptions, 'routes' | 'transport'> = {}
+  options: Omit<IHTTPGatewayOptions, 'routes' | 'transport'> &
+    Partial<Pick<IHTTPGatewayOptions, 'routes'>> = {}
 ): Promise<ITranscodingFixture> => {
   const memory = createMemoryTransportServer();
   const server = createServer(
@@ -184,8 +187,8 @@ export const startTranscoding = async (
     },
     document: OPENAPI_DOCUMENT,
     problemTypes: HTTP_PROBLEM_TYPES,
-    ...options,
     routes: HTTP_ROUTES,
+    ...options,
     transport: memory,
   });
   const { port } = await gateway.start({ address: '127.0.0.1' });
@@ -193,6 +196,7 @@ export const startTranscoding = async (
   return {
     counts,
     gateway,
+    memory,
     port,
     refused,
     server,

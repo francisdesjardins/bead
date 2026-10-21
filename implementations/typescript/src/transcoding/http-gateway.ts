@@ -32,14 +32,10 @@ import {
   type TimeoutId,
 } from '../transport/shared/clock';
 import { REFUSAL_HEADER } from '../transport/shared/constants';
-import {
-  CancelError,
-  ConnectError,
-  ProgrammerError,
-  TimeoutError,
-} from '../transport/shared/errors';
+import { createEmitter } from '../transport/shared/emitter';
+import { CancelError, ProgrammerError, TimeoutError, toError } from '../transport/shared/errors';
 import { HEARTBEAT } from '../transport/shared/heartbeat';
-import type { IMemoryTransportServerLike } from '../transport/shared/types';
+import type { EmitterListener, IMemoryTransportServerLike } from '../transport/shared/types';
 import {
   assertHosts,
   assertOrigins,
@@ -172,7 +168,17 @@ export interface IHTTPGatewayStartOptions {
   readonly port?: number | undefined;
 }
 
-/** A gateway: its handler, and its own listener's start and stop. */
+/** The events a gateway emits, named by the table that types them. */
+export type HTTPGatewayEventMap = {
+  /**
+   * What went wrong that no caller can mend, reported, its words never in a problem (spec 9.0): a
+   * result Bead's proto JSON form holds none of, a scheme its server takes none of (transcoding
+   * 7.6), an answer its stock library refuses, a connection it could not draw, what no gate foresaw.
+   */
+  error: [error: Error];
+};
+
+/** A gateway: its handler, its own listener's start and stop, and what it reports. */
 export interface IHTTPGateway extends AsyncDisposable {
   /**
    * Answers an exchange whose path one of its routes or its document matches, and gives `true`;
@@ -180,6 +186,16 @@ export interface IHTTPGateway extends AsyncDisposable {
    */
   readonly listener: (request: IHTTPRequestLike, response: IHTTPResponseLike) => boolean;
 
+  /** Takes a listener off `event`. */
+  off: <K extends keyof HTTPGatewayEventMap>(
+    event: K,
+    listener: EmitterListener<HTTPGatewayEventMap[K]>
+  ) => void;
+  /** Calls `listener` on each `event`; what it throws goes no further, and the exchange answers on. */
+  on: <K extends keyof HTTPGatewayEventMap>(
+    event: K,
+    listener: EmitterListener<HTTPGatewayEventMap[K]>
+  ) => void;
   /** Listens on its own listener, built by `createServer`, and gives its port. */
   start: (options?: IHTTPGatewayStartOptions) => Promise<{ port: number }>;
   /** Closes its listener, and ends every exchange under way, each connection closed. */
@@ -496,6 +512,12 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   let bodyBytes = 0;
   // every exchange under way, ended by a stop
   const live = new Set<() => void>();
+  const emitter = createEmitter<HTTPGatewayEventMap>();
+
+  // ! a listener's throw goes no further: the exchange answers on
+  const report = (reason: unknown): void => {
+    emitter.emitEach('error', { onError: () => {}, params: [toError(reason)] });
+  };
 
   const admit = (
     counts: typeof calls,
@@ -794,6 +816,17 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       const arose: Arose = reason.origin === 'local' ? (isHanded ? 'answer' : 'client') : 'server';
       const request = chosen.init.request;
 
+      if (
+        reason.code === ProtocolCode.CREDENTIAL_UNSUPPORTED &&
+        reason.scope === FailureScope.PROTOCOL
+      ) {
+        report(
+          new Error(`the server takes none of the scheme this gateway presents: ${reason.detail}`, {
+            cause: reason,
+          })
+        );
+      }
+
       return problemOfFailure(
         {
           arose,
@@ -818,7 +851,10 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return problemOfOwn('timeout', { detail: `no answer within ${String(timeout)} ms` });
     }
 
+    // * the mapping's own words of the result it holds no form of, fixed in transcoding.json
     if (reason instanceof JsonFormError) {
+      report(reason);
+
       return problemOfOwn('unwritable', { detail: reason.message });
     }
 
@@ -830,14 +866,12 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return problemOfOwn('closed', { detail: 'the connection closed' });
     }
 
-    // the stock library's refusal of a result, or a notification, the server answered
+    // the stock library's refusal of a result, or a notification, the server answered, or what else
+    // the call threw: its words are never the gateway's, reported, and its code alone answers (9.0)
+    report(reason);
+
     return problemOfFailure(
-      {
-        arose: 'answer',
-        code: ProtocolCode.PAYLOAD_UNDECODABLE,
-        detail: reason instanceof Error ? reason.message : '',
-        scope: 'protocol',
-      },
+      { arose: 'answer', code: ProtocolCode.PAYLOAD_UNDECODABLE, scope: 'protocol' },
       { challenge }
     );
   };
@@ -989,6 +1023,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         throw error;
       }
 
+      // * the mapping's own words of the client's own request, fixed in transcoding.json
       return (
         answerProblem(exchange, {
           problem: problemOfFailure(
@@ -1037,13 +1072,16 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         return undefined;
       }
 
+      // ! the in-memory transport's words tell of the gateway's inside, never its client's request
+      report(error);
+
       return (
         answerProblem(exchange, {
           problem: problemOfFailure(
             {
               arose: 'client',
               code: ProtocolCode.DESTINATION_UNREACHABLE,
-              detail: error instanceof ConnectError ? error.message : 'the connection is gone',
+              detail: 'the connection is gone',
               scope: 'protocol',
             },
             { challenge }
@@ -1425,11 +1463,10 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     serve(exchange, { chosen, path, query: target.query }).catch((error: unknown) => {
-      // ! what no gate foresaw: its exchange ends, never the gateway
+      // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
+      report(error);
       answerProblem(exchange, {
-        problem: problemOfOwn('unwritable', {
-          detail: error instanceof Error ? error.message : 'the gateway failed',
-        }),
+        problem: problemOfOwn('unwritable', { detail: 'the gateway failed' }),
       });
     });
 
@@ -1483,6 +1520,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   return {
     listener,
+
+    off: (event, handler) => {
+      emitter.off(event, handler);
+    },
+
+    on: (event, handler) => {
+      emitter.on(event, handler);
+    },
 
     start: ({ address = '127.0.0.1', port = 0 } = {}) => {
       if (createServer === undefined) {

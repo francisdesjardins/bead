@@ -4,8 +4,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
-import { createHTTPGateway } from '../http-gateway';
+import type { IClock } from '../../transport/shared/clock';
+import { createHTTPGateway, type IHTTPGateway } from '../http-gateway';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
+import { TranscodingProcedures } from './generated/transcoding_bead';
+import { EdgesSchema } from './generated/transcoding_pb';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
 // interfaces
@@ -69,6 +72,17 @@ const send = (port: number, sent: ISent): Promise<IAnswered> => {
     outgoing.on('error', reject);
     outgoing.end(body);
   });
+};
+
+/** The messages of every error `gateway` reports, as it reports them. */
+const reportedBy = (gateway: IHTTPGateway): string[] => {
+  const reported: string[] = [];
+
+  gateway.on('error', (error) => {
+    reported.push(error.message);
+  });
+
+  return reported;
 };
 
 /** Waits, on the real clock, for `condition`; throws past `within` milliseconds. */
@@ -140,11 +154,14 @@ test('presents the Authorization field ELSEWHERE, or as a JWT under bearer-jwt',
   ).toMatchObject({ headers: { 'www-authenticate': 'Bearer error="invalid_token"' }, status: 401 });
 
   await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+  const reported = reportedBy(jwt.gateway);
   // the server is given no JWT verifier: the scheme the gateway chose is its own misconfiguration
   const presented = await send(jwt.port, { ...whoAmI, headers: { authorization: 'bearer a.b.c' } });
 
   expect(presented.status).toBe(500);
   expect(JSON.parse(presented.body)).toMatchObject({ code: 36, title: 'CREDENTIAL_UNSUPPORTED' });
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toMatch(/^the server takes none of the scheme this gateway presents: /u);
   expect(
     await send(jwt.port, { ...whoAmI, headers: { authorization: 'Basic YTpi' } })
   ).toMatchObject({
@@ -430,4 +447,78 @@ test('holds each caller’s calls and streams to bounds of their own', async () 
   expect((await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' })).status).toBe(
     200
   );
+});
+
+test('answers a result the stock library refuses 502, reported, none of its words in the problem', async () => {
+  // * raw's route told its result is an Edges: the bytes its server echoes, `x`, a varint cut short
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.raw
+        ? {
+            ...init,
+            procedure: { ...init.procedure, result: TranscodingProcedures.echoEdges.result },
+            result: EdgesSchema,
+          }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, {
+    body: 'x',
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(answered).toMatchObject({
+    body: '{"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}',
+    status: 502,
+  });
+  expect(reported).toHaveLength(1);
+  expect(answered.body).not.toContain(reported[0]);
+});
+
+test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, reported, none of its words in the problem', async () => {
+  await using fixture = await startTranscoding();
+  const reported = reportedBy(fixture.gateway);
+
+  await fixture.memory.stop();
+
+  const answered = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+  expect(answered).toMatchObject({
+    body: '{"code":17,"detail":"the connection is gone","scope":"protocol","status":503,"title":"DESTINATION_UNREACHABLE","type":"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE"}',
+    headers: { 'retry-after': '1' },
+    status: 503,
+  });
+  expect(reported).toHaveLength(1);
+  expect(reported[0]).toMatch(/, not open$/u);
+});
+
+test('answers what no gate foresaw 500, reported, none of its words in the problem', async () => {
+  // * a clock that breaks as a body is read, past every gate
+  const broken: IClock = {
+    clearInterval: (timer) => {
+      clearInterval(timer as Parameters<typeof clearInterval>[0]);
+    },
+    clearTimeout: (timer) => {
+      clearTimeout(timer as Parameters<typeof clearTimeout>[0]);
+    },
+    Date,
+    performance: {
+      now: () => {
+        throw new Error('the clock broke');
+      },
+    },
+    setInterval,
+    setTimeout,
+  };
+  await using fixture = await startTranscoding({ clock: broken });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+  expect(answered).toMatchObject({
+    body: '{"detail":"the gateway failed","status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(reported).toEqual(['the clock broke']);
 });
