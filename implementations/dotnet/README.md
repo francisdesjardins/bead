@@ -37,7 +37,8 @@ src/
                                 them, and the service layer a service is served and called through
   Bead.Protobuf/                the check of a proto payload's records against its message's
                                 descriptor, which a generated proto codec calls before
-                                Google.Protobuf reads them: Bead.Core references no Google.Protobuf
+                                Google.Protobuf reads them, and what the validators beadc generates
+                                are made of: Bead.Core references no Google.Protobuf
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
@@ -64,6 +65,10 @@ tools/
   Bead.ProtobufConformance/     protobuf's conformance testee, outside the solution: its
                                 Generated/ is what tools/protobuf-conformance.mjs generates at run
                                 time; failing.txt, its failure list (decision 0028)
+  Bead.ProtovalidateDifferential/
+                                the protovalidate differential's testee, outside the solution: its
+                                Generated/ is what tools/protovalidate-differential.mjs generates
+                                at run time (decision 0035)
 ```
 
 A transport that needs a framework has a project of its own. Each transport server is a Kestrel
@@ -273,6 +278,24 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   field it does not declare among them (spec 17.9, [decision
   0028](../../docs/decisions/0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
   A project that binds `proto` references `Bead.Protobuf`, which carries Google.Protobuf with it.
+- **A `proto` request's rules** are protovalidate's options on its message, which beadc compiles
+  into each side's validator ([decision
+  0035](../../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):
+  `Validators.Of(rules)`, of `Bead.Protobuf`, makes the bindings' `Validate` of the rules it
+  generates, which judge the message into an `IViolationSink`. The sink holds the violations a
+  detail of `MaximumBytes` carries, each sized as its writer writes it, and counts the rest without
+  building their path, so a judging holds a detail's worth whatever the request breaks; under
+  `FailFast` it stops at the first. A `pattern` is a table beadc builds ahead of time,
+  `Pattern.Matches` walking it a cell a code point. Rules written by hand, a `json` binding's, are
+  judged alike through `Validators.Of`. The side that answers judges every request once it reads,
+  before its resolver, and answers one its rules refuse `PAYLOAD_INVALID`, its violations in its
+  detail, lines of canonical JSON that `Violations.Of` reads back; a client whose options say
+  `Validates`, or a server's for its commands, judges the value before it is written. Every verdict
+  of `spec/validations.json` plays through the validators beadc generates for
+  `spec/validations.proto`, in `tests/Bead.Protobuf.Tests/Generated/`, which the root's
+  `tools/check-validations.mjs` holds to beadc; the root's `tools/protovalidate-differential.mjs`
+  plays them against protovalidate-es through the testee in
+  `tools/Bead.ProtovalidateDifferential/`.
 - **The clock** is a `TimeProvider`, named `Clock`, which every layer takes and exposes ([decision
   0011](../../docs/decisions/0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 

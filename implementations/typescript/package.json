@@ -18,7 +18,7 @@
     "./http-transport-client": "./src/transport/client/http-transport-client.ts",
     "./http-transport-server": "./src/transport/server/http-transport-server.ts",
     "./notification-manager": "./src/router/server/notification-manager.ts",
-    "./proto": "./src/proto/records.ts",
+    "./proto": "./src/proto/proto.ts",
     "./router-client": "./src/router/client/router-client.ts",
     "./router-server": "./src/router/server/router-server.ts",
     "./service": "./src/service/service.ts",
@@ -55,10 +55,12 @@
     "test:interop": "playwright test src/client/__tests__/interop.test.ts",
     "test:browser": "playwright test --config playwright.browser.config.ts",
     "test:devtools": "playwright test --config playwright.devtools.config.ts",
-    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit",
+    "type-check": "node node_modules/typescript-7/bin/tsc --noEmit && node node_modules/typescript-7/bin/tsc --noEmit -p tsconfig.validations.json",
     "verify:all": "yarn check && yarn test",
     "protobuf:check": "node tools/check-protobuf.mjs",
-    "protobuf:generate": "node tools/check-protobuf.mjs --write"
+    "protobuf:generate": "node tools/check-protobuf.mjs --write",
+    "validations:check": "node ../../tools/check-validations.mjs typescript",
+    "validations:generate": "node ../../tools/check-validations.mjs typescript --write"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.74.0",

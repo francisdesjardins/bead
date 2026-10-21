@@ -111,6 +111,11 @@
       "procedureName": "endSessionsOf",
       "request": "an issuer, an object of this member alone, a string: {\"issuer\":i}",
       "answers": "null, once it ended every credential's session of that issuer on every connection that keeps one — each JWT's whose identifier's issuer is i, octet for octet, whatever its sid or sub — each subscription they bounded failing SESSION_REQUIRED, and nothing else (section 13.10): an issuer no session kept names ends nothing, an ELSEWHERE's session names no issuer, and a credential that still holds opens its session anew. A request that names no issuer ends nothing and fails it, which its server answers with PROCEDURE_FAILED and reports"
+    },
+    {
+      "procedureName": "checked",
+      "request": "an object holding names, an array of strings, its other members aside, judged before its resolver by rules each server gives its descriptor by hand, as section 18 judges a request's (spec 18.1): names holds 50 items at most, repeated.max_items, its bounds {\"max_items\":\"50\"}; then each item, names[i], 1 character at least, string.min_len, its bounds {\"min_len\":\"1\"}, and 3 at most, string.max_len, its bounds {\"max_len\":\"3\"}, its characters counted as code points, the words of each as spec 18.8.6 gives them. A request that is no such object breaks required at names, \"value is required\", alone",
+      "answers": "the count of its names, a number, once its rules take it; PAYLOAD_INVALID where they refuse it, its violations in its detail (18.6), and its resolver never called"
     }
   ],
   "credentials": {

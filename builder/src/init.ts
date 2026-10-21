@@ -28,7 +28,7 @@ import { dirname, join } from 'node:path';
 import { CONFIG_FILE } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import { EDITOR_COPY, writeEditorCopy } from './generate.ts';
-import { OPTIONS_FILE } from './roots.ts';
+import { BEADC_FILES, VALIDATE_FILE } from './roots.ts';
 import { WRAPPERS, wrapperText } from './wrappers.ts';
 
 // types
@@ -173,7 +173,8 @@ const protoOf = (name: string): string => {
 const BUF = [
   "# buf's workspace, for an editor, for buf lint, and for buf generate where a project's own build",
   '# writes its messages: beadc passes buf a configuration of its own and never reads this file.',
-  "# .beadc/include holds the editor's copy of Bead's options, which beadc generate writes.",
+  "# .beadc/include holds the editor's copy of Bead's options and protovalidate's, which beadc",
+  '# generate writes.',
   'version: v2',
   'modules:',
   '  - path: proto',
@@ -186,6 +187,8 @@ const BUF = [
   '      use: [STANDARD]',
   "      # bead/options.proto's package is `bead`, as protobuf's own options name none",
   '      except: [PACKAGE_VERSION_SUFFIX]',
+  "      # protovalidate's validate.proto is Buf's to lint",
+  `      ignore: [${EDITOR_COPY}/${VALIDATE_FILE}]`,
   '',
 ].join('\n');
 
@@ -275,13 +278,15 @@ export const initProject = (
       return [wrapper, wrapperText(wrapper, { version })] as const;
     })
   );
-  const editorCopy = `${EDITOR_COPY}/${OPTIONS_FILE}`;
+  const editorCopies = [...BEADC_FILES].map((file) => {
+    return `${EDITOR_COPY}/${file}`;
+  });
   const pathOf = (path: string): string => {
     return join(folder, ...path.split('/'));
   };
 
   // * every path looked at before the first write: a refusal writes nothing
-  for (const path of [...files.keys(), editorCopy]) {
+  for (const path of [...files.keys(), ...editorCopies]) {
     if (existsSync(pathOf(path))) {
       throw new InputError(`init writes ${path}, which is there: init writes over no file`);
     }
@@ -316,7 +321,7 @@ export const initProject = (
 
   makeExecutable(pathOf('beadc.sh'));
   writeEditorCopy(folder);
-  written.push(editorCopy);
+  written.push(...editorCopies);
 
   const appended = [...gitLinesOf(languages)].flatMap(([file, lines]) => {
     const path = pathOf(file);

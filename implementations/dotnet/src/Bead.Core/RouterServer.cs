@@ -331,6 +331,15 @@ public sealed class RouterServer : IRouterLike, IDisposable
         }
     }
 
+    /// <inheritdoc/>
+    public int DetailBytes
+    {
+        get
+        {
+            return Limits.DetailBytes;
+        }
+    }
+
     /// <summary>Its transport.</summary>
     public IRouterServerTransport Transport { get; }
 
@@ -377,6 +386,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 OnSent = request.OnSent,
                 Options = request.Options,
                 Procedure = request.Procedure,
+                Refusal = request.Refusal,
                 Series = request.Series,
             });
     }

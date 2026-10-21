@@ -184,6 +184,12 @@ public enum ProtocolCode : ushort
     /// <summary>Nothing came for a transfer through its inactivity timeout.</summary>
     TransferStalled = 51,
 
+    /// <summary>
+    /// The payload reads, and its procedure's rules refuse it (spec 18.2). Its detail holds its
+    /// violations, lines of canonical JSON (18.6), which <see cref="Violations.Of(Failure)"/> reads.
+    /// </summary>
+    PayloadInvalid = 52,
+
     /// <summary>The resolver failed before it answered.</summary>
     ProcedureFailed = 64,
 

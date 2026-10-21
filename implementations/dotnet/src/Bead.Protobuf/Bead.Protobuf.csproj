@@ -1,12 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
     A proto payload's records, read against its message's descriptor before Google.Protobuf reads
-    them (0028): what the code beadc generates for a proto binding calls, so that Bead.Core still
-    references no Google.Protobuf. The TypeScript side's twin is @francisdesjardins/bead/proto.
+    them (0028), and the validators of its message's rules (0035): what the code beadc generates
+    for a proto binding calls, so that Bead.Core still references no Google.Protobuf. It builds on
+    Bead.Core, whose violations and validators it makes. The TypeScript side's twin is
+    @francisdesjardins/bead/proto.
   -->
   <PropertyGroup>
     <RootNamespace>Bead.Protobuf</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Bead.Core/Bead.Core.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- the library a project that binds proto references already, for its generated messages -->

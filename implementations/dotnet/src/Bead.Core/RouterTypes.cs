@@ -359,6 +359,14 @@ public sealed record RouterRequest(Procedure Procedure, ResolvedRequestOptions O
     /// was made: the call counts into them, at its router's gates. None counts under <c>_OTHER</c>.
     /// </summary>
     public ProcedureSeries? Series { get; init; }
+
+    /// <summary>
+    /// What its requester refused it with before handing it on: a value its rules refuse,
+    /// <see cref="ProtocolCode.PayloadInvalid"/> (spec 18.2). Once the call starts it fails with it,
+    /// counted and started and ended in its turn, drawing no call id and sending nothing
+    /// (spec/debugging.md 9.6).
+    /// </summary>
+    public Failure? Refusal { get; init; }
 }
 
 /// <summary>A request a router's core sends: where, for which procedure, and how.</summary>

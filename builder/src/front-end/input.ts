@@ -1,7 +1,8 @@
 // ── Input ─────────────────────────────────────────────────────────────────────
 
 // buf's FileDescriptorSet, read: its registry, and the files a blueprint is read from, the project's
-// own, in the set's order, each with the path a finding names.
+// own, in the set's order, each with the path a finding names; beadc's own, Bead's options and
+// protovalidate's, are never the project's.
 
 // dependencies
 
@@ -13,7 +14,7 @@ import {
 } from '@bufbuild/protobuf';
 import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 
-import { displayOf, OPTIONS_FILE, pathOnDisk } from '../roots.ts';
+import { BEADC_FILES, displayOf, pathOnDisk } from '../roots.ts';
 
 // types
 
@@ -32,7 +33,7 @@ export interface IProtoInput {
 // definition
 
 /**
- * Reads `bytes`, buf's set of `roots`: the files of the roots in the set's order, beadc's options
+ * Reads `bytes`, buf's set of `roots`: the files of the roots in the set's order, beadc's own files
  * and every import from elsewhere left out; only `files` among them when given, by their import
  * paths.
  */
@@ -47,7 +48,7 @@ export const readSet = (
     const path = pathOnDisk(proto.name, options.roots);
     const wanted = options.files === undefined || options.files.includes(proto.name);
 
-    return desc === undefined || path === undefined || proto.name === OPTIONS_FILE || !wanted
+    return desc === undefined || path === undefined || BEADC_FILES.has(proto.name) || !wanted
       ? []
       : [{ desc, path: displayOf(path) }];
   });

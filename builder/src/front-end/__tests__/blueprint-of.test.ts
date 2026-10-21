@@ -38,7 +38,7 @@ test('a finding on the blueprint of a .proto points at the option that causes it
   const root = deriveRoot(INTEROP_PROTO, {
     root: 'id-0',
     change: (text) => {
-      return text.replace('    id: 1\n    revision: 1\n', '    id: 0\n    revision: 1\n');
+      return text.replace('    id: 1\n    revision: 2\n', '    id: 0\n    revision: 2\n');
     },
   });
   const checked = checkRoots([root], { files: [INTEROP_PROTO] });

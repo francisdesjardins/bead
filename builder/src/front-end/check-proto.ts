@@ -1,8 +1,8 @@
 // ── Check proto ───────────────────────────────────────────────────────────────
 
-// The rules at a `.proto`'s level, over the project's files of buf's set, each at buf's
-// `file:line:column` of the option that causes it, or of the rpc or the service when none does. A
-// blueprint is read from the files only once they pass. NAME_TARGET's half that needs the set: a
+// The rules at a `.proto`'s level, over the project's files of buf's set, protovalidate's options
+// among them (`rules.ts`), each at buf's `file:line:column` of the option that causes it, or of the
+// rpc or the service when none does. A blueprint is read from the files only once they pass. NAME_TARGET's half that needs the set: a
 // class a service gives that a message or an enum of its C# namespace holds, since C# compiles every
 // file of a namespace into one, which the blueprint, knowing no enum and no unbound message, cannot
 // see.
@@ -28,6 +28,7 @@ import {
   procedureOptionsOf,
   serviceOptionsOf,
 } from './options.ts';
+import { checkRules } from './rules.ts';
 
 // constants
 
@@ -132,8 +133,14 @@ const typesByNamespaceOf = (input: IProtoInput): Map<string, Set<string>> => {
 
 // definition
 
-/** The findings of the `.proto`-level rules over `input`'s files. */
-export const checkProto = (input: IProtoInput): IDiagnostic[] => {
+/**
+ * The findings of the `.proto`-level rules over `input`'s files; protovalidate's options among them
+ * unless `rules` is false, where buf's PROTOVALIDATE refused them first.
+ */
+export const checkProto = (
+  input: IProtoInput,
+  options: { readonly rules?: boolean } = {}
+): IDiagnostic[] => {
   const diagnostics: IDiagnostic[] = [];
 
   const report = (
@@ -354,6 +361,11 @@ export const checkProto = (input: IProtoInput): IDiagnostic[] => {
         }
       }
     }
+  }
+
+  // * protovalidate's options: what beadc compiles of them, and what a request reaches
+  if (options.rules !== false) {
+    diagnostics.push(...checkRules(input));
   }
 
   return diagnostics;

@@ -9,6 +9,7 @@
 import { ProcedureKind } from '../router/shared/constants';
 import type { IPayloadCodec } from '../router/shared/payloads';
 import type { ConnectionHandle, IAdmissionRequest, IProcedure } from '../router/shared/types';
+import type { IJudged, IValidateOptions } from '../router/shared/violations';
 import { ProgrammerError } from '../transport/shared/errors';
 
 // interfaces
@@ -35,12 +36,13 @@ export interface IDescriptorInit {
   readonly request: IPayloadCodec<unknown, never>;
   readonly result: IPayloadCodec<unknown, never>;
   /**
-   * What checks a request's value beyond its encoding, throwing on a violation: the side that
-   * answers calls it once the request is decoded, before its resolver; a client, before it encodes
-   * one, when its options say so. None validates nothing, and nothing gives one yet: its value is
-   * the decoded request or the given one, and a violation's shape is the validator's to come.
+   * The request's rules beyond its encoding (spec 18), judged into the violations its detail
+   * carries: the side that answers judges every request once it reads, before its resolver, and
+   * answers one they refuse PAYLOAD_INVALID; a requester judges its value before it writes it, when
+   * its options say so. beadc generates it from protovalidate's options; one that throws is its
+   * side's own error, PROCEDURE_FAILED. None judges nothing.
    */
-  readonly validate?: ((request: unknown) => void) | undefined;
+  readonly validate?: ((request: unknown, options?: IValidateOptions) => IJudged) | undefined;
 }
 
 /** A request's, `notification` given for a procedure that notifies. */

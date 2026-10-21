@@ -269,7 +269,7 @@ test('breaking exits 0 against itself, 1 on a finding, 0 once a scoped --except 
     limited,
     readFileSync(INTEROP, 'utf8')
       .replace('"procedureId": 1,', '"maximumPayloadBytes": 1024,\n          "procedureId": 1,')
-      .replace('"serviceRevision": 1', '"serviceRevision": 2')
+      .replace('"serviceRevision": 2', '"serviceRevision": 3')
   );
 
   expect(beadc(['breaking', INTEROP, '--against', INTEROP]).status).toBe(0);

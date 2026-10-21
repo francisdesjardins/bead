@@ -14,14 +14,16 @@ export const Severity = Object.freeze({
 } as const);
 
 /**
- * Where a rule applies: on a `.proto` input, or on any blueprint, one written by hand included; or
- * between two blueprints, the earlier and the current, under `beadc breaking`.
+ * Where a rule applies: on a `.proto` input, or on any blueprint, one written by hand included;
+ * between two blueprints, the earlier and the current, under `beadc breaking`; or between a
+ * blueprint and the targets `beadc generate` writes it with.
  */
 export const Level = Object.freeze({
   PROTO: 'proto',
   BLUEPRINT: 'blueprint',
   BOTH: 'proto and blueprint',
   BREAKING: 'breaking',
+  GENERATE: 'generate',
 } as const);
 
 /**
@@ -61,6 +63,10 @@ export const RULES = Object.freeze({
   PAYLOAD_TYPE_FIELD: { level: Level.PROTO, severity: Severity.ERROR },
   OPTIONS_COPY: { level: Level.PROTO, severity: Severity.ERROR },
   CSHARP_NAMESPACE: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_COPY: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_RULE_UNSUPPORTED: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_PATTERN_LARGE: { level: Level.PROTO, severity: Severity.ERROR },
+  VALIDATE_RULES_UNPLAYED: { level: Level.PROTO, severity: Severity.WARNING },
   // on both
   ADMISSION_EMPTY: { level: Level.BOTH, severity: Severity.ERROR },
   // on any blueprint, in their order: its JSON, its format, its features, its schema
@@ -89,6 +95,9 @@ export const RULES = Object.freeze({
   PROTO_FILE: { level: Level.BLUEPRINT, severity: Severity.ERROR },
   NAME_TARGET: { level: Level.BOTH, severity: Severity.ERROR },
   DESCRIPTION_TARGET: { level: Level.BLUEPRINT, severity: Severity.ERROR },
+  VALIDATE_RULE_FIT: { level: Level.BLUEPRINT, severity: Severity.ERROR },
+  // what `generate` holds a blueprint to: each output's target generates every feature it requires
+  FEATURE_UNGENERATED: { level: Level.GENERATE, severity: Severity.ERROR },
   SPEC_VERSION_NEWER: { level: Level.BLUEPRINT, severity: Severity.WARNING },
   // between two blueprints, by id: what a peer of the earlier meets
   SERVICE_NO_DELETE: { level: Level.BREAKING, severity: Severity.ERROR, category: Category.WIRE },
@@ -117,6 +126,11 @@ export const RULES = Object.freeze({
     category: Category.WIRE,
   },
   PROCEDURE_ADMISSION_TIGHTENED: {
+    level: Level.BREAKING,
+    severity: Severity.ERROR,
+    category: Category.WIRE,
+  },
+  PROCEDURE_RULES_TIGHTENED: {
     level: Level.BREAKING,
     severity: Severity.ERROR,
     category: Category.WIRE,

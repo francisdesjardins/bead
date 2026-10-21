@@ -1,0 +1,22 @@
+[
+  {
+    "rule": "buf:PROTOVALIDATE",
+    "line": 18,
+    "column": 5
+  },
+  {
+    "rule": "buf:PROTOVALIDATE",
+    "line": 19,
+    "column": 5
+  },
+  {
+    "rule": "buf:PROTOVALIDATE",
+    "line": 21,
+    "column": 20
+  },
+  {
+    "rule": "buf:PROTOVALIDATE",
+    "line": 22,
+    "column": 20
+  }
+]

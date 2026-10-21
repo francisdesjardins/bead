@@ -26,6 +26,7 @@ import type {
   ResolverFailure,
   RouterAnswer,
 } from './types';
+import { detailBoundOf, type IJudged, isRefused, violationsDetailOf } from './violations';
 
 // interfaces
 
@@ -104,7 +105,7 @@ export const createServiceResolver = <Handle extends string>(
       type: Exclude<DebugType, 'notification'>;
     }
   ): IRequestResolver<Handle> => {
-    const { beforeRequest, serializer } = dependencies;
+    const { beforeRequest, failFast = false, serializer, validate } = dependencies;
 
     // whether a request may reach the callback, on its header alone — the admission sees no more
     const admission =
@@ -158,6 +159,58 @@ export const createServiceResolver = <Handle extends string>(
           started,
           type,
         });
+      }
+
+      // * a payload that reads is judged by its rules before the callback: a refusal is the
+      // protocol's, PAYLOAD_INVALID, answered here as PAYLOAD_UNDECODABLE is (spec 18.2)
+      if (validate !== undefined) {
+        const maximumBytes = detailBoundOf(router.limits);
+        let judged: IJudged;
+
+        try {
+          judged = validate(requestPayload, { failFast, maximumBytes });
+        } catch (reason) {
+          // a rule that fails to judge is its side's own error, answered as a resolver's that
+          // throws, and why goes on for the router to report
+          if (started !== undefined && !signal.aborted) {
+            trace(procedure, {
+              callId: header.callId,
+              connectionHandle,
+              direction: 'tx',
+              error: reason,
+              isAnswered: true,
+              rx: requestPayload,
+              started,
+              type,
+            });
+          }
+
+          await router.respond({ failure: router.failures.procedureFailed }, target).catch(noop);
+
+          throw reason;
+        }
+
+        if (isRefused(judged)) {
+          const failure = {
+            ...router.failures.payloadInvalid,
+            detail: violationsDetailOf(judged, { maximumBytes }),
+          };
+
+          if (started !== undefined) {
+            trace(procedure, {
+              callId: header.callId,
+              connectionHandle,
+              direction: 'tx',
+              isAnswered: true,
+              rx: requestPayload,
+              started,
+              tx: failure,
+              type,
+            });
+          }
+
+          return router.respond({ failure }, target);
+        }
       }
 
       // the callback is handed the request, decoded, its call's session, and no more

@@ -176,28 +176,13 @@ public sealed class ServiceClientTests
     }
 
     [Fact]
-    public async Task Validates_a_request_before_it_encodes_it_when_its_options_say_so_by_its_descriptor_s_validate()
+    public async Task Fails_a_call_before_it_goes_with_PAYLOAD_INVALID_when_its_options_say_so_and_sends_nothing()
     {
         await using var link = new ServiceLink();
-        var echo = new RequestProcedure<ServiceServerTests.EchoService, string, string, NoFailure>(
-            new Procedure { ServiceId = 8, ProcedureId = 1, ProcedureName = "echo", ServiceRevision = 1 },
-            new ProcedureBindings<string, string>
-            {
-                Admission = AdmissionRule.None,
-                Request = PayloadCodecs.Text,
-                Result = PayloadCodecs.Text,
-                Validate = (request) =>
-                {
-                    if (request.Length == 0)
-                    {
-                        throw new ArgumentOutOfRangeException(nameof(request), "an empty echo");
-                    }
-                },
-            });
-        var server = new ServiceServer<ServiceServerTests.EchoService, string>([echo]);
+        var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
         var sent = new List<string>();
 
-        server.On(echo, (request, response) =>
+        server.On(CheckedProcedures.Echo, (request, response) =>
         {
             sent.Add(request.Payload);
 
@@ -205,19 +190,124 @@ public sealed class ServiceClientTests
         });
         server.Offer(link.Server);
 
-        var validating = new ServiceClient<ServiceServerTests.EchoService>([echo], link.Client, new ServiceClientOptions<ServiceServerTests.EchoService> { Validates = true });
-        var trusting = new ServiceClient<ServiceServerTests.EchoService>([echo], link.Client);
-
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        var validating = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client, new ServiceClientOptions<CheckedProcedures> { Validates = true });
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return validating.RequesterOf(echo)("")().WaitAsync(Patience, Cancelled);
+            return validating.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
         });
 
-        // * the server's layer holds it too: the request went, and its resolver never saw it
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal((FailureOrigin.Local, RouterSide.Client), (refused.Origin, refused.Side));
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+        Assert.Equal(CheckedProcedures.Echo.Procedure.Address, refused.ProcedureAddress);
+        Assert.Empty(sent);
+
+        // * a value its rules take goes as ever
+        Assert.Equal("hi", await validating.RequesterOf(CheckedProcedures.Echo)("hi")().WaitAsync(Patience, Cancelled));
+        Assert.Equal(["hi"], sent);
+    }
+
+    [Fact]
+    public async Task Validates_a_subscribing_request_as_a_plain_one_when_its_options_say_so()
+    {
+        await using var link = new ServiceLink();
+        var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
+        var sent = new List<string>();
+
+        server.On(CheckedProcedures.News, (request, response) =>
+        {
+            sent.Add(request.Payload);
+
+            return response.Answer(request.Payload);
+        });
+        server.Offer(link.Server);
+
+        var validating = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client, new ServiceClientOptions<CheckedProcedures> { Validates = true });
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return validating.NotificationOf(CheckedProcedures.News).Register("", (_) =>
+            {
+                return Task.CompletedTask;
+            })().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal(FailureOrigin.Local, refused.Origin);
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+        Assert.Empty(sent);
+    }
+
+    [Fact]
+    public async Task Answers_PAYLOAD_INVALID_to_a_command_its_rules_refuse_before_its_resolver()
+    {
+        await using var link = new ServiceLink();
+        var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var heard = new List<string>();
+
+        client.On(CheckedProcedures.Shout, (request, response) =>
+        {
+            heard.Add(request.Payload);
+
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        server.Offer(link.Server);
+
+        Assert.Equal("HI", await server.CommandOf(CheckedProcedures.Shout)("hi")(Call).WaitAsync(Patience, Cancelled));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return server.CommandOf(CheckedProcedures.Shout)("")(Call).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal(FailureOrigin.Peer, refused.Origin);
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+        Assert.Equal(["hi"], heard);
+    }
+
+    // debugging 9.6.5
+    [Fact]
+    public async Task Counts_a_call_its_rules_refuse_before_it_goes_as_PAYLOAD_INVALID_started_and_ended_in_its_turn()
+    {
+        var registry = new MetricsRegistry();
+
+        await using var link = new ServiceLink(registry);
+        var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
+
+        server.On(CheckedProcedures.Echo, (request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+        server.Offer(link.Server);
+
+        var validating = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client, new ServiceClientOptions<CheckedProcedures> { Validates = true });
+        var steps = new List<(Exception? Error, DebugEvent Step)>();
+
+        link.Client.Services.Debug += (error, step) =>
+        {
+            steps.Add((error, step));
+        };
+
         await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return trusting.RequesterOf(echo)("")().WaitAsync(Patience, Cancelled);
+            return validating.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
         });
-        Assert.Empty(sent);
+
+        var exposition = registry.Exposition().Text;
+
+        Assert.Contains("bead_client_call_started_total{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", exposition, StringComparison.Ordinal);
+        Assert.Contains(
+            "bead_client_call_handled_total{service=\"8\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PAYLOAD_INVALID\"} 1\n",
+            exposition,
+            StringComparison.Ordinal);
+        Assert.Contains("bead_client_call_duration_seconds_count{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", exposition, StringComparison.Ordinal);
+
+        // * its tx step told as it was refused, naming no call, then its failure
+        Assert.Equal(2, steps.Count);
+        Assert.Equal((DebugDirection.Tx, (uint?)null, (object?)""), (steps[0].Step.Direction, steps[0].Step.CallId, steps[0].Step.Tx));
+        Assert.Null(steps[0].Error);
+        Assert.Equal((DebugDirection.Rx, (uint?)null), (steps[1].Step.Direction, steps[1].Step.CallId));
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, Assert.IsType<FailureException>(steps[1].Error).Code);
     }
 }

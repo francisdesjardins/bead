@@ -14,7 +14,8 @@ import { create, createRegistry, type DescMessage, fromBinary } from '@bufbuild/
 import { CodeGeneratorRequestSchema, FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { createEcmaScriptPlugin } from '@bufbuild/protoplugin';
 
-import type { IServiceEntry } from '../../model/blueprint.ts';
+import { type IServiceEntry, VALIDATE_FEATURE } from '../../model/blueprint.ts';
+import { judgedMessagesOf, plansOf } from '../../model/rules.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../version.ts';
 import {
   bindsMessages,
@@ -28,6 +29,7 @@ import {
 } from '../target.ts';
 import type { ITypeScriptOptions } from './options.ts';
 import { printService } from './templates.ts';
+import { printValidators } from './validators.ts';
 
 // constants
 
@@ -95,6 +97,7 @@ const parameterOf = (options: ITypeScriptOptions): string => {
 /** The TypeScript target: a `_bead.ts` for each service's file, over the service layer. */
 export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
   name: 'typescript',
+  features: new Set([VALIDATE_FEATURE]),
   generate: (input: ITargetInput, options: ITypeScriptOptions): readonly IGeneratedFile[] => {
     const { blueprint } = input;
     const set =
@@ -105,6 +108,7 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
       ? `${options.protoRuntime}.js`
       : options.protoRuntime;
     const files = new Map<string, IServiceEntry[]>();
+    const rules = judgedMessagesOf(blueprint);
     // * the files that mark a deprecation or name a message protobuf deprecates: their own uses are
     // silenced, and only theirs, so the TypeScript side's lint holds every other file to its rules
     const silenced = new Set<string>();
@@ -146,15 +150,22 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
             silenced.add(name);
           }
 
+          // * the rules first: each descriptor's validator is made of them as the module loads
+          const validators = printValidators(f, {
+            plans: plansOf(services, rules),
+            protoRuntime,
+            messageOf,
+          });
+
           for (const service of services) {
-            printService(f, { service, runtime, protoRuntime, messageOf });
+            printService(f, { service, runtime, protoRuntime, messageOf, validators });
           }
 
           f.print();
           f.print(
             '// the contract with the runtime this file needs: an older runtime lacks the constant, and fails here'
           );
-          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_3', runtime), ';');
+          f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_4', runtime), ';');
         }
       },
     });

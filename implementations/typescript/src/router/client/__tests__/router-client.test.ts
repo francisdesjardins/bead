@@ -2777,7 +2777,7 @@ test.describe('createRouterClient', () => {
       expect(scripted.sent).toHaveLength(1);
     });
 
-    // debugging 9.6.11
+    // debugging 9.6.12
     test('counts a call its caller cancels as cancelled, and one its transport refuses as an error', async () => {
       const metricsRegistry = createMetricsRegistry();
       const { control, transport } = createScriptedTransport();

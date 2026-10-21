@@ -571,6 +571,14 @@ public sealed partial class DurationsTests
             }
         }
 
+        public int DetailBytes
+        {
+            get
+            {
+                return LimitDefaults.MaximumDetailBytes;
+            }
+        }
+
         public void RegisterResolver(IRequestResolver resolver)
         {
         }

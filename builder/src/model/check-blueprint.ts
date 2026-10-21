@@ -3,8 +3,8 @@
 // The rules at a blueprint's level that span entries, over a blueprint the format's schema took: one
 // id and one name a scope, folded as spec 16.6 folds; the reservations; a binding's encoding its
 // message's; a notification's result; a failure its service lacks; a `proto` binding's source, and a
-// `proto` path's file; and the names every official target generates or reserves, and the
-// descriptions every one writes.
+// `proto` path's file; the names every official target generates or reserves, and the descriptions
+// every one writes; and, under `validate`, a field's rules of its own type (VALIDATE_RULE_FIT).
 
 // dependencies
 
@@ -21,6 +21,7 @@ import {
 } from '../targets/names.ts';
 import type { IBinding, IBlueprint, IRange, IServiceEntry } from './blueprint.ts';
 import { foldOf } from './identity.ts';
+import { fitFindingsOf } from './rules.ts';
 
 // constants
 
@@ -385,6 +386,12 @@ export const checkBlueprint = (
   };
 
   blueprint.services.forEach(checkService);
+
+  // * a blueprint is read without its .proto, by `breaking` among others: the rules fit their
+  // fields here, a wrapper's its scalar's, as buf's PROTOVALIDATE holds them on a .proto
+  for (const finding of fitFindingsOf(blueprint)) {
+    report('VALIDATE_RULE_FIT', { at: finding.pointer, message: finding.message });
+  }
 
   return diagnostics;
 };

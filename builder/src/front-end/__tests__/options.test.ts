@@ -40,5 +40,6 @@ test("reads the interop's options: its file's admission, its service, each proce
     '16:request',
     '17:request',
     '18:request',
+    '19:request',
   ]);
 });

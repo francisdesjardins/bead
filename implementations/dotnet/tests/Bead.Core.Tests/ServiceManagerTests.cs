@@ -53,13 +53,20 @@ public sealed partial class ServiceManagerTests
     // where a test's wall clock starts: a call traced at once starts there
     private static readonly DateTimeOffset Started = DateTimeOffset.FromUnixTimeMilliseconds(1_000);
 
+    // the bounds of the echo's rule, and the detail a request it refuses under failFast is answered with
+    private static readonly JsonElement MinLen = JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["min_len"] = "1" });
+
+    private const string RefusedDetail =
+        "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"value\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"stopped\":true}";
+
     // ! what a call made, a request answered, a notification sent and one heard allocate while
     // nobody listens, in bytes: the allocation gate's pin, which sees a field, a copy or a closure
     // added to a step's path. Measured on .NET 10.0.12, the runtime of the SDK global.json names,
     // x64, in the Debug build `dotnet test` makes, on Windows and on Linux alike. A runtime that
     // moves them is pinned anew, by hand: run the gate, take the bytes its failure prints, and name
-    // the runtime, and why each step moved, in the commit
-    private static readonly long[] AllocatedWhileNobodyListens = [1256, 984, 560, 768];
+    // the runtime, and why each step moved, in the commit. A call made holds the refusal its rules
+    // may judge it with, which its router's request carries (decision 0035)
+    private static readonly long[] AllocatedWhileNobodyListens = [1272, 984, 560, 768];
 
     // helpers
 
@@ -138,6 +145,23 @@ public sealed partial class ServiceManagerTests
     private static RequestResolverDependencies<Text, Text> Answered(BeforeRequest? beforeRequest = null)
     {
         return new RequestResolverDependencies<Text, Text> { Serializer = Json, BeforeRequest = beforeRequest };
+    }
+
+    // the echo's rule, by hand: its value one character at least, each judging's options written down
+    private static RequestValidator<Text> Judging(List<ValidateOptions> given)
+    {
+        return (request, options) =>
+        {
+            given.Add(options);
+
+            return request.Value.Length > 0
+                ? Judged.None
+                : new Judged
+                {
+                    Stopped = options.FailFast,
+                    Violations = [new Violation { Bounds = MinLen, FieldPath = "value", Message = "must be at least 1 characters", RuleId = "string.min_len" }],
+                };
+        };
     }
 
     private static NotificationDependencies<Text, Text, Text> Notified(int? window = null, Func<uint, Text, Task>? unsubscribe = null)
@@ -1136,6 +1160,8 @@ public sealed partial class ServiceManagerTests
         private readonly Dictionary<ProcedureAddress, INotificationLike> _held = [];
 
         public TimeProvider Clock { get; init; } = TimeProvider.System;
+
+        public int DetailBytes { get; init; } = LimitDefaults.MaximumDetailBytes;
 
         public List<IRequestResolver> RegisteredResolvers { get; } = [];
 

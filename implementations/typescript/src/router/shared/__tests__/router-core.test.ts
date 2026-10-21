@@ -3875,7 +3875,7 @@ test.describe('createRouterCore', () => {
   test.describe('its metrics', () => {
     const answered = lineOf('bead_server_call_', 'service="2",procedure="echo",type="request"');
 
-    // debugging 9.2 and 9.4.20
+    // debugging 9.2 and 9.4.21
     test('count a call answered whose answer its transport throws on as an error, and one its transport rejects once it has it as answered', async () => {
       const registry = createMetricsRegistry();
       const metrics = registry.attach('server');

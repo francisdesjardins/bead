@@ -421,29 +421,14 @@ public sealed class ServiceServerTests
     }
 
     [Fact]
-    public async Task Validates_a_request_before_its_resolver_as_its_descriptor_s_validate_holds_it()
+    public async Task Answers_PAYLOAD_INVALID_with_its_violations_to_a_request_its_rules_refuse_before_its_resolver()
     {
         await using var link = new ServiceLink();
-        var echo = new RequestProcedure<EchoService, string, string, NoFailure>(
-            new Procedure { ServiceId = 8, ProcedureId = 1, ProcedureName = "echo", ServiceRevision = 1 },
-            new ProcedureBindings<string, string>
-            {
-                Admission = AdmissionRule.None,
-                Request = PayloadCodecs.Text,
-                Result = PayloadCodecs.Text,
-                Validate = (request) =>
-                {
-                    if (request.Length == 0)
-                    {
-                        throw new ArgumentOutOfRangeException(nameof(request), "an empty echo");
-                    }
-                },
-            });
-        var server = new ServiceServer<EchoService, string>([echo]);
-        var client = new ServiceClient<EchoService>([echo], link.Client);
+        var server = new ServiceServer<CheckedProcedures, string>(CheckedProcedures.All);
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
         var seen = new List<string>();
 
-        server.On(echo, (request, response) =>
+        server.On(CheckedProcedures.Echo, (request, response) =>
         {
             seen.Add(request.Payload);
 
@@ -451,18 +436,83 @@ public sealed class ServiceServerTests
         });
         server.Offer(link.Server);
 
-        Assert.Equal("hi", await client.RequesterOf(echo)("hi")().WaitAsync(Patience, Cancelled));
-        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.RequesterOf(echo)("")()));
+        Assert.Equal("hi", await client.RequesterOf(CheckedProcedures.Echo)("hi")().WaitAsync(Patience, Cancelled));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return client.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal(FailureOrigin.Peer, refused.Origin);
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+
+        var violation = Assert.Single(Violations.Of(refused.Failure).Violations);
+
+        Assert.Equal(("string.min_len", "must be at least 1 characters"), (violation.RuleId, violation.Message));
         Assert.Equal(["hi"], seen);
+        Assert.Empty(link.Reported);
+    }
+
+    [Fact]
+    public async Task Answers_PROCEDURE_FAILED_to_a_validate_that_throws_and_reports_it()
+    {
+        await using var link = new ServiceLink();
+        var broken = new RequestProcedure<CheckedProcedures, string, string, NoFailure>(
+            CheckedProcedures.Echo.Procedure,
+            CheckedProcedures.BindingsOf((request, _) =>
+            {
+                throw new ArgumentOutOfRangeException(nameof(request), "a rule that cannot judge");
+            }));
+        var server = new ServiceServer<CheckedProcedures, string>([broken]);
+        var client = new ServiceClient<CheckedProcedures>([broken], link.Client);
+        var seen = new List<string>();
+
+        server.On(broken, (request, response) =>
+        {
+            seen.Add(request.Payload);
+
+            return response.Answer(request.Payload);
+        });
+        server.Offer(link.Server);
+
+        Assert.Equal((ushort)ProtocolCode.ProcedureFailed, await CodeOf(client.RequesterOf(broken)("hi")()));
+        Assert.Empty(seen);
         Assert.IsType<ArgumentOutOfRangeException>(await link.FirstReported.WaitAsync(Patience, Cancelled));
         Assert.Single(link.Reported);
     }
 
-    /// <summary>A service of one request, whose descriptor checks its value.</summary>
-    public sealed class EchoService
+    [Fact]
+    public async Task Validates_a_command_before_it_goes_when_its_options_say_so()
     {
-        private EchoService()
+        await using var link = new ServiceLink();
+        var validating = new ServiceServer<CheckedProcedures, string>(
+            CheckedProcedures.All,
+            new ServiceServerOptions<CheckedProcedures> { Admissions = new CheckedAdmissions(), Validates = true });
+        var client = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var heard = new List<string>();
+
+        client.On(CheckedProcedures.Shout, (request, response) =>
         {
-        }
+            heard.Add(request.Payload);
+
+            return response.Answer(request.Payload.ToUpperInvariant());
+        });
+        validating.Offer(link.Server);
+
+        var call = new RequestOptions { ConnectionHandle = ServiceLink.Handle };
+
+        Assert.Equal("HI", await validating.CommandOf(CheckedProcedures.Shout)("hi")(call).WaitAsync(Patience, Cancelled));
+
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return validating.CommandOf(CheckedProcedures.Shout)("")(call).WaitAsync(Patience, Cancelled);
+        });
+
+        // * refused here, before it went: the client never heard it
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal((FailureOrigin.Local, RouterSide.Server), (refused.Origin, refused.Side));
+        Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+        Assert.Equal(["hi"], heard);
     }
 }

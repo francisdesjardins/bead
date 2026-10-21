@@ -26,7 +26,7 @@ test("the default module of the proto check is the subpath the TypeScript side's
   const subpath = DEFAULT_PROTO_RUNTIME.slice(declared.name.length);
 
   expect(DEFAULT_PROTO_RUNTIME.startsWith(`${declared.name}/`)).toBe(true);
-  expect(declared.exports[`.${subpath}`]).toBe('./src/proto/records.ts');
+  expect(declared.exports[`.${subpath}`]).toBe('./src/proto/proto.ts');
 });
 
 test("an output's extensions and messages, in beadc.yaml's words", () => {

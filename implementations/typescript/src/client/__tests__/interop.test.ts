@@ -322,6 +322,23 @@ test.describe('the C# server of the interop service', () => {
         ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_UNDECODABLE });
       });
 
+      test('a request its rules refuse is answered PAYLOAD_INVALID, its violations in its detail', async () => {
+        // * the detail as the server writes it, lines of canonical JSON, byte for byte
+        await expect(interop().checked({ names: ['ab', '', 'abcd'] })()).rejects.toMatchObject({
+          code: ProtocolCode.PAYLOAD_INVALID,
+          detail: [
+            '{"bounds":{"min_len":"1"},"fieldPath":"names[1]","message":"must be at least 1 characters","ruleId":"string.min_len"}',
+            '{"bounds":{"max_len":"3"},"fieldPath":"names[2]","message":"must be at most 3 characters","ruleId":"string.max_len"}',
+            '{"more":0}',
+          ].join('\n'),
+          scope: FailureScope.PROTOCOL,
+        });
+      });
+
+      test('checked answers the count of the names its rules take', async () => {
+        await expect(interop().checked({ names: ['a', 'bc'] })()).resolves.toBe(2);
+      });
+
       test('a call cancelled by its signal is cancelled at the server too', async () => {
         const controller = new AbortController();
         const slow = interop().slow(SLOW)({ signal: controller.signal });

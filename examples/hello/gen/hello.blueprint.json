@@ -18,7 +18,26 @@
       },
       {
         "file": "hello/v1/hello.proto",
-        "fullName": "hello.v1.CountDownRequest"
+        "fullName": "hello.v1.CountDownRequest",
+        "rules": {
+          "fields": [
+            {
+              "fieldName": "from",
+              "fieldNumber": 1,
+              "presence": "implicit",
+              "rules": {
+                "int32": {
+                  "lte": 10
+                }
+              },
+              "type": {
+                "scalar": "int32"
+              }
+            }
+          ],
+          "message": {},
+          "oneofs": []
+        }
       },
       {
         "file": "hello/v1/hello.proto",
@@ -38,7 +57,9 @@
       }
     ]
   },
-  "requires": [],
+  "requires": [
+    "validate"
+  ],
   "reservedServices": {
     "ids": [],
     "names": []
@@ -51,11 +72,6 @@
           "code": 1,
           "description": "Nobody to greet: no name given, and none the caller gave when asked.",
           "failureName": "NAMELESS"
-        },
-        {
-          "code": 2,
-          "description": "A count past 10.",
-          "failureName": "TOO_FAR"
         }
       ],
       "procedures": [
@@ -82,9 +98,7 @@
             "hook": "greeted"
           },
           "description": "Counts down from a number to 0, a Tick a step, for a caller its connection greeted.",
-          "failures": [
-            "TOO_FAR"
-          ],
+          "failures": [],
           "notification": {
             "encoding": "proto",
             "message": "hello.v1.Tick"
@@ -123,13 +137,18 @@
         "fullName": "hello.v1.HelloService"
       },
       "reserved": {
-        "failureCodes": [],
+        "failureCodes": [
+          {
+            "first": 2,
+            "last": 2
+          }
+        ],
         "procedureIds": [],
         "procedureNames": []
       },
       "serviceId": 1,
       "serviceName": "Hello",
-      "serviceRevision": 1
+      "serviceRevision": 2
     }
   ],
   "specVersion": "0.7.0"

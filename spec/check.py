@@ -20,7 +20,8 @@ companion's help and type, its buckets rising under the companion's bounds, each
 canonical number for its bound, each _count the sum of its handled counts, none started below
 handled; each implementation's tests read every group, the conversations, the transports' cases,
 a case of which may name the row of docs/support.md it crosses, the clock cases, the debug filters, the
-metrics, the codecs' payloads and values and the identities' names, ids, folds and procedure kinds,
+metrics, the codecs' payloads and values, the identities' names, ids, folds and procedure kinds, and the
+validations' verdicts and details,
 an entry of either naming, where it crosses a row of docs/support.md, a row that names the file and
 the entry; the encodings section 17 states are the codecs' schema's, each played, and spec.md names
 each .proto of spec/, and no other; the durations name each place by one id and each input by one
@@ -148,6 +149,7 @@ WHOLE = {
     'metrics': ('expositions', 'exits'),
     'codecs': ('payloads', 'values'),
     'identities': ('names', 'ids', 'folds', 'procedureKinds'),
+    'validations': ('verdicts', 'details'),
 }
 
 # the companion's files, which repeat its version and cite its units, each named by a line of it, and
@@ -456,6 +458,9 @@ named['names'] = documents['identities']['names']
 named['ids'] = documents['identities']['ids']
 named['folds'] = documents['identities']['folds']
 named['procedureKinds'] = documents['identities']['procedureKinds']
+# the validations' verdicts and details (0035)
+named['verdicts'] = documents['validations']['verdicts']
+named['details'] = documents['validations']['details']
 
 for group, entries in named.items():
     seen = set()
@@ -652,8 +657,8 @@ for line in re.findall(r'^_Vectors:.*$', text, re.MULTILINE):
         elif part != 'every refusal':
             problems.append(f'spec.md: "{line}" names {part!r}, no group')
 
-for line in re.findall(r'^_(?:Conversations|Transports|Durations|Identities|Codecs):.*$', text, re.MULTILINE):
-    found = re.fullmatch(r'_(?:Conversations|Transports|Durations|Identities|Codecs): `spec/(\S+)\.json`\._', line)
+for line in re.findall(r'^_(?:Conversations|Transports|Durations|Identities|Codecs|Validations):.*$', text, re.MULTILINE):
+    found = re.fullmatch(r'_(?:Conversations|Transports|Durations|Identities|Codecs|Validations): `spec/(\S+)\.json`\._', line)
 
     if found is None or found.group(1) not in documents:
         problems.append(f'spec.md: {line!r} names no file of spec/')
@@ -1555,6 +1560,11 @@ COUNTS = {
             (1, r'\b{n} exits', len(named['exits']), 'exits'),
             *played_by_each(len(named['expositions']) + len(named['exits'])),
         ],
+        'spec/validations.json': [
+            (1, r'^{n} verdicts', len(named['verdicts']), 'verdicts'),
+            (1, r'\b{n} details', len(named['details']), 'details'),
+            *played_by_each(len(named['verdicts']) + len(named['details'])),
+        ],
     },
     'README.md': {
         'spec/vectors.json': [
@@ -1582,6 +1592,10 @@ COUNTS = {
         'spec/metrics.json': [
             (1, r'^{n} expositions', len(named['expositions']), 'expositions'),
             (1, r'\b{n} exits', len(named['exits']), 'exits'),
+        ],
+        'spec/validations.json': [
+            (1, r'^{n} verdicts', len(named['verdicts']), 'verdicts'),
+            (1, r'\b{n} details', len(named['details']), 'details'),
         ],
         'spec/interop-blueprint.json': [
             (1, r'\bits {n} service\b', len(documents['interop-blueprint']['services']), "the blueprint's services"),
@@ -1642,7 +1656,7 @@ print(f'spec: {version}, its companion {companion_version}; {len(documents)} fil
       f'{len(stated)} encodings; {len(named["names"])} names, {len(named["ids"])} ids and revisions and '
       f'{len(named["procedureKinds"])} procedure kinds, each declared '
       f'{len(documents["identities"]["ways"])} ways, and '
-      f'{len(named["folds"])} folds; '
+      f'{len(named["folds"])} folds; {len(named["verdicts"])} verdicts and {len(named["details"])} details; '
       f'{len(units["spec"])} units of the spec, {len(citing["spec"])} cited and {reasons_of("spec")}, in '
       f'units.txt; {len(units["debugging"])} of the companion, {len(citing["debugging"])} cited and '
       f'{reasons_of("debugging")}, in debugging-units.txt; {counted} counts of the tables of files of '

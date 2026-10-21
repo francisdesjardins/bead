@@ -1,0 +1,47 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "package": "x.v1",
+            "path": "x/v1/x.proto"
+          }
+        ],
+        "messages": [
+          {
+            "file": "x/v1/x.proto",
+            "fullName": "x.v1.Request",
+            "rules": {
+              "fields": [
+                {
+                  "fieldName": "count",
+                  "fieldNumber": 1,
+                  "presence": "explicit",
+                  "rules": {
+                    "int32": {
+                      "gt": 0
+                    }
+                  },
+                  "type": {
+                    "scalar": "int32"
+                  }
+                }
+              ],
+              "message": {},
+              "oneofs": []
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "BLUEPRINT_SCHEMA",
+      "pointer": "/requires"
+    }
+  ]
+}

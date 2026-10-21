@@ -232,7 +232,11 @@ test("writes a service with no proto member at the output's root, under its name
     [...comments, ...messages].map((file) => {
       return file.name;
     })
-  ).toEqual(['Bead/Comments/V1/CommentsBead.cs', 'Bead/Messages/V1/MessagesBead.cs']);
+  ).toEqual([
+    'Bead/Comments/V1/CommentsBead.cs',
+    'Bead/Messages/V1/MessagesBead.cs',
+    'Bead/Messages/V1/RulesBead.cs',
+  ]);
   expect(contentOf(comments, 'Bead/Comments/V1/CommentsBead.cs')).toContain(
     '\nnamespace Bead.Comments.V1;\n'
   );
@@ -291,7 +295,7 @@ test('writes two services of one .proto in one file, the contract with the runti
 
   expect(content).toContain('public sealed class CommentsServer<TData>\n');
   expect(content).toContain('public sealed class OtherServer<TData>\n');
-  expect(content.match(/GeneratedCode\.SupportsVersion3;/gu)).toHaveLength(1);
+  expect(content.match(/GeneratedCode\.SupportsVersion4;/gu)).toHaveLength(1);
   expect(content.match(/^\/\/ @generated/gmu)).toHaveLength(1);
   expect(content.match(/^namespace /gmu)).toHaveLength(1);
 });

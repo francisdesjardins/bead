@@ -3,18 +3,22 @@
 // The resolvers of Bead's interop service, its API `spec/interop-blueprint.json`, generated into
 // `generated/interop_bead.ts`, and its behaviour `spec/interop-service.json`, as Bead's TypeScript
 // implementation answers them: what a client of any implementation calls, and what
-// `spec/conversations.json` plays against. Only the resolvers and the hook are written here.
+// `spec/conversations.json` plays against. Only the resolvers, the hook and the rules of `checked`
+// are written here.
 
 // dependencies
 
+import { codePointLength, type IViolationRule, judgeRules } from '../src/proto/validate';
 import type { IDestinationRegistration } from '../src/router/server/types';
 import { sessionKeyOf } from '../src/router/shared/call-session';
 import { CredentialScheme } from '../src/router/shared/constants';
 import type { ICallSession, SessionIdentifier } from '../src/router/shared/types';
+import type { IJudged, IValidateOptions } from '../src/router/shared/violations';
 import type { IServer, IServerTransportLike } from '../src/server/types';
+import { createServiceServer, type IServiceServer, requestOf } from '../src/service/service';
 import type { TransportServerConnectionHandle } from '../src/transport/server/types';
 import { assertHeldFinite } from '../src/transport/shared/clock';
-import { type InteropClient, InteropFailures, InteropServer } from './generated/interop_bead';
+import { type InteropClient, InteropFailures, InteropProcedures } from './generated/interop_bead';
 
 // interfaces
 
@@ -29,6 +33,31 @@ interface IHold {
 /** The question `ask` puts to its client's `clock`, and how long it waits for the answer. */
 const QUESTION = 'What time is it where you are?';
 const CLOCK_MILLISECONDS = 10_000;
+
+// the rules of `checked`, as spec/interop-service.json states them: 50 names at most, each of 1 to 3
+// characters, counted as code points
+const MAXIMUM_NAMES = 50;
+const MINIMUM_CHARACTERS = 1;
+const MAXIMUM_CHARACTERS = 3;
+const NAMES_REQUIRED = Object.freeze<IViolationRule>({
+  message: 'value is required',
+  ruleId: 'required',
+});
+const TOO_MANY_NAMES = Object.freeze<IViolationRule>({
+  bounds: Object.freeze({ max_items: String(MAXIMUM_NAMES) }),
+  message: `must contain no more than ${String(MAXIMUM_NAMES)} item(s)`,
+  ruleId: 'repeated.max_items',
+});
+const NAME_TOO_SHORT = Object.freeze<IViolationRule>({
+  bounds: Object.freeze({ min_len: String(MINIMUM_CHARACTERS) }),
+  message: `must be at least ${String(MINIMUM_CHARACTERS)} characters`,
+  ruleId: 'string.min_len',
+});
+const NAME_TOO_LONG = Object.freeze<IViolationRule>({
+  bounds: Object.freeze({ max_len: String(MAXIMUM_CHARACTERS) }),
+  message: `must be at most ${String(MAXIMUM_CHARACTERS)} characters`,
+  ruleId: 'string.max_len',
+});
 
 // helpers
 
@@ -96,6 +125,70 @@ export const issuerOf = (request: unknown): string => {
   return issuer;
 };
 
+/** The names a `checked` request holds: an array of strings under `names`; none otherwise. */
+const namesOf = (request: unknown): readonly string[] | undefined => {
+  const named = (
+    typeof request === 'object' && request !== null && !Array.isArray(request) ? request : {}
+  ) as { names?: unknown };
+  const { names } = named;
+
+  return Array.isArray(names) &&
+    names.every((name) => {
+      return typeof name === 'string';
+    })
+    ? names
+    : undefined;
+};
+
+/**
+ * The rules of `checked`, written by hand, as a `json` binding's are (spec 18.1), in 18.5's order:
+ * `names`' own, then each name's; a request that holds no names breaks `required` at `names` alone.
+ */
+const judgeChecked = (request: unknown, options?: IValidateOptions): IJudged => {
+  const names = namesOf(request);
+
+  return judgeRules((sink) => {
+    sink.enter('names');
+
+    if (names === undefined) {
+      return sink.add(NAMES_REQUIRED, request);
+    }
+
+    if (names.length > MAXIMUM_NAMES && sink.add(TOO_MANY_NAMES, names)) {
+      return true;
+    }
+
+    sink.leave();
+
+    for (const [index, name] of names.entries()) {
+      const length = codePointLength(name);
+
+      sink.enterIndex('names', index);
+
+      if (length < MINIMUM_CHARACTERS && sink.add(NAME_TOO_SHORT, name)) {
+        return true;
+      }
+
+      if (length > MAXIMUM_CHARACTERS && sink.add(NAME_TOO_LONG, name)) {
+        return true;
+      }
+
+      sink.leave();
+    }
+
+    return false;
+  }, options);
+};
+
+/**
+ * The interop service's procedures, the generated ones, `checked` made again from its descriptor
+ * with its rules, which the blueprint of a `json` binding carries none of (spec 18.1).
+ */
+const INTEROP_PROCEDURES = Object.freeze({
+  ...InteropProcedures,
+  checked: requestOf({ ...InteropProcedures.checked, validate: judgeChecked }),
+});
+
 // definition
 
 /**
@@ -110,10 +203,11 @@ export const issuerOf = (request: unknown): string => {
  */
 export const offerInterop = (
   server: IServer<IServerTransportLike, string>
-): InteropServer<string> => {
+): IServiceServer<typeof INTEROP_PROCEDURES, string> => {
   const { router, sessions } = server;
   const { failures } = router;
-  const interop = new InteropServer<string>({
+  // * the generated server's own body, over its procedures and `checked` with its rules
+  const interop = createServiceServer<typeof INTEROP_PROCEDURES, string>(INTEROP_PROCEDURES, {
     admissions: {
       nobody: {
         admits: () => {
@@ -374,6 +468,11 @@ export const offerInterop = (
     await router.endSessionsOf(issuerOf(request.payload));
 
     return response(null);
+  });
+
+  // its rules took it before it came: an array of names, each of 1 to 3 characters
+  interop.on('checked', (request, response) => {
+    return response((namesOf(request.payload) ?? []).length);
   });
 
   interop.offer(server);

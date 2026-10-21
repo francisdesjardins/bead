@@ -35,8 +35,8 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import type { IChecked } from './check.ts';
 import { OPTIONS_ROOT } from './compile.ts';
-import { type IConfig, isInside, type Output } from './config.ts';
-import { InputError } from './diagnostics.ts';
+import { CONFIG_FILE, type IConfig, isInside, type Output } from './config.ts';
+import { diagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
 import { generateMessages } from './messages.ts';
 import { formOf } from './model/form.ts';
 import {
@@ -45,16 +45,23 @@ import {
   PROTOC_CSHARP_HEADER,
   PROTOC_CSHARP_SOURCE,
 } from './protoc.ts';
-import { OPTIONS_FILE, pathOnDisk } from './roots.ts';
+import { BEADC_FILES, pathOnDisk } from './roots.ts';
 import { csharpTarget } from './targets/csharp/csharp.ts';
 import {
   bindsMessages,
   type IGeneratedFile,
+  type ITarget,
   type ITargetInput,
   Messages,
   type SourceNames,
 } from './targets/target.ts';
 import { typescriptTarget } from './targets/typescript/typescript.ts';
+
+// constants
+
+// each language's official target, by the name `beadc.yaml` gives it
+const TARGETS: Readonly<Record<string, Pick<ITarget<unknown>, 'name' | 'features'>>> =
+  Object.freeze({ typescript: typescriptTarget, csharp: csharpTarget });
 
 // types
 
@@ -183,12 +190,14 @@ const outputFilesOf = (
 ): readonly IGeneratedFile[] => {
   const { input, folder } = details;
   const messages = input.set !== undefined && output.messages === Messages.GENERATE;
+  const set = input.set;
+  const keeps = output.keepValidateOptions === true ? { keepValidateOptions: true } : {};
 
   if (output.language === 'csharp') {
     return [
-      ...(input.set === undefined || !messages
+      ...(set === undefined || !messages
         ? []
-        : generateCSharpMessages(input.set, { blueprint: input.blueprint, folder })),
+        : generateCSharpMessages(set, { blueprint: input.blueprint, folder, ...keeps })),
       ...csharpTarget.generate(input, {
         ...(output.namespace === undefined ? {} : { namespace: output.namespace }),
         messages: output.messages,
@@ -200,11 +209,12 @@ const outputFilesOf = (
     output.messagesOut === undefined ? '' : slashed(output.out, output.messagesOut);
 
   return [
-    ...(input.set === undefined || !messages
+    ...(set === undefined || !messages
       ? []
-      : generateMessages(input.set, {
+      : generateMessages(set, {
           blueprint: input.blueprint,
           importExtension: output.importExtension,
+          ...keeps,
         })),
     ...typescriptTarget.generate(input, {
       importExtension: output.importExtension,
@@ -471,15 +481,52 @@ export const differencesOf = (plan: IPlan): IFileDifference[] => {
 };
 
 /**
- * Writes the editor's copy of Bead's options into `folder`, under {@link EDITOR_COPY}, by its
- * content: a copy of the file would carry its mode, which an image built from a Windows checkout
- * gives as 0755.
+ * Writes the editor's copy of Bead's options and of protovalidate's into `folder`, under
+ * {@link EDITOR_COPY}, by their content: a copy of a file would carry its mode, which an image built
+ * from a Windows checkout gives as 0755.
  */
 export const writeEditorCopy = (folder: string): void => {
-  const copy = join(folder, ...EDITOR_COPY.split('/'), ...OPTIONS_FILE.split('/'));
+  for (const file of BEADC_FILES) {
+    const copy = join(folder, ...EDITOR_COPY.split('/'), ...file.split('/'));
 
-  mkdirSync(dirname(copy), { recursive: true });
-  writeFileSync(copy, readFileSync(join(OPTIONS_ROOT, ...OPTIONS_FILE.split('/'))));
+    mkdirSync(dirname(copy), { recursive: true });
+    writeFileSync(copy, readFileSync(join(OPTIONS_ROOT, ...file.split('/'))));
+  }
+};
+
+/**
+ * The features `checked`'s blueprint requires that an output's target does not generate, each a
+ * FEATURE_UNGENERATED, before a file is written: a rule declared and played by one side alone is
+ * never written (decision 0035).
+ */
+export const ungeneratedOf = (
+  config: IConfig,
+  options: {
+    readonly checked: IChecked;
+    readonly targets?: Readonly<Record<string, Pick<ITarget<unknown>, 'name' | 'features'>>>;
+  }
+): IDiagnostic[] => {
+  const { blueprint, placeOf } = options.checked;
+  const targets = options.targets ?? TARGETS;
+
+  if (blueprint === undefined) {
+    return [];
+  }
+
+  return (config.outputs ?? []).flatMap((output) => {
+    const target = targets[output.language];
+
+    return blueprint.requires.flatMap((feature, at) => {
+      return target === undefined || target.features.has(feature)
+        ? []
+        : [
+            diagnosticOf('FEATURE_UNGENERATED', {
+              message: `the ${target.name} target generates no ${feature}, which the blueprint requires: an output of it would let through what the other sides refuse`,
+              place: placeOf?.(`/requires/${String(at)}`) ?? { file: CONFIG_FILE },
+            }),
+          ];
+    });
+  });
 };
 
 /**

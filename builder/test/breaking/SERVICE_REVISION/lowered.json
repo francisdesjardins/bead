@@ -3,14 +3,14 @@
     {
       "op": "replace",
       "path": "/services/0/serviceRevision",
-      "value": 3
+      "value": 4
     }
   ],
   "current": [
     {
       "op": "replace",
       "path": "/services/0/serviceRevision",
-      "value": 2
+      "value": 3
     }
   ],
   "findings": [

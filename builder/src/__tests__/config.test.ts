@@ -95,7 +95,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
         '    out: interop/generated',
         '    importExtension: none',
         '    runtime: ../../src/service/service',
-        '    protoRuntime: ../../src/proto/records',
+        '    protoRuntime: ../../src/proto/proto',
         '    messages: external',
         '    messagesOut: interop/messages',
         '',
@@ -107,7 +107,7 @@ test("reads an output's keys and refuses another, a C# output's namespace for a 
       out: '/work/interop/generated',
       importExtension: 'none',
       runtime: '../../src/service/service',
-      protoRuntime: '../../src/proto/records',
+      protoRuntime: '../../src/proto/proto',
       messages: 'external',
       messagesOut: '/work/interop/messages',
     },
@@ -279,4 +279,37 @@ test("reads clean, buf's opt-in, off unless set, and refuses one that is no bool
   expect(() => {
     return read('clean: yes please\n');
   }).toThrow(InputError);
+});
+
+test("reads keepValidateOptions, protovalidate's options kept in the messages an output generates, and only there", () => {
+  const folder = '/work';
+  const read = (output: string): IConfig => {
+    return parseConfig(
+      `version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: typescript\n    out: gen/ts\n${output}`,
+      { folder, path: path.posix }
+    );
+  };
+  const readCSharp = (output: string): IConfig => {
+    return parseConfig(
+      `version: 1\nsource:\n  proto: [proto]\noutputs:\n  - language: csharp\n    out: gen/cs\n${output}`,
+      { folder, path: path.posix }
+    );
+  };
+
+  expect(read('').outputs?.[0]?.keepValidateOptions).toBeUndefined();
+  expect(read('    keepValidateOptions: true\n').outputs?.[0]?.keepValidateOptions).toBe(true);
+  expect(readCSharp('    keepValidateOptions: true\n').outputs?.[0]?.keepValidateOptions).toBe(
+    true
+  );
+  expect(read('    keepValidateOptions: false\n').outputs?.[0]?.keepValidateOptions).toBe(false);
+  expect(() => {
+    return read('    keepValidateOptions: kept\n');
+  }).toThrow('outputs[0].keepValidateOptions is true or false');
+  expect(() => {
+    return read(
+      '    messages: external\n    messagesOut: gen/messages\n    keepValidateOptions: true\n'
+    );
+  }).toThrow(
+    "outputs[0].keepValidateOptions keeps protovalidate's options in the messages beadc generates, and only then"
+  );
 });

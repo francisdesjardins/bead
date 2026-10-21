@@ -49,9 +49,14 @@ export interface ITargetInput {
   readonly sources: SourceNames;
 }
 
-/** A target: one language's files, from a checked blueprint. */
+/**
+ * A target: one language's files, from a checked blueprint, and the features of `requires` it
+ * generates, which `generate` holds a blueprint's to (FEATURE_UNGENERATED): a feature declared and
+ * played by one side alone is never written.
+ */
 export interface ITarget<Options> {
   readonly name: string;
+  readonly features: ReadonlySet<string>;
   readonly generate: (input: ITargetInput, options: Options) => readonly IGeneratedFile[];
 }
 

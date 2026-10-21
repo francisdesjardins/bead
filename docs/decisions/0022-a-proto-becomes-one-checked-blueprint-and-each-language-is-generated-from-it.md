@@ -62,8 +62,10 @@ already set.`, and buf 1.73.0 exits 100, `field number 58500 used more than once
 
 **Where it reaches.** The constrained C side reads tables generated from a declaration, never a
 `.proto` (0017's "a side that keeps no names"). HTTP/JSON transcoding writes one OpenAPI document
-for every language from the same declaration, and the validation of payloads carries protovalidate's
-rules through it: each joins as a feature a reader must know.
+for every language from the same declaration, and a request's rules pass through it, under the
+feature `validate`
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)):
+each joins as a feature a reader must know.
 
 ### The options weighed
 
@@ -166,10 +168,12 @@ procedure's `procedureId`, `procedureName`, `procedureKind`, its `request` and `
 [0018](0018-a-services-procedures-are-typed-descriptors-served-and-called-through-one-layer.md)'s
 `AdmissionRule` writes it, the failures it lists, its `maximumPayloadBytes` and its deprecation when
 it has them. A binding is its encoding, and for `proto` alone its message's full name. What a front
-end read of a `.proto` — its files and packages, the messages a `proto` binding names, a service's
-file and full name — sits in `proto` members, which a blueprint written by hand leaves out; each
-path among them is a path from its root, as an import names it, parts by `/`, none `.` or `..`, which
-the schema holds and `PROTO_FILE` holds to a file `proto.files` lists, as protoc's plugin protocol
+end read of a `.proto` — its files and packages, the messages a `proto` binding names and, under
+the feature `validate`, the fields of a request's message that hold a rule or lead to one, each
+with its rules in protovalidate's own shape, a service's file and full name — sits in `proto`
+members, which a blueprint written by hand leaves out; each path among them is a path from its
+root, as an import names it, parts by `/`, none `.` or `..`, which the schema holds and
+`PROTO_FILE` holds to a file `proto.files` lists, as protoc's plugin protocol
 holds a file's name. No language's option and no rpc's name: a C# namespace is the set's
 `csharp_namespace`, which `check` refuses where it is no C# namespace, identifiers of ASCII letters,
 digits and `_` joined by dots, `CSHARP_NAMESPACE`, since the C# target writes it as it is and
@@ -180,8 +184,10 @@ admission is resolved into each procedure. Nothing of configuration: no credenti
 limit of a router's, no topic. `format` names the major, which a reader refuses when it does not
 know it; `requires` lists the features a blueprint uses beyond its major, which a reader refuses
 when it does not know one, as JOSE's `crit` does
-([RFC 7515 §4.1.11](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.11)); removing a member, or
-changing its meaning, makes `/2`. `specVersion` names the version of `spec/spec.md` whose sections
+([RFC 7515 §4.1.11](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.11)), and each target
+declares the features it generates, `beadc generate` refusing one that lacks a feature its
+blueprint requires, `FEATURE_UNGENERATED`; removing a member, or changing its meaning, makes
+`/2`. `specVersion` names the version of `spec/spec.md` whose sections
 16 and 17 its producer follows. Its schema, `spec/schemas/bead-blueprint.schema.json`, is the format,
 a description on every member.
 
@@ -224,8 +230,8 @@ C# a constructor of their own beside one that takes none. A client class takes i
 the layer's options, optional; it holds a requester of each procedure its server answers, under the
 procedure's name, its notifications under `notifications`, at the windows its caller gives, unpaced
 by default ([0002](0002-a-subscription-goes-at-its-clients-pace.md)), and `on` for the commands it
-answers. A file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_3` or
-`GeneratedCode.SupportsVersion3`, and imports nothing of Bead's but `./service`, and `./proto` where
+answers. A file names the contract it needs, `GENERATED_CODE_SUPPORTS_VERSION_4` or
+`GeneratedCode.SupportsVersion4`, and imports nothing of Bead's but `./service`, and `./proto` where
 it binds `proto`, from a path relative to its output's folder or a package's name; the C# it writes
 qualifies every type as `global::Bead.` and `global::`, and a project whose code binds `proto`
 references `Bead.Protobuf`, whose `ProtoRecords.Check` its codec calls before Google.Protobuf reads,

@@ -4,7 +4,10 @@
 # fails on a difference. The plugin runs under the Node that runs buf, so no PATH is read.
 version: v2
 inputs:
+  # codecs.proto alone: spec/validations.proto imports protovalidate's options, which beadc vendors
+  # and generates from, as src/proto/__tests__/ holds it
   - directory: ../../spec
+    paths: [../../spec/codecs.proto]
 plugins:
   - local: [node, node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es]
     out: src/router/shared/__tests__

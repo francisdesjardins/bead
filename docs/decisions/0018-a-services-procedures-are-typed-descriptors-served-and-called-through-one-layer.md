@@ -3,7 +3,7 @@
 - **Status**: accepted
 - **Scope**: both runtimes' public surface: a procedure's kind, checked by each router as it is
   declared; the payload codecs made public; the admission vocabulary; the failure catalogue; the
-  typed descriptors, and their room for a validator; the service layer that serves and calls them;
+  typed descriptors, and their validator; the service layer that serves and calls them;
   the notify filter's argument; a notification asked for again at another window; the bound call and
   its guard; the C# side's server and client interfaces, and its routers' `Notify`; the TypeScript
   side's `./service` entry; the constant of the contract with generated code. Spec section 16, whose
@@ -14,7 +14,9 @@
   [0031](0031-a-proto-payload-is-protobufs-format-and-bead-states-only-its-own.md)'s; the check of a
   `proto` payload's records before its library reads them, its levelings and protobuf's conformance
   suite are
-  [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s
+  [0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)'s;
+  what a request's rules are, the violations and their detail, and the validators beadc generates,
+  [0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)'s
 
 ## Context
 
@@ -348,11 +350,13 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
   `SupportPackageIsVersion9`: "The SupportPackageIsVersion variables are referenced from generated
   protocol buffer files to ensure compatibility with the gRPC version used. The latest support
   package version is 9. Older versions are kept for compatibility" (pkg.go.dev,
-  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_3` on the TypeScript side, and
-  `GeneratedCode.SupportsVersion3` on the C# side, with no underscore, so CA1707 stands; 2 since the
-  layer's options are typed by the service, which generated code names, and 3 since it calls the
+  `google.golang.org/grpc`). `GENERATED_CODE_SUPPORTS_VERSION_4` on the TypeScript side, and
+  `GeneratedCode.SupportsVersion4` on the C# side, with no underscore, so CA1707 stands; 2 since the
+  layer's options are typed by the service, which generated code names, 3 since it calls the
   check of a `proto` payload's records
-  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+  ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)),
+  and 4 since it generates the validators of a request's rules
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
   A runtime too old for a file lacks the constant, and the file fails its type-check (TS2724) and
   its load (a `SyntaxError` at link time), or its build (CS0117). It names no release, so nothing is
   renamed in a release branch, and the product's version, 0008's third axis, stays out of the
@@ -360,15 +364,21 @@ _Conformance:_ none. _Matrix:_ none; `Connect` outside `IClient` is a type's sha
 
 _Conformance:_ none. _Matrix:_ none.
 
-**11. Room for a validator.**
+**11. A validator.**
 
-- Nothing now: the step that validates a request against its message's rules opens the layer again.
-- **An optional `validate` member of a typed descriptor, empty here. Chosen**, the user's choice: the
-  side that answers calls it after the decode and before the resolver, the side that requests before
-  the encode when its options say so; nothing validates until a later step fills it, and a
-  violation's shape is that step's. That step fills a slot rather than reopening the layer.
+- Nothing: each resolver judges its request itself, and answers a failure of its own.
+- **An optional `validate` member of a typed descriptor. Chosen**, the user's choice: a function of
+  the request and its options, `failFast` and `maximumBytes`, that gives the violations it holds,
+  the count of the rest and whether it stopped, which beadc fills from a `proto` request's rules
+  and an application writes for any binding
+  ([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
+  The service layer hands it to the service manager, which judges a request once its payload reads
+  and before its resolver, beside the decode, so `PAYLOAD_INVALID` is answered where
+  `PAYLOAD_UNDECODABLE` is; the side that requests judges before the encode when its options say
+  so.
 
-_Conformance:_ none. _Matrix:_ the feature row "The service layer".
+_Conformance:_ `spec/validations.json`, `spec/conversations.json`'s `checked`. _Matrix:_ the feature
+rows "Payload rules" and "The service layer".
 
 ## Decision
 
@@ -612,7 +622,7 @@ a cast reaches, is sent as written, and its server reports a `ProgrammerError` t
 error event, with the call's connection: the caller hears what it would hear without the layer. On
 the C# side, the procedure's failure class is its list, and no other value reaches `Fail`.
 
-**A procedure's descriptor is one object, with room for a validator.**
+**A procedure's descriptor is one object, with its validator.**
 
 ```ts
 /** What every descriptor holds. */
@@ -622,8 +632,14 @@ export interface IDescriptorInit {
   readonly procedure: IProcedure;
   readonly request: IPayloadCodec<unknown, never>;
   readonly result: IPayloadCodec<unknown, never>;
-  /** Throws on a request its rules refuse; none validates nothing. */
-  readonly validate?: ((request: unknown) => void) | undefined;
+  /** Judges a request by its rules, giving its violations, the count of the rest and whether it stopped; none judges nothing. */
+  readonly validate?: ((request: unknown, options: IValidateOptions) => IJudged) | undefined;
+}
+
+/** What a judging is given: whether it stops at the first violation, and the bound of what it holds. */
+export interface IValidateOptions {
+  readonly failFast: boolean;
+  readonly maximumBytes: number;
 }
 
 /** A request's descriptor, `notification` given for a procedure that notifies: its procedure's kind set. */
@@ -665,8 +681,11 @@ public sealed record ProcedureBindings<TRequest, TResult>
     public required AdmissionRule Admission { get; init; }
     public required IPayloadCodec<TRequest> Request { get; init; }
     public required IPayloadCodec<TResult> Result { get; init; }
-    public Action<TRequest>? Validate { get; init; }
+    public RequestValidator<TRequest>? Validate { get; init; }
 }
+
+/// <summary>Judges a request by its rules: the violations it holds, the count of the rest and whether it stopped.</summary>
+public delegate Judged RequestValidator<in TRequest>(TRequest request, ValidateOptions options);
 
 // and ProcedureBindings<TRequest, TResult, TNotification>, with a required Notification
 ```
@@ -677,12 +696,16 @@ procedure that states another is refused as the descriptor is made, and so is a 
 descriptor is no declaration: its identity and its kind are checked as it is declared (spec 16.10),
 by `on`, `offer`, or the client side's building.
 
-`validate` is empty until a later step fills it. The side that answers calls it on the decoded
-request, before the resolver: a server's resolvers, and a client's command resolvers; one that
-throws is answered `PROCEDURE_FAILED` and reported. The side that requests calls it before the
-encode on the client alone, when its options say so, `validates` and `Validates`, and a throw fails
-the call before anything goes; a server's commands never validate, since nothing gives them that
-option.
+`validate` is beadc's for a `proto` request whose message holds rules, and the application's
+otherwise. The side that answers hands it, with its options' `failFast`, to its service manager,
+which judges the decoded request before the resolver: a server's resolvers, and a client's command
+resolvers. A request its rules refuse is answered `PAYLOAD_INVALID`, its violations in its detail,
+and its resolver never called; a validator that throws is answered `PROCEDURE_FAILED` and reported
+(spec 9.5, 18.2). The side that requests judges its value before the encode when its options say
+so, `validates` and `Validates`: a client's requests and subscribing requests, and a server's
+commands, whose server takes the option too. A refusal fails the call before anything goes with
+`PAYLOAD_INVALID` and the same detail, counted as a call refused before it goes. `failFast`,
+`FailFast`, on either side's options, stops a judging at its first violation.
 
 **One layer serves and calls a service, in each runtime.**
 
@@ -741,8 +764,9 @@ export interface IServiceClient<S extends ServiceProcedures> {
   on: <Name extends CommandName<S>>(name: Name, callback: ServiceResolverCallback<S[Name]>) => void;
 }
 
-/** What a client side is given besides its Bead client: a window for each procedure that notifies, and whether it validates. */
+/** What a client side is given besides its Bead client: a window for each procedure that notifies, whether it validates, and whether a judging stops at its first violation. */
 export interface IServiceClientOptions<S extends ServiceProcedures> {
+  readonly failFast?: boolean | undefined;
   readonly validates?: boolean | undefined;
   readonly windows?: { readonly [Name in NotifyingName<S>]?: number | undefined } | undefined;
 }
@@ -756,8 +780,9 @@ export const createServiceClient: <const S extends ServiceProcedures>(
 
 `ServiceServerOptions<S>` is an optional options object for a service whose procedures name no
 hook, and a required one, its `admissions` required, for one that names any, so
-`createServiceServer(procedures)` holds for the first. A client side takes its Bead client as a
-parameter of its own, and its options after it, every one optional, as Connect-ES's
+`createServiceServer(procedures)` holds for the first; beside its admissions it takes `failFast`,
+and `validates` for its commands. A client side takes its Bead client as a parameter of its own,
+and its options after it, every one optional, as Connect-ES's
 `createClient(service, transport)` takes its transport.
 
 ```csharp
@@ -801,6 +826,8 @@ public interface IServiceAdmissions<TService>
 public sealed record ServiceServerOptions<TService>
 {
     public required IServiceAdmissions<TService> Admissions { get; init; }
+    public bool FailFast { get; init; }
+    public bool Validates { get; init; }
 }
 
 /// <summary>The client side of the service whose type tag is TService, over one Bead client.</summary>
@@ -829,11 +856,12 @@ public interface IServiceWindows<TService>
     IReadOnlyDictionary<string, int?> ToDictionary();
 }
 
-/// <summary>What a client side of TService is given besides its Bead client: a window for each procedure that notifies, and whether it validates.</summary>
+/// <summary>What a client side of TService is given besides its Bead client: a window for each procedure that notifies, whether it validates, and whether a judging stops at its first violation.</summary>
 public sealed record ServiceClientOptions<TService>
 {
     public IServiceWindows<TService>? Windows { get; init; }
     public bool Validates { get; init; }
+    public bool FailFast { get; init; }
 }
 
 /// <summary>A service's hooks, as generated code writes them, and as a service written without beadc writes them: a required member a hook.</summary>
@@ -1015,24 +1043,26 @@ implementation; `WebSocketClient` and `BeadHttpClient` the second. Both live in 
 **The TypeScript side's service layer is one entry**, `"./service": "./src/service/service.ts"` in
 `package.json`'s `exports`: `createServiceServer`, `createServiceClient`, `requestOf`, `commandOf`,
 `failuresOf`, `payloadCodecOf`, `PAYLOAD_CODECS`, `ProcedureKind`,
-`GENERATED_CODE_SUPPORTS_VERSION_3`, `FailureError`, `ProgrammerError`, and their types. A generated
-file imports nothing else of Bead's but `./proto`'s check, where it binds `proto`
+`GENERATED_CODE_SUPPORTS_VERSION_4`, `FailureError`, `ProgrammerError`, and their types. A generated
+file imports nothing else of Bead's but `./proto`'s check and validators, where it binds `proto`
 ([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
 
-**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_3` in `./service`,
-`true`; `GeneratedCode.SupportsVersion3`, a `const bool` on a static class in `Bead.Core`. A
-generated file names the highest it needs: `void GENERATED_CODE_SUPPORTS_VERSION_3;`, and in C# a
+**Generated code names the contract it needs.** `GENERATED_CODE_SUPPORTS_VERSION_4` in `./service`,
+`true`; `GeneratedCode.SupportsVersion4`, a `const bool` on a static class in `Bead.Core`. A
+generated file names the highest it needs: `void GENERATED_CODE_SUPPORTS_VERSION_4;`, and in C# a
 private constant of it. The counter moves only when generated code needs something the runtime did
 not have: 2 for the layer's options typed by the service, `IServiceClientOptions` and the client
 side's Bead client apart on the TypeScript side, `IServiceAdmissions<TService>`,
 `IServiceWindows<TService>`, `ServiceServerOptions<TService>`, `ServiceClientOptions<TService>` and
 the client side's three parameters on the C# side; 3 for the check of a `proto` payload's records,
 `checkProtoRecords` and `ProtoRecords.Check`
-([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md)).
+([0028](0028-a-proto-payloads-records-are-read-against-its-message-before-its-library-reads-them.md));
+4 for the validators of a request's rules, `validatorOf` and `Validators.Of`
+([0035](0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md)).
 An older constant stays while the runtime still serves the code that names it: before 1.0.0, it goes
 once the code that names it no longer conforms through the runtime, and from 1.0.0 it stays for the
-whole major. The runtime holds 3 alone: code that names 2 reads a `proto` payload unchecked, which
-does not conform. A file of a later beadc, built against a runtime that lacks its constant, fails
+whole major. The runtime holds 4 alone: code that names 3 judges no request by its rules, and code
+that names 2 reads a `proto` payload unchecked, neither of which conforms. A file of a later beadc, built against a runtime that lacks its constant, fails
 on the counter (TS2724, CS0117), not on a signature.
 
 **Where it lives.** The TypeScript side: `src/service/` — `service.ts` the entry,

@@ -6,7 +6,7 @@
       "value": {
         "admission": "none",
         "failures": [],
-        "procedureId": 19,
+        "procedureId": 20,
         "procedureKind": "request",
         "procedureName": "greet",
         "request": {
@@ -20,7 +20,7 @@
     {
       "op": "replace",
       "path": "/services/0/serviceRevision",
-      "value": 3
+      "value": 4
     }
   ],
   "findings": []

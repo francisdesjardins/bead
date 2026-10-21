@@ -11,9 +11,12 @@ public static class GeneratedCode
 {
     /// <summary>
     /// The runtime carries the service layer, its descriptors, its catalogue and its codecs, its
-    /// options typed by the service, a client side's Bead client apart from them, and the check of a
+    /// options typed by the service, a client side's Bead client apart from them, the check of a
     /// <c>proto</c> payload's records, <c>Bead.Protobuf</c>'s <c>ProtoRecords</c>, that a generated
-    /// codec calls before its library reads them (decision 0028).
+    /// codec calls before its library reads them (decision 0028), and the payload rules a generated
+    /// file's validators judge a request by (decision 0035): a descriptor's <c>Validate</c> a
+    /// <see cref="RequestValidator{TRequest}"/>, and <c>Bead.Protobuf</c>'s <c>Validators</c>,
+    /// <c>IViolationSink</c>, <c>ViolationRule</c>, <c>PatternTable</c> and <c>Pattern</c>.
     /// </summary>
-    public const bool SupportsVersion3 = true;
+    public const bool SupportsVersion4 = true;
 }

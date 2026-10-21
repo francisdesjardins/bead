@@ -8,9 +8,16 @@ writes the same lines, [`transcript.txt`](transcript.txt), against either server
 
 `HelloService` holds what a service declares: `proto` messages; `sayHello`, which fails with a
 failure of its catalogue, `NAMELESS`, and, given no name, asks its caller's by `askName`, a command
-the client answers; and `countDown`, which fails past 10 with `TOO_FAR`, notifies a `Tick` a step
-to a client that asks for them at a window of 1, and is admitted by its hook, `greeted`, once the
-connection said hello. Both halves serve and call it over WebSocket.
+the client answers; and `countDown`, whose request a rule of its `.proto` holds to 10 at most,
+notifies a `Tick` a step to a client that asks for them at a window of 1, and is admitted by its
+hook, `greeted`, once the connection said hello. Both halves serve and call it over WebSocket.
+
+A rule is protovalidate's, `[(buf.validate.field).int32.lte = 10]`, which beadc compiles into each
+half's validator: the server judges every request once it reads, before its resolver, and answers
+one its rules refuse `PAYLOAD_INVALID`, its violations in its detail (spec 18). beadc compiles
+protovalidate's standard rules on a field, a `oneof` and a message, and refuses the rest, CEL among
+them, by `beadc check`. A rule judges the payload alone: what needs the session, as the name a
+nameless caller gives when asked, stays its resolver's, which answers `NAMELESS`.
 
 Its servers listen on `127.0.0.1`, the address each is given, where a server given none listens on
 `localhost`, both loopbacks, and name no hosts: every server takes `127.0.0.1`, which its clients
@@ -33,16 +40,18 @@ connect to, and refuses a page that rebinds its name to it (spec 15.12).
 countDown before sayHello: ACCESS_DENIED, say hello first
 sayHello Bead: Hello, Bead!
 sayHello, nameless: Hello, Ada!
-countDown from 11: TOO_FAR, a count starts at 10 at most
+countDown from 11: PAYLOAD_INVALID, {"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
+{"more":0}
 countDown from 3: 3 2 1 0, one at a time
 sayHello, nameless again: NAMELESS, nobody to greet
 ```
 
 The hook's refusal and its detail; a request and its answer; the server's command to its client
-before it answers, the client answering `Ada`; a failure of the catalogue by its name; the four
-ticks in their order, and how many of the client's callbacks ran at once, each holding itself
-10 ms: at a window of 1, one, and without it, the ticks overlap; then the catalogue's other
-failure, the client answering an empty name the second time it is asked.
+before it answers, the client answering `Ada`; a request its rule refuses, its detail as it came,
+a violation a line of canonical JSON, then the count of those it left out; the four ticks in their
+order, and how many of the client's callbacks ran at once, each holding itself 10 ms: at a window
+of 1, one, and without it, the ticks overlap; then the catalogue's failure by its name, the client
+answering an empty name the second time it is asked.
 
 ## Generating
 
@@ -77,8 +86,9 @@ Given no `BEADC_IMAGE`, the wrappers run the image they name, as the engine find
 ./beadc.sh generate --check    # nothing to change
 ```
 
-`generate` also writes `.beadc/include/bead/options.proto`, Bead's options, which git ignores: the
-copy an editor reads, and the one each half's own generator reads where its messages are external.
+`generate` also writes `.beadc/include/bead/options.proto`, Bead's options, and
+`.beadc/include/buf/validate/validate.proto`, protovalidate's, which git ignores: the copies an
+editor reads, and the ones each half's own generator reads where its messages are external.
 Run `generate` once in a fresh clone before an external build.
 
 ## Building and running

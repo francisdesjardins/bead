@@ -271,6 +271,7 @@ const createFakeRouter = () => {
   const router: IRouterLike = {
     clock: createTestClock(),
     failures: SERVER_FAILURES,
+    limits: LIMIT_DEFAULTS,
 
     answeredOf: () => {
       return undefined;

@@ -96,10 +96,92 @@ export interface IServiceEntry {
   readonly proto?: { readonly file: string; readonly fullName: string };
 }
 
+/** A protobuf scalar, by its name in `descriptor.proto`'s `FieldDescriptorProto.Type`, lowered. */
+export type ScalarName =
+  | 'double'
+  | 'float'
+  | 'int64'
+  | 'uint64'
+  | 'int32'
+  | 'fixed64'
+  | 'fixed32'
+  | 'bool'
+  | 'string'
+  | 'bytes'
+  | 'uint32'
+  | 'sfixed32'
+  | 'sfixed64'
+  | 'sint32'
+  | 'sint64';
+
+/**
+ * A field's type, as its rules read it: a scalar, an enum or a message by its full name, or one of
+ * `google/protobuf/wrappers.proto`'s messages by the scalar it wraps.
+ */
+export type FieldType =
+  | { readonly scalar: ScalarName }
+  | { readonly enum: string }
+  | { readonly message: string }
+  | { readonly wrapper: ScalarName };
+
+/** A JSON value, as protobuf's JSON mapping writes a rule's member. */
+export type RuleValue =
+  | string
+  | number
+  | boolean
+  | readonly RuleValue[]
+  | { readonly [member: string]: RuleValue };
+
+/**
+ * A field's `(buf.validate.field)`, in protobuf's JSON mapping by proto names, as `validate.proto`
+ * writes them: a 64-bit integer as a string, a float's or a double's value as a string, the double it
+ * is (spec 17.7.4), a value not finite as `Infinity`, `-Infinity` or `NaN` (decision 0035).
+ */
+export type FieldRulesValue = { readonly [member: string]: RuleValue };
+
+/** A field a message's rules judge: one that holds a rule, or leads to a message that does. */
+export interface IFieldRulesEntry {
+  readonly fieldName: string;
+  readonly fieldNumber: number;
+  readonly type: FieldType;
+  /** `repeated`, or `map` with its key's scalar; none for a singular field. */
+  readonly label?: 'repeated' | 'map';
+  readonly key?: ScalarName;
+  /** Whether it tracks presence: a repeated field and a map never do. */
+  readonly presence: 'explicit' | 'implicit';
+  /** The `oneof` it is a member of, by its name. */
+  readonly oneof?: string;
+  readonly rules?: FieldRulesValue;
+}
+
+/** A `oneof`'s `(buf.validate.oneof)`, by its name and its index among its message's. */
+export interface IOneofRulesEntry {
+  readonly oneofIndex: number;
+  readonly oneofName: string;
+  readonly rules: { readonly required?: boolean };
+}
+
+/** A message's rules: its fields', by number, its own `(buf.validate.message)`, its oneofs'. */
+export interface IMessageRules {
+  readonly fields: readonly IFieldRulesEntry[];
+  readonly message: {
+    readonly oneof?: readonly { readonly fields: readonly string[]; readonly required?: boolean }[];
+  };
+  readonly oneofs: readonly IOneofRulesEntry[];
+}
+
+/** A message a binding names or a request's rules reach, with the file that declares it. */
+export interface IMessageEntry {
+  readonly fullName: string;
+  readonly file: string;
+  /** Under the feature `validate`: its rules, where a request's rules reach it (decision 0035). */
+  readonly rules?: IMessageRules;
+}
+
 /** What a front end read of a `.proto`: its files and the messages a `proto` binding names. */
 export interface IProtoSource {
   readonly files: readonly { readonly path: string; readonly package: string }[];
-  readonly messages: readonly { readonly fullName: string; readonly file: string }[];
+  readonly messages: readonly IMessageEntry[];
 }
 
 /** A blueprint, `bead-blueprint/1`. */
@@ -125,8 +207,14 @@ export interface IReading {
 
 // constants
 
-/** The features of `requires` this beadc knows: none yet. */
-export const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>();
+/**
+ * The feature a blueprint requires where a message carries its rules: a reader that does not know
+ * it refuses the blueprint, and never generates a side that judges nothing (decision 0035).
+ */
+export const VALIDATE_FEATURE = 'validate';
+
+/** The features of `requires` this beadc knows. */
+export const KNOWN_FEATURES: ReadonlySet<string> = new Set<string>([VALIDATE_FEATURE]);
 
 const BYTE_ORDER_MARK = '\uFEFF';
 

@@ -8,7 +8,7 @@
     {
       "op": "replace",
       "path": "/services/0/serviceRevision",
-      "value": 2
+      "value": 3
     }
   ],
   "findings": [

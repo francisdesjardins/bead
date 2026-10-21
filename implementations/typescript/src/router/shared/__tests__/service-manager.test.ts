@@ -4,6 +4,7 @@ import type { TransportServerConnectionHandle } from '../../../transport/server/
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
 import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { createSessionManager } from '../../server/session-manager';
+import { judgeRules } from '../../../proto/validate';
 import { CredentialScheme } from '../constants';
 import {
   createServiceManager,
@@ -19,6 +20,7 @@ import {
   type IRouterLike,
   type ProcedureKind,
 } from '../service-manager';
+import type { IValidateOptions } from '../violations';
 import {
   type IText,
   answerOf,
@@ -33,6 +35,37 @@ import {
   serializer,
   serverSerializer,
 } from './service-manager-fixtures';
+
+// constants
+
+/** A text's rule: one character at least, its violation at `text`. */
+const NOT_EMPTY = Object.freeze({
+  bounds: Object.freeze({ min_len: '1' }),
+  message: 'must be at least 1 characters',
+  ruleId: 'string.min_len',
+});
+
+/** The detail PAYLOAD_INVALID carries of a text that breaks {@link NOT_EMPTY}. */
+const NOT_EMPTY_DETAIL =
+  '{"bounds":{"min_len":"1"},"fieldPath":"text","message":"must be at least 1 characters","ruleId":"string.min_len"}\n{"more":0}';
+
+// helpers
+
+/** A text's rules, judged as generated code judges a message's, the options each is given kept. */
+const textRulesOf = () => {
+  const given: IValidateOptions[] = [];
+  const validate = (request: IText, options: IValidateOptions) => {
+    given.push(options);
+
+    return judgeRules((sink) => {
+      sink.enter('text');
+
+      return request.text === '' && sink.add(NOT_EMPTY, request.text);
+    }, options);
+  };
+
+  return { given, validate };
+};
 
 // definition
 
@@ -1021,6 +1054,111 @@ test.describe('createServiceManager', () => {
           return [info.direction, info.type, error];
         })
       ).toEqual([['rx', 'notification', failure]]);
+    });
+  });
+
+  test.describe('getRequestResolver', () => {
+    test('answers PAYLOAD_INVALID to a request its rules refuse, before its callback', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const { given, validate } = textRulesOf();
+      const seen: IText[] = [];
+
+      const resolver = manager.getRequestResolver(echo, {
+        failFast: true,
+        serializer: serverSerializer,
+        validate,
+      })((request, response) => {
+        seen.push(request.payload);
+
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: '' })));
+      await resolver(propsOf(encode({ text: 'hi' })));
+
+      expect(seen).toEqual([{ text: 'hi' }]);
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          // * stopped at its first, as its failFast asks: its detail says so, never a count
+          response: {
+            failure: {
+              ...SERVER_FAILURES.payloadInvalid,
+              detail: NOT_EMPTY_DETAIL.replace('{"more":0}', '{"stopped":true}'),
+            },
+          },
+        },
+        { request: { connectionHandle, header }, response: { payload: encode({ text: 'hi' }) } },
+      ]);
+      // * judged under the detail's bound of its router, with its dependencies' failFast
+      expect(given).toEqual([
+        { failFast: true, maximumBytes: 1_024 },
+        { failFast: true, maximumBytes: 1_024 },
+      ]);
+    });
+
+    test('traces a request its rules refuse: its rx, then its failure', async () => {
+      const { router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const { validate } = textRulesOf();
+
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: serverSerializer,
+        validate,
+      })((request, response) => {
+        return response(request.payload);
+      });
+
+      await resolver(propsOf(encode({ text: '' })));
+
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, info.callId, error, info.rx, info.tx];
+        })
+      ).toEqual([
+        ['rx', 7, null, { text: '' }, undefined],
+        [
+          'tx',
+          7,
+          null,
+          { text: '' },
+          { ...SERVER_FAILURES.payloadInvalid, detail: NOT_EMPTY_DETAIL },
+        ],
+      ]);
+    });
+
+    test('answers PROCEDURE_FAILED to rules that throw, and hands why on for its router to report', async () => {
+      const { calls, router } = createFakeRouter();
+      const manager = createServiceManager(router);
+      const seen = recordDebug(manager);
+      const broken = new RangeError('a rule that fails to judge');
+
+      const resolver = manager.getRequestResolver(echo, {
+        serializer: serverSerializer,
+        validate: () => {
+          throw broken;
+        },
+      })((request, response) => {
+        return response(request.payload);
+      });
+
+      await expect(resolver(propsOf(encode({ text: 'hi' })))).rejects.toBe(broken);
+      expect(calls.respond).toEqual([
+        {
+          request: { connectionHandle, header },
+          response: { failure: SERVER_FAILURES.procedureFailed },
+        },
+      ]);
+      expect(
+        seen.map(({ error, info }) => {
+          return [info.direction, error];
+        })
+      ).toEqual([
+        ['rx', null],
+        ['tx', broken],
+      ]);
     });
   });
 

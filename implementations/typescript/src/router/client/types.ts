@@ -119,6 +119,11 @@ export interface IRouterClient<
       options: IResolvedRequestOptions;
       procedure: IProcedure;
       /**
+       * What refuses the call once it started, before it goes, as its requester judged it: a value
+       * its rules refuse (spec 18.2). It draws no call id, and its payload goes nowhere.
+       */
+      refusal?: Error | undefined;
+      /**
        * The series its requester's declaration gave, which a counted call counts into; `_OTHER`'s
        * when none is given.
        */

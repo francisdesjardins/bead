@@ -63,7 +63,9 @@ to one meaning of `advance`. The why of each rule is in the decisions:
   peer — the calls it answers on a connection, a request's bytes, a WebSocket server's connections,
   what waits for a socket, a request that trickles — sections 9, 12 and 15;
 - [0034](../docs/decisions/0034-a-server-tells-each-access-it-refuses-never-the-credential.md): an
-  access a server refuses, told, section 13.12.
+  access a server refuses, told, section 13.12;
+- [0035](../docs/decisions/0035-a-payload-that-reads-is-held-to-its-messages-rules-before-its-resolver-sees-it.md):
+  payload rules, section 18.
 
 **Version: 0.7.0**, of layout `0xA1`. Each of its conformance files repeats it as its
 `specVersion`, and follows its schema in [`schemas/`](schemas/). The interop's blueprint,
@@ -73,12 +75,12 @@ play. **Status: every section is written.**
 
 What a side traces, filters and counts beside the wire is stated apart, under a version of its own,
 in its companion [`debugging.md`](debugging.md), whether a side builds those or leaves them out. A
-side conforms to the wire by sections 1 to 15, to what it declares by section 16, and to what its
-codecs write and read by section 17, for each encoding it offers: a relay, which reads no payload,
-offers none. A side does what each entry of the files that play those sections says, the clock
-cases holding `advance` to one meaning, but an entry whose `differs` names a row of the support
-matrix, [`docs/support.md`](../docs/support.md), and the side's language. A unit no entry cites
-binds it all the same.
+side conforms to the wire by sections 1 to 15, to what it declares by section 16, to what its
+codecs write and read by section 17, for each encoding it offers, and to its procedures' rules by
+section 18: a relay, which reads no payload, offers none. A side does what each entry of the files
+that play those sections says, the clock cases holding `advance` to one meaning, but an entry whose
+`differs` names a row of the support matrix, [`docs/support.md`](../docs/support.md), and the
+side's language. A unit no entry cites binds it all the same.
 
 ## 1. Conventions
 
@@ -297,8 +299,9 @@ its route (16 to 31), its admission (32 to 47), its payload (48 to 63), then its
 | 18   | `SERVICE_UNKNOWN`          | 49   | `CREDIT_EXCEEDED`        |
 | 19   | `PROCEDURE_UNKNOWN`        | 50   | `PAYLOAD_UNDECODABLE`    |
 | 20   | `CALL_UNKNOWN`             | 51   | `TRANSFER_STALLED`       |
-| 21   | `SUBSCRIPTION_UNKNOWN`     | 64   | `PROCEDURE_FAILED`       |
-| 22   | `SUBSCRIPTION_UNSUPPORTED` | 65   | `DESTINATION_LOST`       |
+| 21   | `SUBSCRIPTION_UNKNOWN`     | 52   | `PAYLOAD_INVALID`        |
+| 22   | `SUBSCRIPTION_UNSUPPORTED` | 64   | `PROCEDURE_FAILED`       |
+|      |                            | 65   | `DESTINATION_LOST`       |
 
 8.2. `CAPACITY_EXCEEDED` says that the receiver holds as much as a bound of its own lets it, and
 takes no more: a request past the calls it answers on its connection at once (section 9.2,
@@ -389,8 +392,8 @@ first that applies:
 7. A subscription opened on a connection that carries nothing back: `SUBSCRIPTION_UNSUPPORTED`.
 8. A payload, or the total a transfer declares, past the procedure's limit or the receiver's:
    `PAYLOAD_TOO_LARGE`. A transfer the receiver takes none of: the same.
-9. Otherwise the request is dispatched to its resolver once its payload is whole, with its call's
-   session.
+9. Otherwise the request is dispatched once its payload is whole: read (section 17), judged by its
+   rules (section 18), then handed to its resolver, with its call's session.
 
 A credential's resolution MAY wait — a `JWT` verified by Web Crypto, a key set asked for a key, a
 service asked whether a token holds — and the admission after it does not. A request presenting
@@ -416,8 +419,9 @@ would settle a call it does not belong to.
 
 9.5. A resolver that fails before it answers MUST still answer, with `PROCEDURE_FAILED`, so its
 requester does not wait out its timeout. A payload its procedure cannot read (section 17) is
-answered with `PAYLOAD_UNDECODABLE`, before the resolver sees it. A procedure's own failure is an
-application failure, with a code from 1 to 65,535 of the procedure's own numbering.
+answered with `PAYLOAD_UNDECODABLE`, and one that reads and breaks its procedure's rules
+(section 18) with `PAYLOAD_INVALID`, before the resolver sees either. A procedure's own failure is
+an application failure, with a code from 1 to 65,535 of the procedure's own numbering.
 
 9.6. What does not read goes through one gate. A side MUST:
 
@@ -1767,7 +1771,7 @@ writes one as its encoding says. A relay reads none (section 14.2).
 17.2. A payload that does not read, or a value that does not write, fails where it is:
 
 1. a request's payload is answered with `PAYLOAD_UNDECODABLE`, and its resolver never sees it
-   (section 9.5);
+   (section 9.5); a payload that reads is judged by its procedure's rules, as section 18 says;
 2. a result's payload fails its call at the requester with `PAYLOAD_UNDECODABLE`;
 3. a notification's payload is reported as `PAYLOAD_UNDECODABLE`, and no callback hears it;
 4. a request's value fails its call before anything goes out, and no call is made;
@@ -1868,3 +1872,123 @@ generator writes for the message. What is Bead's:
 Where two stock libraries part on what protobuf states no rule of, the support matrix says what
 each does. The `proto` rows of `spec/codecs.json` read and write `Probe`, the message of
 `spec/codecs.proto`.
+
+## 18. Payload rules
+
+_Validations: `spec/validations.json`._
+
+Its verdicts judge the messages of `spec/validations.proto`, each bound as a request, by the rules
+that file gives them.
+
+18.1. A procedure's request may be held to rules beyond its encoding: for a `proto` binding, those
+protovalidate's options give its message — `(buf.validate.field)`, `(buf.validate.oneof)` and
+`(buf.validate.message)` of `buf/validate/validate.proto` at
+[v1.2.2](https://github.com/bufbuild/protovalidate/blob/v1.2.2/proto/protovalidate/buf/validate/validate.proto)
+— each meaning what that file states of it; for any binding, a function its side is given. The
+rules judge the payload alone: what needs data or a call's context — a name already taken, a
+balance, a right — is its resolver's, which answers a failure of its procedure's own (section 9.5),
+never `PAYLOAD_INVALID`.
+
+18.2. A side that answers a request judges it on every call, once its payload reads and before its
+resolver sees it. A request its rules refuse is answered with `PAYLOAD_INVALID` and its violations
+(18.6), and its resolver never sees it. A requester MAY judge its request's value before it goes,
+when its application asks it to: a value its rules refuse fails its call before anything goes, with
+`PAYLOAD_INVALID` and the same detail, written under its own bound, as a call refused before it
+goes (section 9.1). A result and a notification are not judged. A side judges every rule, but
+holds of the violations no more than its detail can carry (18.6), and counts the rest. A rule that
+fails to judge, as an application's function that throws, is the side's own error:
+`PROCEDURE_FAILED`, reported (section 9.0).
+
+18.3. A violation is the breach of one rule:
+
+| Member      | What it holds                                                                                                                                                                                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fieldPath` | the path from the request's message to the field (18.4); absent for a rule of the message itself                                                                                                                                                                                                             |
+| `ruleId`    | the rule's id, protovalidate's `rule_id`: a standard rule's, as `string.min_len`, `int32.gte_lte`, `required`, `enum.defined_only`; a CEL rule's own `id`                                                                                                                                                    |
+| `bounds`    | the members its rule takes, by their names in `validate.proto`, each as protobuf's JSON mapping writes its type: a 64-bit integer as a string, bytes in base64, a `float` as the double it is, a value not finite as `"Infinity"`, `"-Infinity"` or `"NaN"`; absent for a rule that takes none, a flag alone |
+| `message`   | its words (18.8)                                                                                                                                                                                                                                                                                             |
+| `forKey`    | `true` where it is a map key's; absent otherwise                                                                                                                                                                                                                                                             |
+
+18.4. A field's path is its fields' names from the request's message, each as its `.proto`
+declares it, by `.`, an item by its index and a map's entry by its key; a wrapper's field is named
+alone, never its `value`; a `oneof`'s `required` names the oneof:
+
+```abnf
+field-path = element *( "." element )
+element    = name [ "[" subscript "]" ]
+name       = ( ALPHA / "_" ) *( ALPHA / DIGIT / "_" )
+subscript  = ( [ "-" ] 1*DIGIT ) / "true" / "false" / json-string [ "..." ]
+```
+
+`json-string` is a string in section 17.7's form, RFC 8785's. A string key is written whole when
+its UTF-8 holds in 64 bytes; otherwise its first 64 bytes, back to the start of the character the
+cut fell in, followed by `...` outside its quotation marks, which no key's own characters can
+write. So `items[2].name`, `labels["zz"]`, `labels["a\tb"]`, `by_id[-1]`, `flags[true]`,
+`labels["kkkk…k"...]`, `choice`. The rendering is Bead's own: protovalidate's `FieldPath` is a
+list of elements, and its implementations render a string differently.
+
+18.5. A side judges every rule, its violations in this order: the message's fields, by
+their numbers, each by its `required`, then its `cel` rules in their order, then its type's rules
+by the numbers of their members in their rules' message, then a repeated field's items by index
+and a map's entries by key — integers ascending, `false` before `true`, strings by code points —
+each item, or each entry's key then its value, by the same steps, then the message it holds, when
+set, by the same steps; then the message's own rules: `cel_expression` and `cel` in their order,
+`(buf.validate.message).oneof` in its order, each oneof's `required` in their declaration's
+order. A side MAY stop at the first violation, when its application asks it to, and gives that one
+alone.
+
+18.6. `PAYLOAD_INVALID`'s detail is lines, joined by one U+000A and none after the last, each a
+JSON text in section 17.7's form: the first violations in 18.5's order, each an object of 18.3's
+members, then a closing line, `{"more":N}`, N the violations it leaves out, or `{"stopped":true}`
+where its side stopped at its first violation. A writer writes the violations in their order while
+they hold in the detail's bound (section 7.4) with 26 bytes kept for the closing line: each whole,
+or, where it does not hold whole, without its `message`, then without its `bounds` too; the first
+whose `fieldPath`, `ruleId` and `forKey` alone do not hold ends the lines, and is counted in `more`
+with every one after it. A detail whose bound holds no closing line is empty.
+
+```text
+{"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
+{"more":0}
+```
+
+18.7. A reader reads a `PAYLOAD_INVALID`'s detail line by line, each read as section 17.5 reads a
+`json` payload: the lines that read as violations, up to the first that does not, are its
+violations, and a closing line its count. A detail cut by its reader's bound (section 7.3), or by a
+relay's on its other leg, keeps its whole lines; one with no closing line leaves what it left out
+uncounted. A violation without its `message` takes the words 18.8.6 gives its rule from its
+`ruleId` and its `bounds`, where they give them; `required`'s and `message.oneof`'s depend on what
+was judged, and such a violation keeps none. A detail whose first line is neither — empty, or
+another text — gives none, and the failure stands by its code.
+
+18.8. What a rule reads:
+
+1. A field with explicit presence — a message, a wrapper, an `optional` field, a `oneof`'s member,
+   one whose edition's `field_presence` is `EXPLICIT` — is judged by `required` alone while unset,
+   a wrapper by its scalar's rules on its value once set, and as it reads once set, at its zero
+   too; one with implicit presence is judged as it reads, its zero when absent; a repeated field and
+   a map are never unset, empty being their zero. `required` refuses an unset field, an implicit
+   one at its zero, and an empty repeated field or map. `IGNORE_IF_ZERO_VALUE` judges nothing of a
+   field of implicit presence at its zero, a repeated field or a map empty among them, and is the
+   default on one of explicit presence; `IGNORE_ALWAYS` nothing of the field, nor of the message it
+   holds. A field a `(buf.validate.message).oneof` names takes `IGNORE_IF_ZERO_VALUE` unless it
+   states its own, and that rule counts it set as `required` reads it.
+2. A string's length counts its code points, its bytes its UTF-8 bytes.
+3. A number compares as its type: a `float` and its bounds as 32-bit floats, a 64-bit integer
+   whole, never through a double. NaN breaks every bound, `finite` refuses NaN and the
+   infinities, and a range whose lower member is past its upper takes the values outside it.
+4. `unique`, `in`, `not_in` and `const` compare as `==` does: `0.0` and `-0.0` are one, two NaN two.
+5. `pattern` is RE2's syntax, matched anywhere in the string unless anchored: `.` any character
+   but `\n`; `\d`, `\s`, `\w` and `\b` of ASCII; `$` at the string's end alone without `(?m)`;
+   `(?i)` by Unicode 17.0.0's simple case folding, and its classes of Unicode 17.0.0, whatever its
+   platform's. A side matches in time linear in the string's length, a constant per character
+   whatever the pattern, never by backtracking.
+6. A standard rule's words are those its rule in `validate.proto` writes, by its expression or,
+   where it gives one, its `message`: `%s` and `%d` writing an integer whole, a `float` or a
+   `double` as section 17.7.4 writes the double it is — a float's widened to a double — and NaN and
+   the infinities `NaN`, `Infinity` and `-Infinity`, a list as `[`, its items by `, `, `]`, a string
+   as it is; `%x` bytes in lower-case hexadecimal. The rules protovalidate plays itself give
+   `value is required` for `required`, `value must be one of the defined enum values` for
+   `enum.defined_only`, `exactly one field is required in oneof` for a oneof's `required`, and, for
+   `(buf.validate.message).oneof`, `only one of ` its fields by `, ` ` can be set`, or, where it
+   requires one, `one of ` its fields ` must be set`. A CEL rule's are its `message`, else the
+   string it gives, else `"` its expression `" returned false`. `spec/validations.json` holds each.

@@ -134,7 +134,7 @@ test('names the first line off, an array out of its order, a missing newline and
     { line: 1, message: 'line 1 is off its form, a carriage return its form never writes' },
   ]);
   expect(formDifferencesOf(text.slice(0, -1), value)).toEqual([
-    { line: 299, message: 'its last line ends with no line feed' },
+    { line: 313, message: 'its last line ends with no line feed' },
   ]);
   expect(formDifferencesOf(`\uFEFF${text}`, value)).toEqual([
     { line: 1, message: 'it opens with a byte order mark, which its form never writes' },

@@ -2,17 +2,35 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
-import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_3, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
+import type { IViolationRule, IViolationSink } from "@francisdesjardins/bead/proto";
+import { checkProtoRecords, validatorOf } from "@francisdesjardins/bead/proto";
 import type { AskNameRequest, AskNameResponse, CountDownRequest, CountDownResponse, SayHelloRequest, SayHelloResponse, Tick } from "./hello_pb.ts";
 import { AskNameRequestSchema, AskNameResponseSchema, CountDownRequestSchema, CountDownResponseSchema, SayHelloRequestSchema, SayHelloResponseSchema, TickSchema } from "./hello_pb.ts";
+import type { IServiceClient, IServiceClientOptions, IServiceServer, ServiceResolvers, ServiceServerOptions } from "@francisdesjardins/bead/service";
+import { commandOf, createServiceClient, createServiceServer, failuresOf, GENERATED_CODE_SUPPORTS_VERSION_4, payloadCodecOf, requestOf } from "@francisdesjardins/bead/service";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
-import { checkProtoRecords } from "@francisdesjardins/bead/proto";
 
+
+// * each request's rules, judged before its resolver, every rule a site of its own (spec 18, decision 0035)
+const CountDownRequest$from$int32_lte = Object.freeze<IViolationRule>({ bounds: Object.freeze({ lte: 10 }), message: 'must be less than or equal to 10', ruleId: 'int32.lte' });
+
+const rulesOfCountDownRequest = (message: CountDownRequest, sink: IViolationSink): boolean => {
+  // from, 1
+  {
+    const value = message.from;
+
+    sink.enter('from');
+    if (!(value <= 10) && sink.add(CountDownRequest$from$int32_lte, value)) {
+      return true;
+    }
+    sink.leave();
+  }
+  return false;
+};
 
 /**
- * The procedures of `hello.v1.HelloService`: service 1, revision 1.
+ * The procedures of `hello.v1.HelloService`: service 1, revision 2.
  *
  * Greets its callers, asks a nameless one its name, and counts down for one it greeted.
  */
@@ -23,7 +41,7 @@ export const HelloProcedures = Object.freeze({
   sayHello: requestOf({
     admission: 'none',
     failures: { NAMELESS: 1 },
-    procedure: { procedureId: 1, procedureName: 'sayHello', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 1, procedureName: 'sayHello', serviceId: 1, serviceRevision: 2 },
     request: payloadCodecOf<SayHelloRequest, MessageInitShape<typeof SayHelloRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, SayHelloRequestSchema); return fromBinary(SayHelloRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SayHelloRequestSchema, create(SayHelloRequestSchema, given)); } }),
     result: payloadCodecOf<SayHelloResponse, MessageInitShape<typeof SayHelloResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, SayHelloResponseSchema); return fromBinary(SayHelloResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(SayHelloResponseSchema, create(SayHelloResponseSchema, given)); } }),
   }),
@@ -32,11 +50,12 @@ export const HelloProcedures = Object.freeze({
    */
   countDown: requestOf({
     admission: { hook: 'greeted' },
-    failures: { TOO_FAR: 2 },
+    failures: {},
     notification: payloadCodecOf<Tick, MessageInitShape<typeof TickSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, TickSchema); return fromBinary(TickSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(TickSchema, create(TickSchema, given)); } }),
-    procedure: { procedureId: 2, procedureName: 'countDown', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 2, procedureName: 'countDown', serviceId: 1, serviceRevision: 2 },
     request: payloadCodecOf<CountDownRequest, MessageInitShape<typeof CountDownRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, CountDownRequestSchema); return fromBinary(CountDownRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CountDownRequestSchema, create(CountDownRequestSchema, given)); } }),
     result: payloadCodecOf<CountDownResponse, MessageInitShape<typeof CountDownResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, CountDownResponseSchema); return fromBinary(CountDownResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(CountDownResponseSchema, create(CountDownResponseSchema, given)); } }),
+    validate: validatorOf(CountDownRequestSchema, rulesOfCountDownRequest),
   }),
   /**
    * Asks the client its name: a command the client answers. Admits every call.
@@ -44,7 +63,7 @@ export const HelloProcedures = Object.freeze({
   askName: commandOf({
     admission: 'none',
     failures: {},
-    procedure: { procedureId: 3, procedureName: 'askName', serviceId: 1, serviceRevision: 1 },
+    procedure: { procedureId: 3, procedureName: 'askName', serviceId: 1, serviceRevision: 2 },
     request: payloadCodecOf<AskNameRequest, MessageInitShape<typeof AskNameRequestSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, AskNameRequestSchema); return fromBinary(AskNameRequestSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskNameRequestSchema, create(AskNameRequestSchema, given)); } }),
     result: payloadCodecOf<AskNameResponse, MessageInitShape<typeof AskNameResponseSchema>>({ decode: (bytes) => { checkProtoRecords(bytes, AskNameResponseSchema); return fromBinary(AskNameResponseSchema, bytes, { recursionLimit: 101 }); }, encode: (given) => { return toBinary(AskNameResponseSchema, create(AskNameResponseSchema, given)); } }),
   }),
@@ -53,7 +72,7 @@ export const HelloProcedures = Object.freeze({
 /**
  * The failures of `hello.v1.HelloService`, by name: service 1's catalogue.
  */
-export const HelloFailures = failuresOf({ codes: { NAMELESS: 1, TOO_FAR: 2 }, serviceId: 1 });
+export const HelloFailures = failuresOf({ codes: { NAMELESS: 1 }, serviceId: 1 });
 
 /**
  * Each procedure's resolver, by its name: for resolvers written in a module of their own.
@@ -154,4 +173,4 @@ export class HelloClient {
 }
 
 // the contract with the runtime this file needs: an older runtime lacks the constant, and fails here
-void GENERATED_CODE_SUPPORTS_VERSION_3;
+void GENERATED_CODE_SUPPORTS_VERSION_4;

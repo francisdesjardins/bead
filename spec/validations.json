@@ -1,0 +1,5545 @@
+{
+  "$schema": "schemas/validations.schema.json",
+  "$comment": [
+    "Bead's payload rules: what a procedure's rules judge of its request's payload, and what PAYLOAD_INVALID's detail carries of it (spec section 18, decision 0035), which every implementation's harness plays through its side's validators and its detail's writer and reader.",
+    "verdicts are payloads judged: message, the message of spec/validations.proto the payload is read as, its full name; payload, its bytes in hexadecimal, or runs, bytes repeated times each, end to end, for a payload too long to write out. Each side reads it through its stock library and judges it through the validator beadc generates for that message, as a server judges a request (18.2).",
+    "maximumBytes, where given, is the bound the validator is given, the detail's it would write (18.6); where none is, it is given 2147483647. failFast, where true, has it stop at its first violation (18.5).",
+    "violations are what it gives, in their order (18.5): each with its fieldPath (18.4), its ruleId, its bounds as protobuf's JSON mapping writes them, its message, and forKey where true (18.3); more, where given, the violations it judged past its bound and holds no more of, 0 where none is given; stopped, where true, that it stopped at its first. A harness checks all three, member for member.",
+    "details are what a detail's writer writes and its reader reads (18.6, 18.7). An entry of write is what a validator gave, its violations, more and stopped, 0 and false where none is given, and the bound it is written under, maximumBytes: detail is the text the writer writes. An entry of read is a detail, the text a reader got: read is what it reads of it, its violations, each with the words it takes where it went without them, more where a closing line counts, stopped where one says so; neither where it has no closing line.",
+    "Each verdict is judged by the generator, which reads the value it wrote the payload from by validate.proto v1.2.2's rules in 18.5's order, its patterns by RE2 itself, its classes of Unicode 17.0.0 by the files spec/generators/ucd.json pins; protovalidate-es judges every verdict alike but for its order, its paths' rendering and its classes' Unicode version.",
+    "clauses are the units of spec.md an entry checks: a clause, 18.2; an item of its numbered list, 18.8.3; a row of its table, 18.3.1."
+  ],
+  "specVersion": "0.7.0",
+  "verdicts": [
+    {
+      "name": "an int32 at its lte is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "08 0A",
+      "violations": []
+    },
+    {
+      "name": "an int32 past its lte breaks int32.lte",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "08 0B",
+      "violations": [
+        {
+          "bounds": {
+            "lte": 10
+          },
+          "fieldPath": "at_most_ten",
+          "message": "must be less than or equal to 10",
+          "ruleId": "int32.lte"
+        }
+      ]
+    },
+    {
+      "name": "an int32 at its lt breaks int32.lt",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "10 0A",
+      "violations": [
+        {
+          "bounds": {
+            "lt": 10
+          },
+          "fieldPath": "below_ten",
+          "message": "must be less than 10",
+          "ruleId": "int32.lt"
+        }
+      ]
+    },
+    {
+      "name": "an int32 at its gt breaks int32.gt",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "18 00",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 0
+          },
+          "fieldPath": "above_zero",
+          "message": "must be greater than 0",
+          "ruleId": "int32.gt"
+        }
+      ]
+    },
+    {
+      "name": "an int32 below its gte breaks int32.gte, and one at it is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "18 01 20 00",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 1
+          },
+          "fieldPath": "at_least_one",
+          "message": "must be greater than or equal to 1",
+          "ruleId": "int32.gte"
+        }
+      ]
+    },
+    {
+      "name": "an int32 within its range is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "28 05",
+      "violations": []
+    },
+    {
+      "name": "an int32 at its range's lt breaks int32.gt_lt",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "28 0A",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 0,
+            "lt": 10
+          },
+          "fieldPath": "between",
+          "message": "must be greater than 0 and less than 10",
+          "ruleId": "int32.gt_lt"
+        }
+      ]
+    },
+    {
+      "name": "an int32 past its range's gte_lte breaks int32.gte_lte",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "38 FF FF FF FF FF FF FF FF FF 01",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 0,
+            "lte": 10
+          },
+          "fieldPath": "within",
+          "message": "must be greater than or equal to 0 and less than or equal to 10",
+          "ruleId": "int32.gte_lte"
+        }
+      ]
+    },
+    {
+      "name": "an int32 within a range given reversed breaks int32.gt_lt_exclusive: the range takes what is outside it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "30 07",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 10,
+            "lt": 5
+          },
+          "fieldPath": "outside",
+          "message": "must be greater than 10 or less than 5",
+          "ruleId": "int32.gt_lt_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "an int32 past a range given reversed is taken, above it or below it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "28 01 30 0B 38 00",
+      "violations": []
+    },
+    {
+      "name": "an int32 below a range given reversed is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "30 04",
+      "violations": []
+    },
+    {
+      "name": "an int32 at a range given reversed's gt breaks it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "30 0A",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 10,
+            "lt": 5
+          },
+          "fieldPath": "outside",
+          "message": "must be greater than 10 or less than 5",
+          "ruleId": "int32.gt_lt_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "an int32 not its const breaks int32.const",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "40 04",
+      "violations": [
+        {
+          "bounds": {
+            "const": 3
+          },
+          "fieldPath": "exactly",
+          "message": "must equal 3",
+          "ruleId": "int32.const"
+        }
+      ]
+    },
+    {
+      "name": "an int32 its const is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "40 03",
+      "violations": []
+    },
+    {
+      "name": "an int32 out of its in breaks int32.in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "48 04",
+      "violations": [
+        {
+          "bounds": {
+            "in": [
+              1,
+              2,
+              3
+            ]
+          },
+          "fieldPath": "listed",
+          "message": "must be in list [1, 2, 3]",
+          "ruleId": "int32.in"
+        }
+      ]
+    },
+    {
+      "name": "an int32 in its not_in breaks int32.not_in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "50 0D",
+      "violations": [
+        {
+          "bounds": {
+            "not_in": [
+              0,
+              13
+            ]
+          },
+          "fieldPath": "unlisted",
+          "message": "must not be in list [0, 13]",
+          "ruleId": "int32.not_in"
+        }
+      ]
+    },
+    {
+      "name": "an int64 at -2^53 breaks lt -2^53 - 1, compared whole",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "58 80 80 80 80 80 80 80 F0 FF 01",
+      "violations": [
+        {
+          "bounds": {
+            "lt": "-9007199254740993"
+          },
+          "fieldPath": "wide",
+          "message": "must be less than -9007199254740993",
+          "ruleId": "int64.lt"
+        }
+      ]
+    },
+    {
+      "name": "an int64 at -2^53 - 2 is taken under lt -2^53 - 1",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "58 FE FF FF FF FF FF FF EF FF 01",
+      "violations": []
+    },
+    {
+      "name": "a uint64 at 2^64 - 1 is in its in, and one below it is not",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "60 FE FF FF FF FF FF FF FF FF 01",
+      "violations": [
+        {
+          "bounds": {
+            "in": [
+              "1",
+              "2",
+              "18446744073709551615"
+            ]
+          },
+          "fieldPath": "unsigned_wide",
+          "message": "must be in list [1, 2, 18446744073709551615]",
+          "ruleId": "uint64.in"
+        }
+      ]
+    },
+    {
+      "name": "a uint64 at 2^64 - 1 is taken by its in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "60 FF FF FF FF FF FF FF FF FF 01",
+      "violations": []
+    },
+    {
+      "name": "a uint32 at 2^32 - 1 breaks uint32.gte_lt",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "68 FF FF FF FF 0F",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 1,
+            "lt": 4294967295
+          },
+          "fieldPath": "unsigned",
+          "message": "must be greater than or equal to 1 and less than 4294967295",
+          "ruleId": "uint32.gte_lt"
+        }
+      ]
+    },
+    {
+      "name": "a uint32 at its gte is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "68 01",
+      "violations": []
+    },
+    {
+      "name": "a sint32 at -1 breaks sint32.gt",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "70 01",
+      "violations": [
+        {
+          "bounds": {
+            "gt": -1
+          },
+          "fieldPath": "zigzag",
+          "message": "must be greater than -1",
+          "ruleId": "sint32.gt"
+        }
+      ]
+    },
+    {
+      "name": "a sint64 below its range breaks sint64.gte_lte",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "78 0B",
+      "violations": [
+        {
+          "bounds": {
+            "gte": "-5",
+            "lte": "5"
+          },
+          "fieldPath": "zigzag_wide",
+          "message": "must be greater than or equal to -5 and less than or equal to 5",
+          "ruleId": "sint64.gte_lte"
+        }
+      ]
+    },
+    {
+      "name": "a fixed32 past its lte breaks fixed32.lte",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "85 01 65 00 00 00",
+      "violations": [
+        {
+          "bounds": {
+            "lte": 100
+          },
+          "fieldPath": "fixed",
+          "message": "must be less than or equal to 100",
+          "ruleId": "fixed32.lte"
+        }
+      ]
+    },
+    {
+      "name": "a fixed64 at 2^53 breaks gt 2^53, and one past it is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "89 01 00 00 00 00 00 00 20 00",
+      "violations": [
+        {
+          "bounds": {
+            "gt": "9007199254740992"
+          },
+          "fieldPath": "fixed_wide",
+          "message": "must be greater than 9007199254740992",
+          "ruleId": "fixed64.gt"
+        }
+      ]
+    },
+    {
+      "name": "a fixed64 at 2^53 + 1 is taken by gt 2^53, compared whole",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "89 01 01 00 00 00 00 00 20 00",
+      "violations": []
+    },
+    {
+      "name": "a sfixed32 within a range given reversed breaks sfixed32.gte_lt_exclusive",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "95 01 05 00 00 00",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 10,
+            "lt": 0
+          },
+          "fieldPath": "signed_fixed",
+          "message": "must be greater than or equal to 10 or less than 0",
+          "ruleId": "sfixed32.gte_lt_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "a sfixed32 outside a range given reversed is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "95 01 FF FF FF FF",
+      "violations": []
+    },
+    {
+      "name": "a sfixed64 within a range given reversed breaks sfixed64.gt_lte_exclusive",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "99 01 03 00 00 00 00 00 00 00",
+      "violations": [
+        {
+          "bounds": {
+            "gt": "10",
+            "lte": "0"
+          },
+          "fieldPath": "signed_fixed_wide",
+          "message": "must be greater than 10 or less than or equal to 0",
+          "ruleId": "sfixed64.gt_lte_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "an int64 at its range's gt breaks int64.gt_lte",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "A0 01 00",
+      "violations": [
+        {
+          "bounds": {
+            "gt": "0",
+            "lte": "100"
+          },
+          "fieldPath": "above_to",
+          "message": "must be greater than 0 and less than or equal to 100",
+          "ruleId": "int64.gt_lte"
+        }
+      ]
+    },
+    {
+      "name": "a uint64 within a range given reversed breaks uint64.gte_lte_exclusive",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "A8 01 07",
+      "violations": [
+        {
+          "bounds": {
+            "gte": "10",
+            "lte": "5"
+          },
+          "fieldPath": "outside_wide",
+          "message": "must be greater than or equal to 10 or less than or equal to 5",
+          "ruleId": "uint64.gte_lte_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "a bool not its const breaks bool.const",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "B0 01 00",
+      "violations": [
+        {
+          "bounds": {
+            "const": true
+          },
+          "fieldPath": "truth",
+          "message": "must equal true",
+          "ruleId": "bool.const"
+        }
+      ]
+    },
+    {
+      "name": "a bool its const is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "B0 01 01",
+      "violations": []
+    },
+    {
+      "name": "an example is never judged: a value other than it is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "B8 01 01",
+      "violations": []
+    },
+    {
+      "name": "every field unset breaks nothing",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "",
+      "violations": []
+    },
+    {
+      "name": "a range before in, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "C0 01 FF FF FF FF FF FF FF FF FF 01",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 0
+          },
+          "fieldPath": "ranged_listed",
+          "message": "must be greater than 0",
+          "ruleId": "int32.gt"
+        },
+        {
+          "bounds": {
+            "in": [
+              5,
+              7
+            ]
+          },
+          "fieldPath": "ranged_listed",
+          "message": "must be in list [5, 7]",
+          "ruleId": "int32.in"
+        }
+      ]
+    },
+    {
+      "name": "every integer rule broken at once, in the fields' order",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Numbers",
+      "payload": "08 0B 10 0A 18 00 58 80 80 80 80 80 80 80 F0 FF 01 70 01 B0 01 00",
+      "violations": [
+        {
+          "bounds": {
+            "lte": 10
+          },
+          "fieldPath": "at_most_ten",
+          "message": "must be less than or equal to 10",
+          "ruleId": "int32.lte"
+        },
+        {
+          "bounds": {
+            "lt": 10
+          },
+          "fieldPath": "below_ten",
+          "message": "must be less than 10",
+          "ruleId": "int32.lt"
+        },
+        {
+          "bounds": {
+            "gt": 0
+          },
+          "fieldPath": "above_zero",
+          "message": "must be greater than 0",
+          "ruleId": "int32.gt"
+        },
+        {
+          "bounds": {
+            "lt": "-9007199254740993"
+          },
+          "fieldPath": "wide",
+          "message": "must be less than -9007199254740993",
+          "ruleId": "int64.lt"
+        },
+        {
+          "bounds": {
+            "gt": -1
+          },
+          "fieldPath": "zigzag",
+          "message": "must be greater than -1",
+          "ruleId": "sint32.gt"
+        },
+        {
+          "bounds": {
+            "const": true
+          },
+          "fieldPath": "truth",
+          "message": "must equal true",
+          "ruleId": "bool.const"
+        }
+      ]
+    },
+    {
+      "name": "a float at its gt of 0.1 breaks it, compared as a float, its bound the double the float is",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "0D CD CC CC 3D",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 0.10000000149011612
+          },
+          "fieldPath": "above_tenth",
+          "message": "must be greater than 0.10000000149011612",
+          "ruleId": "float.gt"
+        }
+      ]
+    },
+    {
+      "name": "a float past its gt is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "0D CD CC 4C 3E",
+      "violations": []
+    },
+    {
+      "name": "a double past its range breaks double.gte_lte",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "11 00 00 00 00 00 00 F8 3F",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 0.0,
+            "lte": 1.0
+          },
+          "fieldPath": "unit",
+          "message": "must be greater than or equal to 0 and less than or equal to 1",
+          "ruleId": "double.gte_lte"
+        }
+      ]
+    },
+    {
+      "name": "a double NaN breaks every bound",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "11 00 00 00 00 00 00 F8 7F",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 0.0,
+            "lte": 1.0
+          },
+          "fieldPath": "unit",
+          "message": "must be greater than or equal to 0 and less than or equal to 1",
+          "ruleId": "double.gte_lte"
+        }
+      ]
+    },
+    {
+      "name": "a double NaN breaks finite",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "19 00 00 00 00 00 00 F8 7F",
+      "violations": [
+        {
+          "fieldPath": "real",
+          "message": "must be finite",
+          "ruleId": "double.finite"
+        }
+      ]
+    },
+    {
+      "name": "a double infinite breaks finite",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "19 00 00 00 00 00 00 F0 FF",
+      "violations": [
+        {
+          "fieldPath": "real",
+          "message": "must be finite",
+          "ruleId": "double.finite"
+        }
+      ]
+    },
+    {
+      "name": "a double finite is taken by finite",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "19 00 00 00 00 00 00 F0 3F",
+      "violations": []
+    },
+    {
+      "name": "a double out of a list holding -Infinity breaks double.in, its bounds the JSON mapping's strings",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "21 00 00 00 00 00 00 00 40",
+      "violations": [
+        {
+          "bounds": {
+            "in": [
+              "-Infinity",
+              1.0
+            ]
+          },
+          "fieldPath": "listed",
+          "message": "must be in list [-Infinity, 1]",
+          "ruleId": "double.in"
+        }
+      ]
+    },
+    {
+      "name": "a double -Infinity is taken by a list holding it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "21 00 00 00 00 00 00 F0 FF",
+      "violations": []
+    },
+    {
+      "name": "a float under gt Infinity breaks it, its words Infinity",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "2D 00 00 80 3F",
+      "violations": [
+        {
+          "bounds": {
+            "gt": "Infinity"
+          },
+          "fieldPath": "beyond",
+          "message": "must be greater than Infinity",
+          "ruleId": "float.gt"
+        }
+      ]
+    },
+    {
+      "name": "a double 0.3 is not its const 0.30000000000000004",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "31 33 33 33 33 33 33 D3 3F",
+      "violations": [
+        {
+          "bounds": {
+            "const": 0.30000000000000004
+          },
+          "fieldPath": "exactly",
+          "message": "must equal 0.30000000000000004",
+          "ruleId": "double.const"
+        }
+      ]
+    },
+    {
+      "name": "a double 0.1 + 0.2 is its const 0.30000000000000004",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "31 34 33 33 33 33 33 D3 3F",
+      "violations": []
+    },
+    {
+      "name": "a double within a range given reversed breaks double.gt_lt_exclusive",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "39 00 00 00 00 00 00 00 00",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 1.0,
+            "lt": -1.0
+          },
+          "fieldPath": "outside",
+          "message": "must be greater than 1 or less than -1",
+          "ruleId": "double.gt_lt_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "a double NaN breaks a range given reversed",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "39 00 00 00 00 00 00 F8 7F",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 1.0,
+            "lt": -1.0
+          },
+          "fieldPath": "outside",
+          "message": "must be greater than 1 or less than -1",
+          "ruleId": "double.gt_lt_exclusive"
+        }
+      ]
+    },
+    {
+      "name": "a double outside a range given reversed is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "39 00 00 00 00 00 00 00 40",
+      "violations": []
+    },
+    {
+      "name": "a float -0.0 is 0 in its not_in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "45 00 00 00 80",
+      "violations": [
+        {
+          "bounds": {
+            "not_in": [
+              0.0
+            ]
+          },
+          "fieldPath": "unlisted",
+          "message": "must not be in list [0]",
+          "ruleId": "float.not_in"
+        }
+      ]
+    },
+    {
+      "name": "a double at 1e21 breaks lt 1e21, its words as ECMAScript writes the double",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "49 50 EF E2 D6 E4 1A 4B 44",
+      "violations": [
+        {
+          "bounds": {
+            "lt": 1e+21
+          },
+          "fieldPath": "below_large",
+          "message": "must be less than 1e+21",
+          "ruleId": "double.lt"
+        }
+      ]
+    },
+    {
+      "name": "a float NaN breaks its gte, then finite, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "55 00 00 C0 7F",
+      "violations": [
+        {
+          "bounds": {
+            "gte": 0.0
+          },
+          "fieldPath": "real_float",
+          "message": "must be greater than or equal to 0",
+          "ruleId": "float.gte"
+        },
+        {
+          "fieldPath": "real_float",
+          "message": "must be finite",
+          "ruleId": "float.finite"
+        }
+      ]
+    },
+    {
+      "name": "a float infinite breaks finite alone",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.3",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Floats",
+      "payload": "55 00 00 80 7F",
+      "violations": [
+        {
+          "fieldPath": "real_float",
+          "message": "must be finite",
+          "ruleId": "float.finite"
+        }
+      ]
+    },
+    {
+      "name": "a string not its const breaks string.const, its words between backticks",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "0A 01 78",
+      "violations": [
+        {
+          "bounds": {
+            "const": "a\"b"
+          },
+          "fieldPath": "exactly",
+          "message": "must equal `a\"b`",
+          "ruleId": "string.const"
+        }
+      ]
+    },
+    {
+      "name": "a string its const is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "0A 03 61 22 62",
+      "violations": []
+    },
+    {
+      "name": "a string of three code points, one astral, holds len 3",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "12 06 F0 9F 98 80 61 62",
+      "violations": []
+    },
+    {
+      "name": "a string of two characters breaks len 3",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "12 02 61 62",
+      "violations": [
+        {
+          "bounds": {
+            "len": "3"
+          },
+          "fieldPath": "three",
+          "message": "must be 3 characters",
+          "ruleId": "string.len"
+        }
+      ]
+    },
+    {
+      "name": "an empty string breaks min_len",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "1A 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "short",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a string past its max_len breaks it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "1A 04 61 62 63 64",
+      "violations": [
+        {
+          "bounds": {
+            "max_len": "3"
+          },
+          "fieldPath": "short",
+          "message": "must be at most 3 characters",
+          "ruleId": "string.max_len"
+        }
+      ]
+    },
+    {
+      "name": "three astral characters hold max_len 3, six UTF-16 units though they are",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "1A 0C F0 9F 98 80 F0 9F 98 80 F0 9F 98 80",
+      "violations": []
+    },
+    {
+      "name": "two characters of four UTF-8 bytes hold len_bytes 4",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "22 04 C3 A9 C3 A9",
+      "violations": []
+    },
+    {
+      "name": "three ASCII characters break len_bytes 4",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "22 03 61 62 63",
+      "violations": [
+        {
+          "bounds": {
+            "len_bytes": "4"
+          },
+          "fieldPath": "four_bytes",
+          "message": "must be 4 bytes",
+          "ruleId": "string.len_bytes"
+        }
+      ]
+    },
+    {
+      "name": "one character of two UTF-8 bytes holds min_bytes 2",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "2A 02 C3 A9",
+      "violations": []
+    },
+    {
+      "name": "one ASCII character breaks min_bytes 2",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "2A 01 61",
+      "violations": [
+        {
+          "bounds": {
+            "min_bytes": "2"
+          },
+          "fieldPath": "few_bytes",
+          "message": "must be at least 2 bytes",
+          "ruleId": "string.min_bytes"
+        }
+      ]
+    },
+    {
+      "name": "two characters of four UTF-8 bytes break max_bytes 3",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "2A 04 C3 A9 C3 A9",
+      "violations": [
+        {
+          "bounds": {
+            "max_bytes": "3"
+          },
+          "fieldPath": "few_bytes",
+          "message": "must be at most 3 bytes",
+          "ruleId": "string.max_bytes"
+        }
+      ]
+    },
+    {
+      "name": "a string its pattern takes is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "32 03 61 62 63",
+      "violations": []
+    },
+    {
+      "name": "a string its pattern does not match breaks string.pattern",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "32 03 61 62 31",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^[a-z]+$"
+          },
+          "fieldPath": "lower",
+          "message": "does not match regex pattern `^[a-z]+$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "a string without its prefix breaks string.prefix",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "3A 04 62 65 61 64",
+      "violations": [
+        {
+          "bounds": {
+            "prefix": "bead:"
+          },
+          "fieldPath": "prefixed",
+          "message": "does not have prefix `bead:`",
+          "ruleId": "string.prefix"
+        }
+      ]
+    },
+    {
+      "name": "a string with its prefix is taken",
+      "clauses": [
+        "18.1",
+        "18.2"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "3A 06 62 65 61 64 3A 78",
+      "violations": []
+    },
+    {
+      "name": "a string without its suffix breaks string.suffix",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "42 04 61 2E 76 32",
+      "violations": [
+        {
+          "bounds": {
+            "suffix": ".v1"
+          },
+          "fieldPath": "suffixed",
+          "message": "does not have suffix `.v1`",
+          "ruleId": "string.suffix"
+        }
+      ]
+    },
+    {
+      "name": "a string without what it contains breaks string.contains",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "4A 06 6E 6F 62 6F 64 79",
+      "violations": [
+        {
+          "bounds": {
+            "contains": "@"
+          },
+          "fieldPath": "containing",
+          "message": "does not contain substring `@`",
+          "ruleId": "string.contains"
+        }
+      ]
+    },
+    {
+      "name": "a string holding what it must not breaks string.not_contains",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "52 04 61 2D 2D 62",
+      "violations": [
+        {
+          "bounds": {
+            "not_contains": "--"
+          },
+          "fieldPath": "excluding",
+          "message": "contains substring `--`",
+          "ruleId": "string.not_contains"
+        }
+      ]
+    },
+    {
+      "name": "a string out of its in breaks string.in, its list as words",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "5A 01 63",
+      "violations": [
+        {
+          "bounds": {
+            "in": [
+              "a",
+              "b"
+            ]
+          },
+          "fieldPath": "listed",
+          "message": "must be in list [a, b]",
+          "ruleId": "string.in"
+        }
+      ]
+    },
+    {
+      "name": "a string in its not_in breaks string.not_in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "62 04 72 6F 6F 74",
+      "violations": [
+        {
+          "bounds": {
+            "not_in": [
+              "root"
+            ]
+          },
+          "fieldPath": "unlisted",
+          "message": "must not be in list [root]",
+          "ruleId": "string.not_in"
+        }
+      ]
+    },
+    {
+      "name": "pattern before len, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.5",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "6A 03 61 62 31",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^[a-z]+$"
+          },
+          "fieldPath": "lengths",
+          "message": "does not match regex pattern `^[a-z]+$`",
+          "ruleId": "string.pattern"
+        },
+        {
+          "bounds": {
+            "len": "4"
+          },
+          "fieldPath": "lengths",
+          "message": "must be 4 characters",
+          "ruleId": "string.len"
+        }
+      ]
+    },
+    {
+      "name": "prefix before len_bytes, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "72 03 61 62 63",
+      "violations": [
+        {
+          "bounds": {
+            "prefix": "x"
+          },
+          "fieldPath": "byte_lengths",
+          "message": "does not have prefix `x`",
+          "ruleId": "string.prefix"
+        },
+        {
+          "bounds": {
+            "len_bytes": "4"
+          },
+          "fieldPath": "byte_lengths",
+          "message": "must be 4 bytes",
+          "ruleId": "string.len_bytes"
+        }
+      ]
+    },
+    {
+      "name": "in before not_contains, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "7A 03 63 2D 2D",
+      "violations": [
+        {
+          "bounds": {
+            "in": [
+              "a--",
+              "b"
+            ]
+          },
+          "fieldPath": "excluded_listed",
+          "message": "must be in list [a--, b]",
+          "ruleId": "string.in"
+        },
+        {
+          "bounds": {
+            "not_contains": "--"
+          },
+          "fieldPath": "excluded_listed",
+          "message": "contains substring `--`",
+          "ruleId": "string.not_contains"
+        }
+      ]
+    },
+    {
+      "name": "an empty string is judged where it is set, and breaks each rule it does not hold, in the fields' order",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Strings",
+      "payload": "12 00 1A 00 32 00 3A 00",
+      "violations": [
+        {
+          "bounds": {
+            "len": "3"
+          },
+          "fieldPath": "three",
+          "message": "must be 3 characters",
+          "ruleId": "string.len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "short",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "pattern": "^[a-z]+$"
+          },
+          "fieldPath": "lower",
+          "message": "does not match regex pattern `^[a-z]+$`",
+          "ruleId": "string.pattern"
+        },
+        {
+          "bounds": {
+            "prefix": "bead:"
+          },
+          "fieldPath": "prefixed",
+          "message": "does not have prefix `bead:`",
+          "ruleId": "string.prefix"
+        }
+      ]
+    },
+    {
+      "name": "bytes not their const break bytes.const, its words in hexadecimal, its bounds in base64",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "0A 01 01",
+      "violations": [
+        {
+          "bounds": {
+            "const": "AP8="
+          },
+          "fieldPath": "exactly",
+          "message": "must be 00ff",
+          "ruleId": "bytes.const"
+        }
+      ]
+    },
+    {
+      "name": "bytes their const are taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "0A 02 00 FF",
+      "violations": []
+    },
+    {
+      "name": "three bytes break bytes.len 4",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "12 03 61 62 63",
+      "violations": [
+        {
+          "bounds": {
+            "len": "4"
+          },
+          "fieldPath": "four",
+          "message": "must be 4 bytes",
+          "ruleId": "bytes.len"
+        }
+      ]
+    },
+    {
+      "name": "one byte breaks bytes.min_len, four break bytes.max_len",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "1A 01 61",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "2"
+          },
+          "fieldPath": "few",
+          "message": "must be at least 2 bytes",
+          "ruleId": "bytes.min_len"
+        }
+      ]
+    },
+    {
+      "name": "four bytes break bytes.max_len 3",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "1A 04 61 62 63 64",
+      "violations": [
+        {
+          "bounds": {
+            "max_len": "3"
+          },
+          "fieldPath": "few",
+          "message": "must be at most 3 bytes",
+          "ruleId": "bytes.max_len"
+        }
+      ]
+    },
+    {
+      "name": "bytes without their prefix break bytes.prefix",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "22 04 47 49 46 38",
+      "violations": [
+        {
+          "bounds": {
+            "prefix": "iVBORw=="
+          },
+          "fieldPath": "png",
+          "message": "does not have prefix 89504e47",
+          "ruleId": "bytes.prefix"
+        }
+      ]
+    },
+    {
+      "name": "bytes without their suffix break bytes.suffix",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "2A 02 61 62",
+      "violations": [
+        {
+          "bounds": {
+            "suffix": "AA=="
+          },
+          "fieldPath": "terminated",
+          "message": "does not have suffix 00",
+          "ruleId": "bytes.suffix"
+        }
+      ]
+    },
+    {
+      "name": "bytes without what they contain break bytes.contains",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "32 02 00 01",
+      "violations": [
+        {
+          "bounds": {
+            "contains": "/g=="
+          },
+          "fieldPath": "marked",
+          "message": "does not contain fe",
+          "ruleId": "bytes.contains"
+        }
+      ]
+    },
+    {
+      "name": "bytes.prefix before bytes.len, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Bytes",
+      "payload": "3A 03 61 62 63",
+      "violations": [
+        {
+          "bounds": {
+            "prefix": "UEs="
+          },
+          "fieldPath": "lengths",
+          "message": "does not have prefix 504b",
+          "ruleId": "bytes.prefix"
+        },
+        {
+          "bounds": {
+            "len": "8"
+          },
+          "fieldPath": "lengths",
+          "message": "must be 8 bytes",
+          "ruleId": "bytes.len"
+        }
+      ]
+    },
+    {
+      "name": "an enum number its enum does not declare breaks defined_only",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Enums",
+      "payload": "08 07",
+      "violations": [
+        {
+          "fieldPath": "defined",
+          "message": "value must be one of the defined enum values",
+          "ruleId": "enum.defined_only"
+        }
+      ]
+    },
+    {
+      "name": "an enum number its enum declares is taken by defined_only",
+      "clauses": [
+        "18.1",
+        "18.2"
+      ],
+      "message": "bead.validations.v1.Enums",
+      "payload": "08 01",
+      "violations": []
+    },
+    {
+      "name": "an enum not its const breaks enum.const, by its number",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Enums",
+      "payload": "10 01",
+      "violations": [
+        {
+          "bounds": {
+            "const": 2
+          },
+          "fieldPath": "exactly",
+          "message": "must equal 2",
+          "ruleId": "enum.const"
+        }
+      ]
+    },
+    {
+      "name": "an enum out of its in breaks enum.in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Enums",
+      "payload": "18 02",
+      "violations": [
+        {
+          "bounds": {
+            "in": [
+              1
+            ]
+          },
+          "fieldPath": "listed",
+          "message": "must be in list [1]",
+          "ruleId": "enum.in"
+        }
+      ]
+    },
+    {
+      "name": "an enum in its not_in breaks enum.not_in",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Enums",
+      "payload": "20 00",
+      "violations": [
+        {
+          "bounds": {
+            "not_in": [
+              0
+            ]
+          },
+          "fieldPath": "unlisted",
+          "message": "must not be in list [0]",
+          "ruleId": "enum.not_in"
+        }
+      ]
+    },
+    {
+      "name": "enum.defined_only before enum.in, by their members' numbers",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Enums",
+      "payload": "28 07",
+      "violations": [
+        {
+          "fieldPath": "checked",
+          "message": "value must be one of the defined enum values",
+          "ruleId": "enum.defined_only"
+        },
+        {
+          "bounds": {
+            "in": [
+              1,
+              2
+            ]
+          },
+          "fieldPath": "checked",
+          "message": "must be in list [1, 2]",
+          "ruleId": "enum.in"
+        }
+      ]
+    },
+    {
+      "name": "an empty repeated field breaks min_items",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        }
+      ]
+    },
+    {
+      "name": "a repeated field past max_items breaks it, then each item breaks its rules, by index",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "0A 01 61 0A 00 0A 01 62 0A 00",
+      "violations": [
+        {
+          "bounds": {
+            "max_items": "3"
+          },
+          "fieldPath": "names",
+          "message": "must contain no more than 3 item(s)",
+          "ruleId": "repeated.max_items"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "names[1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "names[3]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a repeated field within its counts and its items' rules is taken",
+      "clauses": [
+        "18.1",
+        "18.2"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "0A 01 61 0A 01 62",
+      "violations": []
+    },
+    {
+      "name": "an item given twice breaks unique",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "12 03 01 02 01",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        },
+        {
+          "fieldPath": "distinct",
+          "message": "repeated value must contain unique items",
+          "ruleId": "repeated.unique"
+        }
+      ]
+    },
+    {
+      "name": "items each given once are taken by unique",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "12 03 01 02 03",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        }
+      ]
+    },
+    {
+      "name": "0.0 and -0.0 are one item under unique",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "1A 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        },
+        {
+          "fieldPath": "reals",
+          "message": "repeated value must contain unique items",
+          "ruleId": "repeated.unique"
+        }
+      ]
+    },
+    {
+      "name": "two NaN are two items under unique",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "1A 10 00 00 00 00 00 00 F8 7F 00 00 00 00 00 00 F8 7F",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        }
+      ]
+    },
+    {
+      "name": "a string given twice breaks unique",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "22 01 61 22 01 62 22 01 61",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        },
+        {
+          "fieldPath": "words",
+          "message": "repeated value must contain unique items",
+          "ruleId": "repeated.unique"
+        }
+      ]
+    },
+    {
+      "name": "a repeated message's items are judged by index, each by its message's rules",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "2A 00 2A 04 0A 02 6F 6B 2A 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inners[0].name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inners[2].name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "an enum given twice breaks unique, then an item not declared breaks defined_only",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "payload": "3A 03 01 07 01",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "1"
+          },
+          "fieldPath": "names",
+          "message": "must contain at least 1 item(s)",
+          "ruleId": "repeated.min_items"
+        },
+        {
+          "fieldPath": "colours",
+          "message": "repeated value must contain unique items",
+          "ruleId": "repeated.unique"
+        },
+        {
+          "fieldPath": "colours[1]",
+          "message": "value must be one of the defined enum values",
+          "ruleId": "enum.defined_only"
+        }
+      ]
+    },
+    {
+      "name": "a request of 100,000 breaking items holds the violations its detail carries, and counts the rest exactly",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.6",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "runs": [
+        {
+          "bytes": "0A 01 61",
+          "times": 1
+        },
+        {
+          "bytes": "32 00",
+          "times": 100000
+        }
+      ],
+      "maximumBytes": 1024,
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[0]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[2]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[3]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[4]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[5]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[6]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[7]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[8]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ],
+      "more": 99991
+    },
+    {
+      "name": "a request of 100,000 breaking items under failFast gives its first and stops",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Repeated",
+      "runs": [
+        {
+          "bytes": "0A 01 61",
+          "times": 1
+        },
+        {
+          "bytes": "32 00",
+          "times": 100000
+        }
+      ],
+      "failFast": true,
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "many[0]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ],
+      "stopped": true
+    },
+    {
+      "name": "a map past max_pairs breaks it, then its entries by key: a key's rule, then a value's",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6",
+        "18.3.5"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "0A 0F 0A 02 7A 7A 10 FF FF FF FF FF FF FF FF FF 01 0A 05 0A 01 61 10 00 0A 06 0A 02 6D 6D 10 01",
+      "violations": [
+        {
+          "bounds": {
+            "max_pairs": "2"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at most 2 entries",
+          "ruleId": "map.max_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "2"
+          },
+          "fieldPath": "labels[\"a\"]",
+          "forKey": true,
+          "message": "must be at least 2 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "gte": 0
+          },
+          "fieldPath": "labels[\"zz\"]",
+          "message": "must be greater than or equal to 0",
+          "ruleId": "int32.gte"
+        }
+      ]
+    },
+    {
+      "name": "an empty map breaks min_pairs",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        }
+      ]
+    },
+    {
+      "name": "a map within its rules is taken",
+      "clauses": [
+        "18.1",
+        "18.2"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "0A 06 0A 02 61 62 10 00 0A 06 0A 02 63 64 10 01",
+      "violations": []
+    },
+    {
+      "name": "a map of messages judges each by key, integers ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "12 04 08 03 12 00 12 04 08 0A 12 00 12 0D 08 FF FF FF FF FF FF FF FF FF 01 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_id[-1].name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_id[3].name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_id[10].name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by bool judges false before true",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "1A 04 08 01 12 00 1A 04 08 00 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "flags[false]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "flags[true]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by string judges its keys by code points, U+E000 before U+1F600",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "22 08 0A 04 F0 9F 98 80 12 00 22 07 0A 03 EE 80 80 12 00 22 05 0A 01 62 12 00 22 07 0A 03 61 C3 A9 12 00 22 05 0A 01 61 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_text[\"a\"]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_text[\"aé\"]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_text[\"b\"]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_text[\"\"]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_text[\"😀\"]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by int64 judges its keys ascending, negatives first",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "2A 0B 08 81 80 80 80 80 80 80 10 12 00 2A 0D 08 FF FF FF FF FF FF FF EF FF 01 12 00 2A 04 08 00 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_int64[-9007199254740993]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_int64[0]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_int64[9007199254740993]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by uint32 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "32 08 08 FF FF FF FF 0F 12 00 32 04 08 01 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_uint32[1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_uint32[4294967295]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by uint64 judges its keys ascending, past 2^63",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "3A 0D 08 FF FF FF FF FF FF FF FF FF 01 12 00 3A 0D 08 80 80 80 80 80 80 80 80 80 01 12 00 3A 04 08 01 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_uint64[1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_uint64[9223372036854775808]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_uint64[18446744073709551615]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by sint32 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "42 04 08 02 12 00 42 04 08 01 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sint32[-1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sint32[1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by sint64 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "4A 04 08 0A 12 00 4A 04 08 09 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sint64[-5]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sint64[5]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by fixed32 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "52 07 0D 02 00 00 00 12 00 52 07 0D 01 00 00 00 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_fixed32[1]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_fixed32[2]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by fixed64 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "5A 0B 09 FF FF FF FF FF FF FF FF 12 00 5A 0B 09 00 00 00 00 00 00 00 00 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_fixed64[0]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_fixed64[18446744073709551615]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by sfixed32 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "62 07 0D 00 00 00 00 12 00 62 07 0D 00 00 00 80 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sfixed32[-2147483648]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sfixed32[0]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a map keyed by sfixed64 judges its keys ascending",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "6A 0B 09 FF FF FF FF FF FF FF 7F 12 00 6A 0B 09 00 00 00 00 00 00 00 80 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sfixed64[-9223372036854775808]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "by_sfixed64[9223372036854775807]",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a key holding a tab, a quote and U+0001 is written as section 17.7 writes a string",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6",
+        "18.3.5"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "72 09 0A 05 61 09 62 22 01 10 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "max_len": "1"
+          },
+          "fieldPath": "keyed[\"a\\tb\\\"\\u0001\"]",
+          "forKey": true,
+          "message": "must be at most 1 characters",
+          "ruleId": "string.max_len"
+        }
+      ]
+    },
+    {
+      "name": "a key past 64 bytes is cut at 64, back to its character's start, then marked ...",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6",
+        "18.3.5"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "72 D6 0F 0A D1 0F 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B C3 A9 10 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "max_len": "1"
+          },
+          "fieldPath": "keyed[\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\"...]",
+          "forKey": true,
+          "message": "must be at most 1 characters",
+          "ruleId": "string.max_len"
+        }
+      ]
+    },
+    {
+      "name": "a key of 63 ASCII characters and one of two bytes is cut before that one",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6",
+        "18.3.5"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "72 45 0A 41 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B C3 A9 10 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "max_len": "1"
+          },
+          "fieldPath": "keyed[\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\"...]",
+          "forKey": true,
+          "message": "must be at most 1 characters",
+          "ruleId": "string.max_len"
+        }
+      ]
+    },
+    {
+      "name": "a key of 64 bytes is written whole",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6",
+        "18.3.5"
+      ],
+      "message": "bead.validations.v1.Maps",
+      "payload": "72 44 0A 40 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B 6B C3 A9 10 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_pairs": "1"
+          },
+          "fieldPath": "labels",
+          "message": "map must be at least 1 entries",
+          "ruleId": "map.min_pairs"
+        },
+        {
+          "bounds": {
+            "max_len": "1"
+          },
+          "fieldPath": "keyed[\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkké\"]",
+          "forKey": true,
+          "message": "must be at most 1 characters",
+          "ruleId": "string.max_len"
+        }
+      ]
+    },
+    {
+      "name": "an explicit field unset is judged by nothing but required",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "1A 01 78 20 01 2A 01 78 4A 03 0A 01 78 5A 06 0A 01 6B 12 01 76",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "implicit",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "an explicit field set to its zero is judged",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "0A 00 1A 01 78 20 01 2A 01 78 4A 03 0A 01 78 5A 06 0A 01 6B 12 01 76",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "explicit",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "implicit",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "an implicit field absent is judged at its zero",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "1A 01 78 20 01 2A 01 78 4A 03 0A 01 78 5A 06 0A 01 6B 12 01 76",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "implicit",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "required refuses an explicit field unset, an implicit one at its zero, an empty repeated field and an empty map, a message unset",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78",
+      "violations": [
+        {
+          "fieldPath": "needed",
+          "message": "value is required",
+          "ruleId": "required"
+        },
+        {
+          "fieldPath": "needed_implicit",
+          "message": "value is required",
+          "ruleId": "required"
+        },
+        {
+          "fieldPath": "needed_items",
+          "message": "value is required",
+          "ruleId": "required"
+        },
+        {
+          "fieldPath": "inner",
+          "message": "value is required",
+          "ruleId": "required"
+        },
+        {
+          "fieldPath": "needed_pairs",
+          "message": "value is required",
+          "ruleId": "required"
+        }
+      ]
+    },
+    {
+      "name": "required takes an explicit field set to its zero",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78 1A 00 20 01 2A 00 4A 03 0A 01 78 5A 04 0A 00 12 00",
+      "violations": []
+    },
+    {
+      "name": "IGNORE_IF_ZERO_VALUE judges nothing of an implicit field at its zero",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78 1A 01 78 20 01 2A 01 78 4A 03 0A 01 78 5A 06 0A 01 6B 12 01 76",
+      "violations": []
+    },
+    {
+      "name": "IGNORE_IF_ZERO_VALUE judges a field past its zero",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78 1A 01 78 20 01 2A 01 78 30 03 4A 03 0A 01 78 5A 06 0A 01 6B 12 01 76",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 5
+          },
+          "fieldPath": "skipped_zero",
+          "message": "must be greater than 5",
+          "ruleId": "int32.gt"
+        }
+      ]
+    },
+    {
+      "name": "IGNORE_IF_ZERO_VALUE judges nothing of a repeated field or a map empty, and judges one that is not",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78 1A 01 78 20 01 2A 01 78 4A 03 0A 01 78 5A 06 0A 01 6B 12 01 76 62 01 61",
+      "violations": [
+        {
+          "bounds": {
+            "min_items": "2"
+          },
+          "fieldPath": "some_items",
+          "message": "must contain at least 2 item(s)",
+          "ruleId": "repeated.min_items"
+        }
+      ]
+    },
+    {
+      "name": "IGNORE_ALWAYS judges nothing of the message a field holds",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78 1A 01 78 20 01 2A 01 78 4A 03 0A 01 78 52 00 5A 06 0A 01 6B 12 01 76",
+      "violations": []
+    },
+    {
+      "name": "a message set is judged by its own rules, its path through it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Presence",
+      "payload": "12 01 78 1A 01 78 20 01 2A 01 78 4A 00 5A 06 0A 01 6B 12 01 76",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inner.name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "every wrapper unset breaks nothing but required",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Wrappers",
+      "payload": "",
+      "violations": [
+        {
+          "fieldPath": "title",
+          "message": "value is required",
+          "ruleId": "required"
+        }
+      ]
+    },
+    {
+      "name": "a wrapper set is judged on its value, its path the field alone",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Wrappers",
+      "payload": "0A 00 12 00 1A 09 09 00 00 00 00 00 00 F8 7F 22 02 08 0B 2A 00 32 00 3A 00 42 0B 08 FE FF FF FF FF FF FF EF FF 01 4A 04 08 FF FF 03",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 0
+          },
+          "fieldPath": "count",
+          "message": "must be greater than 0",
+          "ruleId": "int32.gt"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "title",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "fieldPath": "ratio",
+          "message": "must be finite",
+          "ruleId": "double.finite"
+        },
+        {
+          "bounds": {
+            "lte": "10"
+          },
+          "fieldPath": "size",
+          "message": "must be less than or equal to 10",
+          "ruleId": "uint64.lte"
+        },
+        {
+          "bounds": {
+            "const": true
+          },
+          "fieldPath": "flag",
+          "message": "must equal true",
+          "ruleId": "bool.const"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "blob",
+          "message": "must be at least 1 bytes",
+          "ruleId": "bytes.min_len"
+        },
+        {
+          "bounds": {
+            "gt": 0.0
+          },
+          "fieldPath": "weight",
+          "message": "must be greater than 0",
+          "ruleId": "float.gt"
+        },
+        {
+          "bounds": {
+            "gte": "-9007199254740993"
+          },
+          "fieldPath": "offset",
+          "message": "must be greater than or equal to -9007199254740993",
+          "ruleId": "int64.gte"
+        }
+      ]
+    },
+    {
+      "name": "a wrapper set to values its rules take is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1"
+      ],
+      "message": "bead.validations.v1.Wrappers",
+      "payload": "0A 02 08 01 12 03 0A 01 61 1A 09 09 00 00 00 00 00 00 E0 3F 22 02 08 0A 2A 02 08 01 32 03 0A 01 78 3A 05 0D 00 00 00 3F 42 0B 08 FF FF FF FF FF FF FF EF FF 01 4A 03 08 BB 03",
+      "violations": []
+    },
+    {
+      "name": "a oneof required with no member set breaks required, at the oneof's name",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "2A 01 61",
+      "violations": [
+        {
+          "fieldPath": "choice",
+          "message": "exactly one field is required in oneof",
+          "ruleId": "required"
+        }
+      ]
+    },
+    {
+      "name": "a oneof's member set is judged by its own rules",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "10 00 2A 01 61",
+      "violations": [
+        {
+          "bounds": {
+            "gt": 0
+          },
+          "fieldPath": "id",
+          "message": "must be greater than 0",
+          "ruleId": "int32.gt"
+        }
+      ]
+    },
+    {
+      "name": "a oneof's member set to its zero is set",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "0A 00 2A 01 61",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a message's oneof breaks where two of its fields are set, and a required one where none is",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "0A 01 61 1A 03 61 62 63 22 01 62",
+      "violations": [
+        {
+          "bounds": {
+            "fields": [
+              "x",
+              "y"
+            ]
+          },
+          "message": "only one of x, y can be set",
+          "ruleId": "message.oneof"
+        },
+        {
+          "bounds": {
+            "fields": [
+              "p",
+              "q"
+            ],
+            "required": true
+          },
+          "message": "one of p, q must be set",
+          "ruleId": "message.oneof"
+        }
+      ]
+    },
+    {
+      "name": "a field of implicit presence a message's oneof names judges nothing at its zero, and counts as unset",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "0A 01 61 22 01 62 32 01 62",
+      "violations": []
+    },
+    {
+      "name": "a field a message's oneof names is judged past its zero",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.1",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "0A 01 61 1A 02 61 62 2A 01 62",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "3"
+          },
+          "fieldPath": "x",
+          "message": "must be at least 3 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a message with every rule held is taken",
+      "clauses": [
+        "18.1",
+        "18.2"
+      ],
+      "message": "bead.validations.v1.Oneofs",
+      "payload": "10 01 1A 03 61 62 63 32 01 62",
+      "violations": []
+    },
+    {
+      "name": "a message held is judged, its path through it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Nested",
+      "payload": "0A 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inner.name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a message held is judged by its fields, then by its own rule, its path the field that holds it",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Nested",
+      "payload": "12 06 12 01 61 1A 01 62",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "pair.label",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "fields": [
+              "left",
+              "right"
+            ]
+          },
+          "fieldPath": "pair",
+          "message": "only one of left, right can be set",
+          "ruleId": "message.oneof"
+        }
+      ]
+    },
+    {
+      "name": "a repeated message's own rules are judged item by item",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Nested",
+      "payload": "1A 09 0A 01 61 12 01 61 1A 01 62 1A 00",
+      "violations": [
+        {
+          "bounds": {
+            "fields": [
+              "left",
+              "right"
+            ]
+          },
+          "fieldPath": "pairs[0]",
+          "message": "only one of left, right can be set",
+          "ruleId": "message.oneof"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "pairs[1].label",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "a message held to a depth of three is judged at each depth, its path through each",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Nested",
+      "payload": "0A 00 22 06 0A 00 22 02 12 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inner.name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "deep.inner.name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "deep.deep.pair.label",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ]
+    },
+    {
+      "name": "fields declared out of their numbers are judged by their numbers, the message's own rules after them",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.4",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Order",
+      "payload": "0A 00 10 01 4A 00",
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inner.name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "gt": 5
+          },
+          "fieldPath": "early",
+          "message": "must be greater than 5",
+          "ruleId": "int32.gt"
+        },
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "late",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        },
+        {
+          "bounds": {
+            "fields": [
+              "p",
+              "q"
+            ],
+            "required": true
+          },
+          "message": "one of p, q must be set",
+          "ruleId": "message.oneof"
+        },
+        {
+          "fieldPath": "choice",
+          "message": "exactly one field is required in oneof",
+          "ruleId": "required"
+        }
+      ]
+    },
+    {
+      "name": "failFast gives the first violation of the order alone, and says it stopped",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Order",
+      "payload": "0A 00 10 01 4A 00",
+      "failFast": true,
+      "violations": [
+        {
+          "bounds": {
+            "min_len": "1"
+          },
+          "fieldPath": "inner.name",
+          "message": "must be at least 1 characters",
+          "ruleId": "string.min_len"
+        }
+      ],
+      "stopped": true
+    },
+    {
+      "name": "failFast on a request that breaks nothing gives nothing, and did not stop",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.5"
+      ],
+      "message": "bead.validations.v1.Order",
+      "payload": "0A 03 0A 01 61 10 06 1A 01 78 2A 01 70 4A 01 61",
+      "failFast": true,
+      "violations": []
+    },
+    {
+      "name": ". takes U+000D",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "0A 01 0D",
+      "violations": []
+    },
+    {
+      "name": ". takes U+2028",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "0A 03 E2 80 A8",
+      "violations": []
+    },
+    {
+      "name": ". takes no U+000A",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "0A 01 0A",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^.$"
+          },
+          "fieldPath": "any",
+          "message": "does not match regex pattern `^.$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": ". takes one astral character",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "0A 04 F0 9F 98 80",
+      "violations": []
+    },
+    {
+      "name": "\\s takes a tab",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "12 01 09",
+      "violations": []
+    },
+    {
+      "name": "\\s takes no U+00A0",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "12 02 C2 A0",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\s$"
+          },
+          "fieldPath": "space",
+          "message": "does not match regex pattern `^\\s$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "\\s takes no vertical tab",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "12 01 0B",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\s$"
+          },
+          "fieldPath": "space",
+          "message": "does not match regex pattern `^\\s$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "\\d takes no U+0663, an Arabic-Indic digit",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "1A 02 D9 A3",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\d$"
+          },
+          "fieldPath": "digit",
+          "message": "does not match regex pattern `^\\d$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "\\w takes no letter outside ASCII",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "7A 05 63 61 66 C3 A9",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\w+$"
+          },
+          "fieldPath": "word",
+          "message": "does not match regex pattern `^\\w+$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "(?i) folds U+212A, the Kelvin sign, to k",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "22 03 E2 84 AA",
+      "violations": []
+    },
+    {
+      "name": "$ is the string's end alone: a final U+000A breaks ^a$",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "2A 02 61 0A",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^a$"
+          },
+          "fieldPath": "ends",
+          "message": "does not match regex pattern `^a$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "^a$ takes a",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "2A 01 61",
+      "violations": []
+    },
+    {
+      "name": "\\b holds at the string's end",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "32 01 61",
+      "violations": []
+    },
+    {
+      "name": "a pattern unanchored matches anywhere in the string",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "3A 03 61 62 63",
+      "violations": []
+    },
+    {
+      "name": "a negated class takes one astral character",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "42 04 F0 9F 98 80",
+      "violations": []
+    },
+    {
+      "name": "(?m) takes a line within the string",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "72 08 6E 6F 0A 6F 6B 0A 6E 6F",
+      "violations": []
+    },
+    {
+      "name": "^(a+)+$ refuses 100,000 a and a !, in time linear in the string",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "runs": [
+        {
+          "bytes": "4A A1 8D 06",
+          "times": 1
+        },
+        {
+          "bytes": "61",
+          "times": 100000
+        },
+        {
+          "bytes": "21",
+          "times": 1
+        }
+      ],
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^(a+)+$"
+          },
+          "fieldPath": "nested",
+          "message": "does not match regex pattern `^(a+)+$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "[a-z]{1,1000}[0-9] refuses 65,536 a, in time linear in the string",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "runs": [
+        {
+          "bytes": "52 80 80 04",
+          "times": 1
+        },
+        {
+          "bytes": "61",
+          "times": 65536
+        }
+      ],
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "[a-z]{1,1000}[0-9]"
+          },
+          "fieldPath": "counted",
+          "message": "does not match regex pattern `[a-z]{1,1000}[0-9]`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "\\pL takes U+10940, a letter of Unicode 17.0.0",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "5A 04 F0 90 A5 80",
+      "violations": []
+    },
+    {
+      "name": "\\pL takes no digit",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "5A 01 31",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\pL$"
+          },
+          "fieldPath": "letter",
+          "message": "does not match regex pattern `^\\pL$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "\\p{Greek} takes Greek letters, and no Latin one",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "62 05 CE B1 CE B2 63",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\p{Greek}+$"
+          },
+          "fieldPath": "greek",
+          "message": "does not match regex pattern `^\\p{Greek}+$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "a name of letters and marks is taken, one that opens on a hyphen is not",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "6A 06 2D 4A 6F 73 C3 A9",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^\\p{L}[\\p{L}\\p{M} '-]{0,63}$"
+          },
+          "fieldPath": "person",
+          "message": "does not match regex pattern `^\\p{L}[\\p{L}\\p{M} '-]{0,63}$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    },
+    {
+      "name": "a name of letters and marks is taken",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "6A 13 4A 6F 73 65 CC 81 20 4F 27 4E 65 69 6C 2D 53 6D 69 74 68",
+      "violations": []
+    },
+    {
+      "name": "a long pattern takes what it names",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "82 01 08 63 6F 64 65 2D 30 34 30",
+      "violations": []
+    },
+    {
+      "name": "a long pattern's words and bounds carry it whole",
+      "clauses": [
+        "18.1",
+        "18.2",
+        "18.8.5",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4",
+        "18.8.6"
+      ],
+      "message": "bead.validations.v1.Patterns",
+      "payload": "82 01 08 63 6F 64 65 2D 39 39 39",
+      "violations": [
+        {
+          "bounds": {
+            "pattern": "^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$"
+          },
+          "fieldPath": "long",
+          "message": "does not match regex pattern `^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$`",
+          "ruleId": "string.pattern"
+        }
+      ]
+    }
+  ],
+  "details": [
+    {
+      "name": "one violation, whole, then a closing line of no more",
+      "clauses": [
+        "18.6",
+        "18.3.1",
+        "18.3.2",
+        "18.3.3",
+        "18.3.4"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":0}"
+    },
+    {
+      "name": "three violations, each a line in their order",
+      "clauses": [
+        "18.6",
+        "18.5"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[2]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[2]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a bound that holds three lines of five writes them, and counts the two it leaves out",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[2]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[3]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[4]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 379
+      },
+      "detail": "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[2]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":2}"
+    },
+    {
+      "name": "a bound a byte short of three lines writes two, and counts three",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[2]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[3]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[4]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 378
+      },
+      "detail": "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[2]\",\"ruleId\":\"string.min_len\"}\n{\"more\":2}"
+    },
+    {
+      "name": "violations the validator counted already are added to the closing line's count",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "more": 98,
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":98}"
+    },
+    {
+      "name": "a bound that holds the closing line alone writes it",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[2]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[3]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[4]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 12
+      },
+      "detail": "{\"more\":5}"
+    },
+    {
+      "name": "a bound that holds no closing line writes an empty detail",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[2]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[3]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[4]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 9
+      },
+      "detail": ""
+    },
+    {
+      "name": "a bound of 0 writes an empty detail",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "maximumBytes": 0
+      },
+      "detail": ""
+    },
+    {
+      "name": "a judging that stopped at its first violation closes on stopped, never on a count",
+      "clauses": [
+        "18.6",
+        "18.5"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "stopped": true,
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"stopped\":true}"
+    },
+    {
+      "name": "a judging that stopped, in a bound that holds no line of its violation, says it stopped alone",
+      "clauses": [
+        "18.6",
+        "18.5"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "stopped": true,
+        "maximumBytes": 30
+      },
+      "detail": "{\"stopped\":true}"
+    },
+    {
+      "name": "a map key's violation says forKey",
+      "clauses": [
+        "18.6",
+        "18.3.5"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "2"
+            },
+            "fieldPath": "labels[\"a\"]",
+            "forKey": true,
+            "message": "must be at least 2 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"min_len\":\"2\"},\"fieldPath\":\"labels[\\\"a\\\"]\",\"forKey\":true,\"message\":\"must be at least 2 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a 64-bit bound is a string",
+      "clauses": [
+        "18.6",
+        "18.3.3"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lt": "-9007199254740993"
+            },
+            "fieldPath": "wide",
+            "message": "must be less than -9007199254740993",
+            "ruleId": "int64.lt"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"lt\":\"-9007199254740993\"},\"fieldPath\":\"wide\",\"message\":\"must be less than -9007199254740993\",\"ruleId\":\"int64.lt\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a bound not finite is the JSON mapping's string",
+      "clauses": [
+        "18.6",
+        "18.3.3"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "gt": "Infinity"
+            },
+            "fieldPath": "beyond",
+            "message": "must be greater than Infinity",
+            "ruleId": "float.gt"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"gt\":\"Infinity\"},\"fieldPath\":\"beyond\",\"message\":\"must be greater than Infinity\",\"ruleId\":\"float.gt\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a violation that does not hold whole goes without its message",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "pattern": "^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$"
+            },
+            "fieldPath": "code",
+            "message": "does not match regex pattern `^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$`",
+            "ruleId": "string.pattern"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"pattern\":\"^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$\"},\"fieldPath\":\"code\",\"ruleId\":\"string.pattern\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a violation that does not hold without its message goes without its bounds too",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "pattern": "^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$|?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$"
+            },
+            "fieldPath": "code",
+            "message": "does not match regex pattern `^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$|?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$`",
+            "ruleId": "string.pattern"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"fieldPath\":\"code\",\"ruleId\":\"string.pattern\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a violation whose path and rule do not hold ends the lines, and is counted",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          },
+          {
+            "bounds": {
+              "max_len": "1"
+            },
+            "fieldPath": "keyed[\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\"...]",
+            "forKey": true,
+            "message": "must be at most 1 characters",
+            "ruleId": "string.max_len"
+          }
+        ],
+        "maximumBytes": 100
+      },
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"ruleId\":\"int32.lte\"}\n{\"more\":1}"
+    },
+    {
+      "name": "a short violation after one that holds in no form is counted, never written",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "pattern": "^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$|?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$"
+            },
+            "fieldPath": "code",
+            "message": "does not match regex pattern `^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$|?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$`",
+            "ruleId": "string.pattern"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "maximumBytes": 60
+      },
+      "detail": "{\"more\":2}"
+    },
+    {
+      "name": "a key cut at 64 bytes is written with its mark",
+      "clauses": [
+        "18.6",
+        "18.4"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "max_len": "1"
+            },
+            "fieldPath": "keyed[\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\"...]",
+            "forKey": true,
+            "message": "must be at most 1 characters",
+            "ruleId": "string.max_len"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"max_len\":\"1\"},\"fieldPath\":\"keyed[\\\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\\\"...]\",\"forKey\":true,\"message\":\"must be at most 1 characters\",\"ruleId\":\"string.max_len\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a key's tab and U+0001 are written as section 17.7 writes them",
+      "clauses": [
+        "18.6",
+        "18.4"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "max_len": "1"
+            },
+            "fieldPath": "keyed[\"a\\tb\\u0001\"]",
+            "forKey": true,
+            "message": "must be at most 1 characters",
+            "ruleId": "string.max_len"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"max_len\":\"1\"},\"fieldPath\":\"keyed[\\\"a\\\\tb\\\\u0001\\\"]\",\"forKey\":true,\"message\":\"must be at most 1 characters\",\"ruleId\":\"string.max_len\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a bound counts UTF-8 bytes, never characters",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "by_text[\"éééééééééééééééééééé\"]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "by_text[\"éééééééééééééééééééé\"]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "maximumBytes": 190
+      },
+      "detail": "{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"by_text[\\\"éééééééééééééééééééé\\\"]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":1}"
+    },
+    {
+      "name": "a oneof's required names the oneof",
+      "clauses": [
+        "18.6",
+        "18.4"
+      ],
+      "write": {
+        "violations": [
+          {
+            "fieldPath": "choice",
+            "message": "exactly one field is required in oneof",
+            "ruleId": "required"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"fieldPath\":\"choice\",\"message\":\"exactly one field is required in oneof\",\"ruleId\":\"required\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a rule of the message itself has no fieldPath",
+      "clauses": [
+        "18.6",
+        "18.3.1"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "fields": [
+                "x",
+                "y"
+              ]
+            },
+            "message": "only one of x, y can be set",
+            "ruleId": "message.oneof"
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"fields\":[\"x\",\"y\"]},\"message\":\"only one of x, y can be set\",\"ruleId\":\"message.oneof\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a detail of the form gives its violations and its count",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":3}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[0]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          }
+        ],
+        "more": 3
+      }
+    },
+    {
+      "name": "a closing line of stopped says its side stopped",
+      "clauses": [
+        "18.7",
+        "18.5"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"stopped\":true}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "stopped": true
+      }
+    },
+    {
+      "name": "a closing line alone gives no violation and its count",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"more\":4}",
+      "read": {
+        "violations": [],
+        "more": 4
+      }
+    },
+    {
+      "name": "a detail cut inside its second line gives the first violation, and no count",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"bounds\":{\"min_len",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a detail cut after a whole line gives it, and no count",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a line without its message takes the words its rule and bounds give",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"ruleId\":\"int32.lte\"}\n{\"bounds\":{\"pattern\":\"^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$\"},\"fieldPath\":\"code\",\"ruleId\":\"string.pattern\"}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[1]\",\"ruleId\":\"string.min_len\"}\n{\"fieldPath\":\"distinct\",\"ruleId\":\"repeated.unique\"}\n{\"bounds\":{\"gt\":0.10000000149011612},\"fieldPath\":\"above_tenth\",\"ruleId\":\"float.gt\"}\n{\"bounds\":{\"const\":\"AP8=\"},\"fieldPath\":\"exactly\",\"ruleId\":\"bytes.const\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          },
+          {
+            "bounds": {
+              "pattern": "^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$"
+            },
+            "fieldPath": "code",
+            "message": "does not match regex pattern `^(?:code-000|code-001|code-002|code-003|code-004|code-005|code-006|code-007|code-008|code-009|code-010|code-011|code-012|code-013|code-014|code-015|code-016|code-017|code-018|code-019|code-020|code-021|code-022|code-023|code-024|code-025|code-026|code-027|code-028|code-029|code-030|code-031|code-032|code-033|code-034|code-035|code-036|code-037|code-038|code-039|code-040|code-041|code-042|code-043|code-044|code-045|code-046|code-047|code-048|code-049|code-050|code-051|code-052|code-053|code-054|code-055|code-056|code-057|code-058|code-059)$`",
+            "ruleId": "string.pattern"
+          },
+          {
+            "bounds": {
+              "min_len": "1"
+            },
+            "fieldPath": "names[1]",
+            "message": "must be at least 1 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "fieldPath": "distinct",
+            "message": "repeated value must contain unique items",
+            "ruleId": "repeated.unique"
+          },
+          {
+            "bounds": {
+              "gt": 0.10000000149011612
+            },
+            "fieldPath": "above_tenth",
+            "message": "must be greater than 0.10000000149011612",
+            "ruleId": "float.gt"
+          },
+          {
+            "bounds": {
+              "const": "AP8="
+            },
+            "fieldPath": "exactly",
+            "message": "must be 00ff",
+            "ruleId": "bytes.const"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a line without its bounds keeps no words where its rule needs them, nor required and message.oneof",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"fieldPath\":\"from\",\"ruleId\":\"int32.lte\"}\n{\"fieldPath\":\"needed\",\"ruleId\":\"required\"}\n{\"bounds\":{\"fields\":[\"x\",\"y\"]},\"ruleId\":\"message.oneof\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "fieldPath": "from",
+            "ruleId": "int32.lte"
+          },
+          {
+            "fieldPath": "needed",
+            "ruleId": "required"
+          },
+          {
+            "bounds": {
+              "fields": [
+                "x",
+                "y"
+              ]
+            },
+            "ruleId": "message.oneof"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "an empty detail gives none, and no count",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "",
+      "read": {
+        "violations": []
+      }
+    },
+    {
+      "name": "a detail of another text gives none",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "the request is invalid",
+      "read": {
+        "violations": []
+      }
+    },
+    {
+      "name": "a first line that is JSON but no violation gives none",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"error\":\"invalid\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":0}",
+      "read": {
+        "violations": []
+      }
+    },
+    {
+      "name": "a line that is no violation ends the violations, and what follows is unread",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"ruleId\":7}\n{\"bounds\":{\"min_len\":\"1\"},\"fieldPath\":\"names[0]\",\"message\":\"must be at least 1 characters\",\"ruleId\":\"string.min_len\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a line JSON reads in another layout is read as its value",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{ \"ruleId\" : \"int32.lte\", \"message\" : \"must be less than or equal to 10\", \"fieldPath\" : \"from\", \"bounds\" : { \"lte\" : 10 } }\n{ \"more\" : 0 }",
+      "read": {
+        "violations": [
+          {
+            "ruleId": "int32.lte",
+            "message": "must be less than or equal to 10",
+            "fieldPath": "from",
+            "bounds": {
+              "lte": 10
+            }
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a line that names a member twice is no violation",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"fieldPath\":\"from\",\"ruleId\":\"int32.lte\",\"ruleId\":\"int32.gt\"}\n{\"more\":0}",
+      "read": {
+        "violations": []
+      }
+    },
+    {
+      "name": "a closing line whose count is below 0 counts nothing",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":-1}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ]
+      }
+    }
+  ]
+}

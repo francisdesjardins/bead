@@ -334,7 +334,7 @@ public sealed partial class RouterServerTests
             {
                 return line.StartsWith("bead_subscriptions_dropped_total", StringComparison.Ordinal);
             }));
-        Assert.Equal(25, registry.Exposition().Text.Split('\n').Count((line) =>
+        Assert.Equal(26, registry.Exposition().Text.Split('\n').Count((line) =>
         {
             return line.StartsWith("bead_subscriptions_dropped_total{service=\"2\",procedure=\"news\"", StringComparison.Ordinal);
         }));

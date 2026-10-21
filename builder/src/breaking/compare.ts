@@ -9,8 +9,8 @@
 // keeps code written against the earlier's generated API compiling and meaning the same, so a
 // service or a procedure gone is its finding even where `WIRE` waives it, deprecated, then its id
 // reserved. A revision is never lowered, and moves where its service changed: a finding of any
-// rule, an addition, a deprecation, or a message its bindings reach where both sides are buf images,
-// with what of its file reaches the wire or a target's API. Read through the model, never as bytes:
+// rule, an addition, a deprecation, a request's rules changed either way, or a message its bindings
+// reach where both sides are buf images, with what of its file reaches the wire or a target's API. Read through the model, never as bytes:
 // an earlier in another member or array order, and a description, change nothing.
 
 // dependencies
@@ -40,6 +40,7 @@ import {
 } from '../model/blueprint.ts';
 import { areOneName } from '../model/identity.ts';
 import { Category, type IRule, RULES, type RuleName } from '../rules.ts';
+import { rulesChangedOf, tighteningsOf } from './rules.ts';
 
 // types
 
@@ -679,6 +680,34 @@ export const compareBlueprints = (current: IBlueprint, options: ICompareOptions)
         });
       } else if (rankAfter < rankBefore) {
         changed.add(serviceId);
+      }
+
+      // * a request's rules, where both sides bind one message: tightened, a peer's request the
+      // earlier took is refused; changed either way, the revision moves (decision 0035)
+      const requested = before.request.message;
+
+      if (
+        requested !== undefined &&
+        before.request.encoding === 'proto' &&
+        after.request.encoding === 'proto' &&
+        requested === after.request.message
+      ) {
+        const sides = { earlier, current };
+        const tightened = tighteningsOf(sides, requested);
+
+        if (tightened.length > 0) {
+          find({
+            rule: 'PROCEDURE_RULES_TIGHTENED',
+            pointer: `${procedure}/request/message`,
+            message: `${procedureNamed}'s request, ${requested}, is held to tighter rules: ${tightened[0] ?? ''}${
+              tightened.length > 1 ? `, and ${String(tightened.length - 1)} more` : ''
+            }; a request an earlier peer sends is refused`,
+            subject: procedureSubject,
+            serviceId,
+          });
+        } else if (rulesChangedOf(sides, requested)) {
+          changed.add(serviceId);
+        }
       }
 
       const listedBefore = codesOf(before, was);

@@ -85,9 +85,10 @@ const compareKeys = (
   return 0;
 };
 
-// each array the form sorts, by its place: files by path, messages by full name, services by id,
-// procedures by id, failures by code, a procedure's failures in their codes' order, ranges
-// ascending, names in their code points' order
+// each array the form sorts, by its place: files by path, messages by full name, a message's rules'
+// fields by number and its oneofs by index, services by id, procedures by id, failures by code, a
+// procedure's failures in their codes' order, ranges ascending, names in their code points' order;
+// a rule's own lists, `in` and a message's `oneof`, keep the order their `.proto` writes
 const arraysOf = (blueprint: unknown): ISortedArray[] => {
   const arrays: ISortedArray[] = [
     { pointer: '/requires', items: arrayAt(blueprint, 'requires'), key: byName },
@@ -95,10 +96,31 @@ const arraysOf = (blueprint: unknown): ISortedArray[] => {
   const proto = isRecord(blueprint) ? blueprint['proto'] : undefined;
 
   if (proto !== undefined) {
+    const messages = arrayAt(proto, 'messages');
+
     arrays.push(
       { pointer: '/proto/files', items: arrayAt(proto, 'files'), key: byMember('path') },
-      { pointer: '/proto/messages', items: arrayAt(proto, 'messages'), key: byMember('fullName') }
+      { pointer: '/proto/messages', items: messages, key: byMember('fullName') }
     );
+
+    messages.forEach((message, at) => {
+      const rules = isRecord(message) ? message['rules'] : undefined;
+
+      if (rules !== undefined) {
+        arrays.push(
+          {
+            pointer: `/proto/messages/${String(at)}/rules/fields`,
+            items: arrayAt(rules, 'fields'),
+            key: byMember('fieldNumber'),
+          },
+          {
+            pointer: `/proto/messages/${String(at)}/rules/oneofs`,
+            items: arrayAt(rules, 'oneofs'),
+            key: byMember('oneofIndex'),
+          }
+        );
+      }
+    });
   }
 
   const reservedServices = isRecord(blueprint) ? blueprint['reservedServices'] : undefined;

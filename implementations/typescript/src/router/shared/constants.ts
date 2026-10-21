@@ -113,6 +113,7 @@ export const ProtocolCode = Object.freeze({
   CREDIT_EXCEEDED: 49,
   PAYLOAD_UNDECODABLE: 50,
   TRANSFER_STALLED: 51,
+  PAYLOAD_INVALID: 52,
   PROCEDURE_FAILED: 64,
   DESTINATION_LOST: 65,
 } as const);
@@ -139,6 +140,7 @@ export const FAILURE_KEYS = Object.freeze({
   creditExceeded: ProtocolCode.CREDIT_EXCEEDED,
   payloadUndecodable: ProtocolCode.PAYLOAD_UNDECODABLE,
   transferStalled: ProtocolCode.TRANSFER_STALLED,
+  payloadInvalid: ProtocolCode.PAYLOAD_INVALID,
   procedureFailed: ProtocolCode.PROCEDURE_FAILED,
   destinationLost: ProtocolCode.DESTINATION_LOST,
 } as const);

@@ -17,6 +17,7 @@ import type {
   IRouterLike,
   IRouterResult,
 } from './types';
+import { detailBoundOf, isRefused, violationsDetailOf } from './violations';
 
 // interfaces
 
@@ -84,6 +85,9 @@ export const REQUEST_DEFAULTS = Object.freeze({
   timeout: 5_000,
 });
 
+// the payload of a call its rules refuse, which goes nowhere
+const NOTHING = new Uint8Array(0);
+
 // helpers
 
 /**
@@ -140,9 +144,36 @@ export const createServiceRequester = <Handle extends string>(
       type: Exclude<DebugType, 'notification'>;
     }
   ) => {
-    const { serializer } = dependencies;
+    const { failFast = false, serializer, validate } = dependencies;
     const { deprecation } = procedure;
     const series = router.declareRequester(procedure);
+    // * judged before it is written: PAYLOAD_INVALID, its detail under this side's bound, as a call
+    // refused before it goes is, counted and traced by its router (spec 18.2)
+    const refusalOf = (
+      requestPayload: RequestPayload,
+      destinationId: IResolvedRequestOptions['destinationId']
+    ): FailureError | undefined => {
+      if (validate === undefined) {
+        return undefined;
+      }
+
+      const maximumBytes = detailBoundOf(router.limits);
+      const judged = validate(requestPayload, { failFast, maximumBytes });
+
+      if (!isRefused(judged)) {
+        return undefined;
+      }
+
+      const { procedureId, serviceId } = procedure;
+
+      return new FailureError(
+        {
+          ...router.failures.payloadInvalid,
+          detail: violationsDetailOf(judged, { maximumBytes }),
+        },
+        { destinationId, procedureAddress: { procedureId, serviceId } }
+      );
+    };
 
     return (requestPayload: RequestPayload) => {
       return async (
@@ -151,7 +182,8 @@ export const createServiceRequester = <Handle extends string>(
         const resolvedOptions = resolveRequestOptions(defaults, options);
         const { closeOnTimeout, destinationId } = resolvedOptions;
         const connectionHandle = options?.connectionHandle;
-        const encoded = serializer.encode(requestPayload);
+        const refusal = refusalOf(requestPayload, destinationId);
+        const encoded = refusal === undefined ? serializer.encode(requestPayload) : NOTHING;
         // * the one check a call makes while nobody listens: no clock is read, no step is built
         const traced = isDebugging()
           ? tracedCallOf<Handle>({
@@ -171,6 +203,7 @@ export const createServiceRequester = <Handle extends string>(
           onCallId: traced?.onCallId,
           options: resolvedOptions,
           procedure: procedureOf(procedure),
+          refusal,
           series,
           subscribes: subscribes?.(),
         });

@@ -31,7 +31,7 @@ test("the interop's blueprint passes", () => {
   const reading = readBlueprint(readFileSync(INTEROP), { file: 'interop-blueprint.json' });
 
   expect(reading.diagnostics).toEqual([]);
-  expect(reading.blueprint?.services[0]?.procedures).toHaveLength(18);
+  expect(reading.blueprint?.services[0]?.procedures).toHaveLength(19);
 });
 
 test('each case of test/blueprints/ and test/form/BLUEPRINT_JSON/ gives its rule at its pointer', () => {
