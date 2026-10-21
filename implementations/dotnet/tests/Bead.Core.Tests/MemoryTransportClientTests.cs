@@ -253,24 +253,29 @@ public sealed class MemoryTransportClientTests
         // a close told unclean is told so at its server
         var third = new SerialScheduler();
         var (told, unclean, uncleanHandle) = await Connected(third);
-        var ends = new List<string>();
+        var atTold = Channel.CreateUnbounded<string>();
+        var atUnclean = new List<string>();
 
         await using (told)
         await using (unclean)
         {
+            // ! each end heard apart: the server's close is told on its scheduler's thread, which
+            // may run before the closer's call has told its own
             told.Close += (isClean, connectionHandle) =>
             {
-                ends.Add($"server closed {isClean} {connectionHandle == uncleanHandle}");
+                atTold.Writer.TryWrite($"closed {isClean} {connectionHandle == uncleanHandle}");
             };
             unclean.Close += (isClean, isQuick) =>
             {
-                ends.Add($"client closed {isClean} {isQuick}");
+                atUnclean.Add($"closed {isClean} {isQuick}");
             };
 
             await unclean.CloseConnection(new TransportDisconnectOptions { IsClean = false });
+            Assert.Equal(["closed False False"], atUnclean);
             await third.WhenIdle().WaitAsync(Patience, Cancelled);
+            atTold.Writer.TryWrite("settled");
 
-            Assert.Equal(["client closed False False", "server closed False True"], ends);
+            Assert.Equal(["closed False True", "settled"], await TakeAll(atTold, 2));
         }
     }
 
