@@ -1644,8 +1644,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var bead = ("content-type", HttpTransport.MediaType);
 
         // :authority names the host and the own origin, a host beside it ignored; a host alone names
-        // it where :authority is absent; neither names none, which the server refuses as it refuses
-        // a request over HTTP/1.0 that names none
+        // it where :authority is absent; neither is a malformed request, its stream reset,
+        // PROTOCOL_ERROR (RFC 9113 §8.3.1)
         Assert.Equal(
             [
                 new TlsAnswer(201, null, null),
@@ -1656,7 +1656,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
                 new TlsAnswer(201, null, null),
                 new TlsAnswer(201, null, null),
                 new TlsAnswer(403, HttpRefusals.Host, null),
-                new TlsAnswer(403, HttpRefusals.Host, null),
+                new TlsAnswer(null, null, 0x1),
             ],
             [
                 await Http2Of((":authority", own), bead),
