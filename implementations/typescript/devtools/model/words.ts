@@ -2,7 +2,8 @@
 
 // What the panel writes of a number, a time, a byte count and an envelope, the package's names for
 // its kinds, codes and schemes read once: a header in words rather than its fields, so "credit up to
-// 2.5 MiB" reads where `creditEnd 2621440` would.
+// 2.5 MiB" reads where `creditEnd 2621440` would; and a PAYLOAD_INVALID's violations, read by the
+// package's own reader of its detail, as every side reads them.
 
 // dependencies
 
@@ -12,9 +13,21 @@ import {
   ProtocolCode,
 } from '../../src/router/client/router-client';
 import { EnvelopeKind } from '../../src/router/shared/constants';
+import {
+  type IReadViolations,
+  type IViolation,
+  violationsOf,
+} from '../../src/router/shared/violations';
 import type { IErrorRecord } from '../messages';
 
 // interfaces
+
+/** A failure, as a step's error or an envelope read off the wire carries it. */
+export interface IFailureWords {
+  code?: number | undefined;
+  detail?: string | undefined;
+  scope?: number | undefined;
+}
 
 /** An envelope's header, as a record carries it: each field a number, a string or a boolean. */
 export type PlainHeader = Readonly<Record<string, boolean | number | string>>;
@@ -49,6 +62,11 @@ const seconds = new Intl.NumberFormat('en-CA', { maximumFractionDigits: 2 });
 
 const kindOf = (header: PlainHeader): number => {
   return Number(header['kind']);
+};
+
+// ! drawn on one line: a message its JSON escaped may hold a line break
+const oneLineOf = (text: string): string => {
+  return text.replace(/[\n\v\f\r\p{Zl}\p{Zp}]+/gu, ' ');
 };
 
 // definition
@@ -197,4 +215,85 @@ export const originWordsOf = (error: IErrorRecord): string | undefined => {
   }
 
   return undefined;
+};
+
+/**
+ * The violations a failure's detail carries, read by the package's own reader (spec 18.7), a line
+ * without its words given those its rule and its bounds give (18.8.6); none for a failure of another
+ * code or scope, or a detail that holds neither a violation nor a closing line, which reads as text.
+ */
+export const violationsReadOf = (failure: IFailureWords): IReadViolations | undefined => {
+  const { code, detail, scope } = failure;
+
+  if (code === undefined || scope === undefined) {
+    return undefined;
+  }
+
+  const read = violationsOf({ code, detail, scope: scope as FailureScope });
+
+  return read.violations.length > 0 || read.more !== undefined || read.stopped === true
+    ? read
+    : undefined;
+};
+
+/** A violation's field: its path, the message's own where it names none, a map key's said so. */
+export const violationFieldOf = (violation: IViolation): string => {
+  const field = violation.fieldPath ?? '(the message)';
+
+  return violation.forKey === true ? `${field} (its key)` : field;
+};
+
+/** A violation's bounds, as compact JSON; nothing for a rule that takes none. */
+export const boundsWordsOf = (violation: IViolation): string => {
+  return violation.bounds === undefined ? '' : JSON.stringify(violation.bounds);
+};
+
+/**
+ * What a detail's closing line says (spec 18.7): the violations it counted past those it holds, that
+ * its side stopped at the first, or, with no closing line, that it was cut; none for a count of 0.
+ */
+export const closingWordsOf = (read: IReadViolations): string | undefined => {
+  if (read.stopped === true) {
+    return 'stopped at the first (failFast)';
+  }
+
+  if (read.more === undefined) {
+    return 'cut: what follows is not counted';
+  }
+
+  return read.more > 0 ? `and ${numberOf(read.more)} more` : undefined;
+};
+
+/**
+ * A failure on one line: its code's name, then its detail; for a PAYLOAD_INVALID whose detail reads,
+ * the count of the violations it holds, the first one's field and words, then `… +N` where its
+ * closing line counts N more.
+ */
+export const failureLineOf = (failure: IFailureWords & { code: number }): string => {
+  const name = codeNameOf(failure.code);
+  const read = violationsReadOf(failure);
+
+  if (read === undefined) {
+    return oneLineOf(
+      failure.detail === undefined || failure.detail === '' ? name : `${name}: ${failure.detail}`
+    );
+  }
+
+  const [first] = read.violations;
+  const count = read.violations.length;
+  const more = read.more === undefined || read.more === 0 ? [] : [`+${numberOf(read.more)}`];
+
+  return oneLineOf(
+    [
+      name,
+      `${numberOf(count)} ${count === 1 ? 'violation' : 'violations'}`,
+      ...(first === undefined
+        ? more
+        : [
+            [`${violationFieldOf(first)}: ${first.message ?? first.ruleId}`, ...more].join(
+              more.length === 0 ? '' : ' … '
+            ),
+          ]),
+    ].join(' · ')
+  );
 };

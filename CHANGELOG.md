@@ -36,6 +36,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transports, each handle its own transport's (spec 15.14, decision 0036).
 - Each side's bench measures calls in memory, and `exchange.*`: a connection drawn, called once and
   closed, as a gateway draws one per HTTP exchange.
+- The DevTools panel reads a `PAYLOAD_INVALID`'s detail with the package's own reader: a call's
+  Overview tables its violations, a row each with its field, rule, words and bounds, then what the
+  closing line counts, that its side stopped, or that the detail was cut; the Wire view sums one up
+  on its line.
 
 ### Changed
 

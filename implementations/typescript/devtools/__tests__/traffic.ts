@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import {
   CredentialScheme,
   FailureScope,
@@ -29,7 +30,45 @@ export const IDS = Object.freeze({
   whoami: 3,
 });
 
+/** The details of `spec/validations.json`, by their entry's name. */
+const DETAILS: ReadonlyMap<string, string> = new Map(
+  (
+    JSON.parse(
+      readFileSync(new URL('../../../../spec/validations.json', import.meta.url), 'utf8')
+    ) as { details: { detail: string; name: string }[] }
+  ).details.map(({ detail, name }) => {
+    return [name, detail];
+  })
+);
+
+/**
+ * The PAYLOAD_INVALID details the panel reads, each the entry of `spec/validations.json`'s details
+ * it is named after: a whole one, one that counts more, one whose side stopped, one cut, one whose
+ * lines came without their words, a map key's, one cut at 64 bytes, and one of another form.
+ */
+export const INVALID_DETAILS = Object.freeze({
+  counted: 'a detail of the form gives its violations and its count',
+  cut: 'a detail cut inside its second line gives the first violation, and no count',
+  key: "a map key's violation says forKey",
+  longKey: 'a key cut at 64 bytes is written with its mark',
+  stopped: 'a closing line of stopped says its side stopped',
+  text: 'a detail of another text gives none',
+  whole: 'one violation, whole, then a closing line of no more',
+  wordless: 'a line without its message takes the words its rule and bounds give',
+});
+
 // helpers
+
+/** A detail of `spec/validations.json`, by its entry's name. */
+export const specDetailOf = (name: string): string => {
+  const detail = DETAILS.get(name);
+
+  if (detail === undefined) {
+    throw new Error(`spec/validations.json has no detail named ${name}`);
+  }
+
+  return detail;
+};
 
 const step = (
   fields: Partial<ICallRecord> & Pick<ICallRecord, 'direction' | 'procedureName' | 'startedAt'>
@@ -479,3 +518,37 @@ export const SLOW_RELAY: readonly ActivityRecord[] = Object.freeze([
     tx: '1',
   }),
 ]);
+
+/**
+ * A call refused before it went for each of {@link INVALID_DETAILS}, as the client's `validates`
+ * refuses one: its `tx` step, no call id drawn, then its `rx` step, PAYLOAD_INVALID raised here with
+ * the detail its entry names; each its own procedure, `submit` and its case's name.
+ */
+export const REFUSED_INVALID: readonly ActivityRecord[] = Object.freeze(
+  Object.entries(INVALID_DETAILS).flatMap(([name, entry], index): ActivityRecord[] => {
+    const started = {
+      procedureId: 40 + index,
+      procedureName: `submit ${name}`,
+      startedAt: T0 + 5_000 + index * 100,
+      tx: '{"from":11}',
+    };
+
+    return [
+      step({ ...started, direction: 'tx' }),
+      step({
+        ...started,
+        direction: 'rx',
+        duration: 0,
+        error: {
+          code: ProtocolCode.PAYLOAD_INVALID,
+          detail: specDetailOf(entry),
+          message: 'the request’s payload breaks its rules',
+          name: 'FailureError',
+          origin: 'local',
+          relays: 0,
+          scope: FailureScope.PROTOCOL,
+        },
+      }),
+    ];
+  })
+);
