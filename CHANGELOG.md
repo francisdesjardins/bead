@@ -113,6 +113,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The TypeScript side's transport client and server refuse a start or a connect in the C# side's
   words: `the transport client is already open`, `the transport server is already connecting`,
   `the transport server is starting`.
+- A server's options name the form to write where an entry is refused for its form alone, on both
+  sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
+  its bare address, and the refused origins wildcard names `*`.
 
 ### Fixed
 
