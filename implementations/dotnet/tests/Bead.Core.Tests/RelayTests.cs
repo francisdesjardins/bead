@@ -15,6 +15,9 @@ public sealed class RelayTests
 
     private const string Device = "type=WS;ip=127.0.0.1;port=50002;ordinal=1";
 
+    // the connection the device opened next, under a handle its transport never gave
+    private const string Second = "type=WS;ip=127.0.0.1;port=50002;ordinal=2";
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static readonly TimeSpan Infinite = Timeout.InfiniteTimeSpan;
@@ -840,7 +843,7 @@ public sealed class RelayTests
     }
 
     [Fact]
-    public async Task Leaves_a_connection_of_its_own_unreachable_once_it_closed_whoever_takes_its_handle_next_until_registered_anew()
+    public async Task Leaves_a_connection_of_its_own_unreachable_once_it_closed_until_registered_anew_on_another_connection()
     {
         var test = new TestRelay();
         var target = new RecordingTarget();
@@ -852,7 +855,7 @@ public sealed class RelayTests
         // admitted as its payload came, then its connection closed: nothing is handed over
         var admitted = test.Relay.HandlerOf(7);
 
-        test.Relay.CloseConnection(Device);
+        test.Close(Device);
 
         var unreachable = Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its connection closed");
 
@@ -872,18 +875,130 @@ public sealed class RelayTests
         Assert.Equal([First], test.Own.Select(HandleOf));
         Assert.Single(target.Asked);
 
-        // it stays registered, and listed, until the application takes it out: its id is not free
-        Assert.Contains(new Destination(7, null), test.Relay.Destinations());
+        // it stays registered, and listed closed, until the application takes it out: its id is not
+        // free
+        Assert.Contains(new Destination(7, null) { IsClosed = true }, test.Relay.Destinations());
         Assert.Throws<ArgumentException>(() =>
         {
-            return test.Relay.Register(new ConnectionTarget(Device), Seven);
+            return test.Relay.Register(new ConnectionTarget(Second), Seven);
         });
         Assert.True(closed.Unregister());
 
-        test.Relay.Register(new ConnectionTarget(Device), Seven);
+        // registered anew, on another connection, it is asked
+        test.Relay.Register(new ConnectionTarget(Second), Seven);
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(9)));
 
-        Assert.Equal([First, Device], test.Own.Select(HandleOf));
+        Assert.Equal([First, Second], test.Own.Select(HandleOf));
+    }
+
+    [Fact]
+    public void Lists_whether_each_destination_s_connection_closed_as_its_registration_says_it_now()
+    {
+        var test = new TestRelay();
+        var onDevice = test.Relay.Register(new ConnectionTarget(Device), new DestinationOptions { DestinationId = 3 });
+        var onFirst = test.Relay.Register(new ConnectionTarget(First), new DestinationOptions { DestinationId = 5 });
+        var behind = test.Relay.Register(new RecordingTarget(), new DestinationOptions { DestinationId = 7, Label = "behind" });
+
+        Assert.Equal([false, false, false], [onDevice.Destination.IsClosed, onFirst.Destination.IsClosed, behind.Destination.IsClosed]);
+
+        test.Close(Device);
+
+        Assert.Equal(
+            [new Destination(3, null) { IsClosed = true }, new Destination(5, null), new Destination(7, "behind")],
+            test.Relay.Destinations());
+        Assert.Equal([true, false, false], [onDevice.Destination.IsClosed, onFirst.Destination.IsClosed, behind.Destination.IsClosed]);
+    }
+
+    [Fact]
+    public async Task Takes_the_place_of_the_registration_it_replaces_at_once_which_takes_nothing_out_after_and_refuses_one_that_does_not_hold_its_destination()
+    {
+        var test = new TestRelay();
+        var replaced = test.Relay.Register(new ConnectionTarget(Device), new DestinationOptions { DestinationId = 7, Label = "a" });
+
+        test.Close(Device);
+
+        // bound to the one replaced, a call finishes with it; the next goes to the one in its place,
+        // and none in between finds the destination unknown
+        var bound = test.Relay.HandlerOf(7);
+        var replacing = test.Relay.Register(new ConnectionTarget(Second), new DestinationOptions { Label = "b", Replaces = replaced });
+
+        await Handled(bound, PropsOf(HeaderOf(1)));
+        await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
+
+        Assert.Equal(7u, replacing.Destination.DestinationId);
+        Assert.Equal<object>(
+            [Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its connection closed"), new byte[] { 8 }],
+            FailuresOf(test.Answers));
+        Assert.Equal([Second], test.Own.Select(HandleOf));
+        Assert.Equal([new Destination(7, "b")], test.Relay.Destinations());
+        Assert.False(replaced.Unregister());
+
+        // one open is replaced as well: whether to is the application's
+        var again = test.Relay.Register(new ConnectionTarget(First), new DestinationOptions { Replaces = replacing });
+
+        // a registration replaced already, or named beside another destination, holds nothing to replace
+        foreach (var options in new DestinationOptions[]
+        {
+            new() { Replaces = replaced },
+            new() { Replaces = replacing },
+            new() { DestinationId = 9, Replaces = again },
+        })
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return test.Relay.Register(new ConnectionTarget(First), options);
+            });
+        }
+
+        // nor one taken out
+        Assert.True(again.Unregister());
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return test.Relay.Register(new ConnectionTarget(First), new DestinationOptions { Replaces = again });
+        });
+        Assert.Empty(test.Relay.Destinations());
+    }
+
+    [Fact]
+    public async Task Registers_a_connection_its_router_no_longer_holds_closed_and_forwards_nothing_to_it()
+    {
+        var test = new TestRelay();
+
+        test.Close(Device);
+
+        var registration = test.Relay.Register(new ConnectionTarget(Device), Seven);
+        var unreachable = Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its connection closed");
+
+        Assert.True(registration.Destination.IsClosed);
+        Assert.Equal([new Destination(7, null) { IsClosed = true }], test.Relay.Destinations());
+        Assert.Equal(unreachable, test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1))));
+
+        await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(3)));
+
+        Assert.Equal<object>([unreachable], FailuresOf(test.Answers));
+        Assert.Empty(test.Own);
+        Assert.Equal(new Dictionary<string, long> { ["closedDestinations"] = 1, ["destinations"] = 1 }, test.Relay.Gauges().Counts);
+    }
+
+    [Fact]
+    public void Refuses_an_id_taken_while_the_close_of_its_connection_is_not_heard_yet_and_closes_with_it_a_registration_that_replaced_it_then()
+    {
+        var test = new TestRelay();
+        var taken = test.Relay.Register(new ConnectionTarget(Device), Seven);
+
+        // its connection gone, its router not told yet: the destination is open, and taken
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return test.Relay.Register(new ConnectionTarget(Second), Seven);
+        });
+        Assert.False(taken.Destination.IsClosed);
+
+        var replacing = test.Relay.Register(new ConnectionTarget(Device), new DestinationOptions { Replaces = taken });
+
+        test.Close(Device);
+
+        Assert.Equal([false, true], [taken.Destination.IsClosed, replacing.Destination.IsClosed]);
+        Assert.Equal([new Destination(7, null) { IsClosed = true }], test.Relay.Destinations());
     }
 
     [Fact]
@@ -999,9 +1114,12 @@ public sealed class RelayTests
 
     // a relay under the options given — admitting every request unless they say otherwise — which
     // records each answer it writes, with the request it answers, each request of its own router's
-    // it makes, and each error it reports, as its message and whether leg A's connection came with it
+    // it makes, and each error it reports, as its message and whether leg A's connection came with
+    // it; Close closes a connection as its router does, which holds it no longer
     private sealed class TestRelay
     {
+        private readonly HashSet<string> _closed = [];
+
         // `isCarrying`: a connection of the relay's own carries a credential, and is secure
         public TestRelay(RelayOptions? options = null, bool isCarrying = false)
         {
@@ -1015,6 +1133,10 @@ public sealed class RelayTests
                     IsSecure = (_) =>
                     {
                         return isCarrying;
+                    },
+                    IsOpen = (connectionHandle) =>
+                    {
+                        return !_closed.Contains(connectionHandle);
                     },
                     IsTwoWay = (_) =>
                     {
@@ -1050,5 +1172,11 @@ public sealed class RelayTests
         public List<(string Message, bool IsLegA)> Reports { get; } = [];
 
         public Func<Action<bool>, Task<RouterResult>> Settle { get; set; } = Answering(new byte[] { 8 });
+
+        public void Close(string connectionHandle)
+        {
+            _closed.Add(connectionHandle);
+            Relay.CloseConnection(connectionHandle);
+        }
     }
 }

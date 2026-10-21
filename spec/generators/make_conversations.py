@@ -1256,14 +1256,17 @@ conversations += [
     sharing_leg_b(('a destination whose connection carries nothing back is answered DESTINATION_UNREACHABLE', ['14.3.4'], None, [
         opened('client'), opened('device', two_way=False), *logged_in(), *registered(),
         on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client')])),
-    sharing_leg_b(('a destination dies with its connection, whoever opens it next, until it is registered anew',
-     ['14.3.4', '14.4'], None, [
-         opened('client'), opened('device'), *logged_in(), *registered(), closed('device'),
+    # a connection opened again is a new connection, under a handle its transport never gave
+    # (15.1): the destination stays dead on it until it registers the destination anew
+    sharing_leg_b(('a destination stays registered while its connection is open, dies with it, and lives again once a connection opened since registers it anew',
+     ['14.1', '14.3.4', '14.4'], None, [
+         opened('client'), opened('device'), opened('device2'), *logged_in(), *registered(),
+         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device2'),
+         on(failure(1, REGISTERED_ALREADY, APPLICATION, detail=REGISTERED), 'device2'),
+         closed('device'),
          on(relayed(3, 'echo', '"x"'), 'client'), on(failure(3, DESTINATION_UNREACHABLE), 'client'),
          opened('device'), on(relayed(5, 'echo', '"y"'), 'client'), on(failure(5, DESTINATION_UNREACHABLE), 'client'),
-         on(json_request(1, 'register', '{"destination":%d}' % DEVICE), 'device'), on(failure(1, REGISTERED_ALREADY, APPLICATION, detail=REGISTERED), 'device'),
-         on(json_request(3, 'unregister', 'null'), 'device'), on(result(3, 'true'), 'device'),
-         *registered(5), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
+         *registered(), on(relayed(7, 'echo', '"z"'), 'client'), leg_b(2, 'echo', '"z"'),
          on(answer(2, '"z"'), 'device'), on(result(7, '"z"'), 'client')])),
     sharing_leg_b(('a destination taken out is answered DESTINATION_UNKNOWN', ['14.1'], None, [
         opened('client'), opened('device'), *logged_in(), *registered(),

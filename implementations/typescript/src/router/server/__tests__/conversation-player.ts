@@ -148,8 +148,9 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
 // helpers
 
 /**
- * A transport server of the connections a conversation names, each under a handle of its own that a
- * connection opened again under the same name takes: it records what it sends on each, with the
+ * A transport server of the connections a conversation names, each under a handle of its own, and a
+ * connection opened again under the same name under a new one, its ordinal the next, as every
+ * transport draws a handle it never gave (spec 15.1): it records what it sends on each, with the
  * credential it is given beside it, delivers what it is given, with what its transport carried, and
  * says what each carries — a credential, and whether in the clear, as its open declared.
  */
@@ -163,17 +164,33 @@ const createScriptedConnections = () => {
     ];
     message: [message: ITransportMessage, connectionHandle: TransportServerConnectionHandle];
   }>();
+  // by name, its port, the handle of the connection it opened last, and how many it opened; every
+  // handle drawn, with its name
+  const ports = new Map<string, number>();
   const handles = new Map<string, TransportServerConnectionHandle>();
+  const opens = new Map<string, number>();
+  const drawn: [name: string, handle: TransportServerConnectionHandle][] = [];
   const opened = new Set<TransportServerConnectionHandle>();
   const oneWay = new Set<TransportServerConnectionHandle>();
   const carryingNone = new Set<TransportServerConnectionHandle>();
   const inTheClear = new Set<TransportServerConnectionHandle>();
   const sent = new Map<TransportServerConnectionHandle, ISent[]>();
+  // the handle of the connection `name` opened last, its ordinal how many it opened: the first
+  // named on the port 50001, the next on 50002
   const handleOf = (name: string): TransportServerConnectionHandle => {
-    const port = 50_001 + handles.size;
-    const handle = handles.get(name) ?? (`type=WS;ip=127.0.0.1;port=${port};ordinal=1` as const);
+    const known = handles.get(name);
 
+    if (known !== undefined) {
+      return known;
+    }
+
+    const port = ports.get(name) ?? 50_001 + ports.size;
+    const handle =
+      `type=WS;ip=127.0.0.1;port=${port};ordinal=${(opens.get(name) ?? 0) || 1}` as const;
+
+    ports.set(name, port);
     handles.set(name, handle);
+    drawn.push([name, handle]);
 
     return handle;
   };
@@ -246,6 +263,15 @@ const createScriptedConnections = () => {
         isTwoWay,
       }: { carriesCredential: boolean; isSecure: boolean; isTwoWay: boolean }
     ): void => {
+      // * a name opened before opens a new connection, under a handle never given
+      const count = (opens.get(name) ?? 0) + 1;
+
+      opens.set(name, count);
+
+      if (count > 1) {
+        handles.delete(name);
+      }
+
       const handle = handleOf(name);
 
       for (const [set, is] of [
@@ -271,7 +297,7 @@ const createScriptedConnections = () => {
     untaken: (): Record<string, (IExpected | undefined)[]> => {
       const untaken: Record<string, (IExpected | undefined)[]> = {};
 
-      for (const [name, handle] of handles) {
+      for (const [name, handle] of drawn) {
         const queue = sent.get(handle) ?? [];
 
         if (queue.length > 0) {
@@ -386,25 +412,17 @@ const createMemoryConnections = (clock: TestClock) => {
 
 /**
  * Whether a pair of the in-memory transport stands for each connection `conversation` opens (spec
- * 15.13): every one secure and two-way, none a request its server sends expects carried toward its
- * client, which an in-memory one never carries, and none opened again, which a real transport
- * names by a handle it never gave, where the scripted one gives the same.
+ * 15.13): every one secure and two-way, and none a request its server sends expects carried toward
+ * its client, which an in-memory one never carries.
  */
 export const isPlayedInMemory = ({ steps }: IConversation): boolean => {
-  const opened = steps.flatMap(({ open }) => {
-    return open === undefined ? [] : [open];
+  return steps.every((step) => {
+    return (
+      step.secure !== false &&
+      step.twoWay !== false &&
+      !(step.expect?.kind === EnvelopeKind.REQUEST && step.carried !== undefined)
+    );
   });
-
-  return (
-    new Set(opened).size === opened.length &&
-    steps.every((step) => {
-      return (
-        step.secure !== false &&
-        step.twoWay !== false &&
-        !(step.expect?.kind === EnvelopeKind.REQUEST && step.carried !== undefined)
-      );
-    })
-  );
 };
 
 /**

@@ -224,8 +224,10 @@ public static class InteropHandlers
     /// gave, which <c>whoami</c> answers from its call's session, as it answers a credential's
     /// <c>sub</c>; the ticks of <c>ticks</c> and <c>tick</c> are held per connection and per
     /// session, its call's. A connection registers itself as a destination of the server's relay by
-    /// <c>register</c>, with the audience it verifies; the destination it registered last is kept
-    /// by its handle, once it closed too, for <c>unregister</c> to take out. <c>endSession</c> ends
+    /// <c>register</c>, with the audience it verifies, whoever it is; the destinations it registered
+    /// are kept by their id, each with the connection that registered it, and one whose connection
+    /// closed is registered anew in its place by the next <c>register</c> that names it.
+    /// <c>unregister</c> takes out the one its caller's connection registered last. <c>endSession</c> ends
     /// a credential's session on every connection that keeps it, and nothing else;
     /// <c>endSessionsOf</c>, every credential's session of an issuer alike. One service a server:
     /// the counts are its connections'.
@@ -255,9 +257,8 @@ public static class InteropHandlers
         // by connection and session, its call's — none for its connection's — the ticks held
         var holds = new Dictionary<(string ConnectionHandle, SessionIdentifier? Session), List<Hold>>();
 
-        // by connection, the destination it registered last: kept once it closed, so whoever
-        // connects under its handle next takes it out
-        var registered = new Dictionary<string, DestinationRegistration>();
+        // by destination, its registration and the connection that registered it, in the order registered
+        var registered = new OrderedDictionary<uint, (string ConnectionHandle, DestinationRegistration Registration)>();
 
         interop.On(InteropProcedures.Echo, (request, response) =>
         {
@@ -461,8 +462,11 @@ public static class InteropHandlers
             return response.Answer(JsonSerializer.SerializeToElement(NameOf(request.Session)));
         });
 
-        // its caller's connection, as the destination it names; looked up and registered under one
-        // lock, so two registers of one destination cannot both pass
+        // its caller's connection, as the destination it names, whoever calls; looked up and
+        // registered under one lock, so two registers of one destination cannot both pass: one
+        // registered already whose connection is open, or that is no connection's, is the caller's to
+        // hear about, not a mistake of the server's; one whose connection closed is registered anew,
+        // in its place at once
         interop.On(InteropProcedures.Register, (request, response) =>
         {
             var destinationId = request.Payload.GetProperty("destination").GetUInt32();
@@ -472,16 +476,29 @@ public static class InteropHandlers
 
             lock (registered)
             {
-                isTaken = router.Destinations().Any((destination) =>
+                var isRegistered = router.Destinations().Any((destination) =>
                 {
                     return destination.DestinationId == destinationId;
                 });
+                var replaced = registered.TryGetValue(destinationId, out var held) ? held.Registration : null;
+
+                isTaken = isRegistered && replaced?.Destination.IsClosed != true;
 
                 if (!isTaken)
                 {
-                    registered[request.ConnectionHandle] = router.RegisterDestination(
+                    var registration = router.RegisterDestination(
                         new ConnectionTarget(request.ConnectionHandle),
-                        new DestinationOptions { Audience = audience, DestinationId = destinationId, Timeout = timeout });
+                        new DestinationOptions
+                        {
+                            Audience = audience,
+                            DestinationId = destinationId,
+                            Replaces = isRegistered ? replaced : null,
+                            Timeout = timeout,
+                        });
+
+                    // ! taken out first, so the order kept is the order registered, the last one its connection's
+                    registered.Remove(destinationId);
+                    registered[destinationId] = (request.ConnectionHandle, registration);
                 }
             }
 
@@ -493,14 +510,23 @@ public static class InteropHandlers
             return response.Answer(JsonSerializer.SerializeToElement(destinationId));
         });
 
-        // the destination its caller's handle registered last, taken out and forgotten
+        // the destination its caller's connection registered last, taken out and forgotten
         interop.On(InteropProcedures.Unregister, (request, response) =>
         {
-            bool isTakenOut;
+            var isTakenOut = false;
 
             lock (registered)
             {
-                isTakenOut = registered.Remove(request.ConnectionHandle, out var registration) && registration.Unregister();
+                var own = registered.LastOrDefault((entry) =>
+                {
+                    return entry.Value.ConnectionHandle == request.ConnectionHandle;
+                });
+
+                if (own.Value.Registration is { } registration)
+                {
+                    registered.Remove(own.Key);
+                    isTakenOut = registration.Unregister();
+                }
             }
 
             return response.Answer(JsonSerializer.SerializeToElement(isTakenOut));

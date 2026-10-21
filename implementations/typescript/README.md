@@ -795,14 +795,18 @@ What comes late is dropped in silence where it is known for late, and reported e
 A server's router relays a request that names a destination registered in it, as a gateway does for
 what stands behind it: each destination answers the same procedures, and the requester picks one by
 its destination — `getRequest(procedure, …)(payload)({ destinationId })`.
-`registerDestination(target, { audience?, destinationId?, label?, timeout? })` names a client router
-the relay calls through, or `{ connectionHandle }`, a connection of its own it asks by a command,
-and gives the destination: given, or drawn, never 0. Its `audience` is the one the destination
-verifies, as a resource is named for a token (RFC 8707); a destination registered with none takes
-no credential the relay forwards. `destinations()` lists them, for the application to publish. A
-destination on a connection dies with it: once that connection closes, it is unreachable until the
-application unregisters it and registers it anew, on another connection: no connection takes a
-handle its transport gave before.
+`registerDestination(target, { audience?, destinationId?, label?, replaces?, timeout? })` names a
+client router the relay calls through, or `{ connectionHandle }`, a connection of its own it asks by
+a command, and gives the destination: given, or drawn, never 0. Its `audience` is the one the
+destination verifies, as a resource is named for a token (RFC 8707); a destination registered with
+none takes no credential the relay forwards. `destinations()` lists them, each saying whether its
+connection closed, for the application to publish. A destination on a connection dies with it: once
+that connection closes, it is unreachable until it is registered anew, on another connection: no
+connection takes a handle its transport gave before, and one the router no longer holds is
+registered closed. Its id stays taken, closed or not: the application unregisters it, or registers
+the next connection in its place at once by `replaces`, the registration it holds, so no request
+meanwhile finds the destination unknown. Who may register which destination is the application's
+to decide (spec 14.1): the relay checks nobody.
 
 The relay terminates each leg. Leg A, from the requester, and leg B, to the target, each have their
 own call ids, limits and session; what crosses is the payload's bytes, undecoded, the answer, and a
@@ -1159,12 +1163,17 @@ for a server that runs beside its page with no backend — a demo, a playground,
 connects by posting `bead-connect` to the worker with one end of a `MessageChannel`; that port is
 the connection, `type=WORKER;ip=local;ordinal=n`, which the server accepts with `bead-open`.
 Envelopes go both ways as bytes, each copied and its buffer transferred, so no one else's is taken;
-either end ends the connection with `bead-close`, since a port does not tell its close. It is
-two-way, in order, and carries transfers, as a socket does. It carries no credential beside an
-envelope, and never leaves the machine: a `JWT` crosses it, and an `ELSEWHERE` fails before it goes.
-The server's `start` listens at once, before anything is awaited, so a connect the worker hears as
-its script runs is not lost; the worker's other messages are left to it. A worker's `error` loses
-the client's connection, and the server is told; a worker terminated without a word is not heard.
+either end ends the connection with `bead-close`, since a port does not tell its close, and a
+client whose close is not clean with `bead-lost`, which its server tells unclean; a client tells
+its server's close unclean, as every client tells a close it did not ask for. It is two-way, in
+order, and carries transfers, as a socket does. It carries no credential beside an envelope, and
+never leaves the machine: a `JWT` crosses it, and an `ELSEWHERE` fails before it goes. The server's
+`start` listens at once, before anything is awaited, so a connect the worker hears as its script
+runs is not lost; the worker's other messages are left to it. A worker's `error` — an exception its
+script did not catch, or a script that failed to load — fails a connect under way at once with a
+`ConnectError`, and ends an open connection of the client's own (spec 15.1): told once on `error`,
+its message and where it was thrown, then its close, unclean at both ends. A worker terminated
+without a word is not heard.
 `createWorkerServer({ transport: { scope: self } })` in the worker and `createWorkerClient({
 transport: { worker } })` in the page are the facades. This one is a page's own: a server in C# has
 no counterpart to mirror.

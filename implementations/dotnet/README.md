@@ -116,7 +116,10 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   core.
 - **The relay** is `Relay`, its registrations under a lock, since they are registered from any
   thread and read on the router's scheduler; a destination is a `ConnectionTarget` or an
-  `IRouterTarget`, which a client's router meets. A server's relay admits by default only a
+  `IRouterTarget`, which a client's router meets. Each `Destination` it lists says whether its
+  connection closed; one registered on a connection the router no longer holds is closed at once,
+  and `DestinationOptions.Replaces`, the registration the application holds, takes its id in its
+  place under that lock, so no request meanwhile finds it unknown (spec 14.1, 14.4). A server's relay admits by default only a
   credential it forwards, `RequireCredential`: a call presenting a `JWT` or an `ELSEWHERE`, by its
   scheme alone unless the relay verifies, for its destination to verify; any other, one that
   presents none or `OPAQUE`, in leg A's connection's session or in none, is refused

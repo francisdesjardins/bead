@@ -554,22 +554,14 @@ internal static class ConversationPlayer
     /// <summary>
     /// Whether a pair of the in-memory transport can stand for every connection a conversation
     /// opens: each carries the server's own envelopes back and is secure, as an in-memory one is;
-    /// none is asked to carry a credential toward its client, which an in-memory one never carries;
-    /// and no name is opened twice, a connection again under the handle of the one before, which an
-    /// in-memory transport never gives twice (spec 15.13).
+    /// and none is asked to carry a credential toward its client, which an in-memory one never
+    /// carries (spec 15.13).
     /// </summary>
     public static bool CanStandFor(JsonElement conversation)
     {
         var steps = conversation.GetProperty("steps").EnumerateArray().ToList();
-        var opened = steps.Where((step) =>
-        {
-            return step.TryGetProperty("open", out _);
-        }).Select((step) =>
-        {
-            return step.GetProperty("open").GetString();
-        }).ToList();
 
-        return opened.Distinct(StringComparer.Ordinal).Count() == opened.Count && steps.All((step) =>
+        return steps.All((step) =>
         {
             var isTwoWay = !step.TryGetProperty("twoWay", out var twoWay) || twoWay.GetBoolean();
             var isSecure = !step.TryGetProperty("secure", out var secure) || secure.GetBoolean();
@@ -754,15 +746,19 @@ internal static class ConversationPlayer
     }
 
     // a transport of connections a test opens by name, delivers to and closes, which records what
-    // it sends on each, with the credential it carries beside it. A name keeps its handle: a
-    // connection opened again under it is a new connection under the same handle
+    // it sends on each, with the credential it carries beside it. A name opened again is a new
+    // connection, under a new handle, its ordinal the next, as every transport draws a handle it
+    // never gave (spec 15.1)
     private sealed class ScriptedTransport : IServerTransport, IPlayedTransport
     {
         // what is sent and asked on the router's scheduler, and taken on the test's
         private readonly Lock _gate = new();
 
-        // by name, its handle, the first named on the port 50001, the next on 50002; and back
+        // by name, the handle of the connection it opened last, the first named on the port 50001,
+        // the next on 50002, its port and how many it opened; and back, every handle drawn
         private readonly Dictionary<string, string> _handles = [];
+        private readonly Dictionary<string, int> _ports = [];
+        private readonly Dictionary<string, int> _opens = [];
         private readonly Dictionary<string, string> _names = [];
 
         // by handle, what was sent on it and not yet taken, in order
@@ -800,7 +796,13 @@ internal static class ConversationPlayer
         {
             if (!_handles.TryGetValue(name, out var handle))
             {
-                handle = $"type=WS;ip=127.0.0.1;port={50001 + _handles.Count};ordinal=1";
+                if (!_ports.TryGetValue(name, out var port))
+                {
+                    port = 50001 + _ports.Count;
+                    _ports[name] = port;
+                }
+
+                handle = $"type=WS;ip=127.0.0.1;port={port};ordinal={Math.Max(_opens.GetValueOrDefault(name), 1)}";
                 _handles[name] = handle;
                 _names[handle] = name;
             }
@@ -815,6 +817,16 @@ internal static class ConversationPlayer
 
         public Task Open(string name, Carrying carrying)
         {
+            // * a name opened before opens a new connection, under a handle never given
+            var opens = _opens.GetValueOrDefault(name) + 1;
+
+            _opens[name] = opens;
+
+            if (opens > 1)
+            {
+                _handles.Remove(name);
+            }
+
             var handle = HandleOf(name);
 
             lock (_gate)
