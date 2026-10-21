@@ -237,6 +237,7 @@ public sealed partial class HttpTransportServerTests
         var (head, body) = await coming.Read();
 
         Assert.Equal((200, Convert.ToHexString(answer)), (head.Status, Convert.ToHexString(body)));
+        Assert.Equal("close", head.Headers.GetValueOrDefault("connection"));
 
         // the rest of it changes nothing: it is never handed on, and its socket, its body not read
         // on, closes behind its answer
