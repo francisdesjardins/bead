@@ -25,10 +25,11 @@ its language's case, `exchangeTimeout` and `ExchangeTimeout`, as
 [0004](0004-one-behaviour-in-every-language.md) has a name; and a C side would report a code, not
 English. Nor may it pin a default no clause states: 9.9, 10.3, 12.2.8, 13.7, 14.4, 15.3 and 15.12
 state theirs, but no clause gives a client's connect its 30 s, its `wait` its 25 s or its
-reconnection its 1 s, nor a WebSocket server's close its 5 s, whose bound the transports' client
-part aligns with the clients', a decision of its own (0004, 0011). And the two platforms are not
-given a duration alike: a JavaScript number holds the milliseconds as written, where a .NET
-`TimeSpan` counts ticks of 100 ns and truncates to them what it is given.
+reconnection its 1 s. Nor does a place observed by its refusal alone carry the default its clause
+states, which nothing in the file would read: a WebSocket's heartbeat, 30 s, and its close timeout,
+5 s (15.3), each side's tests hold. And the two platforms are not given a duration alike: a
+JavaScript number holds the milliseconds as written, where a .NET `TimeSpan` counts ticks of 100 ns
+and truncates to them what it is given.
 
 Four ways were weighed:
 
@@ -177,8 +178,8 @@ platform's word for never, `Infinity` and `infinite`, is its side's: this record
 **The spec states what the file checks**: section 1 names it; 1.4 refuses a value that is no number
 and says what a delay is; 15.12 says how a client times its own inactivity; 15.9 parts a peer's
 `wait` from an application's. The defaults no clause states — a client's connect, its `wait`, its
-reconnection's delay, a WebSocket server's close — stay out of the file until the client part states
-them.
+reconnection's delay — stay out of the file, and so do those 15.3 states for the places observed by
+their refusal alone, a WebSocket's heartbeat and its close timeout: each side's tests hold them.
 
 **The defaults two files state come from one table.** 15.12's defaults are `spec/transports.json`'s
 `defaults` too: `make_durations.py` and `make_transports.py` read them from one module of the

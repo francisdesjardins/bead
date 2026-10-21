@@ -312,9 +312,10 @@ that a test of each side does:
 - the words of a duration's refusal, each side's own, over every input of `spec/durations.json`:
   `transport/shared/__tests__/clock.test.ts` and `Bead.Core.Tests/ClocksTests`; and the defaults that
   file leaves out — those no clause states, a client's connect timeout, its `wait` and its
-  reconnection's delay, and a WebSocket's close timeout, its client's and its server's; and the
-  pause's, at once, which 15.10 states with the schedule no file checks — which each side's tests of
-  that place hold;
+  reconnection's delay; those 15.3 states for the places it observes by their refusal alone, a
+  WebSocket's heartbeat and its close timeout, its client's and its server's; and the pause's, at
+  once, which 15.10 states with the schedule no file checks — which each side's tests of that place
+  hold;
 - the words of a debug filter's refusal and of a declaration's, each side's own, as a C side reports
   a code (debugging §6.7, §7.3): `router/shared/__tests__/debug-filter.test.ts`
   (`refuses a filter in sentences that name the word, or the value, as it was written, quoted as JSON`)
