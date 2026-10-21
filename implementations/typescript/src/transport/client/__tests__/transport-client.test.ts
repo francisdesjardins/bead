@@ -204,7 +204,7 @@ test.describe('createTransportClient', () => {
 
     await client.connect(target);
     await expect(client.connect({ host: 'h', port: 2 })).rejects.toThrow(
-      'transport is already opened'
+      'the transport client is already open'
     );
 
     expect(calls).toEqual(['connect:1']);
@@ -216,7 +216,7 @@ test.describe('createTransportClient', () => {
     await client.connect(target);
     setReadyStateClosing(client);
 
-    await expect(client.connect(target)).rejects.toThrow('transport is already closing');
+    await expect(client.connect(target)).rejects.toThrow('the transport client is already closing');
     expect(calls).toEqual(['connect:1']);
   });
 
@@ -342,7 +342,9 @@ test.describe('createTransportClient #reconnect', () => {
     });
     await waiting.promise;
 
-    await expect(client.connect(target)).rejects.toThrow('transport is already reconnecting');
+    await expect(client.connect(target)).rejects.toThrow(
+      'the transport client is already reconnecting'
+    );
 
     controller.abort();
     await expect(reconnecting).rejects.toBeInstanceOf(CancelError);

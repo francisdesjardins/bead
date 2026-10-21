@@ -110,6 +110,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the connection ends, before its close, unclean, naming the error's message and where it was
   thrown; its server hears that close unclean, by `bead-lost`, as it hears a `disconnect` that is
   not clean (spec 15.1, decision 0036).
+- The TypeScript side's transport client and server refuse a start or a connect in the C# side's
+  words: `the transport client is already open`, `the transport server is already connecting`,
+  `the transport server is starting`.
 
 ### Fixed
 

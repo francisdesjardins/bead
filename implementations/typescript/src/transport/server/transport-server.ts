@@ -337,7 +337,7 @@ export const createTransportServer = <Socket extends object, Request>(
     },
     start: async (options) => {
       if (!server.isUninitialized() && !server.isClosed()) {
-        throw new ProgrammerError(`server is already ${getReadyStateName(server)}`);
+        throw new ProgrammerError(`the transport server is already ${getReadyStateName(server)}`);
       }
 
       const { defaults } = implementation;
@@ -377,7 +377,7 @@ export const createTransportServer = <Socket extends object, Request>(
       }
 
       if (server.isConnecting()) {
-        return Promise.reject(new ProgrammerError('server is starting'));
+        return Promise.reject(new ProgrammerError('the transport server is starting'));
       }
 
       setReadyStateClosing(server);

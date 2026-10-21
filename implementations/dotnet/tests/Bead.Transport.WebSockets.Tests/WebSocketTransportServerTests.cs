@@ -2410,6 +2410,9 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
         await Next(_closes);
 
         var (third, thirdHandle) = await Connect();
+        Assert.Equal([secondHandle, thirdHandle], HandlesOf(_server.Clients));
+        Assert.Equal([firstHandle], HandlesOf(clients));
+
         var (fourth, fourthHandle) = await Connect();
         var (fifth, fifthHandle) = await Connect();
 
