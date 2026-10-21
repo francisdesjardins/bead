@@ -7,9 +7,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using Bead.Tests;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Time.Testing;
@@ -701,6 +703,10 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         // router's largest envelope, and its outbox two of them
         var options = new HttpTransportServerOptions();
         var start = new HttpTransportStartOptions();
+        var burial = Assert.IsType<TimeSpan>(typeof(HttpTransportServer).GetField("Burial", BindingFlags.NonPublic | BindingFlags.Static)!.GetValue(null));
+
+        Assert.Equal(PendingCalls.ReservationOf(null), burial);
+        Assert.Equal(new byte[] { 0x10, 0x11, 0x12, 0x16 }, new[] { (byte)EnvelopeKind.Request, (byte)EnvelopeKind.Result, (byte)EnvelopeKind.Failure, (byte)EnvelopeKind.Cancel });
 
         Assert.Equal(LimitDefaults.MaximumEnvelopeBytes, options.MaximumBodyBytes);
         Assert.Equal(2L * LimitDefaults.MaximumEnvelopeBytes, options.MaximumOutboxBytes);
@@ -747,6 +753,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var client = Assert.Single(_server.Clients);
 
         Assert.Equal((Host, connectionHandle, TransportTypes.Http), (client.Address, client.ConnectionHandle, client.Type));
+        Assert.InRange(client.Port, 1, 65_535);
         // the token reaches no event, no handle, and no client listed
         Assert.DoesNotContain(connectionToken, string.Join(";", [.. _server.ConnectionHandles, .. _connections]), StringComparison.Ordinal);
         Assert.DoesNotContain(connectionToken, string.Join(";", _server.Clients), StringComparison.Ordinal);
@@ -1058,6 +1065,24 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     public async Task Closes_a_connection_on_its_DELETE_a_request_handed_on_learns_it_by_its_exchange_cut()
     {
         await Start();
+        var events = new ConcurrentQueue<object>();
+
+        _server.Connection += (handle) =>
+        {
+            events.Enqueue(new { Type = "connection", ConnectionHandle = handle });
+        };
+        _server.Message += (message, handle) =>
+        {
+            events.Enqueue(new { Type = "message", Bytes = message.Bytes.ToArray(), ConnectionHandle = handle });
+        };
+        _server.Close += (clean, handle) =>
+        {
+            events.Enqueue(new { Type = "close", Clean = clean, ConnectionHandle = handle });
+        };
+        _server.Error += (reason, handle) =>
+        {
+            events.Enqueue(new { Type = "error", Error = reason.Message, ConnectionHandle = handle });
+        };
 
         var (connectionToken, connectionHandle) = await Connect();
         using var waiting = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
@@ -1069,6 +1094,11 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal((true, connectionHandle), _closes.Last());
         Assert.Empty(_server.ConnectionHandles);
         Assert.Empty(_server.Clients);
+
+        var serialized = JsonSerializer.Serialize(events.ToArray());
+
+        Assert.Contains(connectionHandle, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(connectionToken, serialized, StringComparison.Ordinal);
 
         var after = await RefusalOf(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 3)));
 
@@ -1100,6 +1130,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var (connectionToken, connectionHandle) = await Connect();
 
         Assert.NotEmpty(connectionToken);
+        Assert.Matches("^[A-Za-z0-9_-]{22}$", connectionToken);
         Assert.Equal([connectionHandle], told);
         Assert.Equal([(thrown, connectionHandle)], errors);
         Assert.Equal([connectionHandle], _server.ConnectionHandles);
@@ -1245,6 +1276,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal([(thrown, connectionHandle)], errors);
         Assert.Empty(_server.ConnectionHandles);
         Assert.Equal((0, 0), (Count("connections"), Count("addresses")));
+        Assert.Empty(_server.Clients);
     }
 
     [Fact]
@@ -1255,6 +1287,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         var (_, connectionHandle) = await Connect();
         (int Status, string? RetryAfter, string? Reason) refused = default;
         (int Status, string? Reason)[] judged = [];
+        var held = -1;
 
         // the stop under way, its connection's close told: a connect comes, Kestrel still serving
         _server.Close += (_, _) =>
@@ -1262,6 +1295,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             using var response = Fetch(PostOf(null, null)).GetAwaiter().GetResult();
 
             refused = ((int)response.StatusCode, HeaderOf(response, "retry-after"), HeaderOf(response, HttpTransport.RefusalHeader));
+            held = (int)Count("connections");
 
             // what a connect is comes before when it came: another type, then a body
             judged =
@@ -1274,10 +1308,12 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Task.Run(_server.Stop, Cancelled).WaitAsync(Patience, Cancelled);
 
         Assert.Equal((503, "1", HttpRefusals.Busy), refused);
+        Assert.Equal(0, held);
         Assert.Equal([(415, HttpRefusals.Type), (400, HttpRefusals.Malformed)], judged);
         Assert.Equal([connectionHandle], _connections);
         Assert.Equal([(false, connectionHandle)], _closes);
         Assert.Empty(_server.ConnectionHandles);
+        Assert.Equal(ReadyState.Closed, _server.ReadyState);
     }
 
     [Fact]
@@ -1742,22 +1778,27 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
         using var http = SecureClient();
         var answers = new List<(Version Version, string Preflight, string Connect)>();
-
-        // the page's preflight, then its connect, over each
-        foreach (var version in new[] { HttpVersion.Version20, HttpVersion.Version11 })
-        {
-            var asked = With(With(new HttpRequestMessage(HttpMethod.Options, SecureUrl), ("origin", Page)), ("access-control-request-method", "POST"));
-            using var preflight = await Fetch(http, Over(With(asked, ("access-control-request-headers", "bead-listen,content-type,traceparent")), version));
-            using var connect = await Fetch(http, Over(With(PostOf(SecureUrl, (null, null)), ("origin", Page)), version));
-
-            answers.Add((preflight.Version, $"{(int)preflight.StatusCode} {(await BytesOf(preflight)).Length} {CorsOf(preflight)}", $"{(int)connect.StatusCode} {CorsOf(connect)}"));
-        }
-
-        var answered = $"204 0 {Page} | * | none | GET, POST, DELETE | authorization, bead-listen,content-type,traceparent, * | 7200 | no-store nosniff Origin | unmarked";
+        var expected = new List<(Version Version, string Preflight, string Connect)>();
         var drawn = $"201 {Page} | * | none | none | none | none | no-store nosniff Origin | unmarked";
 
-        Assert.Equal([(HttpVersion.Version20, answered, drawn), (HttpVersion.Version11, answered, drawn)], answers);
-        Assert.Equal(2, _connections.Count);
+        foreach (var requested in new[] { "authorization,content-type", "bead-listen,content-type,traceparent" })
+        {
+            foreach (var version in new[] { HttpVersion.Version20, HttpVersion.Version11 })
+            {
+                var asked = With(With(new HttpRequestMessage(HttpMethod.Options, SecureUrl), ("origin", Page)), ("access-control-request-method", "POST"));
+                using var preflight = await Fetch(http, Over(With(asked, ("access-control-request-headers", requested)), version));
+                using var connect = await Fetch(http, Over(With(PostOf(SecureUrl, (null, null)), ("origin", Page)), version));
+
+                Assert.Equal(version, connect.Version);
+                Assert.Empty(await BytesOf(connect));
+                answers.Add((preflight.Version, $"{(int)preflight.StatusCode} {(await BytesOf(preflight)).Length} {CorsOf(preflight)}", $"{(int)connect.StatusCode} {CorsOf(connect)}"));
+                expected.Add((version, $"204 0 {Page} | * | none | GET, POST, DELETE | authorization, {requested}, * | 7200 | no-store nosniff Origin | unmarked", drawn));
+            }
+        }
+
+        Assert.Equal(expected, answers);
+        Assert.Equal(4, _connections.Count);
+        Assert.Equal(4, _server.Clients.Count);
         Assert.Empty(_refusals);
     }
 
@@ -2017,8 +2058,8 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         await Start(new HttpTransportServerOptions { Hosts = ["xn--bad-bma.test"] });
 
         Assert.Equal(
-            [(201, null), (201, null), (403, HttpRefusals.Host), (403, HttpRefusals.Host)],
-            [await StatusOf(page), await StatusOf(("XN--BAD-BMA.test:8080", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null))]);
+            [(201, null), (201, null), (403, HttpRefusals.Host), (403, HttpRefusals.Host), (403, HttpRefusals.Host)],
+            [await StatusOf(page), await StatusOf(("XN--BAD-BMA.test:8080", null)), await StatusOf(("xn--a.test", null)), await StatusOf(("xn---bad-cpa.test", null)), await StatusOf(("xn--a", null))]);
     }
 
     // spec 15.12

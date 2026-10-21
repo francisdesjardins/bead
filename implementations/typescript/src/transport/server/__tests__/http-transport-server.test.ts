@@ -30,12 +30,15 @@ import {
   createHTTPTransportServer,
   ENVELOPE_KINDS,
   EXCHANGE_TIMEOUT,
+  INACTIVITY_TIMEOUT,
   LISTEN_HEADER,
   MAXIMUM_BODY_BYTES,
   MAXIMUM_CONNECTIONS,
   MAXIMUM_CONNECTIONS_PER_ADDRESS,
   MAXIMUM_OUTBOX_BYTES,
   MAXIMUM_WAIT,
+  MAXIMUM_WAITING_EXCHANGES,
+  PATHNAME,
   REFUSAL_HEADER,
   REFUSALS,
   SEQUENCE_HEADER,
@@ -103,6 +106,23 @@ test.describe('createHTTPTransportServer', () => {
     });
     expect(BURIAL_MILLISECONDS).toBe(RESERVATION_MILLISECONDS);
     expect(MAXIMUM_BODY_BYTES).toBe(LIMIT_DEFAULTS.maximumEnvelopeBytes);
+    expect([
+      ENVELOPE_KINDS.REQUEST,
+      ENVELOPE_KINDS.RESULT,
+      ENVELOPE_KINDS.FAILURE,
+      ENVELOPE_KINDS.CANCEL,
+    ]).toEqual([0x10, 0x11, 0x12, 0x16]);
+    expect(MAXIMUM_OUTBOX_BYTES).toBe(2 * LIMIT_DEFAULTS.maximumEnvelopeBytes);
+    expect(BODY_BYTES_BUDGET).toBe(268_435_456);
+    expect([EXCHANGE_TIMEOUT, INACTIVITY_TIMEOUT, MAXIMUM_WAIT]).toEqual([
+      300_000, 300_000, 30_000,
+    ]);
+    expect([
+      MAXIMUM_CONNECTIONS,
+      MAXIMUM_CONNECTIONS_PER_ADDRESS,
+      MAXIMUM_WAITING_EXCHANGES,
+    ]).toEqual([10_000, 64, 64]);
+    expect(PATHNAME).toBe('/bead');
     expect(START_DEFAULTS).toEqual({ address: 'localhost', findOpenPort: false, port: 80 });
   });
 
@@ -123,6 +143,7 @@ test.describe('createHTTPTransportServer', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
     expect(connectionToken).toMatch(/^[\w-]{22}$/u);
+    expect(Buffer.from(connectionToken, 'base64url')).toHaveLength(16);
     expect(connectionHandle).toBe('type=HTTP;ip=127.0.0.1;ordinal=1');
     expect(events).toEqual([
       [
@@ -135,6 +156,9 @@ test.describe('createHTTPTransportServer', () => {
     expect(order).toEqual(['connection', 'answered']);
     expect(server.isTwoWay(connectionHandle)).toBe(false);
     expect(server.clients).toMatchObject([{ address: host, connectionHandle, type: 'HTTP' }]);
+    expect(namesOf(events, 'message')).toEqual([]);
+    expect(namesOf(events, 'close')).toEqual([]);
+    expect(server.gauges().connectionHandles).toEqual(new Set([connectionHandle]));
     // the token reaches no event, and no client listed
     expect(JSON.stringify([events, server.clients])).not.toContain(connectionToken);
 
@@ -606,6 +630,7 @@ test.describe('createHTTPTransportServer', () => {
     await expect(waiting.arrayBuffer()).rejects.toThrow();
     expect(events.at(-1)).toEqual(['close', true, connectionHandle]);
     expect(server.clients).toEqual([]);
+    expect(server.gauges().connectionHandles).toEqual(new Set());
     expect(JSON.stringify(events)).not.toContain(connectionToken);
 
     const after = await refusalOf(
@@ -759,6 +784,11 @@ test.describe('createHTTPTransportServer', () => {
     const { events, fake, server } = await startScripted();
     const thrown = new Error('a connection listener that throws');
     const told: TransportServerConnectionHandle[] = [];
+    const errors: unknown[][] = [];
+
+    server.on('error', (...args) => {
+      errors.push(args);
+    });
 
     server.on('connection', () => {
       throw thrown;
@@ -776,6 +806,10 @@ test.describe('createHTTPTransportServer', () => {
     expect(connectionHandle).toBeDefined();
     expect(told).toEqual([connectionHandle]);
     expect(namesOf(events, 'error')).toEqual([['error', thrown.message, connectionHandle]]);
+    expect(errors).toEqual([[thrown, connectionHandle]]);
+    expect(errors[0]?.[0]).toBe(thrown);
+    expect(server.gauges().counts).toMatchObject({ connections: 1, addresses: 1 });
+    expect(server.gauges().connectionHandles).toEqual(new Set([connectionHandle]));
     expect(namesOf(events, 'close')).toEqual([]);
   });
 
@@ -869,6 +903,11 @@ test.describe('createHTTPTransportServer', () => {
     const second = connectScripted();
     const thrown = new Error('a close listener that throws');
     const told: TransportServerConnectionHandle[] = [];
+    const errors: unknown[][] = [];
+
+    server.on('error', (...args) => {
+      errors.push(args);
+    });
 
     server.on('close', () => {
       throw thrown;
@@ -885,6 +924,17 @@ test.describe('createHTTPTransportServer', () => {
       ['error', thrown.message, second.connectionHandle],
     ]);
     expect(server.isClosed()).toBe(true);
+    expect(namesOf(events, 'close')).toEqual([
+      ['close', false, first.connectionHandle],
+      ['close', false, second.connectionHandle],
+    ]);
+    expect(server.gauges().connectionHandles).toEqual(new Set());
+    expect(errors).toEqual([
+      [thrown, first.connectionHandle],
+      [thrown, second.connectionHandle],
+    ]);
+    expect(errors[0]?.[0]).toBe(thrown);
+    expect(errors[1]?.[0]).toBe(thrown);
   });
 
   test('closes a connection idle past its timeout though a close listener throws, the throw reported', async () => {
@@ -894,6 +944,11 @@ test.describe('createHTTPTransportServer', () => {
       inactivityTimeout: 2_000,
     });
     const thrown = new Error('a close listener that throws');
+    const errors: unknown[][] = [];
+
+    server.on('error', (...args) => {
+      errors.push(args);
+    });
 
     try {
       const { connectionHandle } = connectScripted();
@@ -907,16 +962,20 @@ test.describe('createHTTPTransportServer', () => {
       expect(server.clients).toEqual([]);
       expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
       expect(namesOf(events, 'error')).toEqual([['error', thrown.message, connectionHandle]]);
+      expect(errors).toEqual([[thrown, connectionHandle]]);
+      expect(errors[0]?.[0]).toBe(thrown);
+      expect(server.gauges().counts).toMatchObject({ connections: 0, addresses: 0 });
+      expect(server.gauges().connectionHandles).toEqual(new Set());
     } finally {
       await server.stop();
     }
   });
 
   test('refuses a connect that comes as it stops, busy, told when to come back, drawing nothing', async () => {
-    const { connectScripted, fake, server } = await startScripted();
+    const { connectScripted, events, fake, server } = await startScripted();
     const answers: unknown[][] = [];
 
-    connectScripted();
+    const { connectionHandle } = connectScripted();
 
     // the stop calls it as it closes the connection it held, its own stop under way
     server.on('close', () => {
@@ -947,6 +1006,14 @@ test.describe('createHTTPTransportServer', () => {
       [415, REFUSALS.TYPE],
       [400, REFUSALS.MALFORMED],
     ]);
+    expect(
+      namesOf(events, 'connection').map((event) => {
+        return event.at(-1);
+      })
+    ).toEqual([connectionHandle]);
+    expect(namesOf(events, 'close')).toEqual([['close', false, connectionHandle]]);
+    expect(server.gauges().connectionHandles).toEqual(new Set());
+    expect(server.isClosed()).toBe(true);
   });
 
   test('answers the 404 marked connection-unknown an exchange that comes as it stops, its connection not yet closed, nothing handed on', async () => {
@@ -1297,56 +1364,131 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     await using started = await startSecure({ origins: [PAGE] });
     const { port, server, session } = started;
     const refusals: unknown[] = [];
-    const asked = {
-      'access-control-request-headers': 'authorization,content-type',
-      'access-control-request-method': 'POST',
-      origin: PAGE,
-    };
+    const connections: string[] = [];
 
     server.on('refusal', (refusal) => {
       refusals.push(refusal);
     });
+    server.on('connection', (...[, , connectionHandle]) => {
+      connections.push(connectionHandle);
+    });
 
-    // its status, and the fields it carries
-    type Answer = [number | undefined, IncomingHttpHeaders];
+    type Answer = {
+      protocol: string | false | undefined;
+      status: number | undefined;
+      headers: IncomingHttpHeaders;
+      bodyLength: number;
+    };
 
-    // over HTTP/2
-    const overHTTP2 = await new Promise<Answer>((resolve, reject) => {
-      const stream = session.request({ ':method': 'OPTIONS', ':path': '/bead', ...asked });
+    const overHTTP2 = (method: 'OPTIONS' | 'POST', asked: Record<string, string>) => {
+      return new Promise<Answer>((resolve, reject) => {
+        const stream = session.request({
+          ':method': method,
+          ':path': '/bead',
+          ...(method === 'POST' ? { 'content-type': BEAD_MEDIA_TYPE } : {}),
+          ...asked,
+        });
+        let headers: IncomingHttpHeaders = {};
+        let status: number | undefined;
+        let bodyLength = 0;
 
-      stream.once('response', (headers) => {
-        resolve([headers[':status'], headers]);
+        stream.once('response', (given) => {
+          headers = given;
+          status = given[':status'];
+        });
+        stream.on('data', (chunk: Buffer) => {
+          bodyLength += chunk.length;
+        });
+        stream.once('end', () => {
+          resolve({ protocol: session.alpnProtocol, status, headers, bodyLength });
+        });
+        stream.once('error', reject);
+        stream.end();
       });
-      stream.on('data', () => {});
-      stream.on('error', reject);
-      stream.end();
-    });
-    // over HTTP/1.1, on the same port
-    const overHTTP1 = await new Promise<Answer>((resolve, reject) => {
-      const request = requestHTTPS(
-        { ca: TLS_FIXTURE.cert, headers: asked, host, method: 'OPTIONS', path: '/bead', port },
-        (response) => {
-          response.resume();
-          resolve([response.statusCode, response.headers]);
-        }
-      );
+    };
+    const overHTTP1 = (method: 'OPTIONS' | 'POST', asked: Record<string, string>) => {
+      return new Promise<Answer>((resolve, reject) => {
+        const request = requestHTTPS(
+          {
+            ca: TLS_FIXTURE.cert,
+            headers: {
+              ...(method === 'POST' ? { 'content-type': BEAD_MEDIA_TYPE } : {}),
+              ...asked,
+            },
+            host,
+            method,
+            path: '/bead',
+            port,
+          },
+          (response) => {
+            let bodyLength = 0;
 
-      request.on('error', reject);
-      request.end();
-    });
+            response.on('data', (chunk: Buffer) => {
+              bodyLength += chunk.length;
+            });
+            response.once('end', () => {
+              resolve({
+                protocol: response.httpVersion,
+                status: response.statusCode,
+                headers: response.headers,
+                bodyLength,
+              });
+            });
+            response.once('error', reject);
+          }
+        );
 
-    for (const [status, headers] of [overHTTP2, overHTTP1]) {
-      const fields = {
+        request.once('error', reject);
+        request.end();
+      });
+    };
+    const fields = (headers: IncomingHttpHeaders) => {
+      return {
         get: (name: string) => {
           return headers[name] as string | undefined;
         },
       };
+    };
 
-      const expected = preflightAnswerOf(asked['access-control-request-headers']);
+    for (const requested of [
+      'authorization,content-type',
+      'bead-listen,content-type,traceparent',
+    ]) {
+      for (const [protocol, request] of [
+        ['h2', overHTTP2],
+        ['1.1', overHTTP1],
+      ] as const) {
+        const preflight = await request('OPTIONS', {
+          'access-control-request-headers': requested,
+          'access-control-request-method': 'POST',
+          origin: PAGE,
+        });
+        const connected = await request('POST', { origin: PAGE });
+        const expected = preflightAnswerOf(requested);
+        const drawn = {
+          ...preflightAnswerOf(),
+          'access-control-allow-headers': null,
+          'access-control-allow-methods': null,
+          'access-control-max-age': null,
+        };
 
-      expect([status, fieldsOf(fields, expected)]).toEqual([204, expected]);
+        expect([
+          preflight.protocol,
+          preflight.status,
+          preflight.bodyLength,
+          fieldsOf(fields(preflight.headers), expected),
+        ]).toEqual([protocol, 204, 0, expected]);
+        expect([
+          connected.protocol,
+          connected.status,
+          connected.bodyLength,
+          fieldsOf(fields(connected.headers), drawn),
+        ]).toEqual([protocol, 201, 0, drawn]);
+      }
     }
 
+    expect(connections).toHaveLength(4);
+    expect(server.clients).toHaveLength(4);
     expect(refusals).toEqual([]);
   });
 
