@@ -51,6 +51,7 @@ public sealed class TrustedProxiesTests
         "192.0.2.7",
         " \t192.0.2.7 ",
         " 192.0.2.7:51234 ",
+        "192.0.2.7:51234",
         "::ffff:192.0.2.7",
         "::FFFF:c000:207",
         "[::ffff:192.0.2.7]:80",
@@ -102,7 +103,7 @@ public sealed class TrustedProxiesTests
         TrustedProxies.Assert(null, "TrustedProxies");
         TrustedProxies.Assert([], "TrustedProxies");
         TrustedProxies.Assert(
-            ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.1.178", "192.0.2.0/24", "192.0.2.1/32", "0.0.0.0/1", "fd00::/8", "2001:DB8::/32", "2001:db8::1/128", "::/1"],
+            ["127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.1.178", "192.0.2.0/24", "192.0.2.1/32", "192.0.2.7/32", "0.0.0.0/1", "fd00::/8", "2001:DB8::/32", "2001:db8::1/128", "::/1"],
             "TrustedProxies");
 
         // each refused naming the option and the entry
@@ -110,13 +111,16 @@ public sealed class TrustedProxiesTests
             RefusedEntries,
             (entry) =>
             {
-                var refused = Assert.Throws<ArgumentException>(() =>
+                foreach (var entries in new[] { new[] { entry }, new[] { "127.0.0.1", entry } })
                 {
-                    TrustedProxies.Assert(["127.0.0.1", entry], "TrustedProxies");
-                });
+                    var refused = Assert.Throws<ArgumentException>(() =>
+                    {
+                        TrustedProxies.Assert(entries, "TrustedProxies");
+                    });
 
-                Assert.Equal("TrustedProxies", refused.ParamName);
-                Assert.Contains($"\"{entry}\"", refused.Message, StringComparison.Ordinal);
+                    Assert.Equal("TrustedProxies", refused.ParamName);
+                    Assert.Contains($"\"{entry}\"", refused.Message, StringComparison.Ordinal);
+                }
             });
 
         // prefix 0 told that it trusts what every client writes; host bits, the network to write
@@ -128,6 +132,14 @@ public sealed class TrustedProxiesTests
         {
             TrustedProxies.Assert(["10.1.2.3/8"], "TrustedProxies");
         }).Message, StringComparison.Ordinal);
+        Assert.Contains("write fd00::/8, not fd00::1/8", Assert.Throws<ArgumentException>(() =>
+        {
+            TrustedProxies.Assert(["fd00::1/8"], "TrustedProxies");
+        }).Message, StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            TrustOf(["nginx"], 0);
+        });
         Assert.Contains("write ::1, not [::1]", Assert.Throws<ArgumentException>(() =>
         {
             TrustedProxies.Assert(["[::1]"], "TrustedProxies");
@@ -269,6 +281,7 @@ public sealed class TrustedProxiesTests
                 "192.0.2.7",
                 "192.0.2.7",
                 "192.0.2.7",
+                "192.0.2.7",
                 "2001:db8::1",
                 "2001:db8::1",
                 "2001:db8::1",
@@ -323,6 +336,7 @@ public sealed class TrustedProxiesTests
         Assert.Equal("10.0.0.5", ClientOf(mapped, ("203.0.113.9", ["192.168.0.0/16"])));
         Assert.Equal("10.0.0.5", ClientOf(mapped, (null, ["10.0.0.0/8"])));
         Assert.Equal("198.51.100.7", ClientOf(IPAddress.Parse("::ffff:127.0.0.1"), ("198.51.100.7", ["127.0.0.0/8", "10.0.0.0/8"])));
+        Assert.Equal("198.51.100.8", ClientOf(mapped, ("198.51.100.8", ["127.0.0.0/8", "10.0.0.0/8"])));
         Assert.Equal("192.0.2.1", ClientOf(IPAddress.Parse("::ffff:192.0.2.1"), ("198.51.100.9", ["127.0.0.0/8", "10.0.0.0/8"])));
 
         // an IPv6 network holds no IPv4 address, nor an IPv4 network an IPv6 one

@@ -20,6 +20,7 @@ const TAKEN = [
   '192.168.1.178',
   '192.0.2.0/24',
   '192.0.2.7/32',
+  '192.0.2.1/32',
   '0.0.0.0/1',
   'fd00::/8',
   '2001:DB8::/32',
@@ -67,9 +68,17 @@ test.describe('trusted proxies', () => {
     }).not.toThrow();
 
     for (const entry of REFUSED) {
-      expect(() => {
-        assertTrustedProxies([entry]);
-      }, entry).toThrow(ProgrammerError);
+      for (const entries of [[entry], ['127.0.0.1', entry]]) {
+        expect(() => {
+          assertTrustedProxies(entries);
+        }, entry).toThrow(ProgrammerError);
+        expect(() => {
+          assertTrustedProxies(entries);
+        }).toThrow('trustedProxies');
+        expect(() => {
+          assertTrustedProxies(entries);
+        }).toThrow(entry.endsWith('/0') ? 'prefix 0' : entry);
+      }
     }
 
     // the messages name what to write instead, and why prefix 0 is refused
@@ -231,6 +240,7 @@ test.describe('trusted proxies', () => {
       ['192.0.2.7', '192.0.2.7'],
       [' \t192.0.2.7 ', '192.0.2.7'],
       ['192.0.2.7:51234', '192.0.2.7'],
+      [' 192.0.2.7:51234 ', '192.0.2.7'],
       ['::ffff:192.0.2.7', '192.0.2.7'],
       ['::FFFF:c000:207', '192.0.2.7'],
       ['[::ffff:192.0.2.7]:80', '192.0.2.7'],
@@ -251,6 +261,7 @@ test.describe('trusted proxies', () => {
       // past five digits, an empty entry
       ['2001:db8::2%eth0', undefined],
       ['[fe80::1%25eth0]:80', undefined],
+      ['[fe80::1%25eth0]', undefined],
       ['proxy.example', undefined],
       ['bead.test', undefined],
       ['unknown', undefined],
@@ -299,10 +310,26 @@ test.describe('trusted proxies', () => {
     const trustedProxies = trustedProxiesOf(['127.0.0.1']);
 
     expect(
-      ['2001:db8::2%eth0', '[2001:DB8::1]:443', '::ffff:192.0.2.7'].map((forwarded) => {
+      [
+        '2001:db8::2%eth0',
+        '[2001:DB8::1]:443',
+        '::ffff:192.0.2.7',
+        '192.0.2.7:51234',
+        '2001:db8:0:0:0:0:0:1',
+        '[2001:db8::3]',
+        'unknown',
+      ].map((forwarded) => {
         return clientAddressOf('127.0.0.1', { forwarded, trustedProxies });
       })
-    ).toEqual(['127.0.0.1', '2001:db8::1', '192.0.2.7']);
+    ).toEqual([
+      '127.0.0.1',
+      '2001:db8::1',
+      '192.0.2.7',
+      '192.0.2.7',
+      '2001:db8::1',
+      '2001:db8::3',
+      '127.0.0.1',
+    ]);
   });
 
   // spec 15.12
@@ -316,6 +343,19 @@ test.describe('trusted proxies', () => {
       // a client's, direct, held as the IPv4 address it is, which no network holds
       clientAddressOf('::ffff:192.0.2.1', { forwarded: '198.51.100.9', trustedProxies }),
     ]).toEqual(['198.51.100.7', '198.51.100.8', '192.0.2.1']);
+    expect([
+      clientAddressOf('::ffff:10.0.0.5', {
+        forwarded: '203.0.113.9',
+        trustedProxies: trustedProxiesOf(['10.0.0.0/8']),
+      }),
+      clientAddressOf('::ffff:10.0.0.5', {
+        forwarded: '203.0.113.9',
+        trustedProxies: trustedProxiesOf(['192.168.0.0/16']),
+      }),
+      clientAddressOf('::ffff:10.0.0.5', {
+        trustedProxies: trustedProxiesOf(['10.0.0.0/8']),
+      }),
+    ]).toEqual(['203.0.113.9', '10.0.0.5', '10.0.0.5']);
     // an IPv6 network holds no IPv4 address, nor an IPv4 network an IPv6 one
     expect([
       clientAddressOf('::ffff:10.0.0.5', {
