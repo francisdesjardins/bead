@@ -18,16 +18,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Spec 15.3 states that a side fails a connection with 1009 past its `maximumMessageBytes` (RFC
   6455 §7.1.7): it drains until the peer's close or its close timeout, 5 seconds by default on a
-  server, its close unclean whatever code the peer answers with, and a server reports it naming the
-  bound and its value. Spec 15.1 states what a server transport's `error` reports: a protocol
-  error, a drop or a 1009, each a connection's own once, as it ends, before its close, and a
-  listener's throw; never a peer gone without its closing handshake, one its heartbeat drops, or
-  the server's own abort past its close timeout.
-- Spec 15.1 states that rule for a side's transport, a client's as a server's: what it ends a
-  connection for of its own, a protocol error, a 1009, or over HTTP an envelope past
-  `maximumBodyBytes` and a batch that does not read, each once, as it ends, before its close; never
-  a peer gone, a heartbeat's drop, its own close timeout, nor over HTTP a server gone, a refusal of
-  its own, an exchange lost or its inactivity timeout. Spec 15.3 states that a side reports its 1009.
+  server, its close unclean whatever code the peer answers with, and the side reports it naming the
+  bound and its value. Spec 15.1 states what a side's transport, a client's as a server's, reports
+  on its `error`: what it ends a connection for of its own — a protocol error, a 1009, a drop, or
+  over HTTP an envelope past `maximumBodyBytes` and a batch that does not read — each once, as the
+  connection ends, before its close, and a listener's throw; never a peer gone without its closing
+  handshake, one its heartbeat drops, its own abort past its close timeout, nor over HTTP a server
+  gone, a refusal of its own, an exchange lost or its inactivity timeout.
 - Both WebSocket servers report a drop as `<handle> is dropped: …`, naming `maximumUnsentBytes`, or
   `minimumSendBytesPerSecond` and `sendGracePeriod`, in the spec's spelling with their values,
   where the TypeScript side wrote `the client fell behind: …` and the C# side its option's name
