@@ -1523,7 +1523,9 @@ HTTP does, an HTTP/1.1 request without a `Host`, and one with more than one `Hos
 target in absolute-form it does not read, or an authority that is no host, before it reads anything
 else of it ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2)): no refusal of the
 transport's own, unmarked. The `Host` beside a target in absolute-form is judged as one field line
-alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request whose
+alone, which an HTTP/1.0 request may leave out. Over HTTP/2, it resets the stream of a request that
+names no host, with neither `:authority` nor `host`, whatever its hosts, `*` among them
+([RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)), or whose
 authority is no host, `PROTOCOL_ERROR`, no response written
 ([RFC 9113 §8.1.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.1.1)). A field value that holds
 a control character other than HTAB, or an octet past US-ASCII, is answered alike, 400 unmarked over

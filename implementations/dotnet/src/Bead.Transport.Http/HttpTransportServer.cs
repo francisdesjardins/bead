@@ -37,6 +37,8 @@ public sealed record HttpTransportServerOptions
     /// host in punycode: none besides when none or empty. A request names its host by its
     /// authority: an absolute-form target's, else its <c>Host</c>, which carries HTTP/2's
     /// <c>:authority</c> (spec 15.12). <c>*</c>, alone, takes every host, an empty one and none,
+    /// but over HTTP/2 a request with neither <c>:authority</c> nor <c>host</c>, whose stream is
+    /// reset, <c>PROTOCOL_ERROR</c>, under any hosts (RFC 9113 §8.3.1),
     /// and makes none of their origins its own: the server's own origin is its request's authority
     /// only when its host is taken by name, one every server takes or one listed here, so under
     /// <c>*</c> a page that rebinds its name to the server's address is refused 403,
@@ -1104,6 +1106,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         // through a Uri, which lowers its case and drops a default or an empty port and a userinfo,
         // so it is read from the target as it came, and judged as HTTP judges a Host
         var targetAuthority = HttpServerFields.TargetAuthorityOf(context);
+
+        // ! an HTTP/2 request with neither :authority nor host is malformed (RFC 9113 §8.3.1), under
+        // * as under any hosts: its stream reset, PROTOCOL_ERROR, as Node's HTTP/2 resets it before
+        // any listener, where Kestrel hands it on with an empty Host
+        if (HttpProtocol.IsHttp2(request.Protocol) && request.Headers.Host.Count == 0 && HttpServerFields.ResetMalformedFields(context))
+        {
+            return;
+        }
 
         if (!HttpServerFields.IsTakenTarget(context))
         {
