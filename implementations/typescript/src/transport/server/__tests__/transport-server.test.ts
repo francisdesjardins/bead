@@ -468,13 +468,15 @@ test.describe('createTransportServer', () => {
     const { defineOptions, server } = createStubServer();
     const thrown = new Error('a listener that throws');
     const told: TransportServerConnectionHandle[] = [];
+    const values: unknown[] = [];
     const reported: [Error, string][] = [];
 
     server.on('message', () => {
       throw thrown;
     });
-    server.on('message', (_, connectionHandle) => {
+    server.on('message', ({ data }, connectionHandle) => {
       told.push(connectionHandle);
+      values.push((data as Uint8Array)[0]);
     });
     server.on('error', (error, connectionHandle) => {
       reported.push([error, connectionHandle]);
@@ -484,6 +486,7 @@ test.describe('createTransportServer', () => {
     expect(defineOptions.tell('message', [{ data: new Uint8Array([2]) }, B])).toBe(true);
 
     expect(told).toEqual([A, B]);
+    expect(values).toEqual([1, 2]);
     expect(reported).toEqual([
       [thrown, A],
       [thrown, B],
@@ -519,6 +522,7 @@ test.describe('createTransportServer', () => {
     ]);
     server.removeAllListeners('message');
     expect(defineOptions.tell('message', [{ data: new Uint8Array([3]) }, A])).toBe(false);
+    expect(reported).toHaveLength(4);
   });
 
   test('reports a throw of a listener told no connection with the empty handle', () => {
