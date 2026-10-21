@@ -3293,8 +3293,8 @@
       ]
     },
     {
-      "id": "webSocketTransportServer.closeTimeout",
-      "name": "a WebSocket server's close timeout",
+      "id": "webSocketTransport.closeTimeout",
+      "name": "a WebSocket's close timeout, its client's or its server's",
       "clauses": [
         "1.4"
       ],
@@ -3302,7 +3302,11 @@
       "never": "taken",
       "ways": [
         {
-          "id": "options",
+          "id": "client",
+          "name": "the transport client's options, as it is built"
+        },
+        {
+          "id": "server",
           "name": "the transport server's options, as it is built"
         }
       ],

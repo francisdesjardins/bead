@@ -999,18 +999,20 @@ const pauseOfOptions: Way = async (given) => {
   return { held };
 };
 
-// a WebSocket client's heartbeat, as it is built
-const heartbeatOfClient: Way = (given) => {
-  const { FakeWebSocket, sockets } = createFakeWebSocket();
-  const building = attempt(() => {
-    return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf('heartbeat', given) });
-  });
+// a WebSocket client's option `name`, as it is built
+const ofWSClient = (name: 'closeTimeout' | 'heartbeat'): Way => {
+  return (given) => {
+    const { FakeWebSocket, sockets } = createFakeWebSocket();
+    const building = attempt(() => {
+      return createWSTransportClient({ WebSocket: FakeWebSocket, ...optionOf(name, given) });
+    });
 
-  return Promise.resolve(
-    'refusal' in building
-      ? { moved: movedOf({ 'a socket opened': sockets.length > 0 }), refusal: building.refusal }
-      : {}
-  );
+    return Promise.resolve(
+      'refusal' in building
+        ? { moved: movedOf({ 'a socket opened': sockets.length > 0 }), refusal: building.refusal }
+        : {}
+    );
+  };
 };
 
 // a WebSocket server's option `name`, as it is built
@@ -1379,7 +1381,7 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
   },
   'webSocketTransport.heartbeat': {
     phrase: 'a heartbeat',
-    ways: { client: heartbeatOfClient, server: ofWSServer('heartbeat') },
+    ways: { client: ofWSClient('heartbeat'), server: ofWSServer('heartbeat') },
   },
   'transportClient.connectTimeout': {
     phrase: "a connect's timeout",
@@ -1389,9 +1391,9 @@ const PLAYED: Readonly<Record<string, IPlayed>> = Object.freeze({
     phrase: 'a delay',
     ways: { function: reconnectionOf('function'), number: reconnectionOf('number') },
   },
-  'webSocketTransportServer.closeTimeout': {
+  'webSocketTransport.closeTimeout': {
     phrase: 'a close timeout',
-    ways: { options: ofWSServer('closeTimeout') },
+    ways: { client: ofWSClient('closeTimeout'), server: ofWSServer('closeTimeout') },
   },
   'webSocketTransportServer.sendGracePeriod': {
     phrase: 'sendGracePeriod',

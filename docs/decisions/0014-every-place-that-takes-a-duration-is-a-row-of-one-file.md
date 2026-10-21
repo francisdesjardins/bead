@@ -13,11 +13,11 @@ less than a millisecond nor past 2³¹ − 1, and none for a fraction
 ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)). The values users write do not
 reach a timer alike: 0.41 s is 410 ms in JavaScript and 409.9999 ms in .NET.
 
-Twenty-six places take such a duration, from a call's timeout to a WebSocket server's close timeout.
+Twenty-six places take such a duration, from a call's timeout to a WebSocket's close timeout.
 Some are reached more than one way: a reserve and a cancel, a relay's own timeout and a
-destination's, every transport's connect. Few inputs tell two readings of 1.4 apart — a half up from
-a half to the even, a value as given from as rounded at the ceiling, −1 ms, NaN — and a table of
-inputs that misses them proves neither reading.
+destination's, every transport's connect, a WebSocket's client and its server. Few inputs tell two
+readings of 1.4 apart — a half up from a half to the even, a value as given from as rounded at the
+ceiling, −1 ms, NaN — and a table of inputs that misses them proves neither reading.
 
 A file must not pin what the spec leaves to each side. A refusal's words are each side's: the C#
 side's message carries .NET's ` (Parameter '…')`, which its tests skip; each side names an option in
@@ -79,9 +79,10 @@ and the key stays. A place carries besides:
   the server layer over a transport that gives it none;
 - `observed`: `held`, what the place holds is read, at every place on the clock a side is given;
   `refusal`, whether it refuses alone, at those on the real clock (0011), whose timers no test clock
-  reaches: the heartbeat, a WebSocket server's close timeout, and each server's `sendGracePeriod`
-  and `headersTimeout` ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). A place observed by
-  its refusal has no default in the file, since nothing would read it;
+  reaches: a WebSocket's heartbeat and its close timeout, its client's and its server's, and each
+  server's `sendGracePeriod` and `headersTimeout`
+  ([0033](0033-a-side-bounds-what-a-peer-holds-of-it.md)). A place observed by its refusal has no
+  default in the file, since nothing would read it;
 - `clauses`, the units of the spec it checks, each for what it observes of it, and nothing else:
   1.4, which holds and refuses its durations; its `neverClause`; and its default's clause.
 
@@ -91,9 +92,10 @@ when not given; an HTTP server gives its own 30 s (15.12.10), which `spec/transp
 `httpTransportClient.inactivityTimeout` is the HTTP client's inactivity timeout, which 15.12 names
 for both sides: 5 minutes by default, and without end if given so. `httpTransportClient.pause`'s at
 once is 15.10's "listen again at once", stated with a schedule no file checks: the file leaves it
-out, as it leaves out the defaults no clause states. `webSocketTransportServer.closeTimeout` is the
-server's place, and its outcomes a client's close timeout's too: each WebSocket client's tests play
-it.
+out, as it leaves out the defaults no clause states. `webSocketTransport.closeTimeout` is a
+WebSocket's close timeout by two ways, its client's and its server's, as
+`webSocketTransport.heartbeat` is: each harness plays both, and each WebSocket client's tests play
+its client's way besides.
 
 **One table of inputs serves every place.** An input is given in one of five forms, each a value a
 user writes on every platform:

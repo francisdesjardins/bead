@@ -399,11 +399,14 @@ places = [
         'observed': 'held',
     },
     {
-        'id': 'webSocketTransportServer.closeTimeout',
-        'name': "a WebSocket server's close timeout",
+        'id': 'webSocketTransport.closeTimeout',
+        'name': "a WebSocket's close timeout, its client's or its server's",
         'kind': 'timeout',
         'never': 'taken',
-        'ways': [way('options', "the transport server's options, as it is built")],
+        'ways': [
+            way('client', "the transport client's options, as it is built"),
+            way('server', "the transport server's options, as it is built"),
+        ],
         'observed': 'refusal',
     },
     {

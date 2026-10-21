@@ -371,25 +371,31 @@ public sealed partial class DurationsTests
         return Taken();
     }
 
-    // webSocketTransportServer.closeTimeout
+    // webSocketTransport.closeTimeout
 
-    // the transport server's options, as it is built: taken or refused
-    private static async Task<Observed> CloseTimeoutByOptions(TimeSpan? given)
+    // the transport client's options, as it is built: taken or refused
+    private static async Task<Observed> CloseTimeoutByClient(TimeSpan? given)
     {
-        WebSocketTransportServer server;
+        WebSocketTransportClient client;
 
         try
         {
-            server = new WebSocketTransportServer(new WebSocketTransportServerOptions { CloseTimeout = Assert.NotNull(given) });
+            client = new WebSocketTransportClient(new WebSocketTransportClientOptions { CloseTimeout = Assert.NotNull(given) });
         }
         catch (ArgumentOutOfRangeException refused)
         {
             return Refused(refused);
         }
 
-        await server.DisposeAsync();
+        await client.DisposeAsync();
 
         return Taken();
+    }
+
+    // the transport server's options, as it is built: taken or refused
+    private static Task<Observed> CloseTimeoutByServer(TimeSpan? given)
+    {
+        return WebSocketServerBuilt(new WebSocketTransportServerOptions { CloseTimeout = Assert.NotNull(given) });
     }
 
     // transportClient.connectTimeout

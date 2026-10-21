@@ -1615,15 +1615,19 @@ test.describe('WSTransportClient, its close timeout', () => {
     expect(createWSTransportClient({ clock }).clock).toBe(clock);
     expect(createWSTransportClient().clock).toBe(PLATFORM_CLOCK);
 
-    // the server's place, whose outcomes a WebSocket's close timeout has, a client's as a server's
+    // a WebSocket's close timeout, its client's way, which the durations' harness plays by its
+    // refusal; this loop holds, besides, what `ws` is handed
     const place = DURATIONS.places.find(({ id }) => {
-      return id === 'webSocketTransportServer.closeTimeout';
+      return id === 'webSocketTransport.closeTimeout';
+    });
+    const way = place?.ways.find(({ id }) => {
+      return id === 'client';
     });
 
-    expect(place).toBeDefined();
+    expect(way).toBeDefined();
 
     for (const input of DURATIONS.inputs) {
-      if (place === undefined || isExcused(place, { input })) {
+      if (place === undefined || way === undefined || isExcused(place, { input, way })) {
         continue;
       }
 

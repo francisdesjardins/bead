@@ -132,9 +132,10 @@ public sealed partial class DurationsTests
         {
             ["function"] = new(nameof(TransportReconnectOptions.Delay), ReconnectionDelayByFunction),
         }),
-        ["webSocketTransportServer.closeTimeout"] = ("a close timeout", new()
+        ["webSocketTransport.closeTimeout"] = ("a close timeout", new()
         {
-            ["options"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByOptions),
+            ["client"] = new(nameof(WebSocketTransportClientOptions.CloseTimeout), CloseTimeoutByClient),
+            ["server"] = new(nameof(WebSocketTransportServerOptions.CloseTimeout), CloseTimeoutByServer),
         }),
         ["webSocketTransportServer.sendGracePeriod"] = (nameof(WebSocketTransportServerOptions.SendGracePeriod), new()
         {

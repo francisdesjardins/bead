@@ -1414,8 +1414,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
-    // the server's close timeout's place of the durations' file, whose outcomes a WebSocket's close
-    // timeout has, a client's as a server's, as the TypeScript side's client plays them
+    // a WebSocket's close timeout, its client's way of the durations' file, which the durations'
+    // harness plays by its refusal, as the TypeScript side's client plays it
     [Fact]
     public async Task Holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refusing_zero_and_runs_on_the_clock_it_is_given()
     {
@@ -1425,7 +1425,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         Assert.Same(time, client.Clock);
         Assert.Same(TimeProvider.System, _client.Clock);
 
-        var place = Durations.PlaceOf("webSocketTransportServer.closeTimeout");
+        var place = Durations.PlaceOf("webSocketTransport.closeTimeout");
 
         foreach (var (input, outcome) in Durations.Played(place))
         {
