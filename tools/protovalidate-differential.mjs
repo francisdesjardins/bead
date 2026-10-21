@@ -441,11 +441,17 @@ const setOf = () => {
   mkdirSync(WORK, { recursive: true });
 
   const set = join(WORK, 'validations.binpb');
+  // ! spec/validations.proto alone, apart from spec/'s other .proto files: each is a blueprint of
+  // its own, whose services may take the same ids
+  const apart = join(WORK, 'set');
 
+  rmSync(apart, { force: true, recursive: true });
+  mkdirSync(apart, { recursive: true });
+  writeFileSync(join(apart, 'validations.proto'), readFileSync(VALIDATIONS_PROTO));
   run(process.execPath, [
     BEADC,
     'blueprint',
-    join(ROOT, 'spec'),
+    apart,
     '-o',
     join(WORK, 'validations.blueprint.json'),
     '--descriptor-set-out',
