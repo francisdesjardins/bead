@@ -2118,7 +2118,7 @@ public sealed class HttpTransportClientTests
             Assert.Equal(envelope, await Next(heard));
             await sending.WaitAsync(Patience, Cancelled);
             Assert.Equal(ReadyState.Open, client.ReadyState);
-            Assert.True(origin.CountOf("GET") >= 3);
+            Assert.Equal(3, origin.CountOf("GET"));
             await client.CloseConnection().WaitAsync(Patience, Cancelled);
         }
 
