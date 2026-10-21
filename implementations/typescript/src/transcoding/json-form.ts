@@ -179,6 +179,11 @@ export class JsonFormError extends Error {
   }
 }
 
+/** The article an integer type's name takes, as it is read aloud: `an int32`, `a uint32`, `a fixed32`. */
+const articleOf = (name: string): string => {
+  return /^[ais]/u.test(name) ? 'an' : 'a';
+};
+
 // a member's place below `at`, by its name, and an item's by its index
 const memberAt = (at: string, name: string): string => {
   return at === '' ? name : `${at}.${name}`;
@@ -755,14 +760,11 @@ const readScalar = (
       read = integerOfDigits(node.text);
 
       if (read === 'fraction') {
-        throw new JsonFormError(`an ${name} that is no integer`.replace(/^an u/u, 'a u'), at);
+        throw new JsonFormError(`${articleOf(name)} ${name} that is no integer`, at);
       }
     } else if (node.kind === 'string' && is64) {
       if (!INTEGER.test(node.value)) {
-        throw new JsonFormError(
-          `an ${name} string off -?(0|[1-9][0-9]*)`.replace(/^an u/u, 'a u'),
-          at
-        );
+        throw new JsonFormError(`${articleOf(name)} ${name} string off -?(0|[1-9][0-9]*)`, at);
       }
 
       read = BigInt(node.value);
@@ -770,14 +772,14 @@ const readScalar = (
       read = integerOfDigits(node.value);
 
       if (read === 'fraction') {
-        throw new JsonFormError(`an ${name} that is no integer`.replace(/^an u/u, 'a u'), at);
+        throw new JsonFormError(`${articleOf(name)} ${name} that is no integer`, at);
       }
     } else {
       throw new JsonFormError(`no ${name}`, at);
     }
 
     if (read === 'past' || read < bounds.least || read > bounds.most) {
-      throw new JsonFormError(`an ${name} past its range`.replace(/^an u/u, 'a u'), at);
+      throw new JsonFormError(`${articleOf(name)} ${name} past its range`, at);
     }
 
     if (!is64) {
@@ -903,7 +905,7 @@ const readMapKey = (scalar: ScalarType, { at, key }: { at: string; key: string }
 
   const integer = integerTypeOf(scalar);
   const name = integer?.name ?? 'integer';
-  const article = name.startsWith('u') ? 'a' : 'an';
+  const article = articleOf(name);
 
   if (integer === undefined || !INTEGER.test(key)) {
     throw new JsonFormError(`${article} ${name} key off -?(0|[1-9][0-9]*)`, at);

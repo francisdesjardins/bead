@@ -213,7 +213,7 @@ public sealed class HttpTemplate
     /// Each variable's value of <paramref name="path"/>, which it matches, by its field path (3.8):
     /// the segments it takes, by <c>/</c>, a single-segment one's percent-decoded whole, a
     /// multi-segment one's but each <c>%2F</c> and <c>%2f</c>. A <c>%</c> that two hexadecimal
-    /// digits do not follow, and bytes that are not UTF-8, are a <see cref="FormatException"/>.
+    /// digits do not follow, and bytes that are not UTF-8, are a <see cref="JsonFormException"/>.
     /// </summary>
     public IReadOnlyDictionary<string, string> ValuesOf(HttpPath path)
     {
@@ -249,7 +249,7 @@ public sealed class HttpTemplate
     /// <summary>
     /// <paramref name="text"/> percent-decoded, each <c>%2F</c> and <c>%2f</c> kept as it came where
     /// <paramref name="keepsSlash"/>: a <c>%</c> that two hexadecimal digits do not follow, and
-    /// bytes that are not UTF-8, are a <see cref="FormatException"/>.
+    /// bytes that are not UTF-8, are a <see cref="JsonFormException"/>.
     /// </summary>
     internal static string PercentDecoded(string text, bool keepsSlash)
     {
@@ -279,7 +279,7 @@ public sealed class HttpTemplate
 
             if (at + 2 >= text.Length || !Uri.IsHexDigit(text[at + 1]) || !Uri.IsHexDigit(text[at + 2]))
             {
-                throw new FormatException("a % that two hexadecimal digits do not follow");
+                throw new JsonFormException("a % that two hexadecimal digits do not follow");
             }
 
             var value = Convert.ToByte(text.Substring(at + 1, 2), 16);
@@ -302,7 +302,7 @@ public sealed class HttpTemplate
         }
         catch (DecoderFallbackException reason)
         {
-            throw new FormatException("a value whose bytes are not UTF-8", reason);
+            throw new JsonFormException("a value whose bytes are not UTF-8", reason);
         }
     }
 
@@ -318,7 +318,7 @@ public sealed class HttpTemplate
         {
             return PercentDecoded(segment, false) is "." or "..";
         }
-        catch (FormatException)
+        catch (JsonFormException)
         {
             return false;
         }

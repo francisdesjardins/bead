@@ -65,18 +65,18 @@ public sealed class BindingTests
             "/v1/books/%FF",
         })
         {
-            Assert.Throws<FormatException>(() =>
+            Assert.Throws<JsonFormException>(() =>
             {
                 Bind(("getBook", get), (target, null));
             });
         }
 
         // a field the path binds that the body sets too, and a query beside a body of the request whole
-        Assert.Throws<FormatException>(() =>
+        Assert.Throws<JsonFormException>(() =>
         {
             Bind(("archiveBook", archive), ("/v1/shelves/1/books/2:archive", "{\"name\":\"x\"}"));
         });
-        Assert.Throws<FormatException>(() =>
+        Assert.Throws<JsonFormException>(() =>
         {
             Bind(("archiveBook", archive), ("/v1/shelves/1/books/2:archive?revision=1", "{}"));
         });

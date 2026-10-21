@@ -100,7 +100,7 @@ public sealed partial class JsonForm
 
     /// <summary>
     /// <paramref name="body"/> read as transcoding 5.2 reads a <c>proto</c> request's: the message,
-    /// or a <see cref="FormatException"/> saying why it is refused, which a gateway answers 400
+    /// or a <see cref="JsonFormException"/> saying why it is refused, which a gateway answers 400
     /// <c>PAYLOAD_UNDECODABLE</c>.
     /// </summary>
     public IMessage Read(MessageDescriptor descriptor, ReadOnlySpan<byte> body)
@@ -112,7 +112,7 @@ public sealed partial class JsonForm
 
     /// <summary>
     /// <paramref name="message"/> written in Bead's proto JSON form (transcoding 5.6), in UTF-8, or a
-    /// <see cref="FormatException"/> saying why 5.7 refuses it, which a gateway answers 500.
+    /// <see cref="JsonFormException"/> saying why 5.7 refuses it, which a gateway answers 500.
     /// </summary>
     public byte[] Write(IMessage message)
     {
@@ -197,7 +197,7 @@ public sealed partial class JsonForm
 
         if (depth > Depth)
         {
-            throw new FormatException("nested past 100");
+            throw new JsonFormException("nested past 100");
         }
 
         if (IsWellKnown(descriptor))
@@ -207,7 +207,7 @@ public sealed partial class JsonForm
 
         if (value.Kind != JsonNodeKind.Object)
         {
-            throw new FormatException($"a {descriptor.Name} that is no object");
+            throw new JsonFormException($"a {descriptor.Name} that is no object");
         }
 
         var message = descriptor.Parser.ParseFrom(ByteString.Empty);
@@ -216,11 +216,11 @@ public sealed partial class JsonForm
 
         foreach (var (key, member) in value.Members)
         {
-            var field = FieldNamed(descriptor, key) ?? throw new FormatException("a key no field names");
+            var field = FieldNamed(descriptor, key) ?? throw new JsonFormException("a key no field names");
 
             if (!named.Add(field.FieldNumber))
             {
-                throw new FormatException("a field by its two names");
+                throw new JsonFormException("a field by its two names");
             }
 
             // * null is its field's default, but where it is a value of its own: a Value's, a NullValue's
@@ -231,7 +231,7 @@ public sealed partial class JsonForm
 
             if (field.RealContainingOneof is { } oneof && !oneofs.Add(oneof.Name))
             {
-                throw new FormatException("two members of one oneof");
+                throw new JsonFormException("two members of one oneof");
             }
 
             ReadField(message, (field, member, depth));
@@ -275,7 +275,7 @@ public sealed partial class JsonForm
         {
             if (member.Kind != JsonNodeKind.Array)
             {
-                throw new FormatException("a repeated field that is no array");
+                throw new JsonFormException("a repeated field that is no array");
             }
 
             var list = (IList)field.Accessor.GetValue(message);
@@ -284,7 +284,7 @@ public sealed partial class JsonForm
             {
                 if (item.Kind == JsonNodeKind.Null && !IsNullable(field))
                 {
-                    throw new FormatException("a null item");
+                    throw new JsonFormException("a null item");
                 }
 
                 list.Add(ReadSingle(field, (item, depth)));
@@ -302,7 +302,7 @@ public sealed partial class JsonForm
 
         if (member.Kind != JsonNodeKind.Object)
         {
-            throw new FormatException("a map that is no object");
+            throw new JsonFormException("a map that is no object");
         }
 
         var keyField = field.MessageType.FindFieldByNumber(1);
@@ -315,18 +315,18 @@ public sealed partial class JsonForm
 
             if (map.Contains(readKey))
             {
-                throw new FormatException("two keys of one value");
+                throw new JsonFormException("two keys of one value");
             }
 
             if (item.Kind == JsonNodeKind.Null && !IsNullable(valueField))
             {
-                throw new FormatException("a null value in a map");
+                throw new JsonFormException("a null value in a map");
             }
 
             // * a map's entry is a message (17.9.3)
             if (depth + 1 > Depth)
             {
-                throw new FormatException("nested past 100");
+                throw new JsonFormException("nested past 100");
             }
 
             map[readKey] = ReadSingle(valueField, (item, depth + 1));
@@ -362,7 +362,7 @@ public sealed partial class JsonForm
 
         if (value.Kind == JsonNodeKind.String)
         {
-            var named = descriptor.FindValueByName(value.Text) ?? throw new FormatException($"no value of {descriptor.Name} of that name");
+            var named = descriptor.FindValueByName(value.Text) ?? throw new JsonFormException($"no value of {descriptor.Name} of that name");
 
             return System.Enum.ToObject(descriptor.ClrType, named.Number);
         }
@@ -373,24 +373,24 @@ public sealed partial class JsonForm
 
             if (!isInteger)
             {
-                throw new FormatException("an enum number that is no integer");
+                throw new JsonFormException("an enum number that is no integer");
             }
 
             if (exact < int.MinValue || exact > int.MaxValue)
             {
-                throw new FormatException("an enum number past the 32-bit range");
+                throw new JsonFormException("an enum number past the 32-bit range");
             }
 
             // * an open enum takes a number no value numbers, as every enum of proto3 is
             if (IsClosed(descriptor) && descriptor.FindValueByNumber((int)exact) is null)
             {
-                throw new FormatException($"no value of {descriptor.Name} of that number");
+                throw new JsonFormException($"no value of {descriptor.Name} of that number");
             }
 
             return System.Enum.ToObject(descriptor.ClrType, (int)exact);
         }
 
-        throw new FormatException($"no {descriptor.Name}");
+        throw new JsonFormException($"no {descriptor.Name}");
     }
 
     private static object ReadScalar(FieldType type, JsonNode value)
@@ -418,7 +418,7 @@ public sealed partial class JsonForm
                 // * the 32-bit float nearest the double, a tie to the even, refused past its largest
                 if (float.IsInfinity(narrow) && double.IsFinite(wide))
                 {
-                    throw new FormatException("a float past its range");
+                    throw new JsonFormException("a float past its range");
                 }
 
                 return narrow;
@@ -429,20 +429,26 @@ public sealed partial class JsonForm
                 {
                     JsonNodeKind.True => true,
                     JsonNodeKind.False => false,
-                    _ => throw new FormatException("no bool"),
+                    _ => throw new JsonFormException("no bool"),
                 };
             case FieldType.String:
-                return value.Kind == JsonNodeKind.String ? value.Text : throw new FormatException("no string");
+                return value.Kind == JsonNodeKind.String ? value.Text : throw new JsonFormException("no string");
             case FieldType.Bytes:
                 return ReadBytes(value);
             default:
-                throw new FormatException($"no form for a {type}");
+                throw new JsonFormException($"no form for a {type}");
         }
     }
 
     private static bool Is64(FieldType type)
     {
         return type is FieldType.Int64 or FieldType.SInt64 or FieldType.SFixed64 or FieldType.UInt64 or FieldType.Fixed64;
+    }
+
+    // the article an integer type's name takes, as it is read aloud: an int32, a uint32, a fixed32
+    private static string ArticleOf(string name)
+    {
+        return name[0] is 'a' or 'i' or 's' ? "an" : "a";
     }
 
     private static string NameOf(FieldType type)
@@ -472,7 +478,7 @@ public sealed partial class JsonForm
         {
             if (!Decimal().IsMatch(value.Text))
             {
-                throw new FormatException($"an {name} string off -?(0|[1-9][0-9]*)");
+                throw new JsonFormException($"{ArticleOf(name)} {name} string off -?(0|[1-9][0-9]*)");
             }
 
             exact = BigInteger.Parse(value.Text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
@@ -483,19 +489,19 @@ public sealed partial class JsonForm
 
             if (!isInteger)
             {
-                throw new FormatException($"an {name} that is no integer");
+                throw new JsonFormException($"{ArticleOf(name)} {name} that is no integer");
             }
 
             exact = read;
         }
         else
         {
-            throw new FormatException($"no {name}");
+            throw new JsonFormException($"no {name}");
         }
 
         if (exact < range.Low || exact > range.High)
         {
-            throw new FormatException($"an {name} past its range");
+            throw new JsonFormException($"{ArticleOf(name)} {name} past its range");
         }
 
         return exact;
@@ -516,7 +522,7 @@ public sealed partial class JsonForm
                 default:
                     if (!JsonNumber().IsMatch(value.Text))
                     {
-                        throw new FormatException($"no {name}");
+                        throw new JsonFormException($"no {name}");
                     }
 
                     break;
@@ -524,7 +530,7 @@ public sealed partial class JsonForm
         }
         else if (value.Kind != JsonNodeKind.Number)
         {
-            throw new FormatException($"no {name}");
+            throw new JsonFormException($"no {name}");
         }
 
         // * the double nearest its digits, a tie to the even (spec 17.6)
@@ -532,7 +538,7 @@ public sealed partial class JsonForm
 
         if (!double.IsFinite(read))
         {
-            throw new FormatException("a number past a double");
+            throw new JsonFormException("a number past a double");
         }
 
         return read;
@@ -543,7 +549,7 @@ public sealed partial class JsonForm
     {
         if (value.Kind != JsonNodeKind.String)
         {
-            throw new FormatException("no bytes");
+            throw new JsonFormException("no bytes");
         }
 
         var text = value.Text;
@@ -552,14 +558,14 @@ public sealed partial class JsonForm
 
         if (!(Standard().IsMatch(body) || UrlSafe().IsMatch(body)))
         {
-            throw new FormatException("bytes of no one alphabet of base64");
+            throw new JsonFormException("bytes of no one alphabet of base64");
         }
 
         var missing = (4 - (body.Length % 4)) % 4;
 
         if (body.Length % 4 == 1 || (pads != 0 && pads != missing))
         {
-            throw new FormatException("bytes padded wrongly");
+            throw new JsonFormException("bytes padded wrongly");
         }
 
         var standard = body.Replace('-', '+').Replace('_', '/');
@@ -611,14 +617,14 @@ public sealed partial class JsonForm
                 {
                     "true" => true,
                     "false" => false,
-                    _ => throw new FormatException("a bool key that is neither true nor false"),
+                    _ => throw new JsonFormException("a bool key that is neither true nor false"),
                 };
             default:
                 var name = NameOf(field.FieldType);
 
                 if (!Decimal().IsMatch(key))
                 {
-                    throw new FormatException($"an {name} key off -?(0|[1-9][0-9]*)");
+                    throw new JsonFormException($"{ArticleOf(name)} {name} key off -?(0|[1-9][0-9]*)");
                 }
 
                 var number = BigInteger.Parse(key, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
@@ -632,7 +638,7 @@ public sealed partial class JsonForm
 
                 if (number < low || number > high)
                 {
-                    throw new FormatException($"an {name} key past its range");
+                    throw new JsonFormException($"{ArticleOf(name)} {name} key past its range");
                 }
 
                 return field.FieldType switch
@@ -724,19 +730,19 @@ public sealed partial class JsonForm
             case "google.protobuf.Empty":
                 if (value.Kind != JsonNodeKind.Object)
                 {
-                    throw new FormatException("an Empty that is no object");
+                    throw new JsonFormException("an Empty that is no object");
                 }
 
-                return value.Members.Count == 0 ? new Empty() : throw new FormatException("a key no field names");
+                return value.Members.Count == 0 ? new Empty() : throw new JsonFormException("a key no field names");
             case "google.protobuf.Struct":
                 if (value.Kind != JsonNodeKind.Object)
                 {
-                    throw new FormatException("a Struct that is no object");
+                    throw new JsonFormException("a Struct that is no object");
                 }
 
                 if (value.Members.Count > 0 && depth + 1 > Depth)
                 {
-                    throw new FormatException("nested past 100");
+                    throw new JsonFormException("nested past 100");
                 }
 
                 var fields = new Struct();
@@ -750,7 +756,7 @@ public sealed partial class JsonForm
             case "google.protobuf.ListValue":
                 if (value.Kind != JsonNodeKind.Array)
                 {
-                    throw new FormatException("a ListValue that is no array");
+                    throw new JsonFormException("a ListValue that is no array");
                 }
 
                 var list = new ListValue();
@@ -796,7 +802,7 @@ public sealed partial class JsonForm
     {
         if (value.Kind != JsonNodeKind.Object)
         {
-            throw new FormatException("an Any that is no object");
+            throw new JsonFormException("an Any that is no object");
         }
 
         if (value.Members.Count == 0)
@@ -811,16 +817,16 @@ public sealed partial class JsonForm
 
         if (type.Key is null)
         {
-            throw new FormatException("an Any without its @type");
+            throw new JsonFormException("an Any without its @type");
         }
 
         if (type.Value.Kind != JsonNodeKind.String || !type.Value.Text.Contains('/', StringComparison.Ordinal))
         {
-            throw new FormatException("an Any whose @type is no URL");
+            throw new JsonFormException("an Any whose @type is no URL");
         }
 
         var url = type.Value.Text;
-        var held = _registry.Find(url[(url.LastIndexOf('/') + 1)..]) ?? throw new FormatException("an Any of a type its definitions do not hold");
+        var held = _registry.Find(url[(url.LastIndexOf('/') + 1)..]) ?? throw new JsonFormException("an Any of a type its definitions do not hold");
         var others = value.Members.Where((member) =>
         {
             return member.Key != "@type";
@@ -831,7 +837,7 @@ public sealed partial class JsonForm
         {
             if (others.Count != 1 || others[0].Key != "value")
             {
-                throw new FormatException("an Any of a well-known type whose members are not its value alone");
+                throw new JsonFormException("an Any of a well-known type whose members are not its value alone");
             }
 
             inner = ReadMessage(held, (others[0].Value, depth + 1));
@@ -850,7 +856,7 @@ public sealed partial class JsonForm
 
         if (found is not { Success: true })
         {
-            throw new FormatException("a Timestamp off RFC 3339");
+            throw new JsonFormException("a Timestamp off RFC 3339");
         }
 
         int PartOf(int group)
@@ -863,7 +869,7 @@ public sealed partial class JsonForm
 
         if (month is < 1 or > 12 || day < 1 || day > DaysIn(year, month) || hour > 23 || minute > 59 || second > 59)
         {
-            throw new FormatException("a Timestamp of no instant");
+            throw new JsonFormException("a Timestamp of no instant");
         }
 
         var zone = found.Groups[8].Value;
@@ -875,7 +881,7 @@ public sealed partial class JsonForm
 
             if (hours > 23 || minutes > 59)
             {
-                throw new FormatException("a Timestamp of no offset");
+                throw new JsonFormException("a Timestamp of no offset");
             }
 
             offset = ((hours * 3600) + (minutes * 60)) * (zone[0] == '+' ? 1 : -1);
@@ -885,7 +891,7 @@ public sealed partial class JsonForm
 
         if (seconds is < Earliest or > Latest)
         {
-            throw new FormatException("a Timestamp past its range");
+            throw new JsonFormException("a Timestamp past its range");
         }
 
         return new Timestamp { Seconds = seconds, Nanos = NanosOf(found.Groups[7].Value) };
@@ -897,7 +903,7 @@ public sealed partial class JsonForm
 
         if (found is not { Success: true })
         {
-            throw new FormatException("a Duration off its form");
+            throw new JsonFormException("a Duration off its form");
         }
 
         var sign = found.Groups[1].Success ? -1 : 1;
@@ -907,7 +913,7 @@ public sealed partial class JsonForm
 
         if (seconds > Longest)
         {
-            throw new FormatException("a Duration past its range");
+            throw new JsonFormException("a Duration past its range");
         }
 
         return new Duration { Seconds = sign * (long)seconds, Nanos = sign * NanosOf(found.Groups[3].Value) };
@@ -922,7 +928,7 @@ public sealed partial class JsonForm
     {
         if (value.Kind != JsonNodeKind.String)
         {
-            throw new FormatException("a FieldMask that is no string");
+            throw new JsonFormException("a FieldMask that is no string");
         }
 
         var mask = new FieldMask();
@@ -936,7 +942,7 @@ public sealed partial class JsonForm
         {
             if (path.Length == 0)
             {
-                throw new FormatException("a FieldMask of an empty path");
+                throw new JsonFormException("a FieldMask of an empty path");
             }
 
             var segments = path.Split('.');
@@ -946,14 +952,14 @@ public sealed partial class JsonForm
                 return !CamelSegment().IsMatch(segment);
             }))
             {
-                throw new FormatException("a FieldMask path off lowerCamelCase");
+                throw new JsonFormException("a FieldMask path off lowerCamelCase");
             }
 
             var snake = string.Join('.', segments.Select(SnakeOf));
 
             if (CamelOf(snake) != path)
             {
-                throw new FormatException("a FieldMask path that does not read back");
+                throw new JsonFormException("a FieldMask path that does not read back");
             }
 
             mask.Paths.Add(snake);
@@ -1053,7 +1059,7 @@ public sealed partial class JsonForm
 
         if (depth > Depth)
         {
-            throw new FormatException("a message nested past 100");
+            throw new JsonFormException("a message nested past 100");
         }
 
         if (IsWellKnown(message.Descriptor))
@@ -1324,7 +1330,7 @@ public sealed partial class JsonForm
             case Struct fields:
                 if (fields.Fields.Count > 0 && depth + 1 > Depth)
                 {
-                    throw new FormatException("a message nested past 100");
+                    throw new JsonFormException("a message nested past 100");
                 }
 
                 writer.Append('{');
@@ -1391,7 +1397,7 @@ public sealed partial class JsonForm
             case Value.KindOneofCase.NumberValue:
                 if (!double.IsFinite(value.NumberValue))
                 {
-                    throw new FormatException("a Value whose number is not finite");
+                    throw new JsonFormException("a Value whose number is not finite");
                 }
 
                 writer.Append(Payloads.NumberText(value.NumberValue));
@@ -1409,7 +1415,7 @@ public sealed partial class JsonForm
                 WriteMessage(writer, (value.ListValue, depth + 1));
                 break;
             default:
-                throw new FormatException("a Value that holds no kind");
+                throw new JsonFormException("a Value that holds no kind");
         }
     }
 
@@ -1430,7 +1436,7 @@ public sealed partial class JsonForm
 
         if (held is null)
         {
-            throw new FormatException("an Any whose type its definitions do not hold");
+            throw new JsonFormException("an Any whose type its definitions do not hold");
         }
 
         IMessage inner;
@@ -1441,7 +1447,7 @@ public sealed partial class JsonForm
         }
         catch (InvalidProtocolBufferException reason)
         {
-            throw new FormatException("an Any whose bytes do not read as its type", reason);
+            throw new JsonFormException("an Any whose bytes do not read as its type", reason);
         }
 
         var written = new Writer();
@@ -1478,7 +1484,7 @@ public sealed partial class JsonForm
     {
         if (timestamp.Seconds is < Earliest or > Latest || timestamp.Nanos is < 0 or > 999_999_999)
         {
-            throw new FormatException("a Timestamp outside its range");
+            throw new JsonFormException("a Timestamp outside its range");
         }
 
         var days = Math.DivRem(timestamp.Seconds, 86_400, out var within);
@@ -1501,7 +1507,7 @@ public sealed partial class JsonForm
 
         if (Math.Abs(seconds) > Longest || Math.Abs(nanos) > 999_999_999 || (seconds > 0 && nanos < 0) || (seconds < 0 && nanos > 0))
         {
-            throw new FormatException("a Duration outside its range");
+            throw new JsonFormException("a Duration outside its range");
         }
 
         var sign = seconds < 0 || nanos < 0 ? "-" : "";
@@ -1540,7 +1546,7 @@ public sealed partial class JsonForm
 
             if (string.Join('.', camel.Split('.').Select(SnakeOf)) != path)
             {
-                throw new FormatException("a FieldMask path whose lowerCamelCase does not read back");
+                throw new JsonFormException("a FieldMask path whose lowerCamelCase does not read back");
             }
 
             paths.Add(camel);

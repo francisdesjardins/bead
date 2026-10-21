@@ -23,6 +23,7 @@ import type {
   RequestCredential,
   RouterLimitsOptions,
 } from '../router/shared/types';
+import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { createMemoryTransportClient } from '../transport/client/memory-transport-client';
 import {
   assertHeld,
@@ -380,6 +381,27 @@ const scopeOf = (scope: number): 'application' | 'protocol' => {
   return scope === FailureScope.APPLICATION ? 'application' : 'protocol';
 };
 
+/** The server's answer its stock library refused, that refusal its cause. */
+class UndecodedAnswerError extends Error {
+  constructor(cause: unknown) {
+    super("the server's answer does not decode", { cause });
+    this.name = 'UndecodedAnswerError';
+  }
+}
+
+/**
+ * The server's answer read: a `proto` result or notification by its stock library, its records
+ * checked first, as its codec reads one, or a `text` one as spec 17.4 reads it; what refuses it is
+ * the answer's, never the gateway's (7.5, item 2).
+ */
+const decodedOf = <T>(read: () => T): T => {
+  try {
+    return read();
+  } catch (error) {
+    throw new UndecodedAnswerError(error);
+  }
+};
+
 // definition
 
 /**
@@ -519,14 +541,32 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     emitter.emitEach('error', { onError: () => {}, params: [toError(reason)] });
   };
 
+  /** A call or a stream held against its bounds (10.3): its release, or the words of the bound it is past. */
   const admit = (
     counts: typeof calls,
-    { address, most, mostPerAddress }: { address: string; most: number; mostPerAddress: number }
-  ): (() => void) | undefined => {
+    {
+      address,
+      isStream,
+      most,
+      mostPerAddress,
+    }: { address: string; isStream: boolean; most: number; mostPerAddress: number }
+  ): { refused: string } | { release: () => void } => {
     const held = counts.byAddress.get(address) ?? 0;
 
-    if (counts.all >= most || held >= mostPerAddress) {
-      return undefined;
+    if (counts.all >= most) {
+      return {
+        refused: isStream
+          ? 'the streams under way hold maximumConnections'
+          : 'the calls under way hold maximumExchanges',
+      };
+    }
+
+    if (held >= mostPerAddress) {
+      return {
+        refused: isStream
+          ? 'the streams of its address hold maximumConnectionsPerAddress'
+          : 'the calls of its address hold maximumExchangesPerAddress',
+      };
     }
 
     counts.all += 1;
@@ -534,21 +574,23 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     let isReleased = false;
 
-    return () => {
-      if (isReleased) {
-        return;
-      }
+    return {
+      release: () => {
+        if (isReleased) {
+          return;
+        }
 
-      isReleased = true;
-      counts.all -= 1;
+        isReleased = true;
+        counts.all -= 1;
 
-      const left = (counts.byAddress.get(address) ?? 1) - 1;
+        const left = (counts.byAddress.get(address) ?? 1) - 1;
 
-      if (left === 0) {
-        counts.byAddress.delete(address);
-      } else {
-        counts.byAddress.set(address, left);
-      }
+        if (left === 0) {
+          counts.byAddress.delete(address);
+        } else {
+          counts.byAddress.set(address, left);
+        }
+      },
     };
   };
 
@@ -678,7 +720,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         slow = clock.setTimeout(
           () => {
             fail({
-              detail: 'the body came slower than its rate',
+              detail: 'a body slower than minimumBodyBytesPerSecond',
               reason: REFUSALS.TOO_SLOW,
               status: 408,
             });
@@ -699,7 +741,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         if (received > maximumBodyBytes) {
           return (
             fail({
-              detail: `a body past ${String(maximumBodyBytes)} bytes`,
+              detail: `a body past maximumBodyBytes ${String(maximumBodyBytes)}`,
               reason: REFUSALS.TOO_LARGE,
               status: 413,
             }),
@@ -710,7 +752,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         if (bodyBytes > bodyBytesBudget) {
           return (
             fail({
-              detail: 'the bodies under way hold their budget',
+              detail: 'the bodies under way hold bodyBytesBudget',
               fields: { 'retry-after': '1' },
               reason: REFUSALS.BUSY,
               status: 503,
@@ -785,7 +827,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     // * the stock library's own read, its records checked: what it refuses is the server's answer
-    const message = codec.decode(bytes) as Message;
+    const message = decodedOf(() => {
+      return codec.decode(bytes) as Message;
+    });
 
     return {
       body:
@@ -866,14 +910,21 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       return problemOfOwn('closed', { detail: 'the connection closed' });
     }
 
-    // the stock library's refusal of a result, or a notification, the server answered, or what else
-    // the call threw: its words are never the gateway's, reported, and its code alone answers (9.0)
+    // the stock library's refusal of a result, or a notification, the server answered: its words
+    // are never the gateway's, reported, and its code alone answers (9.0)
+    if (reason instanceof UndecodedAnswerError) {
+      report(reason.cause);
+
+      return problemOfFailure(
+        { arose: 'answer', code: ProtocolCode.PAYLOAD_UNDECODABLE, scope: 'protocol' },
+        { challenge }
+      );
+    }
+
+    // ! what no gate foresaw: its words are reported, never the gateway's
     report(reason);
 
-    return problemOfFailure(
-      { arose: 'answer', code: ProtocolCode.PAYLOAD_UNDECODABLE, scope: 'protocol' },
-      { challenge }
-    );
+    return problemOfOwn('unwritable', { detail: 'the gateway failed' });
   };
 
   /** Serves an exchange its routes take, past the gates of 10.1's steps 8 to 11. */
@@ -896,7 +947,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (takesBody && !isTakenType(request, encoding)) {
       return (
         refuse(exchange, {
-          detail: `a body of ${MEDIA_TYPES[encoding]} alone, unencoded`,
+          detail: `this route's body is ${MEDIA_TYPES[encoding]}, unencoded`,
           reason: REFUSALS.TYPE,
           status: 415,
         }),
@@ -932,7 +983,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (Number.isFinite(declared) && declared > maximumBodyBytes) {
       return (
         refuse(exchange, {
-          detail: `a body declared past ${String(maximumBodyBytes)} bytes`,
+          detail: `a body declared past maximumBodyBytes ${String(maximumBodyBytes)}`,
           reason: REFUSALS.TOO_LARGE,
           status: 413,
         }),
@@ -941,24 +992,24 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     const isStream = init.notification !== undefined && asksStream(request);
-    const release = isStream
+    const admitted = isStream
       ? admit(streams, {
           address: exchange.address,
+          isStream,
           most: maximumConnections,
           mostPerAddress: maximumConnectionsPerAddress,
         })
       : admit(calls, {
           address: exchange.address,
+          isStream,
           most: maximumExchanges,
           mostPerAddress: maximumExchangesPerAddress,
         });
 
-    if (release === undefined) {
+    if ('refused' in admitted) {
       return (
         refuse(exchange, {
-          detail: isStream
-            ? 'the streams of its address are at their bound'
-            : 'the calls of its address are at their bound',
+          detail: admitted.refused,
           fields: { 'retry-after': '1' },
           reason: REFUSALS.BUSY,
           status: 503,
@@ -966,6 +1017,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         undefined
       );
     }
+
+    const { release } = admitted;
 
     response.on('close', release);
 
@@ -1241,9 +1294,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     let written: { body: string } | { bytes: Uint8Array };
+    let data = '';
 
     try {
       written = resultBodyOf(chosen, { bytes: result, isNotification: false });
+
+      if (stream !== undefined) {
+        data = 'body' in written ? written.body : dataOfNative(init.result, written.bytes);
+      }
     } catch (error) {
       const problem =
         problemOfCall(error, {
@@ -1264,10 +1322,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     if (stream !== undefined) {
-      return (
-        stream.result('body' in written ? written.body : dataOfNative(init.result, written.bytes)),
-        undefined
-      );
+      return (stream.result(data), undefined);
     }
 
     const resultEncoding = encodingOf(init.result);
@@ -1281,10 +1336,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     return (close(), undefined);
   };
 
-  /** A `json`, `text` or `raw` payload as an event's data (8.4). */
+  /** A `json`, `text` or `raw` payload as an event's data (8.4), a `text` one read as spec 17.4 reads it. */
   const dataOfNative = (payload: HttpPayload | undefined, bytes: Uint8Array): string => {
     if (payload === 'text') {
-      return eventDataOf({ encoding: 'text', text: DECODER.decode(bytes) });
+      const text = decodedOf(() => {
+        return PAYLOAD_CODECS.text.decode(bytes);
+      });
+
+      return eventDataOf({ encoding: 'text', text });
     }
 
     if (payload === 'raw') {
@@ -1418,7 +1477,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
       if (!isNavigation || !(isDocument || navigated?.isNavigable === true)) {
         refuse(exchange, {
-          detail: 'a request of another site that shows no origin',
+          detail: 'a request from a page of another site that shows no origin',
           reason: REFUSALS.ORIGIN,
           status: 403,
         });
@@ -1453,7 +1512,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     if (chosen === undefined || path === undefined) {
       refuse(exchange, {
-        detail: `a method no route of its path takes, ${method}`,
+        detail: 'a method no route of its path takes',
         fields: { allow: methods.join(', ') },
         reason: REFUSALS.METHOD,
         status: 405,
@@ -1477,7 +1536,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   const serveDocument = (exchange: IExchange, method: string): void => {
     if (method !== 'GET' && method !== 'HEAD') {
       refuse(exchange, {
-        detail: `a method the document takes none of, ${method}`,
+        detail: 'a method the document takes none of',
         fields: { allow: 'GET, HEAD' },
         reason: REFUSALS.METHOD,
         status: 405,

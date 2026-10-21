@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
+import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
@@ -27,6 +28,17 @@ interface IAnswered {
   body: string;
   headers: IncomingHttpHeaders;
   status: number;
+}
+
+/** A refusal or a failure of the gateway's own, as a request meets it: its status, mark and words. */
+interface IOwnCase {
+  body?: string;
+  /** Its request's line, then its fields; a `host` of the gateway's own where it names none. */
+  lines: readonly string[];
+  /** Its `bead-refusal`; none for a failure of its own, unmarked. */
+  reason?: string;
+  status: number;
+  words: string;
 }
 
 // constants
@@ -71,6 +83,84 @@ const send = (port: number, sent: ISent): Promise<IAnswered> => {
 
     outgoing.on('error', reject);
     outgoing.end(body);
+  });
+};
+
+/** A request's octets as a socket of the test's own writes them: its lines, its length, its body. */
+const octetsOf = (port: number, { body = '', lines }: Pick<IOwnCase, 'body' | 'lines'>): string => {
+  const [line = '', ...fields] = lines;
+  const named = fields.some((field) => {
+    return field.toLowerCase().startsWith('host:');
+  });
+  const isChunked = fields.some((field) => {
+    return field.toLowerCase().startsWith('transfer-encoding:');
+  });
+
+  return [
+    line,
+    ...(named ? [] : [`host: 127.0.0.1:${String(port)}`]),
+    ...fields,
+    ...(body === '' || isChunked ? [] : [`content-length: ${String(Buffer.byteLength(body))}`]),
+    'connection: close',
+    '',
+    body,
+  ].join('\r\n');
+};
+
+/** Opens a socket of the test's own to the gateway on `port` and writes `octets` on it. */
+const opened = (port: number, octets: string): Socket => {
+  const socket = connect(port, '127.0.0.1');
+
+  socket.on('error', () => {});
+  socket.write(octets);
+
+  return socket;
+};
+
+/** Writes `octets` on a socket of its own, and reads the response whole, to the socket's close. */
+const exchanged = (port: number, octets: string): Promise<IAnswered> => {
+  const socket = opened(port, octets);
+  const chunks: Buffer[] = [];
+
+  socket.on('data', (chunk: Buffer) => {
+    chunks.push(chunk);
+  });
+
+  return new Promise((resolve) => {
+    socket.on('close', () => {
+      const text = Buffer.concat(chunks).toString('utf8');
+      const end = text.indexOf('\r\n\r\n');
+      const [statusLine = '', ...fields] = text.slice(0, end).split('\r\n');
+      const headers: IncomingHttpHeaders = {};
+
+      for (const field of fields) {
+        const colon = field.indexOf(':');
+
+        headers[field.slice(0, colon).trim().toLowerCase()] = field.slice(colon + 1).trim();
+      }
+
+      resolve({
+        body: text.slice(end + 4),
+        headers,
+        status: Number(statusLine.split(' ')[1]),
+      });
+    });
+  });
+};
+
+/** What a case's response parts from it: its status, its mark, and its problem's words exactly. */
+const partsOf = (answered: IAnswered, expected: IOwnCase): string[] => {
+  const { detail } = JSON.parse(answered.body || '{}') as { detail?: string };
+  const parts = [
+    ...(answered.status === expected.status ? [] : [`status ${String(answered.status)}`]),
+    ...(answered.headers['bead-refusal'] === expected.reason
+      ? []
+      : [`bead-refusal ${String(answered.headers['bead-refusal'])}`]),
+    ...(detail === expected.words ? [] : [`detail ${String(detail)}`]),
+  ];
+
+  return parts.map((part) => {
+    return `${expected.words}: ${part}`;
   });
 };
 
@@ -475,6 +565,16 @@ test('answers a result the stock library refuses 502, reported, none of its word
   });
   expect(reported).toHaveLength(1);
   expect(answered.body).not.toContain(reported[0]);
+
+  // and one whose records its codec refuses first (spec 17.9.5): `at`, a message, as a varint
+  const recorded = await send(fixture.port, {
+    body: '\u0008\u0000',
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(recorded).toMatchObject({ body: answered.body, status: 502 });
+  expect(reported).toHaveLength(2);
 });
 
 test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, reported, none of its words in the problem', async () => {
@@ -494,6 +594,7 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
   expect(reported[0]).toMatch(/, not open$/u);
 });
 
+// transcoding 7.6.27
 test('answers what no gate foresaw 500, reported, none of its words in the problem', async () => {
   // * a clock that breaks as a body is read, past every gate
   const broken: IClock = {
@@ -521,4 +622,222 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
     status: 500,
   });
   expect(reported).toEqual(['the clock broke']);
+});
+
+test('words each refusal of its gates exactly, none of them what its request carried', async () => {
+  const json = 'content-type: application/json';
+  const book = '{"aString":"0123456789"}';
+  const cases: Record<'jwt' | 'plain' | 'small', IOwnCase[]> = {
+    jwt: [
+      {
+        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Basic YTpi'],
+        body: '{}',
+        status: 401,
+        words: 'an auth-scheme but Bearer',
+      },
+      {
+        lines: [
+          'POST /api/Transcoding/whoAmI HTTP/1.1',
+          json,
+          `authorization: Bearer ${'a'.repeat(1_005)}`,
+        ],
+        body: '{}',
+        status: 431,
+        words: 'a token past 1004 bytes',
+      },
+    ],
+    plain: [
+      {
+        lines: ['GET /v1/books/2 HTTP/1.1', 'host: evil.example'],
+        reason: 'host-refused',
+        status: 403,
+        words: 'a host it does not take',
+      },
+      {
+        lines: ['GET /nope HTTP/1.1'],
+        reason: 'path-unknown',
+        status: 404,
+        words: 'a path no route matches',
+      },
+      {
+        lines: ['GET /v1/books/2 HTTP/1.1', 'origin: https://other.example'],
+        reason: 'origin-refused',
+        status: 403,
+        words: 'an origin neither its own nor listed',
+      },
+      {
+        lines: [
+          'GET /v1/books/2 HTTP/1.1',
+          'sec-fetch-site: cross-site',
+          'sec-fetch-mode: no-cors',
+        ],
+        reason: 'origin-refused',
+        status: 403,
+        words: 'a request from a page of another site that shows no origin',
+      },
+      {
+        lines: ['PUT /v1/shelves/1/books/2 HTTP/1.1', json],
+        body: '{}',
+        reason: 'method-refused',
+        status: 405,
+        words: 'a method no route of its path takes',
+      },
+      {
+        lines: ['POST /openapi.json HTTP/1.1', json],
+        body: '{}',
+        reason: 'method-refused',
+        status: 405,
+        words: 'a method the document takes none of',
+      },
+      {
+        lines: ['GET /openapi.json HTTP/1.1', json],
+        body: '{}',
+        reason: 'malformed',
+        status: 400,
+        words: 'content to the document',
+      },
+      {
+        lines: ['POST /api/Transcoding/echo HTTP/1.1', 'content-type: text/plain'],
+        body: '{}',
+        reason: 'type-refused',
+        status: 415,
+        words: "this route's body is application/json, unencoded",
+      },
+      {
+        lines: ['GET /v1/books/2 HTTP/1.1', json],
+        body: '{}',
+        reason: 'malformed',
+        status: 400,
+        words: 'content to a route that takes none',
+      },
+      {
+        lines: [
+          'POST /api/Transcoding/whoAmI HTTP/1.1',
+          json,
+          'authorization: Bearer good',
+          'authorization: Bearer good',
+        ],
+        body: '{}',
+        reason: 'malformed',
+        status: 400,
+        words: 'two authorization fields',
+      },
+    ],
+    small: [
+      {
+        lines: ['POST /api/Transcoding/echo HTTP/1.1', json],
+        body: book,
+        reason: 'too-large',
+        status: 413,
+        words: 'a body declared past maximumBodyBytes 16',
+      },
+      {
+        lines: ['POST /api/Transcoding/echo HTTP/1.1', json, 'transfer-encoding: chunked'],
+        body: `18\r\n${book}\r\n0\r\n\r\n`,
+        reason: 'too-large',
+        status: 413,
+        words: 'a body past maximumBodyBytes 16',
+      },
+    ],
+  };
+  await using plain = await startTranscoding();
+  await using jwt = await startTranscoding({ authorization: 'bearer-jwt' });
+  await using small = await startTranscoding({ maximumBodyBytes: 16 });
+  const parted: string[] = [];
+
+  for (const [fixture, each] of [
+    [plain, cases.plain],
+    [jwt, cases.jwt],
+    [small, cases.small],
+  ] as const) {
+    for (const expected of each) {
+      parted.push(
+        ...partsOf(await exchanged(fixture.port, octetsOf(fixture.port, expected)), expected)
+      );
+    }
+  }
+
+  expect(parted).toEqual([]);
+});
+
+test('words each refusal of its bounds exactly', async () => {
+  const echo: Pick<IOwnCase, 'body' | 'lines'> = {
+    body: '{}',
+    lines: ['POST /api/Transcoding/echo HTTP/1.1', 'content-type: application/json'],
+  };
+  const hang = {
+    ...echo,
+    lines: ['POST /api/Transcoding/hang HTTP/1.1', 'content-type: application/json'],
+  };
+  const watch = {
+    ...echo,
+    lines: [
+      'POST /api/Transcoding/watch HTTP/1.1',
+      'content-type: application/json',
+      'accept: text/event-stream',
+    ],
+  };
+  const parted: string[] = [];
+  const meet = async (
+    fixture: Awaited<ReturnType<typeof startTranscoding>>,
+    expected: IOwnCase
+  ): Promise<void> => {
+    parted.push(
+      ...partsOf(await exchanged(fixture.port, octetsOf(fixture.port, expected)), expected)
+    );
+  };
+
+  // * a call that hangs holds its bound; a second is refused past it, every caller's or its address's
+  for (const [options, words] of [
+    [{ maximumExchanges: 1 }, 'the calls under way hold maximumExchanges'],
+    [{ maximumExchangesPerAddress: 1 }, 'the calls of its address hold maximumExchangesPerAddress'],
+  ] as const) {
+    await using fixture = await startTranscoding(options);
+    const held = opened(fixture.port, octetsOf(fixture.port, hang));
+
+    await until(() => {
+      return fixture.counts.hanging === 1;
+    });
+    await meet(fixture, { ...echo, reason: 'busy', status: 503, words });
+    held.destroy();
+  }
+
+  // a stream that stays holds its own, apart from the calls
+  for (const [options, words] of [
+    [{ maximumConnections: 1 }, 'the streams under way hold maximumConnections'],
+    [
+      { maximumConnectionsPerAddress: 1 },
+      'the streams of its address hold maximumConnectionsPerAddress',
+    ],
+  ] as const) {
+    await using fixture = await startTranscoding(options);
+    const held = opened(fixture.port, octetsOf(fixture.port, watch));
+
+    await new Promise((resolve) => {
+      held.once('data', resolve);
+    });
+    await meet(fixture, { ...watch, reason: 'busy', status: 503, words });
+    held.destroy();
+  }
+
+  await using budget = await startTranscoding({ bodyBytesBudget: 4 });
+  await using slow = await startTranscoding({ bodyGracePeriod: 100 });
+  await using timed = await startTranscoding({ timeout: 50 });
+
+  await meet(budget, {
+    body: '{"anInt32":1}',
+    lines: echo.lines,
+    reason: 'busy',
+    status: 503,
+    words: 'the bodies under way hold bodyBytesBudget',
+  });
+  await meet(slow, {
+    lines: [...echo.lines, 'content-length: 10'],
+    reason: 'too-slow',
+    status: 408,
+    words: 'a body slower than minimumBodyBytesPerSecond',
+  });
+  await meet(timed, { ...hang, status: 504, words: 'no answer within 50 ms' });
+
+  expect(parted).toEqual([]);
 });

@@ -27,7 +27,7 @@ public sealed class JsonFormTests
     private static void Refused<TMessage>(string body)
         where TMessage : IMessage<TMessage>, new()
     {
-        Assert.Throws<FormatException>(() =>
+        Assert.Throws<JsonFormException>(() =>
         {
             Read<TMessage>(body);
         });
@@ -106,11 +106,11 @@ public sealed class JsonFormTests
         Assert.Equal("{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Inner\",\"name\":\"a\",\"count\":2}}", Written(new Edges { Any = Any.Pack(new Inner { Name = "a", Count = 2 }) }));
 
         // 5.7: what Bead's proto JSON form holds none of is refused, a gateway's own 500
-        Assert.Throws<FormatException>(() =>
+        Assert.Throws<JsonFormException>(() =>
         {
             Form.Write(new Edges { Value = Value.ForNumber(double.NaN) });
         });
-        Assert.Throws<FormatException>(() =>
+        Assert.Throws<JsonFormException>(() =>
         {
             Form.Write(new Edges { Mask = new FieldMask { Paths = { "foo_" } } });
         });

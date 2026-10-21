@@ -77,7 +77,7 @@ public sealed class HttpEvents
     /// An event's data (8.4), one JSON text: a <c>proto</c> payload by Bead's proto JSON form, a
     /// <c>json</c> one as it is, a <c>text</c> one as a JSON string, a <c>raw</c> one as a JSON string
     /// of its bytes in standard base64, padded. A <c>proto</c> payload Bead's proto JSON form holds
-    /// none of is a <see cref="FormatException"/>.
+    /// none of is a <see cref="JsonFormException"/>.
     /// </summary>
     public static ReadOnlyMemory<byte> DataOf(HttpPayload payload, (ReadOnlyMemory<byte> Bytes, JsonForm Form) of)
     {

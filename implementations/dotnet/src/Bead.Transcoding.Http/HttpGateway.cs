@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using Bead.Protobuf;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -111,7 +113,7 @@ public sealed class HttpGateway : IAsyncDisposable
             return new[] { route.Request, route.Result, route.Notification }.Select((payload) =>
             {
                 return payload?.Descriptor;
-            }).OfType<Google.Protobuf.Reflection.MessageDescriptor>();
+            }).OfType<MessageDescriptor>();
         }));
         _binding = new HttpBinding(_form);
 
@@ -226,7 +228,7 @@ public sealed class HttpGateway : IAsyncDisposable
         // 2. a host it does not take
         if (!HostsAndOrigins.IsTakenHost(authority, _policy.Hosts))
         {
-            await Refuse(context, (StatusCodes.Status403Forbidden, "host-refused", $"the host {authority ?? "named by none"} is not one this gateway takes"));
+            await Refuse(context, (StatusCodes.Status403Forbidden, "host-refused", "a host it does not take"));
 
             return;
         }
@@ -240,7 +242,7 @@ public sealed class HttpGateway : IAsyncDisposable
         // 3. a path no route matches
         if (!isDocument && matched.Count == 0)
         {
-            await Refuse(context, (StatusCodes.Status404NotFound, "path-unknown", $"no route answers {path}"));
+            await Refuse(context, (StatusCodes.Status404NotFound, "path-unknown", "a path no route matches"));
 
             return;
         }
@@ -251,7 +253,7 @@ public sealed class HttpGateway : IAsyncDisposable
         // 4. an origin neither its own nor listed
         if (!HostsAndOrigins.IsTakenOrigin(origin, (own, _policy.Origins)))
         {
-            await Refuse(context, (StatusCodes.Status403Forbidden, "origin-refused", $"the origin {origin} is neither this gateway's nor one it lists"));
+            await Refuse(context, (StatusCodes.Status403Forbidden, "origin-refused", "an origin neither its own nor listed"));
 
             return;
         }
@@ -285,9 +287,18 @@ public sealed class HttpGateway : IAsyncDisposable
 
         if (isDocument)
         {
-            await (method == "GET"
-                ? ServeDocument(context)
-                : Refuse(context, (StatusCodes.Status405MethodNotAllowed, "method-refused", $"{DocumentPath} takes GET and HEAD"), new Dictionary<string, string> { ["allow"] = "GET, HEAD" }));
+            if (method != "GET")
+            {
+                await Refuse(context, (StatusCodes.Status405MethodNotAllowed, "method-refused", "a method the document takes none of"), new Dictionary<string, string> { ["allow"] = "GET, HEAD" });
+            }
+            else if (HasBody(request))
+            {
+                await Refuse(context, (StatusCodes.Status400BadRequest, "malformed", "content to the document"));
+            }
+            else
+            {
+                await ServeDocument(context);
+            }
 
             return;
         }
@@ -295,7 +306,7 @@ public sealed class HttpGateway : IAsyncDisposable
         // 7. a method no route of its path takes
         if (!matched.TryGetValue(method, out var served))
         {
-            await Refuse(context, (StatusCodes.Status405MethodNotAllowed, "method-refused", $"no route of {path} takes {request.Method}"), new Dictionary<string, string> { ["allow"] = string.Join(", ", MethodsOf(matched)) });
+            await Refuse(context, (StatusCodes.Status405MethodNotAllowed, "method-refused", "a method no route of its path takes"), new Dictionary<string, string> { ["allow"] = string.Join(", ", MethodsOf(matched)) });
 
             return;
         }
@@ -313,7 +324,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             if (HasBody(request))
             {
-                await Refuse(context, (StatusCodes.Status400BadRequest, "malformed", "this route takes no body"));
+                await Refuse(context, (StatusCodes.Status400BadRequest, "malformed", "content to a route that takes none"));
 
                 return;
             }
@@ -335,7 +346,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
         if (request.ContentLength > _policy.MaximumBodyBytes)
         {
-            await Refuse(context, (StatusCodes.Status413PayloadTooLarge, "too-large", $"a body past maximumBodyBytes {_policy.MaximumBodyBytes}"));
+            await Refuse(context, (StatusCodes.Status413PayloadTooLarge, "too-large", $"a body declared past maximumBodyBytes {_policy.MaximumBodyBytes}"));
 
             return;
         }
@@ -343,9 +354,9 @@ public sealed class HttpGateway : IAsyncDisposable
         var isStream = served.Route.Notification is not null && AcceptsStream(request);
         var address = AddressOf(context) ?? "local";
 
-        if (!Hold((address, isStream)))
+        if (Hold((address, isStream)) is { } bound)
         {
-            await Refuse(context, (StatusCodes.Status503ServiceUnavailable, "busy", "this gateway holds all it can of this caller's"), new Dictionary<string, string> { ["retry-after"] = "1" });
+            await Refuse(context, (StatusCodes.Status503ServiceUnavailable, "busy", bound), new Dictionary<string, string> { ["retry-after"] = "1" });
 
             return;
         }
@@ -530,8 +541,9 @@ public sealed class HttpGateway : IAsyncDisposable
         };
     }
 
-    // a call or a stream held against its bounds, in all and by its caller's address (10.3)
-    private bool Hold((string Address, bool IsStream) held)
+    // a call or a stream held against its bounds, in all and by its caller's address (10.3): none,
+    // or the words of the bound it is past, every caller's before its address's
+    private string? Hold((string Address, bool IsStream) held)
     {
         lock (_gate)
         {
@@ -540,9 +552,14 @@ public sealed class HttpGateway : IAsyncDisposable
                 : (_callsByAddress, _calls, _options.MaximumExchanges, _options.MaximumExchangesPerAddress);
             var ofAddress = byAddress.GetValueOrDefault(held.Address);
 
-            if (all >= maximum || ofAddress >= perAddress)
+            if (all >= maximum)
             {
-                return false;
+                return held.IsStream ? "the streams under way hold maximumConnections" : "the calls under way hold maximumExchanges";
+            }
+
+            if (ofAddress >= perAddress)
+            {
+                return held.IsStream ? "the streams of its address hold maximumConnectionsPerAddress" : "the calls of its address hold maximumExchangesPerAddress";
             }
 
             byAddress[held.Address] = ofAddress + 1;
@@ -556,7 +573,7 @@ public sealed class HttpGateway : IAsyncDisposable
                 _calls += 1;
             }
 
-            return true;
+            return null;
         }
     }
 
@@ -756,7 +773,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             payload = PayloadOf((served, target, body));
         }
-        catch (FormatException refused)
+        catch (JsonFormException refused)
         {
             // * the mapping's own words of the client's own request, fixed in transcoding.json
             await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, refused.Message), problems));
@@ -833,7 +850,7 @@ public sealed class HttpGateway : IAsyncDisposable
                 return sequence.Length > 0;
             }))
             {
-                throw new FormatException("a query beside a body of the whole request");
+                throw new JsonFormException("a query beside a body of the whole request");
             }
 
             return body;
@@ -888,38 +905,80 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
-        IMessage message;
-
-        try
-        {
-            message = descriptor.Parser.ParseFrom(payload.Span);
-        }
-        catch (InvalidProtocolBufferException reason)
-        {
-            // the stock library's refusal of the result its server answered: its words are the
-            // library's, reported, and its code alone answers (spec 9.0)
-            Report(reason);
-            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), problems with { Arose = FailureArising.Answer }));
-
-            return;
-        }
-
         byte[] written;
 
         try
         {
+            var message = Decoded(descriptor, payload);
+
             written = served.Rule.ResponseBody is { } field ? _form.WriteField(message, field) : _form.Write(message);
         }
-        catch (FormatException reason)
+        catch (Exception reason) when (reason is JsonFormException or UndecodedAnswerException)
         {
-            // * the mapping's own words of the result it holds no form of, fixed in transcoding.json
-            Report(reason);
-            await Answer(context, HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, _options.Challenge)));
+            await Answer(context, AnswerRefused(reason, problems));
 
             return;
         }
 
         await WriteWhole(context, (StatusCodes.Status200OK, "application/json", written));
+    }
+
+    // ! the server's answer read: a proto result or notification by its stock library, its records
+    // checked first (spec 17.9), as its client's codec reads one; what refuses it is the answer's,
+    // never the gateway's (7.5, item 2), and EventDataOf reads a text one so too
+    private static IMessage Decoded(MessageDescriptor descriptor, ReadOnlyMemory<byte> bytes)
+    {
+        try
+        {
+            ProtoRecords.Check(bytes.Span, descriptor);
+
+            return descriptor.Parser.ParseFrom(bytes.Span);
+        }
+        catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
+        {
+            throw new UndecodedAnswerException(reason);
+        }
+    }
+
+    // a result or a notification as an event's data (8.4): a proto one read, then written in Bead's
+    // proto JSON form; a text one read as UTF-8 (spec 17.4); a json or a raw one as it came
+    private ReadOnlyMemory<byte> EventDataOf(HttpPayload payload, ReadOnlyMemory<byte> bytes)
+    {
+        if (payload.Descriptor is { } descriptor)
+        {
+            return _form.Write(Decoded(descriptor, bytes));
+        }
+
+        if (payload.Encoding == HttpEncoding.Text)
+        {
+            try
+            {
+                return Payloads.WriteJsonString(Payloads.ReadText(bytes));
+            }
+            catch (FormatException reason)
+            {
+                throw new UndecodedAnswerException(reason);
+            }
+        }
+
+        return HttpEvents.DataOf(payload, (bytes, _form));
+    }
+
+    // what refused the server's answer, reported: Bead's mapping, of a result it holds no form of,
+    // 500 in its own words, fixed in transcoding.json (5.7); or its stock library, 502, its code
+    // alone, none of the library's words (spec 9.0)
+    private HttpProblem AnswerRefused(Exception reason, ProblemContext problems)
+    {
+        if (reason is JsonFormException unwritable)
+        {
+            Report(unwritable);
+
+            return HttpProblems.Own(OwnFailure.Unwritable, (unwritable.Message, _options.Challenge));
+        }
+
+        Report(reason.InnerException ?? reason);
+
+        return HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), problems with { Arose = FailureArising.Answer });
     }
 
     // ── A stream, transcoding 8 ─────────────────────────────────────────────────────────────────
@@ -981,15 +1040,11 @@ public sealed class HttpGateway : IAsyncDisposable
 
         try
         {
-            data = HttpEvents.DataOf(route.Result, (result.Payload, _form));
+            data = EventDataOf(route.Result, result.Payload);
         }
-        catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
+        catch (Exception reason) when (reason is JsonFormException or UndecodedAnswerException)
         {
-            Report(reason);
-
-            var problem = reason is FormatException
-                ? HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, _options.Challenge))
-                : HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), problems with { Arose = FailureArising.Answer });
+            var problem = AnswerRefused(reason, problems);
 
             events.Failure(problem.Body, out _);
             await Answer(context, problem);
@@ -1412,6 +1467,9 @@ public sealed class HttpGateway : IAsyncDisposable
     // a refusal of the gateway's own: its status, its mark and its words
     private sealed record Refused(int Status, string Reason, string Words);
 
+    // the server's answer its stock library refused, that refusal inside it
+    private sealed class UndecodedAnswerException(Exception refusal) : Exception("the server's answer does not decode", refusal);
+
     // the notification of one stream's subscription, paced: each credited once the event before it
     // was taken by its response (8.8), and the failure that ends it written as its last event
     private sealed class StreamNotification(HttpRoute route, (HttpEvents Events, HttpGateway Gateway, ProblemContext Problems, TaskCompletionSource Ended) stream) : INotificationLike
@@ -1438,17 +1496,11 @@ public sealed class HttpGateway : IAsyncDisposable
 
             try
             {
-                data = HttpEvents.DataOf(route.Notification!, (payload, stream.Gateway._form));
+                data = stream.Gateway.EventDataOf(route.Notification!, payload);
             }
-            catch (Exception reason) when (reason is FormatException or InvalidProtocolBufferException)
+            catch (Exception reason) when (reason is JsonFormException or UndecodedAnswerException)
             {
-                stream.Gateway.Report(reason);
-
-                var problem = reason is FormatException
-                    ? HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, stream.Gateway._options.Challenge))
-                    : HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable), stream.Problems with { Arose = FailureArising.Answer });
-
-                End(problem.Body);
+                End(stream.Gateway.AnswerRefused(reason, stream.Problems).Body);
 
                 return [];
             }

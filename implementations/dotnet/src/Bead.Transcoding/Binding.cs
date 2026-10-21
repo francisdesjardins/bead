@@ -32,7 +32,7 @@ public sealed record BindingRequest
 /// A <c>proto</c> request bound from its route's variables, its query and its body into one JSON
 /// value of its message, then read by Bead's mapping, so that one reader judges every field wherever
 /// it came from (transcoding 4, <c>http.proto</c>'s rules); a <c>PATCH</c>'s <c>update_mask</c>
-/// filled with the members its body holds (4.5). A refusal is a <see cref="FormatException"/>,
+/// filled with the members its body holds (4.5). A refusal is a <see cref="JsonFormException"/>,
 /// which a gateway answers 400 <c>PAYLOAD_UNDECODABLE</c>.
 /// </summary>
 public sealed class HttpBinding
@@ -62,7 +62,7 @@ public sealed class HttpBinding
 
     /// <summary>
     /// The request <paramref name="request"/> brings, bound by <paramref name="route"/>, whose template
-    /// matches its path: its message, or a <see cref="FormatException"/> saying why it is refused.
+    /// matches its path: its message, or a <see cref="JsonFormException"/> saying why it is refused.
     /// </summary>
     public IMessage Bind(BindingRoute route, BindingRequest request)
     {
@@ -94,7 +94,7 @@ public sealed class HttpBinding
 
             if (inner.Kind == JsonNodeKind.Null)
             {
-                throw new FormatException("a body that is null");
+                throw new JsonFormException("a body that is null");
             }
 
             // ! the mask is of the members the body holds as its caller sent them, before a variable joins it
@@ -125,7 +125,7 @@ public sealed class HttpBinding
 
         if (pairs.Count > 0 && body == Whole)
         {
-            throw new FormatException("a query beside a body of the whole request");
+            throw new JsonFormException("a query beside a body of the whole request");
         }
 
         var named = new HashSet<string>(StringComparer.Ordinal);
@@ -134,23 +134,23 @@ public sealed class HttpBinding
 
         foreach (var (name, text) in pairs)
         {
-            var fields = FieldsAlong(route.Request, (name, true)) ?? throw new FormatException("a parameter no field path names");
+            var fields = FieldsAlong(route.Request, (name, true)) ?? throw new JsonFormException("a parameter no field path names");
             var leaf = fields[^1];
             var key = KeyOf(fields);
 
             if (bound.Contains(key) || (body is not null && fields[0].Name == body))
             {
-                throw new FormatException("a parameter of a field the route binds otherwise");
+                throw new JsonFormException("a parameter of a field the route binds otherwise");
             }
 
             if (leaf.IsMap || (leaf.IsRepeated && leaf.FieldType == FieldType.Message))
             {
-                throw new FormatException("a parameter of a map or a repeated message");
+                throw new JsonFormException("a parameter of a map or a repeated message");
             }
 
             if (leaf.FieldType == FieldType.Message && !leaf.MessageType.IsWrapper() && !StringForms.Contains(leaf.MessageType.FullName))
             {
-                throw new FormatException("a parameter of a message");
+                throw new JsonFormException("a parameter of a message");
             }
 
             if (leaf.IsRepeated)
@@ -169,7 +169,7 @@ public sealed class HttpBinding
 
             if (!named.Add(key))
             {
-                throw new FormatException("a field the query names twice");
+                throw new JsonFormException("a field the query names twice");
             }
 
             var value = leaf.FieldType != FieldType.Message
@@ -289,7 +289,7 @@ public sealed class HttpBinding
 
         if (root.Kind != JsonNodeKind.Object)
         {
-            throw new FormatException("a body that is no object");
+            throw new JsonFormException("a body that is no object");
         }
 
         var members = root.Members;
@@ -320,7 +320,7 @@ public sealed class HttpBinding
             }
             else
             {
-                throw new FormatException("a field that two of the request set");
+                throw new JsonFormException("a field that two of the request set");
             }
         }
 
@@ -328,7 +328,7 @@ public sealed class HttpBinding
 
         if (leaf >= 0 && members[leaf].Value.Kind != JsonNodeKind.Null)
         {
-            throw new FormatException("a field that two of the request set");
+            throw new JsonFormException("a field that two of the request set");
         }
 
         if (leaf >= 0)
@@ -422,7 +422,7 @@ public sealed class HttpBinding
         }
         catch (DecoderFallbackException reason)
         {
-            throw new FormatException("a query whose bytes are not UTF-8", reason);
+            throw new JsonFormException("a query whose bytes are not UTF-8", reason);
         }
     }
 }

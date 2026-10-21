@@ -42,14 +42,16 @@ public sealed class TranscodingTests
                 return text.GetString()!;
             }).ToList();
 
-            if (entry.TryGetProperty("refused", out _))
+            if (StringOf(entry, "refused") is { } refusal)
             {
-                if (!Refuses(() =>
+                var parsed = RefusalOf<FormatException>(() =>
                 {
                     HttpTemplate.Parse(texts[0]);
-                }))
+                });
+
+                if (parsed != refusal)
                 {
-                    parted.Add($"templates: {name}: parsed");
+                    parted.Add($"templates: {name}: {parsed ?? "parsed"}");
                 }
 
                 continue;
@@ -86,14 +88,16 @@ public sealed class TranscodingTests
                     continue;
                 }
 
-                if (path.TryGetProperty("refused", out _))
+                if (StringOf(path, "refused") is { } refused)
                 {
-                    if (!Refuses(() =>
+                    var decoded = RefusalOf<JsonFormException>(() =>
                     {
                         templates[index].ValuesOf(split!);
-                    }))
+                    });
+
+                    if (decoded != refused)
                     {
-                        parted.Add($"templates: {name}: {raw} decoded");
+                        parted.Add($"templates: {name}: {raw} {decoded ?? "decoded"}");
                     }
 
                     continue;
@@ -137,12 +141,14 @@ public sealed class TranscodingTests
 
             if (StringOf(entry, "refused") is { } reason)
             {
-                if (!Refuses(() =>
+                var refusal = RefusalOf<JsonFormException>(() =>
                 {
                     Form.Read(descriptor, body);
-                }))
+                });
+
+                if (refusal != reason)
                 {
-                    parted.Add($"readings: {name}: taken, where it is refused, {reason}");
+                    parted.Add($"readings: {name}: {refusal ?? "taken"}, where it is refused, {reason}");
                 }
 
                 continue;
@@ -159,7 +165,7 @@ public sealed class TranscodingTests
                     parted.Add($"readings: {name}: read {Convert.ToHexString(read.ToByteArray())}");
                 }
             }
-            catch (FormatException refused)
+            catch (JsonFormException refused)
             {
                 parted.Add($"readings: {name}: refused, {refused.Message}");
             }
@@ -176,12 +182,14 @@ public sealed class TranscodingTests
 
             if (StringOf(entry, "refused") is { } reason)
             {
-                if (!Refuses(() =>
+                var refusal = RefusalOf<JsonFormException>(() =>
                 {
                     Form.Write(message);
-                }))
+                });
+
+                if (refusal != reason)
                 {
-                    parted.Add($"writings: {name}: written, where it is refused, {reason}");
+                    parted.Add($"writings: {name}: {refusal ?? "written"}, where it is refused, {reason}");
                 }
 
                 continue;
@@ -196,7 +204,7 @@ public sealed class TranscodingTests
                     parted.Add($"writings: {name}: wrote {written}");
                 }
             }
-            catch (FormatException refused)
+            catch (JsonFormException refused)
             {
                 parted.Add($"writings: {name}: refused, {refused.Message}");
             }
@@ -227,12 +235,14 @@ public sealed class TranscodingTests
 
             if (StringOf(entry, "refused") is { } reason)
             {
-                if (!Refuses(() =>
+                var refusal = RefusalOf<JsonFormException>(() =>
                 {
                     binding.Bind(route, request);
-                }))
+                });
+
+                if (refusal != reason)
                 {
-                    parted.Add($"bindings: {name}: bound, where it is refused, {reason}");
+                    parted.Add($"bindings: {name}: {refusal ?? "bound"}, where it is refused, {reason}");
                 }
 
                 continue;
@@ -248,7 +258,7 @@ public sealed class TranscodingTests
                     parted.Add($"bindings: {name}: bound {Convert.ToHexString(bound.ToByteArray())}");
                 }
             }
-            catch (FormatException refused)
+            catch (JsonFormException refused)
             {
                 parted.Add($"bindings: {name}: refused, {refused.Message}");
             }
@@ -401,17 +411,19 @@ public sealed class TranscodingTests
         return HttpEvents.DataOf(HttpPayload.Raw, (Hex(value.GetProperty("raw").GetString()!), Form));
     }
 
-    private static bool Refuses(Action act)
+    // the words `act` is refused in, as its refusal's message; none where it is taken
+    private static string? RefusalOf<TException>(Action act)
+        where TException : Exception
     {
         try
         {
             act();
 
-            return false;
+            return null;
         }
-        catch (FormatException)
+        catch (TException refused)
         {
-            return true;
+            return refused.Message;
         }
     }
 }

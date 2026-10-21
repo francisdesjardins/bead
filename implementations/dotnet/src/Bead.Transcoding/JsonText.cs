@@ -69,7 +69,7 @@ internal sealed class JsonNode
 /// One JSON text read as spec 17.5 reads a <c>json</c> payload — UTF-8, no byte order mark, one JSON
 /// text, no member named twice, no surrogate alone, no number past the largest double — but for its
 /// depth, which Bead's mapping counts by the message's descriptor, and the digits of each number,
-/// which it keeps (transcoding 5.2, step 1). A refusal is a <see cref="FormatException"/>.
+/// which it keeps (transcoding 5.2, step 1). A refusal is a <see cref="JsonFormException"/>.
 /// </summary>
 internal static class JsonText
 {
@@ -90,12 +90,12 @@ internal static class JsonText
     {
         if (!Utf8.IsValid(text))
         {
-            throw new FormatException("not UTF-8");
+            throw new JsonFormException("not UTF-8");
         }
 
         if (text.StartsWith(ByteOrderMark))
         {
-            throw new FormatException("a byte order mark");
+            throw new JsonFormException("a byte order mark");
         }
 
         var reader = new Utf8JsonReader(text, new JsonReaderOptions { MaxDepth = Depth });
@@ -104,21 +104,21 @@ internal static class JsonText
         {
             if (!reader.Read())
             {
-                throw new FormatException("not JSON");
+                throw new JsonFormException("not JSON");
             }
 
             var value = ValueOf(ref reader);
 
             if (reader.Read())
             {
-                throw new FormatException("not JSON");
+                throw new JsonFormException("not JSON");
             }
 
             return value;
         }
         catch (JsonException reason)
         {
-            throw new FormatException("not JSON", reason);
+            throw new JsonFormException("not JSON", reason);
         }
     }
 
@@ -131,7 +131,7 @@ internal static class JsonText
         }
         catch (InvalidOperationException reason)
         {
-            throw new FormatException("a surrogate alone", reason);
+            throw new JsonFormException("a surrogate alone", reason);
         }
     }
 
@@ -150,7 +150,7 @@ internal static class JsonText
 
                 if (!double.IsFinite(double.Parse(digits, NumberStyles.Float, CultureInfo.InvariantCulture)))
                 {
-                    throw new FormatException("a number past a double");
+                    throw new JsonFormException("a number past a double");
                 }
 
                 return JsonNode.NumberOf(digits);
@@ -176,7 +176,7 @@ internal static class JsonText
                     // * named twice once its escapes are read: "anInt32" is "anInt32"
                     if (!names.Add(name))
                     {
-                        throw new FormatException("a member named twice");
+                        throw new JsonFormException("a member named twice");
                     }
 
                     reader.Read();
@@ -185,7 +185,7 @@ internal static class JsonText
 
                 return JsonNode.ObjectOf(members);
             default:
-                throw new FormatException("not JSON");
+                throw new JsonFormException("not JSON");
         }
     }
 }

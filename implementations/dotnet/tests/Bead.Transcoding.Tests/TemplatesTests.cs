@@ -68,7 +68,7 @@ public sealed class TemplatesTests
 
         foreach (var refused in new[] { "/v1/books/%ZZ", "/v1/books/%4", "/v1/books/%FF", "/v1/books/%C3%28" })
         {
-            Assert.Throws<FormatException>(() =>
+            Assert.Throws<JsonFormException>(() =>
             {
                 single.ValuesOf(PathOf(refused));
             });
