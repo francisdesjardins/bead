@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Threading.Channels;
 using Bead.Tests;
@@ -1743,6 +1744,11 @@ public sealed class HttpTransportClientTests
     [Fact]
     public async Task Lets_go_of_a_connection_drawn_as_its_connect_gave_up_and_closes_even_when_the_server_cannot_hear_its_DELETE()
     {
+        var duration = typeof(HttpTransportClient).GetField("DisconnectTimeout", BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(duration);
+        Assert.Equal(TimeSpan.FromMilliseconds(5_000), Assert.IsType<TimeSpan>(duration.GetValue(null)));
+
         // drawn, then dropped before the connect heard it: its answer comes back all the same
         using var drawn = new Fetch { IsDeaf = true };
         await using var client = new HttpTransportClient(NotListening with { Handler = drawn });
@@ -1868,13 +1874,32 @@ public sealed class HttpTransportClientTests
         await using var client = new HttpTransportClient(NotListening with { Handler = refused });
         var connecting = client.Connect(new HttpConnectOptions { Host = "::1", Pathname = "api", Port = 8_080, Secured = true }, Cancelled);
 
-        // named by its status and its mark, a refusal of the transport's own
-        (await refused.CallOf(0)).Answer(new Answer { Status = 503, Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = "busy" } });
+        // a gateway's unmarked refusal is named by its status alone
+        (await refused.CallOf(0)).Answer(new Answer { Status = 503 });
 
-        Assert.Equal("the server drew no connection: 503 busy", (await Assert.ThrowsAsync<HttpRequestException>(() =>
+        Assert.Equal("the server drew no connection: 503", (await Assert.ThrowsAsync<HttpRequestException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
         })).Message);
+
+        foreach (var (answer, message) in new[]
+        {
+            (new Answer { Status = 503, Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = "busy" } }, "the server drew no connection: 503 busy"),
+            (new Answer { Status = 403, Headers = new Dictionary<string, string> { [HttpTransport.RefusalHeader] = "host-refused" } }, "the server drew no connection: 403 host-refused"),
+            (new Answer { Status = 502 }, "the server drew no connection: 502"),
+        })
+        {
+            using var named = new Fetch();
+            await using var naming = new HttpTransportClient(NotListening with { Handler = named });
+            var connectingNamed = naming.Connect(new HttpConnectOptions { Host = Host, Port = 80 }, Cancelled);
+
+            (await named.CallOf(0)).Answer(answer);
+
+            Assert.Equal(message, (await Assert.ThrowsAsync<HttpRequestException>(() =>
+            {
+                return connectingNamed.WaitAsync(Patience, Cancelled);
+            })).Message);
+        }
 
         // a token without its 201, or a 201 without its token, draws nothing
         foreach (var answer in new[]
@@ -2105,8 +2130,14 @@ public sealed class HttpTransportClientTests
 
             return ForwardedTo(started.Port, (asked, token));
         });
-        var (client, heard) = HearingClient(new HttpTransportClientOptions());
+        var client = new HttpTransportClient();
+        var heard = Channel.CreateUnbounded<(byte[] Bytes, int Listens)>();
         var envelope = EnvelopeOf(EnvelopeKind.Notification, (1, 0));
+
+        client.Message += (message) =>
+        {
+            heard.Writer.TryWrite((message.Bytes.ToArray(), origin.CountOf("GET")));
+        };
 
         await using (client)
         {
@@ -2115,10 +2146,13 @@ public sealed class HttpTransportClientTests
             var connectionHandle = await Next(started.Connections);
             var sending = started.Server.Send(new TransportMessage(envelope, false), connectionHandle);
 
-            Assert.Equal(envelope, await Next(heard));
+            var received = await Next(heard);
+
+            Assert.Equal(envelope, received.Bytes);
             await sending.WaitAsync(Patience, Cancelled);
             Assert.Equal(ReadyState.Open, client.ReadyState);
-            Assert.True(origin.CountOf("GET") >= 3);
+            Assert.Equal(3, received.Listens);
+            Assert.Empty(target.Asked);
             await client.CloseConnection().WaitAsync(Patience, Cancelled);
         }
 
@@ -2150,7 +2184,7 @@ public sealed class HttpTransportClientTests
             await sender.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false)).WaitAsync(Patience, Cancelled);
 
             Assert.Equal((false, false), await Next(closes));
-            Assert.Equal(connectionHandle, (await Next(started.Closes)).ConnectionHandle);
+            Assert.Equal((true, connectionHandle), await Next(started.Closes));
             Assert.Equal(1, origin.CountOf("DELETE"));
         }
 
@@ -2422,11 +2456,11 @@ public sealed class HttpTransportClientTests
         Assert.False(await Next(marks));
 
         // what a listen brings back keeps no order with it (spec 15.9)
-        listen.Answer(Batch(1, EnvelopeOf(EnvelopeKind.Failure, (3, 0)), EnvelopeOf(EnvelopeKind.Notification, (1, 0))));
+        listen.Answer(Batch(1, EnvelopeOf(EnvelopeKind.Result, (3, 0)), EnvelopeOf(EnvelopeKind.Failure, (3, 0)), EnvelopeOf(EnvelopeKind.Notification, (1, 0))));
 
-        var overtaking = new[] { await Next(marks), await Next(marks) };
+        var overtaking = new[] { await Next(marks), await Next(marks), await Next(marks) };
 
-        Assert.Equal([true, true], overtaking);
+        Assert.Equal([true, true, true], overtaking);
 
         await faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true }).WaitAsync(Patience, Cancelled);
     }
@@ -2858,7 +2892,9 @@ public sealed class HttpTransportClientTests
         Assert.Equal("0", (await faked.Fetch.CallOf(1)).Wait);
 
         (await faked.Fetch.CallOf(1)).Answer(new Answer { Status = 204 });
-        time.Advance(TimeSpan.FromMilliseconds(59));
+        time.Advance(TimeSpan.FromMilliseconds(20));
+        Assert.Equal(2, faked.Fetch.Count);
+        time.Advance(TimeSpan.FromMilliseconds(39));
 
         // not yet
         Assert.Equal(2, faked.Fetch.Count);
@@ -3312,7 +3348,13 @@ public sealed class HttpTransportClientTests
         };
 
         await client.Connect(started.Target(), Cancelled);
+        var first = await Next(started.Connections);
+
         await client.Reconnect().WaitAsync(Patience, Cancelled);
+
+        var opened = await Next(started.Connections);
+
+        Assert.NotEqual(first, opened);
 
         // the reconnection went on to its attempt, which opened
         Assert.Equal(ReadyState.Open, client.ReadyState);
