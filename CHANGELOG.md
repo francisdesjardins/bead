@@ -57,6 +57,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   edge where it parts.
 - Protobuf's conformance suite's JSON tests through each side's mapping of protobuf's JSON, 5,601
   tests binary and JSON, the same two failures listed on both sides.
+- Each side's bench measures `transcoding.read.*` and `transcoding.write.*`: Bead's mapping of
+  protobuf's JSON against its stock library's, on a message of every kind of field, and
+  `--transcoding` runs those alone.
 - `spec/durations.json`'s places `gateway.timeout` and `gateway.heartbeat`, and the way `gateway` of
   `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
   `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites

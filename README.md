@@ -407,7 +407,7 @@ node ../../tools/coverage-report.mjs TestResults/coverage/*.cobertura.xml --unde
 
 ## Measurement
 
-Both sides measure the same four layers on the loopback. Run each bench separately on a quiet
+Both sides measure the same five layers on the loopback. Run each bench separately on a quiet
 machine, with Node, the TypeScript dependencies and .NET installed. Both benches start the other
 side's interop server as the interop tests do: `interop/serve.ts` for TypeScript, and
 `dotnet run -c Release --project interop/Bead.Interop.Server` for C#. The server reports its
@@ -427,20 +427,23 @@ node tools/bench-compare.mjs typescript.json csharp.json
 require positive integers. Each codec warms for 5,000 round trips, each call payload for 500 calls,
 and each large echo for one call. Longer phases give the runtimes more time to warm. Without
 `--json`, the report prints its environment and method, then each measure's median, minimum and
-maximum. Progress goes to stderr; JSON alone goes to stdout.
+maximum. Progress goes to stderr; JSON alone goes to stdout. `--transcoding` runs the
+transcoding's measures alone, and starts no interop server.
 
-| Layer         | Measure                                                    | Unit and scope                                                                      |
-| ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                      |
-| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                           |
-| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP, WebSocket and in memory  |
-| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                      |
-| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes  |
-| Exchanges     | `exchange.p50`, `exchange.p95`, `exchange.p99`             | us per exchange in memory: a client and its connection drawn, one JSON echo, closed |
-| Exchanges     | `exchange.throughput`, `exchange.memory`                   | exchanges/s in batches of 32, and B/exchange over 2,000 sequential exchanges        |
-| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                 |
-| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                 |
-| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                              |
+| Layer         | Measure                                                    | Unit and scope                                                                                                                                         |
+| ------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Envelope      | `codec.roundTrip`                                          | ns per request written and read back, at 0 B, 1 KiB and 64 KiB                                                                                         |
+| Payload       | `json.roundTrip`                                           | ns per JSON string encoded and decoded, at the same sizes                                                                                              |
+| Transcoding   | `transcoding.read.bead`, `transcoding.read.stock`          | ns per body of `spec/transcoding.json`'s message of every kind of field read to its message's bytes, by Bead's mapping and by the stock library's JSON |
+| Transcoding   | `transcoding.write.bead`, `transcoding.write.stock`        | ns per message's bytes written to its body, by Bead's mapping and by the stock library's JSON                                                          |
+| Calls         | `call.p50`, `call.p95`, `call.p99`                         | us per sequential JSON echo, at the same sizes, over HTTP, WebSocket and in memory                                                                     |
+| Calls         | `call.throughput`                                          | calls/s in batches of 32, over each transport and payload size                                                                                         |
+| Calls         | `call.memory`                                              | B/call over 2,000 sequential calls; the runtime's method below defines these bytes                                                                     |
+| Exchanges     | `exchange.p50`, `exchange.p95`, `exchange.p99`             | us per exchange in memory: a client and its connection drawn, one JSON echo, closed                                                                    |
+| Exchanges     | `exchange.throughput`, `exchange.memory`                   | exchanges/s in batches of 32, and B/exchange over 2,000 sequential exchanges                                                                           |
+| Notifications | `notification.p50`, `notification.p95`, `notification.p99` | us from the server's notify to its client's handler                                                                                                    |
+| Notifications | `notification.throughput`                                  | notifications/s received, including the final drain                                                                                                    |
+| Large echo    | `transfer.echo`, `transfer.throughput`                     | ms per 20 MiB echo and MiB/s, counting both directions                                                                                                 |
 
 Every call measure runs with client and server in the same process (`local`) and with the other
 language's interop server in a child process (`interop`), on each transport; in memory, locally
