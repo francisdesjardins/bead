@@ -5540,6 +5540,2617 @@
           }
         ]
       }
+    },
+    {
+      "name": "a writer writes no member empty, a ruleId of \"\" an id",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {},
+            "fieldPath": "",
+            "forKey": false,
+            "message": "",
+            "ruleId": "required"
+          },
+          {
+            "message": "must be even",
+            "ruleId": ""
+          }
+        ],
+        "maximumBytes": 1024
+      },
+      "detail": "{\"ruleId\":\"required\"}\n{\"message\":\"must be even\",\"ruleId\":\"\"}\n{\"more\":0}"
+    },
+    {
+      "name": "a count past 2^53 - 1 is written as 2^53 - 1",
+      "clauses": [
+        "18.6"
+      ],
+      "write": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "more": 10000000000000000,
+        "maximumBytes": 1024
+      },
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":9007199254740991}"
+    },
+    {
+      "name": "a member empty is absent, and its line kept",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{},\"fieldPath\":\"\",\"forKey\":false,\"message\":\"\",\"ruleId\":\"required\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"\",\"ruleId\":\"int32.lte\"}\n{\"message\":\"must be even\",\"ruleId\":\"\"}\n{\"ruleId\":\"\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "ruleId": "required"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          },
+          {
+            "message": "must be even",
+            "ruleId": ""
+          },
+          {
+            "ruleId": ""
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a closing count of 2^53 - 1 is read",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":9007199254740991}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "more": 9007199254740991
+      }
+    },
+    {
+      "name": "a closing count past 2^53 - 1 counts nothing",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":9007199254740993}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a closing count that is no integer counts nothing",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":1.5}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a closing count is the value its number reads as, 1e2 a hundred",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":1e2}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "more": 100
+      }
+    },
+    {
+      "name": "a closing count of -0 counts 0",
+      "clauses": [
+        "18.7"
+      ],
+      "detail": "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}\n{\"more\":-0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "from",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "float's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":1.5},\"fieldPath\":\"value\",\"ruleId\":\"float.const\"}\n{\"bounds\":{\"lt\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"float.lt\"}\n{\"bounds\":{\"lte\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"float.lte\"}\n{\"bounds\":{\"gt\":0.10000000149011612},\"fieldPath\":\"value\",\"ruleId\":\"float.gt\"}\n{\"bounds\":{\"gte\":0.10000000149011612},\"fieldPath\":\"value\",\"ruleId\":\"float.gte\"}\n{\"bounds\":{\"gt\":0.10000000149011612,\"lt\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"float.gt_lt\"}\n{\"bounds\":{\"gt\":0.10000000149011612,\"lte\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"float.gt_lte\"}\n{\"bounds\":{\"gte\":0.10000000149011612,\"lt\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"float.gte_lt\"}\n{\"bounds\":{\"gte\":0.10000000149011612,\"lte\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"float.gte_lte\"}\n{\"bounds\":{\"gt\":2.5,\"lt\":0.10000000149011612},\"fieldPath\":\"value\",\"ruleId\":\"float.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":2.5,\"lte\":0.10000000149011612},\"fieldPath\":\"value\",\"ruleId\":\"float.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":2.5,\"lt\":0.10000000149011612},\"fieldPath\":\"value\",\"ruleId\":\"float.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":2.5,\"lte\":0.10000000149011612},\"fieldPath\":\"value\",\"ruleId\":\"float.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[0.10000000149011612,1.5]},\"fieldPath\":\"value\",\"ruleId\":\"float.in\"}\n{\"bounds\":{\"not_in\":[2.5]},\"fieldPath\":\"value\",\"ruleId\":\"float.not_in\"}\n{\"fieldPath\":\"value\",\"ruleId\":\"float.finite\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 1.5
+            },
+            "fieldPath": "value",
+            "message": "must equal 1.5",
+            "ruleId": "float.const"
+          },
+          {
+            "bounds": {
+              "lt": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be less than 2.5",
+            "ruleId": "float.lt"
+          },
+          {
+            "bounds": {
+              "lte": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 2.5",
+            "ruleId": "float.lte"
+          },
+          {
+            "bounds": {
+              "gt": 0.10000000149011612
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 0.10000000149011612",
+            "ruleId": "float.gt"
+          },
+          {
+            "bounds": {
+              "gte": 0.10000000149011612
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 0.10000000149011612",
+            "ruleId": "float.gte"
+          },
+          {
+            "bounds": {
+              "gt": 0.10000000149011612,
+              "lt": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 0.10000000149011612 and less than 2.5",
+            "ruleId": "float.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 0.10000000149011612,
+              "lte": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 0.10000000149011612 and less than or equal to 2.5",
+            "ruleId": "float.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 0.10000000149011612,
+              "lt": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 0.10000000149011612 and less than 2.5",
+            "ruleId": "float.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 0.10000000149011612,
+              "lte": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 0.10000000149011612 and less than or equal to 2.5",
+            "ruleId": "float.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 2.5,
+              "lt": 0.10000000149011612
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 2.5 or less than 0.10000000149011612",
+            "ruleId": "float.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 2.5,
+              "lte": 0.10000000149011612
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 2.5 or less than or equal to 0.10000000149011612",
+            "ruleId": "float.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 2.5,
+              "lt": 0.10000000149011612
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 2.5 or less than 0.10000000149011612",
+            "ruleId": "float.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 2.5,
+              "lte": 0.10000000149011612
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 2.5 or less than or equal to 0.10000000149011612",
+            "ruleId": "float.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                0.10000000149011612,
+                1.5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [0.10000000149011612, 1.5]",
+            "ruleId": "float.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                2.5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [2.5]",
+            "ruleId": "float.not_in"
+          },
+          {
+            "fieldPath": "value",
+            "message": "must be finite",
+            "ruleId": "float.finite"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "double's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":1.5},\"fieldPath\":\"value\",\"ruleId\":\"double.const\"}\n{\"bounds\":{\"lt\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"double.lt\"}\n{\"bounds\":{\"lte\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"double.lte\"}\n{\"bounds\":{\"gt\":0.1},\"fieldPath\":\"value\",\"ruleId\":\"double.gt\"}\n{\"bounds\":{\"gte\":0.1},\"fieldPath\":\"value\",\"ruleId\":\"double.gte\"}\n{\"bounds\":{\"gt\":0.1,\"lt\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"double.gt_lt\"}\n{\"bounds\":{\"gt\":0.1,\"lte\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"double.gt_lte\"}\n{\"bounds\":{\"gte\":0.1,\"lt\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"double.gte_lt\"}\n{\"bounds\":{\"gte\":0.1,\"lte\":2.5},\"fieldPath\":\"value\",\"ruleId\":\"double.gte_lte\"}\n{\"bounds\":{\"gt\":2.5,\"lt\":0.1},\"fieldPath\":\"value\",\"ruleId\":\"double.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":2.5,\"lte\":0.1},\"fieldPath\":\"value\",\"ruleId\":\"double.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":2.5,\"lt\":0.1},\"fieldPath\":\"value\",\"ruleId\":\"double.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":2.5,\"lte\":0.1},\"fieldPath\":\"value\",\"ruleId\":\"double.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[0.1,1.5]},\"fieldPath\":\"value\",\"ruleId\":\"double.in\"}\n{\"bounds\":{\"not_in\":[2.5]},\"fieldPath\":\"value\",\"ruleId\":\"double.not_in\"}\n{\"fieldPath\":\"value\",\"ruleId\":\"double.finite\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 1.5
+            },
+            "fieldPath": "value",
+            "message": "must equal 1.5",
+            "ruleId": "double.const"
+          },
+          {
+            "bounds": {
+              "lt": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be less than 2.5",
+            "ruleId": "double.lt"
+          },
+          {
+            "bounds": {
+              "lte": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 2.5",
+            "ruleId": "double.lte"
+          },
+          {
+            "bounds": {
+              "gt": 0.1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 0.1",
+            "ruleId": "double.gt"
+          },
+          {
+            "bounds": {
+              "gte": 0.1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 0.1",
+            "ruleId": "double.gte"
+          },
+          {
+            "bounds": {
+              "gt": 0.1,
+              "lt": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 0.1 and less than 2.5",
+            "ruleId": "double.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 0.1,
+              "lte": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 0.1 and less than or equal to 2.5",
+            "ruleId": "double.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 0.1,
+              "lt": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 0.1 and less than 2.5",
+            "ruleId": "double.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 0.1,
+              "lte": 2.5
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 0.1 and less than or equal to 2.5",
+            "ruleId": "double.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 2.5,
+              "lt": 0.1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 2.5 or less than 0.1",
+            "ruleId": "double.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 2.5,
+              "lte": 0.1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 2.5 or less than or equal to 0.1",
+            "ruleId": "double.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 2.5,
+              "lt": 0.1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 2.5 or less than 0.1",
+            "ruleId": "double.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 2.5,
+              "lte": 0.1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 2.5 or less than or equal to 0.1",
+            "ruleId": "double.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                0.1,
+                1.5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [0.1, 1.5]",
+            "ruleId": "double.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                2.5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [2.5]",
+            "ruleId": "double.not_in"
+          },
+          {
+            "fieldPath": "value",
+            "message": "must be finite",
+            "ruleId": "double.finite"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "int32's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":5},\"fieldPath\":\"value\",\"ruleId\":\"int32.const\"}\n{\"bounds\":{\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"int32.lt\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"int32.lte\"}\n{\"bounds\":{\"gt\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.gt\"}\n{\"bounds\":{\"gte\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.gte\"}\n{\"bounds\":{\"gt\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"int32.gt_lt\"}\n{\"bounds\":{\"gt\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"int32.gt_lte\"}\n{\"bounds\":{\"gte\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"int32.gte_lt\"}\n{\"bounds\":{\"gte\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"int32.gte_lte\"}\n{\"bounds\":{\"gt\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[1,5]},\"fieldPath\":\"value\",\"ruleId\":\"int32.in\"}\n{\"bounds\":{\"not_in\":[10]},\"fieldPath\":\"value\",\"ruleId\":\"int32.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 5
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "int32.const"
+          },
+          {
+            "bounds": {
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "int32.lt"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int32.lte"
+          },
+          {
+            "bounds": {
+              "gt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "int32.gt"
+          },
+          {
+            "bounds": {
+              "gte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "int32.gte"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "int32.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "int32.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "int32.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "int32.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "int32.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "int32.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "int32.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "int32.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "int32.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                10
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "int32.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "int64's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"5\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.const\"}\n{\"bounds\":{\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.lt\"}\n{\"bounds\":{\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.lte\"}\n{\"bounds\":{\"gt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gt\"}\n{\"bounds\":{\"gte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gte\"}\n{\"bounds\":{\"gt\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gt_lt\"}\n{\"bounds\":{\"gt\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gt_lte\"}\n{\"bounds\":{\"gte\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gte_lt\"}\n{\"bounds\":{\"gte\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gte_lte\"}\n{\"bounds\":{\"gt\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"int64.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[\"1\",\"5\"]},\"fieldPath\":\"value\",\"ruleId\":\"int64.in\"}\n{\"bounds\":{\"not_in\":[\"10\"]},\"fieldPath\":\"value\",\"ruleId\":\"int64.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "5"
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "int64.const"
+          },
+          {
+            "bounds": {
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "int64.lt"
+          },
+          {
+            "bounds": {
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "int64.lte"
+          },
+          {
+            "bounds": {
+              "gt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "int64.gt"
+          },
+          {
+            "bounds": {
+              "gte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "int64.gte"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "int64.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "int64.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "int64.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "int64.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "int64.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "int64.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "int64.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "int64.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                "1",
+                "5"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "int64.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "10"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "int64.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "uint32's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":5},\"fieldPath\":\"value\",\"ruleId\":\"uint32.const\"}\n{\"bounds\":{\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"uint32.lt\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"uint32.lte\"}\n{\"bounds\":{\"gt\":1},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gt\"}\n{\"bounds\":{\"gte\":1},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gte\"}\n{\"bounds\":{\"gt\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gt_lt\"}\n{\"bounds\":{\"gt\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gt_lte\"}\n{\"bounds\":{\"gte\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gte_lt\"}\n{\"bounds\":{\"gte\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gte_lte\"}\n{\"bounds\":{\"gt\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"uint32.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[1,5]},\"fieldPath\":\"value\",\"ruleId\":\"uint32.in\"}\n{\"bounds\":{\"not_in\":[10]},\"fieldPath\":\"value\",\"ruleId\":\"uint32.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 5
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "uint32.const"
+          },
+          {
+            "bounds": {
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "uint32.lt"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "uint32.lte"
+          },
+          {
+            "bounds": {
+              "gt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "uint32.gt"
+          },
+          {
+            "bounds": {
+              "gte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "uint32.gte"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "uint32.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "uint32.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "uint32.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "uint32.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "uint32.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "uint32.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "uint32.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "uint32.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "uint32.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                10
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "uint32.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "uint64's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"5\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.const\"}\n{\"bounds\":{\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.lt\"}\n{\"bounds\":{\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.lte\"}\n{\"bounds\":{\"gt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gt\"}\n{\"bounds\":{\"gte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gte\"}\n{\"bounds\":{\"gt\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gt_lt\"}\n{\"bounds\":{\"gt\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gt_lte\"}\n{\"bounds\":{\"gte\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gte_lt\"}\n{\"bounds\":{\"gte\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gte_lte\"}\n{\"bounds\":{\"gt\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"uint64.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[\"1\",\"5\"]},\"fieldPath\":\"value\",\"ruleId\":\"uint64.in\"}\n{\"bounds\":{\"not_in\":[\"10\"]},\"fieldPath\":\"value\",\"ruleId\":\"uint64.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "5"
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "uint64.const"
+          },
+          {
+            "bounds": {
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "uint64.lt"
+          },
+          {
+            "bounds": {
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "uint64.lte"
+          },
+          {
+            "bounds": {
+              "gt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "uint64.gt"
+          },
+          {
+            "bounds": {
+              "gte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "uint64.gte"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "uint64.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "uint64.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "uint64.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "uint64.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "uint64.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "uint64.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "uint64.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "uint64.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                "1",
+                "5"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "uint64.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "10"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "uint64.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "sint32's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":5},\"fieldPath\":\"value\",\"ruleId\":\"sint32.const\"}\n{\"bounds\":{\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"sint32.lt\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"sint32.lte\"}\n{\"bounds\":{\"gt\":1},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gt\"}\n{\"bounds\":{\"gte\":1},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gte\"}\n{\"bounds\":{\"gt\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gt_lt\"}\n{\"bounds\":{\"gt\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gt_lte\"}\n{\"bounds\":{\"gte\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gte_lt\"}\n{\"bounds\":{\"gte\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gte_lte\"}\n{\"bounds\":{\"gt\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"sint32.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[1,5]},\"fieldPath\":\"value\",\"ruleId\":\"sint32.in\"}\n{\"bounds\":{\"not_in\":[10]},\"fieldPath\":\"value\",\"ruleId\":\"sint32.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 5
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "sint32.const"
+          },
+          {
+            "bounds": {
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "sint32.lt"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "sint32.lte"
+          },
+          {
+            "bounds": {
+              "gt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "sint32.gt"
+          },
+          {
+            "bounds": {
+              "gte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "sint32.gte"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "sint32.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "sint32.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "sint32.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "sint32.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "sint32.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "sint32.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "sint32.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "sint32.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "sint32.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                10
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "sint32.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "sint64's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"5\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.const\"}\n{\"bounds\":{\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.lt\"}\n{\"bounds\":{\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.lte\"}\n{\"bounds\":{\"gt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gt\"}\n{\"bounds\":{\"gte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gte\"}\n{\"bounds\":{\"gt\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gt_lt\"}\n{\"bounds\":{\"gt\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gt_lte\"}\n{\"bounds\":{\"gte\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gte_lt\"}\n{\"bounds\":{\"gte\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gte_lte\"}\n{\"bounds\":{\"gt\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sint64.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[\"1\",\"5\"]},\"fieldPath\":\"value\",\"ruleId\":\"sint64.in\"}\n{\"bounds\":{\"not_in\":[\"10\"]},\"fieldPath\":\"value\",\"ruleId\":\"sint64.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "5"
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "sint64.const"
+          },
+          {
+            "bounds": {
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "sint64.lt"
+          },
+          {
+            "bounds": {
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "sint64.lte"
+          },
+          {
+            "bounds": {
+              "gt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "sint64.gt"
+          },
+          {
+            "bounds": {
+              "gte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "sint64.gte"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "sint64.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "sint64.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "sint64.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "sint64.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "sint64.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "sint64.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "sint64.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "sint64.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                "1",
+                "5"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "sint64.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "10"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "sint64.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "fixed32's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":5},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.const\"}\n{\"bounds\":{\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.lt\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.lte\"}\n{\"bounds\":{\"gt\":1},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gt\"}\n{\"bounds\":{\"gte\":1},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gte\"}\n{\"bounds\":{\"gt\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gt_lt\"}\n{\"bounds\":{\"gt\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gt_lte\"}\n{\"bounds\":{\"gte\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gte_lt\"}\n{\"bounds\":{\"gte\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gte_lte\"}\n{\"bounds\":{\"gt\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[1,5]},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.in\"}\n{\"bounds\":{\"not_in\":[10]},\"fieldPath\":\"value\",\"ruleId\":\"fixed32.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 5
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "fixed32.const"
+          },
+          {
+            "bounds": {
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "fixed32.lt"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "fixed32.lte"
+          },
+          {
+            "bounds": {
+              "gt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "fixed32.gt"
+          },
+          {
+            "bounds": {
+              "gte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "fixed32.gte"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "fixed32.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "fixed32.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "fixed32.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "fixed32.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "fixed32.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "fixed32.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "fixed32.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "fixed32.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "fixed32.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                10
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "fixed32.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "fixed64's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"5\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.const\"}\n{\"bounds\":{\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.lt\"}\n{\"bounds\":{\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.lte\"}\n{\"bounds\":{\"gt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gt\"}\n{\"bounds\":{\"gte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gte\"}\n{\"bounds\":{\"gt\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gt_lt\"}\n{\"bounds\":{\"gt\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gt_lte\"}\n{\"bounds\":{\"gte\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gte_lt\"}\n{\"bounds\":{\"gte\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gte_lte\"}\n{\"bounds\":{\"gt\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[\"1\",\"5\"]},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.in\"}\n{\"bounds\":{\"not_in\":[\"10\"]},\"fieldPath\":\"value\",\"ruleId\":\"fixed64.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "5"
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "fixed64.const"
+          },
+          {
+            "bounds": {
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "fixed64.lt"
+          },
+          {
+            "bounds": {
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "fixed64.lte"
+          },
+          {
+            "bounds": {
+              "gt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "fixed64.gt"
+          },
+          {
+            "bounds": {
+              "gte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "fixed64.gte"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "fixed64.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "fixed64.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "fixed64.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "fixed64.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "fixed64.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "fixed64.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "fixed64.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "fixed64.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                "1",
+                "5"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "fixed64.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "10"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "fixed64.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "sfixed32's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":5},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.const\"}\n{\"bounds\":{\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.lt\"}\n{\"bounds\":{\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.lte\"}\n{\"bounds\":{\"gt\":1},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gt\"}\n{\"bounds\":{\"gte\":1},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gte\"}\n{\"bounds\":{\"gt\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gt_lt\"}\n{\"bounds\":{\"gt\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gt_lte\"}\n{\"bounds\":{\"gte\":1,\"lt\":10},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gte_lt\"}\n{\"bounds\":{\"gte\":1,\"lte\":10},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gte_lte\"}\n{\"bounds\":{\"gt\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":10,\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[1,5]},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.in\"}\n{\"bounds\":{\"not_in\":[10]},\"fieldPath\":\"value\",\"ruleId\":\"sfixed32.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 5
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "sfixed32.const"
+          },
+          {
+            "bounds": {
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "sfixed32.lt"
+          },
+          {
+            "bounds": {
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "sfixed32.lte"
+          },
+          {
+            "bounds": {
+              "gt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "sfixed32.gt"
+          },
+          {
+            "bounds": {
+              "gte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "sfixed32.gte"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "sfixed32.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "sfixed32.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lt": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "sfixed32.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": 1,
+              "lte": 10
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "sfixed32.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "sfixed32.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "sfixed32.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "sfixed32.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": 10,
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "sfixed32.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                5
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "sfixed32.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                10
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "sfixed32.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "sfixed64's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"5\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.const\"}\n{\"bounds\":{\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.lt\"}\n{\"bounds\":{\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.lte\"}\n{\"bounds\":{\"gt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gt\"}\n{\"bounds\":{\"gte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gte\"}\n{\"bounds\":{\"gt\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gt_lt\"}\n{\"bounds\":{\"gt\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gt_lte\"}\n{\"bounds\":{\"gte\":\"1\",\"lt\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gte_lt\"}\n{\"bounds\":{\"gte\":\"1\",\"lte\":\"10\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gte_lte\"}\n{\"bounds\":{\"gt\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gt_lt_exclusive\"}\n{\"bounds\":{\"gt\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gt_lte_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lt\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gte_lt_exclusive\"}\n{\"bounds\":{\"gte\":\"10\",\"lte\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.gte_lte_exclusive\"}\n{\"bounds\":{\"in\":[\"1\",\"5\"]},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.in\"}\n{\"bounds\":{\"not_in\":[\"10\"]},\"fieldPath\":\"value\",\"ruleId\":\"sfixed64.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "5"
+            },
+            "fieldPath": "value",
+            "message": "must equal 5",
+            "ruleId": "sfixed64.const"
+          },
+          {
+            "bounds": {
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than 10",
+            "ruleId": "sfixed64.lt"
+          },
+          {
+            "bounds": {
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be less than or equal to 10",
+            "ruleId": "sfixed64.lte"
+          },
+          {
+            "bounds": {
+              "gt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1",
+            "ruleId": "sfixed64.gt"
+          },
+          {
+            "bounds": {
+              "gte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1",
+            "ruleId": "sfixed64.gte"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than 10",
+            "ruleId": "sfixed64.gt_lt"
+          },
+          {
+            "bounds": {
+              "gt": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 1 and less than or equal to 10",
+            "ruleId": "sfixed64.gt_lte"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lt": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than 10",
+            "ruleId": "sfixed64.gte_lt"
+          },
+          {
+            "bounds": {
+              "gte": "1",
+              "lte": "10"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 1 and less than or equal to 10",
+            "ruleId": "sfixed64.gte_lte"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than 1",
+            "ruleId": "sfixed64.gt_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gt": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than 10 or less than or equal to 1",
+            "ruleId": "sfixed64.gt_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lt": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than 1",
+            "ruleId": "sfixed64.gte_lt_exclusive"
+          },
+          {
+            "bounds": {
+              "gte": "10",
+              "lte": "1"
+            },
+            "fieldPath": "value",
+            "message": "must be greater than or equal to 10 or less than or equal to 1",
+            "ruleId": "sfixed64.gte_lte_exclusive"
+          },
+          {
+            "bounds": {
+              "in": [
+                "1",
+                "5"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 5]",
+            "ruleId": "sfixed64.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "10"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [10]",
+            "ruleId": "sfixed64.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a bool's rule without its words takes those of its template",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":true},\"fieldPath\":\"value\",\"ruleId\":\"bool.const\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": true
+            },
+            "fieldPath": "value",
+            "message": "must equal true",
+            "ruleId": "bool.const"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a string's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"abc\"},\"fieldPath\":\"value\",\"ruleId\":\"string.const\"}\n{\"bounds\":{\"len\":\"3\"},\"fieldPath\":\"value\",\"ruleId\":\"string.len\"}\n{\"bounds\":{\"min_len\":\"3\"},\"fieldPath\":\"value\",\"ruleId\":\"string.min_len\"}\n{\"bounds\":{\"max_len\":\"3\"},\"fieldPath\":\"value\",\"ruleId\":\"string.max_len\"}\n{\"bounds\":{\"len_bytes\":\"3\"},\"fieldPath\":\"value\",\"ruleId\":\"string.len_bytes\"}\n{\"bounds\":{\"min_bytes\":\"3\"},\"fieldPath\":\"value\",\"ruleId\":\"string.min_bytes\"}\n{\"bounds\":{\"max_bytes\":\"3\"},\"fieldPath\":\"value\",\"ruleId\":\"string.max_bytes\"}\n{\"bounds\":{\"pattern\":\"^[a-z]+$\"},\"fieldPath\":\"value\",\"ruleId\":\"string.pattern\"}\n{\"bounds\":{\"prefix\":\"ab\"},\"fieldPath\":\"value\",\"ruleId\":\"string.prefix\"}\n{\"bounds\":{\"suffix\":\"yz\"},\"fieldPath\":\"value\",\"ruleId\":\"string.suffix\"}\n{\"bounds\":{\"contains\":\"mid\"},\"fieldPath\":\"value\",\"ruleId\":\"string.contains\"}\n{\"bounds\":{\"not_contains\":\"bad\"},\"fieldPath\":\"value\",\"ruleId\":\"string.not_contains\"}\n{\"bounds\":{\"in\":[\"a\",\"b\"]},\"fieldPath\":\"value\",\"ruleId\":\"string.in\"}\n{\"bounds\":{\"not_in\":[\"c\"]},\"fieldPath\":\"value\",\"ruleId\":\"string.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "abc"
+            },
+            "fieldPath": "value",
+            "message": "must equal `abc`",
+            "ruleId": "string.const"
+          },
+          {
+            "bounds": {
+              "len": "3"
+            },
+            "fieldPath": "value",
+            "message": "must be 3 characters",
+            "ruleId": "string.len"
+          },
+          {
+            "bounds": {
+              "min_len": "3"
+            },
+            "fieldPath": "value",
+            "message": "must be at least 3 characters",
+            "ruleId": "string.min_len"
+          },
+          {
+            "bounds": {
+              "max_len": "3"
+            },
+            "fieldPath": "value",
+            "message": "must be at most 3 characters",
+            "ruleId": "string.max_len"
+          },
+          {
+            "bounds": {
+              "len_bytes": "3"
+            },
+            "fieldPath": "value",
+            "message": "must be 3 bytes",
+            "ruleId": "string.len_bytes"
+          },
+          {
+            "bounds": {
+              "min_bytes": "3"
+            },
+            "fieldPath": "value",
+            "message": "must be at least 3 bytes",
+            "ruleId": "string.min_bytes"
+          },
+          {
+            "bounds": {
+              "max_bytes": "3"
+            },
+            "fieldPath": "value",
+            "message": "must be at most 3 bytes",
+            "ruleId": "string.max_bytes"
+          },
+          {
+            "bounds": {
+              "pattern": "^[a-z]+$"
+            },
+            "fieldPath": "value",
+            "message": "does not match regex pattern `^[a-z]+$`",
+            "ruleId": "string.pattern"
+          },
+          {
+            "bounds": {
+              "prefix": "ab"
+            },
+            "fieldPath": "value",
+            "message": "does not have prefix `ab`",
+            "ruleId": "string.prefix"
+          },
+          {
+            "bounds": {
+              "suffix": "yz"
+            },
+            "fieldPath": "value",
+            "message": "does not have suffix `yz`",
+            "ruleId": "string.suffix"
+          },
+          {
+            "bounds": {
+              "contains": "mid"
+            },
+            "fieldPath": "value",
+            "message": "does not contain substring `mid`",
+            "ruleId": "string.contains"
+          },
+          {
+            "bounds": {
+              "not_contains": "bad"
+            },
+            "fieldPath": "value",
+            "message": "contains substring `bad`",
+            "ruleId": "string.not_contains"
+          },
+          {
+            "bounds": {
+              "in": [
+                "a",
+                "b"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [a, b]",
+            "ruleId": "string.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "c"
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [c]",
+            "ruleId": "string.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "bytes' rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"AP8=\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"len\":\"2\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.len\"}\n{\"bounds\":{\"min_len\":\"2\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.min_len\"}\n{\"bounds\":{\"max_len\":\"2\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.max_len\"}\n{\"bounds\":{\"prefix\":\"iVBORw==\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.prefix\"}\n{\"bounds\":{\"suffix\":\"rkJggg==\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.suffix\"}\n{\"bounds\":{\"contains\":\"AQID\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.contains\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "AP8="
+            },
+            "fieldPath": "value",
+            "message": "must be 00ff",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "len": "2"
+            },
+            "fieldPath": "value",
+            "message": "must be 2 bytes",
+            "ruleId": "bytes.len"
+          },
+          {
+            "bounds": {
+              "min_len": "2"
+            },
+            "fieldPath": "value",
+            "message": "must be at least 2 bytes",
+            "ruleId": "bytes.min_len"
+          },
+          {
+            "bounds": {
+              "max_len": "2"
+            },
+            "fieldPath": "value",
+            "message": "must be at most 2 bytes",
+            "ruleId": "bytes.max_len"
+          },
+          {
+            "bounds": {
+              "prefix": "iVBORw=="
+            },
+            "fieldPath": "value",
+            "message": "does not have prefix 89504e47",
+            "ruleId": "bytes.prefix"
+          },
+          {
+            "bounds": {
+              "suffix": "rkJggg=="
+            },
+            "fieldPath": "value",
+            "message": "does not have suffix ae426082",
+            "ruleId": "bytes.suffix"
+          },
+          {
+            "bounds": {
+              "contains": "AQID"
+            },
+            "fieldPath": "value",
+            "message": "does not contain 010203",
+            "ruleId": "bytes.contains"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "an enum's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":1},\"fieldPath\":\"value\",\"ruleId\":\"enum.const\"}\n{\"fieldPath\":\"value\",\"ruleId\":\"enum.defined_only\"}\n{\"bounds\":{\"in\":[1,2]},\"fieldPath\":\"value\",\"ruleId\":\"enum.in\"}\n{\"bounds\":{\"not_in\":[3]},\"fieldPath\":\"value\",\"ruleId\":\"enum.not_in\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": 1
+            },
+            "fieldPath": "value",
+            "message": "must equal 1",
+            "ruleId": "enum.const"
+          },
+          {
+            "fieldPath": "value",
+            "message": "value must be one of the defined enum values",
+            "ruleId": "enum.defined_only"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                2
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must be in list [1, 2]",
+            "ruleId": "enum.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                3
+              ]
+            },
+            "fieldPath": "value",
+            "message": "must not be in list [3]",
+            "ruleId": "enum.not_in"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a repeated field's and a map's rules without their words take those of their templates",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"min_items\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"repeated.min_items\"}\n{\"bounds\":{\"max_items\":\"4\"},\"fieldPath\":\"value\",\"ruleId\":\"repeated.max_items\"}\n{\"fieldPath\":\"value\",\"ruleId\":\"repeated.unique\"}\n{\"bounds\":{\"min_pairs\":\"1\"},\"fieldPath\":\"value\",\"ruleId\":\"map.min_pairs\"}\n{\"bounds\":{\"max_pairs\":\"4\"},\"fieldPath\":\"value\",\"ruleId\":\"map.max_pairs\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "min_items": "1"
+            },
+            "fieldPath": "value",
+            "message": "must contain at least 1 item(s)",
+            "ruleId": "repeated.min_items"
+          },
+          {
+            "bounds": {
+              "max_items": "4"
+            },
+            "fieldPath": "value",
+            "message": "must contain no more than 4 item(s)",
+            "ruleId": "repeated.max_items"
+          },
+          {
+            "fieldPath": "value",
+            "message": "repeated value must contain unique items",
+            "ruleId": "repeated.unique"
+          },
+          {
+            "bounds": {
+              "min_pairs": "1"
+            },
+            "fieldPath": "value",
+            "message": "map must be at least 1 entries",
+            "ruleId": "map.min_pairs"
+          },
+          {
+            "bounds": {
+              "max_pairs": "4"
+            },
+            "fieldPath": "value",
+            "message": "map must be at most 4 entries",
+            "ruleId": "map.max_pairs"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a rule beadc does not compile, or validate.proto does not define, takes no words, and its line is kept",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"pattern\":\"^a$\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.pattern\"}\n{\"bounds\":{\"in\":[\"AQI=\"]},\"fieldPath\":\"value\",\"ruleId\":\"bytes.in\"}\n{\"bounds\":{\"not_in\":[\"AQI=\"]},\"fieldPath\":\"value\",\"ruleId\":\"bytes.not_in\"}\n{\"bounds\":{\"in\":[true]},\"fieldPath\":\"value\",\"ruleId\":\"bool.in\"}\n{\"bounds\":{\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"enum.lt\"}\n{\"bounds\":{\"gt\":1,\"lt\":3},\"fieldPath\":\"value\",\"ruleId\":\"enum.gt_lt\"}\n{\"bounds\":{\"finite\":true},\"fieldPath\":\"value\",\"ruleId\":\"int32.finite\"}\n{\"bounds\":{\"gt\":2,\"lt\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.lt_gt\"}\n{\"bounds\":{\"const\":1},\"fieldPath\":\"value\",\"ruleId\":\"repeated.const\"}\n{\"bounds\":{\"email\":true},\"fieldPath\":\"value\",\"ruleId\":\"string.email\"}\n{\"bounds\":{\"items\":{\"string\":{\"min_len\":\"1\"}}},\"fieldPath\":\"value\",\"ruleId\":\"repeated.items\"}\n{\"bounds\":{\"keys\":{\"string\":{\"min_len\":\"1\"}}},\"fieldPath\":\"value\",\"ruleId\":\"map.keys\"}\n{\"bounds\":{\"gt\":\"1s\"},\"fieldPath\":\"value\",\"ruleId\":\"duration.gt\"}\n{\"bounds\":{\"max\":3},\"fieldPath\":\"value\",\"ruleId\":\"name.short\"}\n{\"bounds\":{\"lte\":1},\"fieldPath\":\"value\",\"ruleId\":\"\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "pattern": "^a$"
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.pattern"
+          },
+          {
+            "bounds": {
+              "in": [
+                "AQI="
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                "AQI="
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.not_in"
+          },
+          {
+            "bounds": {
+              "in": [
+                true
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "bool.in"
+          },
+          {
+            "bounds": {
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "ruleId": "enum.lt"
+          },
+          {
+            "bounds": {
+              "gt": 1,
+              "lt": 3
+            },
+            "fieldPath": "value",
+            "ruleId": "enum.gt_lt"
+          },
+          {
+            "bounds": {
+              "finite": true
+            },
+            "fieldPath": "value",
+            "ruleId": "int32.finite"
+          },
+          {
+            "bounds": {
+              "gt": 2,
+              "lt": 1
+            },
+            "fieldPath": "value",
+            "ruleId": "int32.lt_gt"
+          },
+          {
+            "bounds": {
+              "const": 1
+            },
+            "fieldPath": "value",
+            "ruleId": "repeated.const"
+          },
+          {
+            "bounds": {
+              "email": true
+            },
+            "fieldPath": "value",
+            "ruleId": "string.email"
+          },
+          {
+            "bounds": {
+              "items": {
+                "string": {
+                  "min_len": "1"
+                }
+              }
+            },
+            "fieldPath": "value",
+            "ruleId": "repeated.items"
+          },
+          {
+            "bounds": {
+              "keys": {
+                "string": {
+                  "min_len": "1"
+                }
+              }
+            },
+            "fieldPath": "value",
+            "ruleId": "map.keys"
+          },
+          {
+            "bounds": {
+              "gt": "1s"
+            },
+            "fieldPath": "value",
+            "ruleId": "duration.gt"
+          },
+          {
+            "bounds": {
+              "max": 3
+            },
+            "fieldPath": "value",
+            "ruleId": "name.short"
+          },
+          {
+            "bounds": {
+              "lte": 1
+            },
+            "fieldPath": "value",
+            "ruleId": ""
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "a member of another shape than its template takes gives no words, and its line is kept",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"fieldPath\":\"value\",\"ruleId\":\"int32.lte\"}\n{\"bounds\":{\"gte\":0},\"fieldPath\":\"value\",\"ruleId\":\"int32.gte_lte\"}\n{\"bounds\":{\"lte\":[1]},\"fieldPath\":\"value\",\"ruleId\":\"int32.lte\"}\n{\"bounds\":{\"in\":1},\"fieldPath\":\"value\",\"ruleId\":\"int32.in\"}\n{\"bounds\":{\"in\":[[1]]},\"fieldPath\":\"value\",\"ruleId\":\"int32.in\"}\n{\"bounds\":{\"in\":[1,[2]]},\"fieldPath\":\"value\",\"ruleId\":\"enum.in\"}\n{\"bounds\":{\"not_in\":[null]},\"fieldPath\":\"value\",\"ruleId\":\"string.not_in\"}\n{\"bounds\":{\"in\":[{\"a\":1}]},\"fieldPath\":\"value\",\"ruleId\":\"string.in\"}\n{\"bounds\":{\"lte\":null},\"fieldPath\":\"value\",\"ruleId\":\"uint64.lte\"}\n{\"bounds\":{\"const\":{\"value\":1}},\"fieldPath\":\"value\",\"ruleId\":\"string.const\"}\n{\"bounds\":{\"prefix\":[\"a\"]},\"fieldPath\":\"value\",\"ruleId\":\"string.prefix\"}\n{\"bounds\":{\"min_items\":[\"1\"]},\"fieldPath\":\"value\",\"ruleId\":\"repeated.min_items\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "fieldPath": "value",
+            "ruleId": "int32.lte"
+          },
+          {
+            "bounds": {
+              "gte": 0
+            },
+            "fieldPath": "value",
+            "ruleId": "int32.gte_lte"
+          },
+          {
+            "bounds": {
+              "lte": [
+                1
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "int32.lte"
+          },
+          {
+            "bounds": {
+              "in": 1
+            },
+            "fieldPath": "value",
+            "ruleId": "int32.in"
+          },
+          {
+            "bounds": {
+              "in": [
+                [
+                  1
+                ]
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "int32.in"
+          },
+          {
+            "bounds": {
+              "in": [
+                1,
+                [
+                  2
+                ]
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "enum.in"
+          },
+          {
+            "bounds": {
+              "not_in": [
+                null
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "string.not_in"
+          },
+          {
+            "bounds": {
+              "in": [
+                {
+                  "a": 1
+                }
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "string.in"
+          },
+          {
+            "bounds": {
+              "lte": null
+            },
+            "fieldPath": "value",
+            "ruleId": "uint64.lte"
+          },
+          {
+            "bounds": {
+              "const": {
+                "value": 1
+              }
+            },
+            "fieldPath": "value",
+            "ruleId": "string.const"
+          },
+          {
+            "bounds": {
+              "prefix": [
+                "a"
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "string.prefix"
+          },
+          {
+            "bounds": {
+              "min_items": [
+                "1"
+              ]
+            },
+            "fieldPath": "value",
+            "ruleId": "repeated.min_items"
+          }
+        ],
+        "more": 0
+      }
+    },
+    {
+      "name": "bytes take words in base64 as RFC 4648 §4 writes it alone",
+      "clauses": [
+        "18.7",
+        "18.8.6"
+      ],
+      "detail": "{\"bounds\":{\"const\":\"AP8=\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"prefix\":\"AQID\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.prefix\"}\n{\"bounds\":{\"suffix\":\"AQ==\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.suffix\"}\n{\"bounds\":{\"contains\":\"\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.contains\"}\n{\"bounds\":{\"const\":\"AR==\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"AP8\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"-_8=\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"AP 8=\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"AP8=\\n\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"A===\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"AP8=AP8=\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":\"!!!!\"},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"bounds\":{\"const\":7},\"fieldPath\":\"value\",\"ruleId\":\"bytes.const\"}\n{\"more\":0}",
+      "read": {
+        "violations": [
+          {
+            "bounds": {
+              "const": "AP8="
+            },
+            "fieldPath": "value",
+            "message": "must be 00ff",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "prefix": "AQID"
+            },
+            "fieldPath": "value",
+            "message": "does not have prefix 010203",
+            "ruleId": "bytes.prefix"
+          },
+          {
+            "bounds": {
+              "suffix": "AQ=="
+            },
+            "fieldPath": "value",
+            "message": "does not have suffix 01",
+            "ruleId": "bytes.suffix"
+          },
+          {
+            "bounds": {
+              "contains": ""
+            },
+            "fieldPath": "value",
+            "message": "does not contain ",
+            "ruleId": "bytes.contains"
+          },
+          {
+            "bounds": {
+              "const": "AR=="
+            },
+            "fieldPath": "value",
+            "message": "must be 01",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "AP8"
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "-_8="
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "AP 8="
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "AP8=\n"
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "A==="
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "AP8=AP8="
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": "!!!!"
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          },
+          {
+            "bounds": {
+              "const": 7
+            },
+            "fieldPath": "value",
+            "ruleId": "bytes.const"
+          }
+        ],
+        "more": 0
+      }
     }
   ]
 }

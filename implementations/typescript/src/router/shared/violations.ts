@@ -58,6 +58,19 @@ export interface IReadViolations {
   readonly violations: readonly IViolation[];
 }
 
+/** A placeholder of a template: the member it is written from, whether as bytes, and the text after it. */
+interface IPlaceholder {
+  readonly isBytes: boolean;
+  readonly name: string;
+  readonly tail: string;
+}
+
+/** A rule's template (spec 18.8.6): its words before its first placeholder, then its placeholders. */
+interface ITemplate {
+  readonly head: string;
+  readonly placeholders: readonly IPlaceholder[];
+}
+
 /** What holds a judging's violations within a detail's bound, line by line as its writer writes. */
 export interface IViolationHolder {
   /** The lines held, in their order. */
@@ -72,7 +85,7 @@ export interface IViolationHolder {
 
 // constants
 
-/** The closing line at its longest, `{"more":N}` with N below 2⁵³, and the line feed before it. */
+/** The closing line at its longest, `{"more":N}` with N at 2⁵³ − 1, and the line feed before it. */
 export const CLOSING_BYTES = 26;
 
 // what an envelope holds beside a failure's detail: its prefix, an announcement's block, its
@@ -93,7 +106,14 @@ const VIOLATION_MEMBERS: ReadonlySet<string> = new Set([
   'ruleId',
 ]);
 
-const NUMBERS: ReadonlySet<string> = new Set([
+// the largest count a closing line writes and reads, the largest integer an I-JSON number holds
+// exactly (RFC 7493 §2.2)
+const LARGEST_COUNT = Number.MAX_SAFE_INTEGER;
+
+// the twelve number types of validate.proto's rules
+const NUMBER_TYPES: readonly string[] = Object.freeze([
+  'float',
+  'double',
   'int32',
   'int64',
   'uint32',
@@ -104,37 +124,23 @@ const NUMBERS: ReadonlySet<string> = new Set([
   'fixed64',
   'sfixed32',
   'sfixed64',
-  'float',
-  'double',
 ]);
 
-// the words of the rules protovalidate plays itself, and of a flag alone (spec 18.8.6)
-const FLAG_WORDS: Readonly<Record<string, string>> = Object.freeze({
-  'double.finite': 'must be finite',
-  'enum.defined_only': 'value must be one of the defined enum values',
-  'float.finite': 'must be finite',
-  'repeated.unique': 'repeated value must contain unique items',
-});
-
-const PHRASES: Readonly<Record<string, string>> = Object.freeze({
+const BOUND_WORDS = Object.freeze({
   gt: 'greater than',
   gte: 'greater than or equal to',
   lt: 'less than',
   lte: 'less than or equal to',
 });
 
-const RANGE = /^(gte?)_(lte?)(_exclusive)?$/u;
+// a template's placeholders, each written from the member beside it (spec 18.8.6)
+const PLACEHOLDER = /%[dsx]/u;
 
-// the kinds whose rules a member's words are rendered for
-const RENDERED_KINDS: ReadonlySet<string> = new Set([
-  ...NUMBERS,
-  'bool',
-  'bytes',
-  'enum',
-  'map',
-  'repeated',
-  'string',
-]);
+// the members a list is written for, in and not_in alone; every other member is a scalar
+const LISTS: ReadonlySet<string> = new Set(['in', 'not_in']);
+
+// base64 as RFC 4648 §4 writes it: its standard alphabet, by fours, padded to the last
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
 // helpers
 
@@ -147,15 +153,19 @@ const canonicalOf = (value: unknown): string => {
   return DECODER.decode(PAYLOAD_CODECS.json.encode(value));
 };
 
-/** A violation as its line carries it: its members alone, `value` left on its side. */
+/**
+ * A violation as its line carries it (spec 18.6, 18.7): its members alone, none empty — no
+ * `fieldPath` or `message` of `''`, no `bounds` of `{}`, no `forKey` but `true` — and `value` left
+ * on its side.
+ */
 const membersOf = (violation: IViolation): Record<string, unknown> => {
   const { bounds, fieldPath, forKey, message, ruleId } = violation;
 
   return {
-    ...(bounds === undefined ? {} : { bounds }),
-    ...(fieldPath === undefined ? {} : { fieldPath }),
+    ...(bounds === undefined || Object.keys(bounds).length === 0 ? {} : { bounds }),
+    ...(fieldPath === undefined || fieldPath === '' ? {} : { fieldPath }),
     ...(forKey === true ? { forKey } : {}),
-    ...(message === undefined ? {} : { message }),
+    ...(message === undefined || message === '' ? {} : { message }),
     ruleId,
   };
 };
@@ -169,112 +179,113 @@ const linesOf = (violation: IViolation): string[] => {
   return [...new Set([canonicalOf(whole), canonicalOf(short), canonicalOf(shortest)])];
 };
 
-/** A bound's text, as `%s` writes the value it is: a list by `, `, a string as it is. */
-const wordsOfBound = (value: unknown): string | undefined => {
-  if (Array.isArray(value)) {
-    const items = value.map(wordsOfBound);
+/**
+ * The placeholders of `text`, which opens on one, each `%s`, `%d` or `%x` with the member of `names`
+ * it takes, in their order, and the text after it up to the next.
+ */
+const placeholdersOf = (text: string, names: readonly string[]): IPlaceholder[] => {
+  const [name, ...rest] = names;
 
-    return items.includes(undefined) ? undefined : `[${items.join(', ')}]`;
+  if (name === undefined) {
+    return [];
   }
 
-  if (typeof value === 'boolean') {
-    return value ? 'true' : 'false';
-  }
+  const after = text.slice(2);
+  const next = after.search(PLACEHOLDER);
+  const tail = next === -1 ? after : after.slice(0, next);
 
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  // * ECMAScript's Number::toString, section 17.7.4's form of the double a bound is
-  return typeof value === 'number' ? String(value) : undefined;
+  return [
+    Object.freeze({ isBytes: text.startsWith('%x'), name, tail }),
+    ...placeholdersOf(after.slice(tail.length), rest),
+  ];
 };
 
-/** Bytes given in base64 in lower-case hexadecimal, `%x`'s form; none where they do not read. */
+/** The template of `words`, each of its placeholders written from the member of `names` beside it. */
+const templateOf = (words: string, names: readonly string[] = []): ITemplate => {
+  const first = words.search(PLACEHOLDER);
+  const head = first === -1 ? words : words.slice(0, first);
+
+  return Object.freeze({ head, placeholders: placeholdersOf(words.slice(head.length), names) });
+};
+
+/** A number type's templates, by their ids: its `const`, its bounds, its ranges, reversed or not, its lists. */
+const numberTemplatesOf = (kind: string): [string, ITemplate][] => {
+  const bounds = (['lt', 'lte', 'gt', 'gte'] as const).map((member): [string, ITemplate] => {
+    return [`${kind}.${member}`, templateOf(`must be ${BOUND_WORDS[member]} %s`, [member])];
+  });
+  const ranges = (['gt', 'gte'] as const).flatMap((lower) => {
+    return (['lt', 'lte'] as const).flatMap((upper) => {
+      const words = (joined: string): string => {
+        return `must be ${BOUND_WORDS[lower]} %s ${joined} ${BOUND_WORDS[upper]} %s`;
+      };
+
+      return [
+        [`${kind}.${lower}_${upper}`, templateOf(words('and'), [lower, upper])],
+        [`${kind}.${lower}_${upper}_exclusive`, templateOf(words('or'), [lower, upper])],
+      ] satisfies [string, ITemplate][];
+    });
+  });
+
+  return [
+    [`${kind}.const`, templateOf('must equal %s', ['const'])],
+    ...bounds,
+    ...ranges,
+    [`${kind}.in`, templateOf('must be in list %s', ['in'])],
+    [`${kind}.not_in`, templateOf('must not be in list %s', ['not_in'])],
+  ];
+};
+
+/** A scalar as `%s` writes it: a string as it is, a number as section 17.7.4 writes it, a literal. */
+const scalarWordsOf = (value: unknown): string | undefined => {
+  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+    ? String(value)
+    : undefined;
+};
+
+/** Bytes in base64 as RFC 4648 §4 writes them, in lower-case hexadecimal, `%x`'s form; none otherwise. */
 const hexadecimalOf = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') {
+  if (typeof value !== 'string' || !BASE64.test(value)) {
     return undefined;
   }
 
-  try {
-    return Array.from(atob(value), (character) => {
-      return (character.codePointAt(0) ?? 0).toString(16).padStart(2, '0');
-    }).join('');
-  } catch {
-    return undefined;
-  }
+  return Array.from(atob(value), (character) => {
+    return character.charCodeAt(0).toString(16).padStart(2, '0');
+  }).join('');
 };
 
-/** A member's words, from its kind and its bounds; none where its bound is missing. */
+const isWords = (words: readonly (string | undefined)[]): words is readonly string[] => {
+  return !words.includes(undefined);
+};
+
+/**
+ * A member's words, as its placeholder writes it: bytes in hexadecimal, `in` and `not_in` as a list
+ * of scalars, `[`, its items by `, `, `]`, any other a scalar; none where it is missing or of another
+ * shape.
+ */
 const memberWordsOf = (
-  member: string,
-  { bounds, kind }: { bounds: Readonly<Record<string, unknown>>; kind: string }
+  { isBytes, name }: IPlaceholder,
+  bounds: Readonly<Record<string, unknown>> | undefined
 ): string | undefined => {
-  const bound = bounds[member];
-  const text = wordsOfBound(bound);
-  const isString = kind === 'string';
-  const unit = isString ? 'characters' : 'bytes';
+  const value = bounds !== undefined && Object.hasOwn(bounds, name) ? bounds[name] : undefined;
 
-  if (text === undefined) {
+  if (isBytes) {
+    return hexadecimalOf(value);
+  }
+
+  if (!LISTS.has(name)) {
+    return scalarWordsOf(value);
+  }
+
+  if (!Array.isArray(value)) {
     return undefined;
   }
 
-  switch (member) {
-    case 'const':
-      if (kind === 'bytes') {
-        const hexadecimal = hexadecimalOf(bound);
+  const items = value.map(scalarWordsOf);
 
-        return hexadecimal === undefined ? undefined : `must be ${hexadecimal}`;
-      }
-
-      return isString ? `must equal \`${text}\`` : `must equal ${text}`;
-    case 'in':
-      return `must be in list ${text}`;
-    case 'not_in':
-      return `must not be in list ${text}`;
-    case 'len':
-      return `must be ${text} ${unit}`;
-    case 'min_len':
-      return `must be at least ${text} ${unit}`;
-    case 'max_len':
-      return `must be at most ${text} ${unit}`;
-    case 'len_bytes':
-      return `must be ${text} bytes`;
-    case 'min_bytes':
-      return `must be at least ${text} bytes`;
-    case 'max_bytes':
-      return `must be at most ${text} bytes`;
-    case 'pattern':
-      return `does not match regex pattern \`${text}\``;
-    case 'not_contains':
-      return `contains substring \`${text}\``;
-    case 'min_items':
-      return `must contain at least ${text} item(s)`;
-    case 'max_items':
-      return `must contain no more than ${text} item(s)`;
-    case 'min_pairs':
-      return `map must be at least ${text} entries`;
-    case 'max_pairs':
-      return `map must be at most ${text} entries`;
-    default:
-      break;
-  }
-
-  const affix = { contains: 'contain', prefix: 'have prefix', suffix: 'have suffix' }[member];
-
-  if (affix === undefined) {
-    return undefined;
-  }
-
-  if (isString) {
-    return `does not ${affix === 'contain' ? 'contain substring' : affix} \`${text}\``;
-  }
-
-  const hexadecimal = hexadecimalOf(bound);
-
-  return hexadecimal === undefined ? undefined : `does not ${affix} ${hexadecimal}`;
+  return isWords(items) ? `[${items.join(', ')}]` : undefined;
 };
 
-/** A line read as a violation (spec 18.3): its members alone, each of its type; none otherwise. */
+/** A line read as a violation (spec 18.3, 18.7): its members alone, each of its type, none empty. */
 const asViolation = (value: unknown): IViolation | undefined => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return undefined;
@@ -293,13 +304,14 @@ const asViolation = (value: unknown): IViolation | undefined => {
     typeof ruleId !== 'string' ||
     !(fieldPath === undefined || typeof fieldPath === 'string') ||
     !(message === undefined || typeof message === 'string') ||
-    !(forKey === undefined || forKey === true) ||
+    !(forKey === undefined || typeof forKey === 'boolean') ||
     !isBounds
   ) {
     return undefined;
   }
 
-  return record as unknown as IViolation;
+  // * a member empty is absent, as protovalidate drops an empty field path or message
+  return membersOf(record as unknown as IViolation) as unknown as IViolation;
 };
 
 /** A line read as section 17.5 reads a `json` payload; none where it refuses it. */
@@ -310,6 +322,47 @@ const readLine = (line: string): unknown => {
     return undefined;
   }
 };
+
+// the templates of the rules beadc compiles, by their ids, each its rule's in validate.proto: a reader
+// gives words to these alone (spec 18.8.6)
+const TEMPLATES: Readonly<Record<string, ITemplate>> = Object.freeze(
+  Object.fromEntries([
+    ...NUMBER_TYPES.flatMap(numberTemplatesOf),
+    ['float.finite', templateOf('must be finite')],
+    ['double.finite', templateOf('must be finite')],
+    ['bool.const', templateOf('must equal %s', ['const'])],
+    ['string.const', templateOf('must equal `%s`', ['const'])],
+    ['string.len', templateOf('must be %s characters', ['len'])],
+    ['string.min_len', templateOf('must be at least %s characters', ['min_len'])],
+    ['string.max_len', templateOf('must be at most %s characters', ['max_len'])],
+    ['string.len_bytes', templateOf('must be %s bytes', ['len_bytes'])],
+    ['string.min_bytes', templateOf('must be at least %s bytes', ['min_bytes'])],
+    ['string.max_bytes', templateOf('must be at most %s bytes', ['max_bytes'])],
+    ['string.pattern', templateOf('does not match regex pattern `%s`', ['pattern'])],
+    ['string.prefix', templateOf('does not have prefix `%s`', ['prefix'])],
+    ['string.suffix', templateOf('does not have suffix `%s`', ['suffix'])],
+    ['string.contains', templateOf('does not contain substring `%s`', ['contains'])],
+    ['string.not_contains', templateOf('contains substring `%s`', ['not_contains'])],
+    ['string.in', templateOf('must be in list %s', ['in'])],
+    ['string.not_in', templateOf('must not be in list %s', ['not_in'])],
+    ['bytes.const', templateOf('must be %x', ['const'])],
+    ['bytes.len', templateOf('must be %s bytes', ['len'])],
+    ['bytes.min_len', templateOf('must be at least %s bytes', ['min_len'])],
+    ['bytes.max_len', templateOf('must be at most %s bytes', ['max_len'])],
+    ['bytes.prefix', templateOf('does not have prefix %x', ['prefix'])],
+    ['bytes.suffix', templateOf('does not have suffix %x', ['suffix'])],
+    ['bytes.contains', templateOf('does not contain %x', ['contains'])],
+    ['enum.const', templateOf('must equal %s', ['const'])],
+    ['enum.defined_only', templateOf('value must be one of the defined enum values')],
+    ['enum.in', templateOf('must be in list %s', ['in'])],
+    ['enum.not_in', templateOf('must not be in list %s', ['not_in'])],
+    ['repeated.min_items', templateOf('must contain at least %d item(s)', ['min_items'])],
+    ['repeated.max_items', templateOf('must contain no more than %s item(s)', ['max_items'])],
+    ['repeated.unique', templateOf('repeated value must contain unique items')],
+    ['map.min_pairs', templateOf('map must be at least %d entries', ['min_pairs'])],
+    ['map.max_pairs', templateOf('map must be at most %d entries', ['max_pairs'])],
+  ])
+);
 
 // definition
 
@@ -393,8 +446,11 @@ export const violationsDetailOf = (
     held += 1;
   }
 
+  // * a count past 2⁵³ − 1 is written as it, the largest integer I-JSON holds (spec 18.6)
   const closing = canonicalOf(
-    judged.stopped ? { stopped: true } : { more: judged.more + judged.violations.length - held }
+    judged.stopped
+      ? { stopped: true }
+      : { more: Math.min(judged.more + judged.violations.length - held, LARGEST_COUNT) }
   );
   const lines = [...holder.lines, closing];
   const size = lines.reduce((total, line) => {
@@ -405,8 +461,10 @@ export const violationsDetailOf = (
 };
 
 /**
- * 18.8.6's words of a violation, from its rule's id and its bounds: none where they do not give
- * them alone, as `required`'s and `message.oneof`'s, which depend on what was judged.
+ * 18.8.6's words of a violation, from its rule's id and its bounds, for the rules beadc compiles
+ * alone, by their templates in `validate.proto`: none for another id, as `required`'s and
+ * `message.oneof`'s, which depend on what was judged, or a CEL rule's, nor where a member its
+ * template takes is missing or of another shape.
  *
  * @example
  * import { wordsOf } from '@francisdesjardins/bead/service';
@@ -415,41 +473,19 @@ export const violationsDetailOf = (
  */
 export const wordsOf = (violation: Pick<IViolation, 'bounds' | 'ruleId'>): string | undefined => {
   const { bounds, ruleId } = violation;
-  const flag = Object.hasOwn(FLAG_WORDS, ruleId) ? FLAG_WORDS[ruleId] : undefined;
-  const dot = ruleId.indexOf('.');
-  const kind = ruleId.slice(0, Math.max(dot, 0));
-  const member = dot === -1 ? '' : ruleId.slice(dot + 1);
+  const template = Object.hasOwn(TEMPLATES, ruleId) ? TEMPLATES[ruleId] : undefined;
 
-  if (flag !== undefined) {
-    return flag;
-  }
-
-  if (bounds === undefined || member === '') {
+  if (template === undefined) {
     return undefined;
   }
 
-  const isNumber = NUMBERS.has(kind);
+  const pieces = template.placeholders.map((placeholder) => {
+    const words = memberWordsOf(placeholder, bounds);
 
-  if ((isNumber || kind === 'enum' || kind === 'bool') && Object.hasOwn(PHRASES, member)) {
-    const text = wordsOfBound(bounds[member]);
+    return words === undefined ? undefined : `${words}${placeholder.tail}`;
+  });
 
-    return text === undefined ? undefined : `must be ${PHRASES[member] ?? ''} ${text}`;
-  }
-
-  const range = RANGE.exec(member);
-
-  if (range !== null && isNumber) {
-    const [, lower = '', upper = ''] = range;
-    const low = wordsOfBound(bounds[lower]);
-    const high = wordsOfBound(bounds[upper]);
-    const joined = range[3] === undefined ? 'and' : 'or';
-
-    return low === undefined || high === undefined
-      ? undefined
-      : `must be ${PHRASES[lower] ?? ''} ${low} ${joined} ${PHRASES[upper] ?? ''} ${high}`;
-  }
-
-  return RENDERED_KINDS.has(kind) ? memberWordsOf(member, { bounds, kind }) : undefined;
+  return isWords(pieces) ? `${template.head}${pieces.join('')}` : undefined;
 };
 
 /**
@@ -497,8 +533,10 @@ export const violationsOf = (
     >;
     const names = Object.keys(closing).join(',');
 
-    if (names === 'more' && Number.isInteger(closing['more']) && Number(closing['more']) >= 0) {
-      return { more: Number(closing['more']), violations };
+    // * a count is an integer from 0 to 2⁵³ − 1 (spec 18.7); any other leaves the detail uncounted
+    if (names === 'more' && Number.isSafeInteger(closing['more']) && Number(closing['more']) >= 0) {
+      // * a count of -0 is 0
+      return { more: Math.abs(Number(closing['more'])), violations };
     }
 
     if (names === 'stopped' && closing['stopped'] === true) {

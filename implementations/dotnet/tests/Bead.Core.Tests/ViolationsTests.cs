@@ -189,7 +189,7 @@ public sealed class ViolationsTests
             "{\"fieldPath\":\"from\"}\n{\"more\":0}",
             "{\"bounds\":[10],\"ruleId\":\"int32.lte\"}\n{\"more\":0}",
             "{\"message\":10,\"ruleId\":\"int32.lte\"}\n{\"more\":0}",
-            "{\"forKey\":false,\"ruleId\":\"required\"}\n{\"more\":0}",
+            "{\"forKey\":\"true\",\"ruleId\":\"required\"}\n{\"more\":0}",
             "{\"stopped\":false}",
             "﻿{\"ruleId\":\"required\"}",
         ];
@@ -231,6 +231,54 @@ public sealed class ViolationsTests
 
         Assert.Equal([Shown(key)], bare.Violations.Select(Shown));
         Assert.Null(bare.More);
+    }
+
+    [Fact]
+    public void Takes_a_member_empty_as_absent_its_line_kept_and_an_empty_ruleId_as_an_id()
+    {
+        var empty = Violations.Read("{\"bounds\":{},\"fieldPath\":\"\",\"forKey\":false,\"message\":\"\",\"ruleId\":\"required\"}\n{\"more\":0}");
+
+        Assert.Equal([Shown(new Violation { RuleId = "required" })], empty.Violations.Select(Shown));
+        Assert.Equal(0, empty.More);
+
+        // * an empty message takes its rule's words, as an absent one does
+        var worded = Violations.Read("{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"\",\"ruleId\":\"int32.lte\"}");
+
+        Assert.Equal([Shown(From)], worded.Violations.Select(Shown));
+
+        var idLess = Violations.Read("{\"ruleId\":\"\"}\n{\"message\":\"must be even\",\"ruleId\":\"\"}\n{\"more\":1}");
+
+        Assert.Equal(
+            [Shown(new Violation { RuleId = "" }), Shown(new Violation { Message = "must be even", RuleId = "" })],
+            idLess.Violations.Select(Shown));
+        Assert.Equal(1, idLess.More);
+    }
+
+    [Fact]
+    public void Reads_a_closing_count_from_0_to_the_largest_integer_I_JSON_holds_and_none_past_it_nor_of_a_fraction()
+    {
+        var line = "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}";
+
+        Assert.Equal(9_007_199_254_740_991, Violations.Read(line + "\n{\"more\":9007199254740991}").More);
+
+        // * a number is read as the double nearest it (spec 17.6), so 1e2 counts a hundred
+        Assert.Equal(100, Violations.Read(line + "\n{\"more\":1e2}").More);
+
+        foreach (var count in new[] { "9007199254740992", "1e300", "1.5", "-1", "\"3\"", "true", "null" })
+        {
+            var read = Violations.Read(line + "\n{\"more\":" + count + "}");
+
+            Assert.Equal($"{count}: {Shown(From)} -", $"{count}: {string.Join(", ", read.Violations.Select(Shown))} {read.More?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}");
+        }
+    }
+
+    [Fact]
+    public void Writes_no_member_empty_and_a_count_past_the_largest_integer_I_JSON_holds_as_it()
+    {
+        var empty = new Violation { Bounds = BoundsOf("{}"), FieldPath = "", Message = "", RuleId = "required" };
+
+        Assert.Equal("{\"ruleId\":\"required\"}\n{\"more\":0}", Violations.DetailOf(new Judged { Violations = [empty] }, 1_024));
+        Assert.Equal("{\"more\":9007199254740991}", Violations.DetailOf(new Judged { More = 1L << 60, Violations = [] }, 1_024));
     }
 
     [Fact]
@@ -326,6 +374,63 @@ public sealed class ViolationsTests
         // * a bound of a scalar is written as `%s` writes it, a flag among them
         Assert.Equal("must be less than or equal to true", WordsOf("int32.lte", "{\"lte\":true}"));
         Assert.Equal("must equal false", WordsOf("bool.const", "{\"const\":false}"));
+    }
+
+    [Fact]
+    public void Gives_words_to_the_rules_beadc_compiles_alone_by_their_templates()
+    {
+        Assert.Equal("does not match regex pattern `^a$`", WordsOf("string.pattern", "{\"pattern\":\"^a$\"}"));
+        Assert.Equal("must contain at least 2 item(s)", WordsOf("repeated.min_items", "{\"min_items\":\"2\"}"));
+        Assert.Equal("must be finite", WordsOf("float.finite", null));
+
+        // * bytes' pattern and lists, which beadc does not compile, take none, nor an id of no rule's
+        (string RuleId, string Bounds)[] none =
+        [
+            ("bytes.pattern", "{\"pattern\":\"^a$\"}"),
+            ("bytes.in", "{\"in\":[\"AQI=\"]}"),
+            ("bytes.not_in", "{\"not_in\":[\"AQI=\"]}"),
+            ("bool.in", "{\"in\":[true]}"),
+            ("enum.gt_lt", "{\"gt\":1,\"lt\":3}"),
+            ("repeated.const", "{\"const\":1}"),
+            ("", "{\"lte\":1}"),
+            ("constructor", "{\"lte\":1}"),
+        ];
+
+        foreach (var (ruleId, bounds) in none)
+        {
+            Assert.Equal($"{ruleId}: ", $"{ruleId}: {WordsOf(ruleId, bounds)}");
+        }
+    }
+
+    [Fact]
+    public void Takes_a_list_for_in_and_not_in_alone_and_a_scalar_for_every_other_member()
+    {
+        Assert.Equal("must be in list [1, a, true]", WordsOf("int32.in", "{\"in\":[1,\"a\",true]}"));
+        Assert.Equal("must not be in list []", WordsOf("string.not_in", "{\"not_in\":[]}"));
+
+        foreach (var bounds in new[] { "{\"in\":1}", "{\"in\":[[1]]}", "{\"in\":[1,[2]]}", "{\"in\":\"a\"}" })
+        {
+            Assert.Equal($"{bounds}: ", $"{bounds}: {WordsOf("int32.in", bounds)}");
+        }
+
+        foreach (var bounds in new[] { "{\"lte\":[1]}", "{\"lte\":{}}", "{\"lte\":null}" })
+        {
+            Assert.Equal($"{bounds}: ", $"{bounds}: {WordsOf("int32.lte", bounds)}");
+        }
+    }
+
+    [Fact]
+    public void Takes_bytes_in_base64_as_RFC_4648_writes_it_alone_padded_of_its_standard_alphabet()
+    {
+        Assert.Equal("must be 00ff", WordsOf("bytes.const", "{\"const\":\"AP8=\"}"));
+        Assert.Equal("does not have suffix 01", WordsOf("bytes.suffix", "{\"suffix\":\"AQ==\"}"));
+        Assert.Equal("does not contain 010203", WordsOf("bytes.contains", "{\"contains\":\"AQID\"}"));
+        Assert.Equal("must be 01", WordsOf("bytes.const", "{\"const\":\"AR==\"}"));
+
+        foreach (var text in new[] { "AP8", "-_8=", "AP 8=", "AP8=\\n", "A===", "AP8=AP8=", "!!!!", "AQ=" })
+        {
+            Assert.Equal($"{text}: ", $"{text}: {WordsOf("bytes.const", "{\"const\":\"" + text + "\"}")}");
+        }
     }
 
     [Fact]

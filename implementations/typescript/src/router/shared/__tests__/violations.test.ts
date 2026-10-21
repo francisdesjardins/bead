@@ -139,7 +139,7 @@ test.describe('violationsOf', () => {
     expect(readOf('{"fieldPath":"from"}\n{"more":0}')).toEqual({ violations: [] });
     expect(readOf('{"bounds":[10],"ruleId":"int32.lte"}\n{"more":0}')).toEqual({ violations: [] });
     expect(readOf('{"message":10,"ruleId":"int32.lte"}\n{"more":0}')).toEqual({ violations: [] });
-    expect(readOf('{"forKey":false,"ruleId":"required"}\n{"more":0}')).toEqual({ violations: [] });
+    expect(readOf('{"forKey":"true","ruleId":"required"}\n{"more":0}')).toEqual({ violations: [] });
     expect(readOf('{"stopped":false}')).toEqual({ violations: [] });
     expect(readOf('﻿{"ruleId":"required"}')).toEqual({ violations: [] });
     // a failure of another code carries none, whatever its detail
@@ -192,7 +192,57 @@ test.describe('violationsOf', () => {
   });
 });
 
+test.describe('violationsOf, its members and its count', () => {
+  test('takes a member empty as absent, its line kept, and an empty ruleId as an id', () => {
+    expect(
+      readOf(
+        '{"bounds":{},"fieldPath":"","forKey":false,"message":"","ruleId":"required"}\n{"more":0}'
+      )
+    ).toEqual({ more: 0, violations: [{ ruleId: 'required' }] });
+    // * an empty message takes its rule's words, as an absent one does
+    expect(
+      readOf('{"bounds":{"lte":10},"fieldPath":"from","message":"","ruleId":"int32.lte"}')
+    ).toEqual({ violations: [FROM] });
+    expect(readOf('{"ruleId":""}\n{"message":"must be even","ruleId":""}\n{"more":1}')).toEqual({
+      more: 1,
+      violations: [{ ruleId: '' }, { message: 'must be even', ruleId: '' }],
+    });
+  });
+
+  test('reads a closing count from 0 to the largest integer I-JSON holds, and none past it nor of a fraction', () => {
+    const line =
+      '{"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}';
+
+    expect(readOf(`${line}\n{"more":9007199254740991}`)).toEqual({
+      more: Number.MAX_SAFE_INTEGER,
+      violations: [FROM],
+    });
+    // * a number is read as the double nearest it (spec 17.6), so 1e2 counts a hundred
+    expect(readOf(`${line}\n{"more":1e2}`)).toEqual({ more: 100, violations: [FROM] });
+
+    for (const count of ['9007199254740992', '1e300', '1.5', '-1', '"3"', 'true', 'null']) {
+      expect(readOf(`${line}\n{"more":${count}}`), count).toEqual({ violations: [FROM] });
+    }
+  });
+});
+
 test.describe('violationsDetailOf', () => {
+  test('writes no member empty, and a count past the largest integer I-JSON holds as it', () => {
+    expect(
+      violationsDetailOf(
+        {
+          more: 0,
+          stopped: false,
+          violations: [{ bounds: {}, fieldPath: '', message: '', ruleId: 'required' }],
+        },
+        { maximumBytes: 1_024 }
+      )
+    ).toBe('{"ruleId":"required"}\n{"more":0}');
+    expect(
+      violationsDetailOf({ more: 2 ** 60, stopped: false, violations: [] }, { maximumBytes: 1_024 })
+    ).toBe('{"more":9007199254740991}');
+  });
+
   test('leaves the value a violation broke on the side that judged', () => {
     expect(
       violationsDetailOf(
@@ -289,6 +339,64 @@ test.describe('wordsOf', () => {
       'must be less than or equal to true'
     );
     expect(wordsOf({ bounds: { const: false }, ruleId: 'bool.const' })).toBe('must equal false');
+  });
+});
+
+test.describe('wordsOf, its rules and their bounds', () => {
+  test('gives words to the rules beadc compiles alone, by their templates', () => {
+    expect(wordsOf({ bounds: { pattern: '^a$' }, ruleId: 'string.pattern' })).toBe(
+      'does not match regex pattern `^a$`'
+    );
+    expect(wordsOf({ bounds: { min_items: '2' }, ruleId: 'repeated.min_items' })).toBe(
+      'must contain at least 2 item(s)'
+    );
+    expect(wordsOf({ ruleId: 'float.finite' })).toBe('must be finite');
+
+    // * bytes' pattern and lists, which beadc does not compile, take none, nor an id of no rule's
+    for (const violation of [
+      { bounds: { pattern: '^a$' }, ruleId: 'bytes.pattern' },
+      { bounds: { in: ['AQI='] }, ruleId: 'bytes.in' },
+      { bounds: { not_in: ['AQI='] }, ruleId: 'bytes.not_in' },
+      { bounds: { in: [true] }, ruleId: 'bool.in' },
+      { bounds: { gt: 1, lt: 3 }, ruleId: 'enum.gt_lt' },
+      { bounds: { const: 1 }, ruleId: 'repeated.const' },
+      { bounds: { lte: 1 }, ruleId: '' },
+      { bounds: { lte: 1 }, ruleId: 'constructor' },
+    ]) {
+      expect(wordsOf(violation), violation.ruleId).toBeUndefined();
+    }
+  });
+
+  test('takes a list for in and not_in alone, and a scalar for every other member', () => {
+    expect(wordsOf({ bounds: { in: [1, 'a', true] }, ruleId: 'int32.in' })).toBe(
+      'must be in list [1, a, true]'
+    );
+    expect(wordsOf({ bounds: { not_in: [] }, ruleId: 'string.not_in' })).toBe(
+      'must not be in list []'
+    );
+
+    for (const bounds of [{ in: 1 }, { in: [[1]] }, { in: [1, [2]] }, { in: 'a' }]) {
+      expect(wordsOf({ bounds, ruleId: 'int32.in' }), JSON.stringify(bounds)).toBeUndefined();
+    }
+
+    for (const bounds of [{ lte: [1] }, { lte: {} }, { lte: null }]) {
+      expect(wordsOf({ bounds, ruleId: 'int32.lte' }), JSON.stringify(bounds)).toBeUndefined();
+    }
+  });
+
+  test('takes bytes in base64 as RFC 4648 writes it alone, padded, of its standard alphabet', () => {
+    expect(wordsOf({ bounds: { const: 'AP8=' }, ruleId: 'bytes.const' })).toBe('must be 00ff');
+    expect(wordsOf({ bounds: { suffix: 'AQ==' }, ruleId: 'bytes.suffix' })).toBe(
+      'does not have suffix 01'
+    );
+    expect(wordsOf({ bounds: { contains: 'AQID' }, ruleId: 'bytes.contains' })).toBe(
+      'does not contain 010203'
+    );
+    expect(wordsOf({ bounds: { const: 'AR==' }, ruleId: 'bytes.const' })).toBe('must be 01');
+
+    for (const text of ['AP8', '-_8=', 'AP 8=', 'AP8=\n', 'A===', 'AP8=AP8=', '!!!!', 'AQ=']) {
+      expect(wordsOf({ bounds: { const: text }, ruleId: 'bytes.const' }), text).toBeUndefined();
+    }
   });
 });
 

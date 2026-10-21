@@ -1944,7 +1944,10 @@ where its side stopped at its first violation. A writer writes the violations in
 they hold in the detail's bound (section 7.4) with 26 bytes kept for the closing line: each whole,
 or, where it does not hold whole, without its `message`, then without its `bounds` too; the first
 whose `fieldPath`, `ruleId` and `forKey` alone do not hold ends the lines, and is counted in `more`
-with every one after it. A detail whose bound holds no closing line is empty.
+with every one after it. A writer writes no member empty: no `fieldPath` or `message` of `""`, no
+`bounds` of `{}`, no `forKey` but `true`; and N at most 2^53 − 1, the largest integer an I-JSON
+number holds exactly (RFC 7493 §2.2), a count past it written as 2^53 − 1. A detail whose bound
+holds no closing line is empty.
 
 ```text
 {"bounds":{"lte":10},"fieldPath":"from","message":"must be less than or equal to 10","ruleId":"int32.lte"}
@@ -1955,7 +1958,11 @@ with every one after it. A detail whose bound holds no closing line is empty.
 `json` payload: the lines that read as violations, up to the first that does not, are its
 violations, and a closing line its count. A detail cut by its reader's bound (section 7.3), or by a
 relay's on its other leg, keeps its whole lines; one with no closing line leaves what it left out
-uncounted. A violation without its `message` takes the words 18.8.6 gives its rule from its
+uncounted. A member empty is absent, as protovalidate drops an empty field path or message: a
+`fieldPath` or a `message` of `""`, a `bounds` of `{}`, a `forKey` of `false`, the line kept; a
+`ruleId` of `""` is an id, an id-less CEL rule's. A closing line's N is an integer from 0 to
+2^53 − 1, its number read as section 17.6 reads one; any other is no closing line, and the detail
+is uncounted. A violation without its `message` takes the words 18.8.6 gives its rule from its
 `ruleId` and its `bounds`, where they give them; `required`'s and `message.oneof`'s depend on what
 was judged, and such a violation keeps none. A detail whose first line is neither — empty, or
 another text — gives none, and the failure stands by its code.
@@ -1992,3 +1999,39 @@ another text — gives none, and the failure stands by its code.
    `(buf.validate.message).oneof`, `only one of ` its fields by `, ` ` can be set`, or, where it
    requires one, `one of ` its fields ` must be set`. A CEL rule's are its `message`, else the
    string it gives, else `"` its expression `" returned false`. `spec/validations.json` holds each.
+   A reader gives the words of a violation from its `ruleId` and its `bounds` (18.7) to these ids
+   alone, of the rules beadc compiles, each by the template its rule formats in `validate.proto`,
+   each `%s`, `%d` or `%x` written from the member beside it, `N` any of the twelve number types:
+
+   - `N.const`, `bool.const`, `enum.const`: `must equal %s`, of `const`;
+   - `N.lt`, `N.lte`, `N.gt`, `N.gte`: `must be less than %s`, `must be less than or equal to %s`,
+     `must be greater than %s`, `must be greater than or equal to %s`, of their member;
+   - `N.gt_lt`, `N.gt_lte`, `N.gte_lt`, `N.gte_lte`: `must be greater than %s and less than %s`, its
+     lower member's words then its upper's by `and`, of its lower member then its upper; each
+     `_exclusive` alike, by `or`;
+   - `N.in`, `string.in`, `enum.in`: `must be in list %s`; `N.not_in`, `string.not_in`,
+     `enum.not_in`: `must not be in list %s`; of their member;
+   - `float.finite` and `double.finite`: `must be finite`; `enum.defined_only`:
+     `value must be one of the defined enum values`; `repeated.unique`:
+     `repeated value must contain unique items`; of no member;
+   - `string.const`: ``must equal `%s` ``; `string.len`, `string.min_len`, `string.max_len`:
+     `must be %s characters`, `must be at least %s characters`, `must be at most %s characters`;
+     `string.len_bytes`, `string.min_bytes`, `string.max_bytes`: `must be %s bytes`,
+     `must be at least %s bytes`, `must be at most %s bytes`; `string.pattern`, `string.prefix`,
+     `string.suffix`, `string.contains`, `string.not_contains`: ``does not match regex pattern `%s` ``,
+     ``does not have prefix `%s` ``, ``does not have suffix `%s` ``,
+     ``does not contain substring `%s` ``, ``contains substring `%s` ``; of their member;
+   - `bytes.const`: `must be %x`; `bytes.len`, `bytes.min_len`, `bytes.max_len`: `must be %s bytes`,
+     `must be at least %s bytes`, `must be at most %s bytes`; `bytes.prefix`, `bytes.suffix`,
+     `bytes.contains`: `does not have prefix %x`, `does not have suffix %x`, `does not contain %x`;
+     of their member;
+   - `repeated.min_items`, `repeated.max_items`: `must contain at least %d item(s)`,
+     `must contain no more than %s item(s)`; `map.min_pairs`, `map.max_pairs`:
+     `map must be at least %d entries`, `map must be at most %d entries`; of their member.
+
+   `in` and `not_in` take a list of scalars, every other member a scalar: a string, a number,
+   `true` or `false`; `%x` takes a string of base64 as RFC 4648 §4 writes it, its standard alphabet,
+   padded, no white space. Any other id gives none — `bytes.pattern`, `bytes.in` and
+   `bytes.not_in`, which beadc does not compile, an id `validate.proto` does not define, as
+   `bool.in` or `enum.lt`, and a CEL rule's — nor does a member its template takes that is missing
+   or of another shape, a list nested among them.

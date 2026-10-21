@@ -39,6 +39,9 @@ def es(value):
 def canonical(value):
     """A value's canonical form (17.7): its members sorted by their UTF-16 code units, a number as
     ECMAScript writes its double, a string as JSON.stringify writes a well-formed one."""
+    if value is None:
+        return 'null'
+
     if value is True:
         return 'true'
 
@@ -78,20 +81,32 @@ def violation(path, rule_id, bounds, message, for_key=False):
     if for_key:
         found['forKey'] = True
 
-    found['message'] = message
+    if message:
+        found['message'] = message
+
     found['ruleId'] = rule_id
     return found
 
 
 # ── The detail, 18.6 and 18.7 ───────────────────────────────────────────────────────────────────
 
-# the closing line at its longest, {"more":N} with N below 2^53, and the line feed before it
-KEPT = 1 + len('{"more":9007199254740991}')
+# the largest count a closing line writes, the largest integer an I-JSON number holds exactly (RFC 7493
+# §2.2), and the closing line at its longest, {"more":N} with N at it, and the line feed before it
+LARGEST_COUNT = 2 ** 53 - 1
+KEPT = 1 + len('{"more":' + str(LARGEST_COUNT) + '}')
 assert KEPT == 26
+
+
+def written(found):
+    """A violation's members as a writer writes them (18.6): none empty, a fieldPath or a message of '',
+    a bounds of {}, a forKey but true."""
+    return {key: member for key, member in found.items()
+            if key == 'ruleId' or (member is True if key == 'forKey' else member not in ('', {}, None))}
 
 
 def forms(found):
     """A violation's line, whole, then without its message, then without its bounds too (18.6)."""
+    found = written(found)
     whole = canonical(found)
     short = canonical({key: member for key, member in found.items() if key != 'message'})
     shortest = canonical({key: member for key, member in found.items() if key not in ('message', 'bounds')})
@@ -128,7 +143,8 @@ def judged(violations, *, maximum=None, fail_fast=False):
 def detail_of(result, maximum):
     """The detail 18.6 writes of what a validator gave, under a bound."""
     count, lines = kept(result['violations'], maximum)
-    closing = canonical({'stopped': True} if result['stopped'] else {'more': result['more'] + len(result['violations']) - count})
+    left = min(result['more'] + len(result['violations']) - count, LARGEST_COUNT)
+    closing = canonical({'stopped': True} if result['stopped'] else {'more': left})
 
     # the lines, each with the line feed after it, then the closing line
     if sum(utf8(line) + 1 for line in lines) + utf8(closing) > maximum:

@@ -10,7 +10,9 @@ words as 18.8.6 writes them. A pattern is matched by RE2 itself, google-re2, whi
 pins; a pattern of a Unicode class is matched once that class is written as the ranges Unicode 17.0.0's
 own files give it, UnicodeData.txt and Scripts.txt, each read where spec/generators/ucd.json pins it by
 its sha256, so that no platform's tables and no older ones of RE2's decide it. A detail is written by
-18.6's writer and read by 18.7's reader, both here, over RFC 8785's canonical form. A backslash is
+18.6's writer and read by 18.7's reader, both here, over RFC 8785's canonical form, the reader's words
+from the template each rule formats in builder/proto/buf/validate/validate.proto, the copy beadc vendors,
+for the rules beadc compiles alone. A backslash is
 chr(92), so that no escape this file builds is read before it is built."""
 import base64
 import hashlib
@@ -24,7 +26,7 @@ import urllib.request
 
 import re2
 
-from details import KEPT, canonical, detail_of, es, judged, utf8, violation
+from details import KEPT, LARGEST_COUNT, canonical, detail_of, es, judged, utf8, violation
 from spec_version import spec_version
 
 # the conformance files sit one folder up from their generators
@@ -1117,77 +1119,124 @@ def judge_map(field, entries, path):
                 yield violation(rendered(at), rule_id, bounds, words)
 
 
-# 18.8.6's words of a standard rule from its id and its bounds, where they give them alone
-RENDERED = {
-    'const': lambda kind, bounds: (f'must equal `{bounds["const"]}`' if kind == 'string' else
-                                   f'must be {base64.b64decode(bounds["const"]).hex()}' if kind == 'bytes' else
-                                   f'must equal {words_of_json(kind, bounds["const"])}'),
-    'in': lambda kind, bounds: f'must be in list {words_of_json(kind, bounds["in"])}',
-    'not_in': lambda kind, bounds: f'must not be in list {words_of_json(kind, bounds["not_in"])}',
-    'len': lambda kind, bounds: f'must be {bounds["len"]} ' + ('characters' if kind == 'string' else 'bytes'),
-    'min_len': lambda kind, bounds: f'must be at least {bounds["min_len"]} ' + ('characters' if kind == 'string' else 'bytes'),
-    'max_len': lambda kind, bounds: f'must be at most {bounds["max_len"]} ' + ('characters' if kind == 'string' else 'bytes'),
-    'len_bytes': lambda kind, bounds: f'must be {bounds["len_bytes"]} bytes',
-    'min_bytes': lambda kind, bounds: f'must be at least {bounds["min_bytes"]} bytes',
-    'max_bytes': lambda kind, bounds: f'must be at most {bounds["max_bytes"]} bytes',
-    'pattern': lambda kind, bounds: f'does not match regex pattern `{bounds["pattern"]}`',
-    'prefix': lambda kind, bounds: (f'does not have prefix `{bounds["prefix"]}`' if kind == 'string' else
-                                    f'does not have prefix {base64.b64decode(bounds["prefix"]).hex()}'),
-    'suffix': lambda kind, bounds: (f'does not have suffix `{bounds["suffix"]}`' if kind == 'string' else
-                                    f'does not have suffix {base64.b64decode(bounds["suffix"]).hex()}'),
-    'contains': lambda kind, bounds: (f'does not contain substring `{bounds["contains"]}`' if kind == 'string' else
-                                      f'does not contain {base64.b64decode(bounds["contains"]).hex()}'),
-    'not_contains': lambda kind, bounds: f'contains substring `{bounds["not_contains"]}`',
-    'min_items': lambda kind, bounds: f'must contain at least {bounds["min_items"]} item(s)',
-    'max_items': lambda kind, bounds: f'must contain no more than {bounds["max_items"]} item(s)',
-    'min_pairs': lambda kind, bounds: f'map must be at least {bounds["min_pairs"]} entries',
-    'max_pairs': lambda kind, bounds: f'map must be at most {bounds["max_pairs"]} entries',
-}
-FLAGS = {'enum.defined_only': 'value must be one of the defined enum values',
-         'repeated.unique': 'repeated value must contain unique items', 'float.finite': 'must be finite',
-         'double.finite': 'must be finite'}
-PHRASES = {'gt': 'greater than', 'gte': 'greater than or equal to', 'lt': 'less than', 'lte': 'less than or equal to'}
+# ── The words a reader gives, 18.8.6 ────────────────────────────────────────────────────────────
+
+# the rules beadc compiles whose words a reader gives from their id and their bounds alone (18.8.6):
+# every member of the first set's rules messages but example, a number's ranges among them; required's
+# and message.oneof's depend on what was judged, and give none
+RANGES = [f'{lower}_{upper}{exclusive}' for lower in ('gt', 'gte') for upper in ('lt', 'lte') for exclusive in ('', '_exclusive')]
+WORDED = [
+    *(f'{kind}.{member}' for kind in (*FLOATS, *INTEGERS)
+      for member in (*(name for name in NUMBER_RULES if name not in ('finite', 'example')), *RANGES)),
+    *(f'{kind}.finite' for kind in FLOATS),
+    *(f'{kind}.{member}' for kind, rules in (('bool', BOOL_RULES), ('string', STRING_RULES), ('bytes', BYTES_RULES),
+                                              ('enum', ENUM_RULES), ('repeated', REPEATED_RULES), ('map', MAP_RULES))
+      for member in rules if member not in ('example', 'items', 'keys', 'values')),
+]
+assert len(WORDED) == len(set(WORDED)) == 12 * 15 + 2 + 1 + 14 + 7 + 4 + 3 + 2
+
+VALIDATE_PROTO = os.path.join(ROOT, '..', 'builder', 'proto', 'buf', 'validate', 'validate.proto')
+
+# what each %s, %d or %x is replaced by, and which members a list is: in and not_in alone (18.8.6)
+PLACEHOLDER = re.compile('%[dsx]')
+LISTS = {'in', 'not_in'}
+# base64 as RFC 4648 §4 writes it: its standard alphabet, by fours, padded to the last
+BASE64 = re.compile('(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?')
 
 
-def words_of_json(kind, value):
-    """A bound's words from its JSON, as %s writes the value it is."""
-    if isinstance(value, list):
-        return '[' + ', '.join(words_of_json(kind, each) for each in value) + ']'
+def templates():
+    """Each worded rule's template and the members it takes, in their order, as validate.proto v1.2.2
+    writes them: its expression's '…'.format([…]), or, where it formats none, its message or the one
+    literal its expression gives; enum.defined_only's, which protovalidate plays itself and
+    validate.proto gives no expression, as 18.8.6 states them."""
+    with open(VALIDATE_PROTO, encoding='utf-8') as file:
+        text = file.read()
+
+    found = {'enum.defined_only': ('value must be one of the defined enum values', [])}
+
+    for match in re.finditer('id: "([a-z0-9_.]+)"', text):
+        rule_id = match.group(1)
+
+        if rule_id not in WORDED:
+            continue
+
+        body = text[match.end():text.index('}', match.end())]
+        message = re.search('message: "([^"]*)"', body)
+        expression = ''.join(re.findall('"([^"]*)"', body.split('expression:', 1)[1]))
+        formatted = re.search("'([^']*)'[.]format[(]" + B + "[(.*?)" + B + "][)]", expression)
+
+        if formatted:
+            arguments = re.sub("getField[(]rules, '([a-z_]+)'[)]", lambda each: each.group(1), formatted.group(2))
+            found[rule_id] = (formatted.group(1), [each.strip().removeprefix('rules.') for each in arguments.split(',')])
+        elif message:
+            found[rule_id] = (message.group(1), [])
+        else:
+            literals = [each for each in re.findall("'([^']*)'", expression) if each.strip(') :')]
+            assert len(literals) == 1, rule_id
+            found[rule_id] = (literals[0], [])
+
+    assert sorted(found) == sorted(WORDED), sorted(set(WORDED) ^ set(found))
+
+    for rule_id, (words, members) in found.items():
+        assert len(PLACEHOLDER.findall(words)) == len(members), rule_id
+
+    return found
+
+
+TEMPLATES = templates()
+
+
+def scalar_words(value):
+    """A scalar as %s writes it: a string as it is, a number as 17.7.4 writes the double it is, a
+    literal true or false; None for anything else."""
     if isinstance(value, bool):
         return 'true' if value else 'false'
+
     if isinstance(value, str):
         return value
-    if isinstance(value, float) or kind in FLOATS:
+
+    if isinstance(value, (int, float)):
         return es(float(value))
-    return str(value)
+
+    return None
+
+
+def member_words(member, placeholder, value):
+    """A member as its template's placeholder writes it, or None where it is of another shape: %x bytes
+    given in base64 in lower-case hexadecimal, a list as `[`, its items by `, `, `]`, a scalar alone."""
+    if placeholder == '%x':
+        return base64.b64decode(value).hex() if isinstance(value, str) and BASE64.fullmatch(value) else None
+
+    if member not in LISTS:
+        return scalar_words(value)
+
+    if not isinstance(value, list):
+        return None
+
+    items = [scalar_words(each) for each in value]
+    return None if None in items else '[' + ', '.join(items) + ']'
 
 
 def words_from(rule_id, bounds):
     """18.8.6's words of a violation from its rule's id and its bounds, or None where they do not give
-    them alone (18.7)."""
-    if rule_id in FLAGS:
-        return FLAGS[rule_id]
-
-    kind, _, member = rule_id.partition('.')
-
-    if bounds is None or not member:
+    them alone (18.7): an id outside the rules beadc compiles, or a member its template takes missing
+    or of another shape."""
+    if rule_id not in TEMPLATES:
         return None
 
-    if kind in (*INTEGERS, *FLOATS, 'enum', 'bool') and member in ('gt', 'gte', 'lt', 'lte'):
-        return f'must be {PHRASES[member]} {words_of_json(kind, bounds[member])}'
+    template, members = TEMPLATES[rule_id]
 
-    found = re.fullmatch(r'(gte?)_(lte?)(_exclusive)?', member)
+    if members and bounds is None:
+        return None
 
-    if found and kind in (*INTEGERS, *FLOATS):
-        lower, upper = found.group(1), found.group(2)
-        joined = 'or' if found.group(3) else 'and'
-        return (f'must be {PHRASES[lower]} {words_of_json(kind, bounds[lower])} {joined} '
-                f'{PHRASES[upper]} {words_of_json(kind, bounds[upper])}')
+    placeholders = PLACEHOLDER.findall(template)
+    words = [member_words(member, placeholder, bounds.get(member)) for member, placeholder in zip(members, placeholders)]
 
-    if member in RENDERED and kind in ('string', 'bytes', 'enum', 'bool', 'repeated', 'map', *INTEGERS, *FLOATS):
-        return RENDERED[member](kind, bounds)
+    if None in words:
+        return None
 
-    return None
+    filled = iter(words)
+    return PLACEHOLDER.sub(lambda _: next(filled), template)
 
 
 VIOLATION_MEMBERS = {'bounds', 'fieldPath', 'forKey', 'message', 'ruleId'}
@@ -1211,17 +1260,31 @@ def strict_json(text):
 
 
 def as_violation(value):
+    """A line read as a violation (18.3, 18.7): its members alone, each of its type, a member empty
+    taken as absent, a fieldPath or a message of '', a bounds of {}, a forKey of false; None
+    otherwise."""
     if not isinstance(value, dict) or not value.keys() <= VIOLATION_MEMBERS or not isinstance(value.get('ruleId'), str):
         return None
     if 'fieldPath' in value and not isinstance(value['fieldPath'], str):
         return None
     if 'message' in value and not isinstance(value['message'], str):
         return None
-    if 'forKey' in value and value['forKey'] is not True:
+    if 'forKey' in value and not isinstance(value['forKey'], bool):
         return None
     if 'bounds' in value and not isinstance(value['bounds'], dict):
         return None
-    return value
+    return {key: member for key, member in value.items()
+            if key == 'ruleId' or (member is True if key == 'forKey' else member not in ('', {}))}
+
+
+def count_of(value):
+    """A closing line's count (18.7): an integer from 0 to 2^53 - 1, its number read as 17.6 reads one,
+    the double nearest it; None for any other."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+
+    number = float(value)
+    return int(number) if number.is_integer() and 0 <= number <= LARGEST_COUNT else None
 
 
 def read_detail(detail):
@@ -1234,14 +1297,15 @@ def read_detail(detail):
         found = as_violation(value)
 
         if found is not None:
-            if 'message' not in found and words_from(found['ruleId'], found.get('bounds')) is not None:
-                found = dict(sorted({**found, 'message': words_from(found['ruleId'], found.get('bounds'))}.items()))
+            words = words_from(found['ruleId'], found.get('bounds'))
+
+            if 'message' not in found and words is not None:
+                found = dict(sorted({**found, 'message': words}.items()))
             read['violations'].append(found)
             continue
 
-        if isinstance(value, dict) and value.keys() == {'more'} and isinstance(value['more'], int) \
-                and not isinstance(value['more'], bool) and value['more'] >= 0:
-            read['more'] = value['more']
+        if isinstance(value, dict) and value.keys() == {'more'} and count_of(value['more']) is not None:
+            read['more'] = count_of(value['more'])
         elif value == {'stopped': True}:
             read['stopped'] = True
 
@@ -1615,6 +1679,77 @@ def lines(*values):
     return '\n'.join(canonical(value) for value in values)
 
 
+def unworded(rule_id, bounds):
+    """A violation's line without its words, its path the field its rule is of."""
+    return {**({} if bounds is None else {'bounds': bounds}), 'fieldPath': 'value', 'ruleId': rule_id}
+
+
+def number_cases(kind):
+    """Each of a number type's rules, by bounds its JSON mapping writes: a 64-bit one's as strings, a
+    float's as the double it widens to."""
+    low, high, inside = (0.1, 2.5, 1.5) if kind in FLOATS else (1, 10, 5)
+    ranges = [(f'{lower}_{upper}', {lower: low, upper: high}) for lower in ('gt', 'gte') for upper in ('lt', 'lte')]
+    reversed_ranges = [(f'{lower}_{upper}_exclusive', {lower: high, upper: low}) for lower in ('gt', 'gte') for upper in ('lt', 'lte')]
+    members = [('const', {'const': inside}), ('lt', {'lt': high}), ('lte', {'lte': high}), ('gt', {'gt': low}),
+               ('gte', {'gte': low}), *ranges, *reversed_ranges, ('in', {'in': [low, inside]}),
+               ('not_in', {'not_in': [high]}), *((('finite', None),) if kind in FLOATS else ())]
+    return [(f'{kind}.{member}', None if bounds is None else {name: bound_json(kind, each) for name, each in bounds.items()})
+            for member, bounds in members]
+
+
+def count_bound(member, count):
+    return {member: str(count)}
+
+
+WORDED_CASES = [
+    *((f"{kind}'s rules without their words take those of their templates", number_cases(kind)) for kind in (*FLOATS, *INTEGERS)),
+    ("a bool's rule without its words takes those of its template", [('bool.const', {'const': True})]),
+    ("a string's rules without their words take those of their templates", [
+        ('string.const', {'const': 'abc'}), *((f'string.{member}', count_bound(member, 3)) for member in
+                                              ('len', 'min_len', 'max_len', 'len_bytes', 'min_bytes', 'max_bytes')),
+        ('string.pattern', {'pattern': '^[a-z]+$'}), ('string.prefix', {'prefix': 'ab'}), ('string.suffix', {'suffix': 'yz'}),
+        ('string.contains', {'contains': 'mid'}), ('string.not_contains', {'not_contains': 'bad'}),
+        ('string.in', {'in': ['a', 'b']}), ('string.not_in', {'not_in': ['c']})]),
+    ("bytes' rules without their words take those of their templates", [
+        ('bytes.const', {'const': 'AP8='}), *((f'bytes.{member}', count_bound(member, 2)) for member in ('len', 'min_len', 'max_len')),
+        ('bytes.prefix', {'prefix': 'iVBORw=='}), ('bytes.suffix', {'suffix': 'rkJggg=='}), ('bytes.contains', {'contains': 'AQID'})]),
+    ("an enum's rules without their words take those of their templates", [
+        ('enum.const', {'const': 1}), ('enum.defined_only', None), ('enum.in', {'in': [1, 2]}), ('enum.not_in', {'not_in': [3]})]),
+    ("a repeated field's and a map's rules without their words take those of their templates", [
+        ('repeated.min_items', count_bound('min_items', 1)), ('repeated.max_items', count_bound('max_items', 4)),
+        ('repeated.unique', None), ('map.min_pairs', count_bound('min_pairs', 1)), ('map.max_pairs', count_bound('max_pairs', 4))]),
+]
+# the rules a reader gives no words to: bytes' that beadc does not compile, ids validate.proto does not
+# define, the rules its first set leaves out, a CEL rule's, an id-less one's
+UNWORDED = [('bytes.pattern', {'pattern': '^a$'}), ('bytes.in', {'in': ['AQI=']}), ('bytes.not_in', {'not_in': ['AQI=']}),
+            ('bool.in', {'in': [True]}), ('enum.lt', {'lt': 1}), ('enum.gt_lt', {'gt': 1, 'lt': 3}), ('int32.finite', {'finite': True}),
+            ('int32.lt_gt', {'lt': 1, 'gt': 2}), ('repeated.const', {'const': 1}), ('string.email', {'email': True}),
+            ('repeated.items', {'items': {'string': {'min_len': '1'}}}), ('map.keys', {'keys': {'string': {'min_len': '1'}}}),
+            ('duration.gt', {'gt': '1s'}), ('name.short', {'max': 3}), ('', {'lte': 1})]
+# a member its template takes, missing or of another shape: a list for a scalar, a scalar or a nested
+# list for in, an item no scalar, a null, an object
+MISSHAPEN = [('int32.lte', None), ('int32.gte_lte', {'gte': 0}), ('int32.lte', {'lte': [1]}),
+             ('int32.in', {'in': 1}), ('int32.in', {'in': [[1]]}), ('enum.in', {'in': [1, [2]]}), ('string.not_in', {'not_in': [None]}),
+             ('string.in', {'in': [{'a': 1}]}), ('uint64.lte', {'lte': None}), ('string.const', {'const': {'value': 1}}),
+             ('string.prefix', {'prefix': ['a']}), ('repeated.min_items', {'min_items': ['1']})]
+# bytes in base64: RFC 4648 §4's, padded, of its standard alphabet, empty, or its last character's bits
+# past the bytes not zero, which §3.5 lets a decoder take; then unpadded, URL-safe, with white space,
+# padded past its end, padded inside, of another alphabet, a number
+BASE64_CASES = [('bytes.const', {'const': 'AP8='}), ('bytes.prefix', {'prefix': 'AQID'}), ('bytes.suffix', {'suffix': 'AQ=='}),
+                ('bytes.contains', {'contains': ''}), ('bytes.const', {'const': 'AR=='}),
+                ('bytes.const', {'const': 'AP8'}), ('bytes.const', {'const': '-_8='}), ('bytes.const', {'const': 'AP 8='}),
+                ('bytes.const', {'const': 'AP8=' + chr(10)}), ('bytes.const', {'const': 'A==='}), ('bytes.const', {'const': 'AP8=AP8='}),
+                ('bytes.const', {'const': '!!!!'}), ('bytes.const', {'const': 7})]
+BASE64_WORDED = [True, True, True, True, True, False, False, False, False, False, False, False, False]
+# a line of every member empty, a fieldPath, a message, a bounds and a forKey; one whose message alone is,
+# which takes its rule's words; and two of an id-less rule's, with words of its own and without
+READ_EMPTY = [{'bounds': {}, 'fieldPath': '', 'forKey': False, 'message': '', 'ruleId': 'required'},
+              {'bounds': {'lte': 10}, 'fieldPath': 'from', 'message': '', 'ruleId': 'int32.lte'},
+              {'message': 'must be even', 'ruleId': ''}, {'ruleId': ''}]
+WRITTEN_EMPTY = [{'bounds': {}, 'fieldPath': '', 'forKey': False, 'message': '', 'ruleId': 'required'},
+                 {'message': 'must be even', 'ruleId': ''}]
+
+
 SIZE_OF_THREE = utf8(lines(*NAMES[:3])) + KEPT
 DETAILS = [
     write('one violation, whole, then a closing line of no more', ['18.3.1', '18.3.2', '18.3.3', '18.3.4'], [FROM], 1024),
@@ -1668,7 +1803,30 @@ DETAILS = [
     read('a line that names a member twice is no violation', [],
          '{"fieldPath":"from","ruleId":"int32.lte","ruleId":"int32.gt"}\n{"more":0}'),
     read('a closing line whose count is below 0 counts nothing', [], lines(FROM, {'more': -1})),
+    write('a writer writes no member empty, a ruleId of "" an id', [], WRITTEN_EMPTY, 1024),
+    write('a count past 2^53 - 1 is written as 2^53 - 1', [], [FROM], 1024, more=10 ** 16),
+    read('a member empty is absent, and its line kept', [], lines(*READ_EMPTY, {'more': 0})),
+    read('a closing count of 2^53 - 1 is read', [], lines(FROM, {'more': LARGEST_COUNT})),
+    read('a closing count past 2^53 - 1 counts nothing', [], lines(FROM) + '\n{"more":9007199254740993}'),
+    read('a closing count that is no integer counts nothing', [], lines(FROM, {'more': 1.5})),
+    read('a closing count is the value its number reads as, 1e2 a hundred', [], lines(FROM) + '\n{"more":1e2}'),
+    read('a closing count of -0 counts 0', [], lines(FROM) + '\n{"more":-0}'),
+    *(read(name, [WORDS], lines(*(unworded(rule_id, bounds) for rule_id, bounds in cases), {'more': 0}))
+      for name, cases in WORDED_CASES),
+    read('a rule beadc does not compile, or validate.proto does not define, takes no words, and its line is kept', [WORDS],
+         lines(*(unworded(rule_id, bounds) for rule_id, bounds in UNWORDED), {'more': 0})),
+    read('a member of another shape than its template takes gives no words, and its line is kept', [WORDS],
+         lines(*(unworded(rule_id, bounds) for rule_id, bounds in MISSHAPEN), {'more': 0})),
+    read('bytes take words in base64 as RFC 4648 §4 writes it alone', [WORDS],
+         lines(*(unworded(rule_id, bounds) for rule_id, bounds in BASE64_CASES), {'more': 0})),
 ]
+
+# * every rule a reader gives words to has its words read in a case, and the cases that give none give none
+worded_ids = [rule_id for _, cases in WORDED_CASES for rule_id, _ in cases]
+assert sorted(worded_ids) == sorted(WORDED), sorted(set(worded_ids) ^ set(WORDED))
+assert all(words_from(rule_id, bounds) is not None for _, cases in WORDED_CASES for rule_id, bounds in cases)
+assert all(words_from(rule_id, bounds) is None for rule_id, bounds in (*UNWORDED, *MISSHAPEN))
+assert [words_from(rule_id, bounds) is not None for rule_id, bounds in BASE64_CASES] == BASE64_WORDED
 
 
 # ── The file ────────────────────────────────────────────────────────────────────────────────────
@@ -1693,6 +1851,13 @@ assert re2.search('^' + B + 'pL$', SIDETIC) is None, 'google-re2 takes U+10940 a
 assert by_name['a request of 100,000 breaking items holds the violations its detail carries, and counts the rest exactly']['more'] == \
     MANY - len(by_name['a request of 100,000 breaking items holds the violations its detail carries, and counts the rest exactly'][
         'violations'])
+
+# * a reader's words are those the validators write, for every rule of the verdicts whose id and bounds
+# give them
+for entry in verdict_entries:
+    for found in entry['violations']:
+        if found['ruleId'] not in ('required', 'message.oneof'):
+            assert words_from(found['ruleId'], found.get('bounds')) == found['message'], (entry['name'], found['ruleId'])
 
 for entry in DETAILS:
     if 'detail' in entry and 'write' in entry:
