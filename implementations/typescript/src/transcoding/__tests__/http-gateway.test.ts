@@ -582,11 +582,16 @@ test('holds each caller’s calls and streams to bounds of their own', async () 
     return fixture.counts.cancelled === 1;
   });
 
-  // both freed as their exchanges end
-  await sleep(50);
-  expect((await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' })).status).toBe(
-    200
-  );
+  // both freed as their exchanges end, which no event of this side tells: asked again until one is
+  // taken, as the C# side asks, never decided by a delay
+  const deadline = performance.now() + 2_000;
+  let freed = 503;
+
+  while (freed !== 200 && performance.now() < deadline) {
+    freed = (await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' })).status;
+  }
+
+  expect(freed).toBe(200);
 });
 
 test('answers a result the stock library refuses 502, reported, none of its words in the problem', async () => {

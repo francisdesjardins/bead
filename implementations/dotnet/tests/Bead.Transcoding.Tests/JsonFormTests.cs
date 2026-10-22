@@ -24,13 +24,13 @@ public sealed class JsonFormTests
         return Encoding.UTF8.GetString(Form.Write(message));
     }
 
-    private static void Refused<TMessage>(string body)
+    private static void Refused<TMessage>(string body, string words)
         where TMessage : IMessage<TMessage>, new()
     {
-        Assert.Throws<JsonFormException>(() =>
+        Assert.Equal(words, Assert.Throws<JsonFormException>(() =>
         {
             Read<TMessage>(body);
-        });
+        }).Message);
     }
 
     [Fact]
@@ -44,22 +44,29 @@ public sealed class JsonFormTests
         Assert.Equal(new Edges { NullMember = NullValue.NullValue }, Read<Edges>("{\"nullMember\":null}"));
         Assert.Equal(new Everything { ChoiceInner = new Inner() }, Read<Everything>("{\"choiceText\":null,\"choiceInner\":{}}"));
 
-        // what the two stock libraries part on, refused on both sides
-        Refused<Edges>("{\"anInt32\":1,\"anInt32\":2}");
-        Refused<Edges>("{\"anInt32\":1,\"an_int32\":2}");
-        Refused<Edges>("{\"anInt64\":\"1e3\"}");
-        Refused<Edges>("{\"wrappedInt64\":\"1e3\"}");
-        Refused<Edges>("{\"byInt32\":{\"01\":\"a\"}}");
-        Refused<Edges>("{\"someBytes\":\"+_8=\"}");
-        Refused<Edges>("{\"someBytes\":\"AQ=\"}");
-        Refused<Edges>("{\"at\":\"2026-02-30T00:00:00Z\"}");
-        Refused<Edges>("{\"took\":\"01s\"}");
-        Refused<Edges>("{\"took\":\"1.0000000001s\"}");
-        Refused<Edges>("{\"mask\":\"FooBar\"}");
-        Refused<Edges>("{\"mask\":\"a,,b\"}");
-        Refused<Edges>("{\"any\":{\"x\":1}}");
-        Refused<Edges>("{\"nope\":1}");
-        Refused<Everything>("{\"aBool\":\"true\"}");
+        // what the two stock libraries part on, refused on both sides, each in its words
+        Refused<Edges>("{\"anInt32\":1,\"anInt32\":2}", "a member named twice");
+        Refused<Edges>("{\"anInt32\":1,\"an\\u0049nt32\":2}", "a member named twice");
+        Refused<Edges>("{\"anInt32\":1,\"an_int32\":2}", "a field by its two names");
+        Refused<Edges>("{\"anInt64\":\"1e3\"}", "an int64 string off -?(0|[1-9][0-9]*)");
+        Refused<Edges>("{\"wrappedInt64\":\"1e3\"}", "an int64 string off -?(0|[1-9][0-9]*)");
+        Refused<Edges>("{\"anInt32\":0.5}", "an int32 that is no integer");
+        Refused<Edges>("{\"aUint32\":-1}", "a uint32 past its range");
+        Refused<Edges>("{\"byInt32\":{\"01\":\"a\"}}", "an int32 key off -?(0|[1-9][0-9]*)");
+        Refused<Edges>("{\"someBytes\":\"+_8=\"}", "bytes of no one alphabet of base64");
+        Refused<Edges>("{\"someBytes\":\"AQ=\"}", "bytes padded wrongly");
+        Refused<Edges>("{\"at\":\"2026-02-30T00:00:00Z\"}", "a Timestamp of no instant");
+        Refused<Edges>("{\"at\":\"2026-10-21T12:00:00z\"}", "a Timestamp off RFC 3339");
+        Refused<Edges>("{\"took\":\"01s\"}", "a Duration off its form");
+        Refused<Edges>("{\"took\":\"1.0000000001s\"}", "a Duration off its form");
+        Refused<Edges>("{\"mask\":\"FooBar\"}", "a FieldMask path off lowerCamelCase");
+        Refused<Edges>("{\"mask\":\"a,,b\"}", "a FieldMask of an empty path");
+        Refused<Edges>("{\"any\":{\"x\":1}}", "an Any without its @type");
+        Refused<Edges>("{\"aliased\":\"aliased_first\"}", "no value of Aliased of that name");
+        Refused<Edges>("{\"nullMember\":null,\"textMember\":\"a\"}", "two members of one oneof");
+        Refused<Edges>("{\"ints\":[1,null]}", "a null item");
+        Refused<Edges>("{\"nope\":1}", "a key no field names");
+        Refused<Everything>("{\"aBool\":\"true\"}", "no bool");
     }
 
     [Fact]
@@ -77,14 +84,18 @@ public sealed class JsonFormTests
 
         // * a Value and its ListValue each a message: 50 arrays are 100 deep, a number in them 101
         Assert.IsType<Edges>(Read<Edges>(Lists(50, "")));
-        Refused<Edges>(Lists(50, "1"));
+        Refused<Edges>(Lists(50, "1"), "nested past 100");
 
         // a message 100 deep below the request, past the 64 of a json payload, is taken; 101 is not
         Assert.IsType<Edges>(Read<Edges>(Children(100)));
-        Refused<Edges>(Children(101));
+        Refused<Edges>(Children(101), "nested past 100");
+
+        // a map's entry is a message, its value one more
+        Assert.IsType<Edges>(Read<Edges>(string.Concat(Enumerable.Repeat("{\"child\":", 99)) + "{\"labels\":{\"a\":1}}" + new string('}', 99)));
+        Refused<Edges>(string.Concat(Enumerable.Repeat("{\"child\":", 100)) + "{\"labels\":{\"a\":1}}" + new string('}', 100), "nested past 100");
 
         // a repeated field's array counts nothing
-        Assert.IsType<Edges>(Read<Edges>(string.Concat(Enumerable.Repeat("{\"children\":[", 80)) + "{}" + string.Concat(Enumerable.Repeat("]}", 80))));
+        Assert.IsType<Edges>(Read<Edges>(string.Concat(Enumerable.Repeat("{\"children\":[", 100)) + "{}" + string.Concat(Enumerable.Repeat("]}", 100))));
 
         // a text past what any message nests is refused before its message is read, its nodes bounded
         Assert.Equal("nested past 100", Assert.Throws<JsonFormException>(() =>
@@ -112,14 +123,18 @@ public sealed class JsonFormTests
         Assert.Equal("{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Inner\",\"name\":\"a\",\"count\":2}}", Written(new Edges { Any = Any.Pack(new Inner { Name = "a", Count = 2 }) }));
 
         // 5.7: what Bead's proto JSON form holds none of is refused, a gateway's own 500
-        Assert.Throws<JsonFormException>(() =>
+        Assert.Equal("a Value whose number is not finite", Assert.Throws<JsonFormException>(() =>
         {
             Form.Write(new Edges { Value = Value.ForNumber(double.NaN) });
-        });
-        Assert.Throws<JsonFormException>(() =>
+        }).Message);
+        Assert.Equal("a FieldMask path whose lowerCamelCase does not read back", Assert.Throws<JsonFormException>(() =>
         {
             Form.Write(new Edges { Mask = new FieldMask { Paths = { "foo_" } } });
-        });
+        }).Message);
+        Assert.Equal("an Any whose type its definitions do not hold", Assert.Throws<JsonFormException>(() =>
+        {
+            Form.Write(new Edges { Any = new Any { TypeUrl = "type.googleapis.com/nope.Nope" } });
+        }).Message);
     }
 
     [Fact]
