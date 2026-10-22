@@ -1281,19 +1281,24 @@ test('resets over HTTP/2 the stream of a request whose target or a field holds a
 
   session.on('error', () => {});
 
-  // its status, or the code its stream was reset with when none came
+  // its status and body, or the code its stream was reset with when none came
   const answerOf = (headers: Record<string, string>) => {
-    return new Promise<number | undefined>((resolve) => {
+    return new Promise<[number, string] | number>((resolve) => {
       const stream = session.request({ ':method': 'GET', ...headers });
       let status: number | undefined;
+      const body: Buffer[] = [];
 
       stream.once('response', (response) => {
         status = response[':status'];
       });
-      stream.on('data', () => {});
+      stream.on('data', (bytes: Buffer) => {
+        body.push(bytes);
+      });
       stream.on('error', () => {});
       stream.once('close', () => {
-        resolve(status ?? stream.rstCode);
+        resolve(
+          status === undefined ? stream.rstCode : [status, Buffer.concat(body).toString('utf8')]
+        );
       });
       stream.end();
     });
@@ -1319,7 +1324,10 @@ test('resets over HTTP/2 the stream of a request whose target or a field holds a
       })
     );
     // what its target percent-encodes is no octet of it
-    expect(await answerOf({ ':path': '/v1/books/a%01b' })).toBe(200);
+    expect(await answerOf({ ':path': '/v1/books/a%01b' })).toEqual([
+      200,
+      '{"name":"a\\u0001b","title":"A tale"}',
+    ]);
   } finally {
     session.close();
   }
@@ -1562,6 +1570,10 @@ test('answers each request at the edges of its gates', async () => {
     '{"anInt32":2}'
   );
   abort.abort();
+  await expect(hanging).rejects.toThrow();
+  await until(() => {
+    return fixture.counts.cancelled === 1;
+  });
 });
 
 test('serves its document to a HEAD and to a preflight that asks for no field', async () => {
