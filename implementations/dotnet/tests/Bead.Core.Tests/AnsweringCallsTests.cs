@@ -279,8 +279,8 @@ public sealed class AnsweringCallsTests
     [Fact]
     public void Forgets_a_call_abandoned_once_its_transfer_s_inactivity_is_over()
     {
-        var time = new FakeTimeProvider();
-        var calls = CallsOf(OptionsOf(time) with { Limits = RouterLimits.Default with { TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) } });
+        var time = new RouterCoreTests.RequesterClock();
+        var calls = CallsOf(OptionsOf(time) with { Limits = RouterLimits.Default with { MaximumTransfers = 4, TransferInactivityTimeout = TimeSpan.FromMilliseconds(250) } });
 
         foreach (var callId in new uint[] { 1, 3 })
         {
@@ -290,8 +290,17 @@ public sealed class AnsweringCallsTests
             calls.Take(new CallAddress(callId, "a"));
         }
 
-        // the call a request took stops its timer: abandoned again later, it waits its own time
         calls.Open(new AnswerTarget("a", HeaderOf(3)));
+        Assert.Equal([TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(250)], time.Armed.Select((timer) =>
+        {
+            return timer.Delay;
+        }));
+
+        // the call a request took stops its timer
+        Assert.Equal([time.Armed[1]], time.Armed.Where((timer) =>
+        {
+            return timer.IsCleared;
+        }));
         time.Advance(TimeSpan.FromMilliseconds(249));
         Assert.Equal(10, calls.AbandonedEndOf(new CallAddress(1, "a")));
         time.Advance(TimeSpan.FromMilliseconds(1));

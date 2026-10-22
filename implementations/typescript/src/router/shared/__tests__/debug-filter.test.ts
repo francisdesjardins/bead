@@ -89,26 +89,29 @@ test.describe('parseDebugFilter', () => {
         return parseDebugFilter(spec);
       }, spec).toThrow(ProgrammerError);
     }
+
+    expect(parseDebugFilter('t(request|R)').types).toEqual(['request', 'request']);
   });
 
   test('refuses a filter in sentences that name the word, or the value, as it was written, quoted as JSON', () => {
     const refusals: [spec: string, sentence: string][] = [
+      ['ping E()', `a debug filter's selector names a value, not "E()"`],
+      ['d(rx|)', `a debug filter's selector leaves no value empty, not "d(rx|)"`],
       ['d(UP)', 'a debug filter takes a direction among rx, tx, not "UP"'],
       [
-        't(x)',
-        'a debug filter takes a type among request, command, notification, r, c, n, not "x"',
+        't(r\\n)',
+        'a debug filter takes a type among request, command, notification, r, c, n, not "r\\\\n"',
       ],
       [
-        'e(chunks)',
-        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not "chunks"',
+        'e("fail")',
+        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not "\\"fail\\""',
       ],
-      ['d("rx")', 'a debug filter takes a direction among rx, tx, not "\\"rx\\""'],
-      ['d()', `a debug filter's selector names a value, not "d()"`],
-      ['d(rx|)', `a debug filter's selector leaves no value empty, not "d(rx|)"`],
       [
         'd(rx,tx)',
         'a debug filter holds a parenthesis in a selector alone, d(…), t(…) or e(…), not "d(rx"',
       ],
+      // a control character and a lone surrogate escaped as JSON.stringify writes them
+      ['d(a\u0001\ud800)', 'a debug filter takes a direction among rx, tx, not "a\\u0001\\ud800"'],
     ];
 
     for (const [spec, sentence] of refusals) {
@@ -193,12 +196,12 @@ test.describe('filterDebug', () => {
       return filterEnvelopeDebug(none, { kinds: [0x99 as EnvelopeKind] });
     }).toThrow(
       new ProgrammerError(
-        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not 153'
+        'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not "153"'
       )
     );
   });
 
-  test('takes a filter as an object, its values checked once, as it is given', () => {
+  test('takes a filter given whole, its values checked once, as it is given', () => {
     expect(heardOf({ directions: ['tx'], exclude: ['p*'] }, events)).toEqual([
       'getStatus tx request',
     ]);
@@ -309,6 +312,26 @@ test.describe('filterDebug', () => {
     expect(reads).toBe(1);
   });
 
+  test('takes a function that gives filters as they are, and a filter given anew alike as the same', () => {
+    let asked = 0;
+    const source = () => {
+      asked += 1;
+
+      // a new filter each time: of the same lists, asked as it is made and at the first two events;
+      // another at the last two
+      return asked < 4 ? { directions: ['rx'] as const } : { directions: ['tx'] as const };
+    };
+
+    expect(
+      heardOf(source, [
+        eventOf('echo', { direction: 'rx' }),
+        eventOf('echo'),
+        eventOf('echo', { direction: 'rx' }),
+        eventOf('echo'),
+      ])
+    ).toEqual(['echo rx request', 'echo tx request']);
+  });
+
   test('passes the error and the event on as they came', () => {
     const failure = new Error('failed');
     const event = eventOf('echo');
@@ -352,7 +375,11 @@ test.describe('filterEnvelopeDebug', () => {
     expect(heardOf('d(rx)')).toEqual(['17 rx', '18 rx']);
     expect(heardOf('e(request|cancel)')).toEqual(['16 tx', '22 tx']);
     expect(heardOf({ directions: ['rx'], kinds: [EnvelopeKind.FAILURE] })).toEqual(['18 rx']);
-    expect(heardOf({ directions: ['tx'] })).toEqual(['16 tx', '22 tx']);
+    expect(
+      heardOf(() => {
+        return { directions: ['tx'] };
+      })
+    ).toEqual(['16 tx', '22 tx']);
   });
 
   test('serves the same spec as the calls: the names and the types of calls are not asked', () => {

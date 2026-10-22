@@ -170,7 +170,7 @@ public sealed class JwtVerifierTests
     }
 
     [Fact]
-    public async Task Read_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
+    public async Task Reads_the_wall_clock_once_the_signature_verifies_so_a_verification_that_waits_past_a_token_s_end_refuses_it_at_exp()
     {
         var vector = Vectors.Of("jwtVerdicts", Holding);
         var token = vector.GetProperty("token").GetString()!;
@@ -229,7 +229,9 @@ public sealed class JwtVerifierTests
         var jwk = ElementOf($$"""{"k":"{{key.Jwk.GetProperty("k").GetString()}}","key_ops":["verify\ud800"],"kty":"oct"}""");
         var props = PropsOf(vector) with { Keys = [key with { Jwk = jwk }] };
 
-        Assert.Equal(JwtRefusal.Key, (await JwtVerifier.VerifyJwt(vector.GetProperty("token").GetString()!, props)).Reason);
+        var verdict = await JwtVerifier.VerifyJwt(vector.GetProperty("token").GetString()!, props);
+
+        Assert.Equal<(bool, JwtRefusal?)>((false, JwtRefusal.Key), (verdict.Holds, verdict.Reason));
     }
 
     [Fact]
@@ -249,9 +251,9 @@ public sealed class JwtVerifierTests
         // characters once read, the first holding a backslash
         await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\\u00":1}"""), PropsOf(vector));
 
-        Assert.Equal(
-            JwtRefusal.Crit,
-            (await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\u0063rit":["exp"]}"""), PropsOf(vector))).Reason);
+        var verdict = await JwtVerifier.VerifyJwt(headed($$"""{"{{first}}":0,"alg":"HS256","typ":"at+jwt","\u0063rit":["exp"]}"""), PropsOf(vector));
+
+        Assert.Equal<(bool, JwtRefusal?)>((false, JwtRefusal.Crit), (verdict.Holds, verdict.Reason));
     }
 
     [Fact]

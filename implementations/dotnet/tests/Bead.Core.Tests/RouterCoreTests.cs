@@ -213,7 +213,7 @@ public sealed partial class RouterCoreTests
     }
 
     [Fact]
-    public async Task Refuses_a_payload_past_its_procedure_s_limit_before_it_draws_or_sends()
+    public async Task Refuses_a_payload_past_its_procedure_s_limit_before_it_sends_or_tells_its_call_id()
     {
         await using var link = new Link();
 

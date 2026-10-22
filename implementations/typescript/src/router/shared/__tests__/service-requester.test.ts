@@ -24,7 +24,7 @@ import {
 // definition
 
 test.describe('resolveRequestOptions', () => {
-  test('fills what the options leave out, and leaves the options alone', () => {
+  test('fills what the options leave out, and passes a destination as it is', () => {
     const options = { connectionHandle, destinationId: undefined };
 
     expect(REQUEST_DEFAULTS).toEqual({ timeout: 5_000 });
@@ -50,6 +50,7 @@ test.describe('resolveRequestOptions', () => {
         { closeOnTimeout: false }
       )
     ).toEqual({ ...REQUEST_DEFAULTS, closeOnTimeout: false });
+    // * and the options it is given are left as they are
     expect(options).toEqual({ connectionHandle, destinationId: undefined });
   });
 });
@@ -302,7 +303,7 @@ test.describe('createServiceManager', () => {
       ).toEqual([true, true]);
     });
 
-    test('a deprecated procedure emits "deprecated" at each call, and only a deprecated one', async () => {
+    test('a deprecated procedure raises "deprecated" at each call, and only a deprecated one', async () => {
       const manager = createServiceManager(createFakeRouter().router);
       const seen: unknown[][] = [];
 

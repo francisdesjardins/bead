@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
-import { CLIENT_FAILURES, CredentialScheme, SERVER_FAILURES } from '../constants';
+import { CLIENT_FAILURES, CredentialScheme, FailureScope, SERVER_FAILURES } from '../constants';
 import { FailureError } from '../errors';
 import { headerBytesOf, readHeader, readPrefix, writeHeader } from '../header';
 import type { Credential, EnvelopeHeader, SessionToken } from '../types';
@@ -336,19 +336,25 @@ test.describe('writeHeader', () => {
   });
 
   test('refuses an offset, an end or a total that is not a whole number from 0 to 2⁵³ − 1', () => {
+    const refusalOf = (field: string, value: number): ProgrammerError => {
+      return new ProgrammerError(
+        `${field} is a whole number from 0 to 2⁵³ − 1, got ${String(value)}`
+      );
+    };
+
     for (const value of [-1, 1.5, 2 ** 53, Number.NaN]) {
       expect(() => {
         return writeHeader(
           { callId: 1, isLast: true, kind: 0x14, offset: value },
           new Uint8Array(16)
         );
-      }, String(value)).toThrow(ProgrammerError);
+      }, String(value)).toThrow(refusalOf('offset', value));
       expect(() => {
         return writeHeader({ callId: 1, creditEnd: value, kind: 0x15 }, new Uint8Array(16));
-      }, String(value)).toThrow(ProgrammerError);
+      }, String(value)).toThrow(refusalOf('creditEnd', value));
       expect(() => {
         return writeHeader({ callId: 1, kind: 0x11, total: value }, new Uint8Array(16));
-      }, String(value)).toThrow(ProgrammerError);
+      }, String(value)).toThrow(refusalOf('total', value));
     }
   });
 
@@ -423,7 +429,11 @@ test.describe('writeHeader', () => {
     ]) {
       expect(() => {
         return writeHeader(header as unknown as EnvelopeHeader, new Uint8Array(16));
-      }, String(header.kind)).toThrow(/paces nothing/);
+      }, String(header.kind)).toThrow(
+        new ProgrammerError(
+          `a 0x${header.kind.toString(16)} header paces nothing: a request that opens a subscription does, or a credit`
+        )
+      );
     }
   });
 
@@ -484,7 +494,12 @@ test.describe('readHeader', () => {
         return readHeader(fromHexadecimal(bytes), SERVER_FAILURES);
       });
 
-      expect(failure).toMatchObject({ code, side: 'server' });
+      expect(failure).toMatchObject({
+        code,
+        origin: 'local',
+        scope: FailureScope.PROTOCOL,
+        side: 'server',
+      });
 
       if (detail !== undefined) {
         expect(failure.detail).toBe(detail);

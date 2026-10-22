@@ -222,7 +222,7 @@ test.describe('createReceivingTransfers', () => {
     expect(credits).toEqual(['a 1 20', 'b 1 20']);
   });
 
-  test('stalls a transfer nothing comes for, its timer on its clock set going again by bytes placed alone', () => {
+  test('stalls a transfer nothing comes for, its timer set going again by bytes placed alone', () => {
     for (const [progressAt, duplicateAfter] of [
       [100, 0],
       [200, 100],

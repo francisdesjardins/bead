@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { createRouterClient } from '../../client/router-client';
+import { createRouterServer } from '../../server/router-server';
 import {
   areOneName,
   checkDeclaration,
@@ -113,7 +114,7 @@ test.describe('checkDeclaration', () => {
     );
   });
 
-  test('a declaration refused declares nothing, before its registry is asked', async () => {
+  test('a refused declaration declares nothing, its registry holding no series of it', async () => {
     const registry = createMetricsRegistry();
     using router = createRouterClient(
       {
@@ -148,7 +149,67 @@ test.describe('checkDeclaration', () => {
     // the address it was refused at is free, under its name
     router.declareRequester(echo);
 
-    expect(registry.exposition().text).not.toBe(before);
+    expect(registry.exposition().text.split(String.fromCharCode(0x0a))).toContain(
+      'bead_client_call_started_total{service="2",procedure="echo",type="request"} 0'
+    );
+  });
+
+  test('checks a declaration before the router’s reasons and its registry’s', async () => {
+    const transport = {
+      off: () => {
+        return undefined;
+      },
+      on: () => {
+        return undefined;
+      },
+      send: () => {
+        return Promise.resolve();
+      },
+    };
+    using server = createRouterServer(transport, { metricsRegistry: createMetricsRegistry() });
+    using client = createRouterClient(transport, { metricsRegistry: createMetricsRegistry() });
+    const named = { ...echo, procedureName: 'Echo' };
+
+    server.registerResolver(
+      Object.assign(() => {
+        return Promise.resolve();
+      }, echo)
+    );
+    server.declareRequester(echo);
+    client.declareRequester(echo);
+
+    // the address is registered, and held under another name: the form refuses first
+    expect(() => {
+      server.registerResolver(
+        Object.assign(() => {
+          return Promise.resolve();
+        }, named)
+      );
+    }).toThrow(/: off its form$/);
+    expect(() => {
+      server.declareRequester(named);
+    }).toThrow(/: off its form$/);
+    await expect(
+      client.registerNotification({
+        ...named,
+        trigger: () => {
+          return Promise.resolve([]);
+        },
+      })
+    ).rejects.toThrow(/: off its form$/);
+  });
+
+  // * no JSON text holds a surrogate alone (RFC 7493 §2.1), so the file leaves it here
+  test('refuses a name holding a surrogate alone off its form, and folds none but an ASCII letter', () => {
+    const high = String.fromCharCode(0xd800);
+    const low = String.fromCharCode(0xdc00);
+
+    expect(reasonOf({ ...echo, procedureName: `a${high}b` })).toBe(IdentityRefusal.OFF_ITS_FORM);
+    expect(reasonOf({ ...echo, procedureName: `echo${low}` })).toBe(IdentityRefusal.OFF_ITS_FORM);
+    expect(isProcedureName(`a${high}${String.fromCharCode(0xde00)}`)).toBe(false);
+    expect(areOneName(`a${high}`, `A${high}`)).toBe(true);
+    expect(areOneName(`a${high}`, `a${low}`)).toBe(false);
+    expect(areOneName('[', '{')).toBe(false);
   });
 });
 

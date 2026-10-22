@@ -31,16 +31,28 @@ public sealed partial class ServiceManagerTests
     {
         var router = new RecordingRouter();
         var requester = new ServiceManager(router).GetRequest(Echo, Asked)(new Text("a"));
+        var closing = new ServiceManager(router, new ServiceManagerOptions
+        {
+            Defaults = new RequestDefaults { CloseOnTimeout = true },
+        }).GetRequest(Echo, Asked)(new Text("a"));
 
         await requester().WaitAsync(Patience, Cancelled);
+
+        // a destination is the call's alone, passed on as it is, left out included
         await requester(new RequestOptions { ConnectionHandle = Handle, DestinationId = null }).WaitAsync(Patience, Cancelled);
         await requester(new RequestOptions { DestinationId = 4, Timeout = TimeSpan.FromMilliseconds(10) }).WaitAsync(Patience, Cancelled);
+
+        // a close on timeout only where the call or the defaults have one
+        await closing().WaitAsync(Patience, Cancelled);
+        await closing(new RequestOptions { CloseOnTimeout = false }).WaitAsync(Patience, Cancelled);
 
         Assert.Equal(
             [
                 new ResolvedRequestOptions { Timeout = TimeoutDefault },
                 new ResolvedRequestOptions { ConnectionHandle = Handle, Timeout = TimeoutDefault },
                 new ResolvedRequestOptions { DestinationId = 4, Timeout = TimeSpan.FromMilliseconds(10) },
+                new ResolvedRequestOptions { CloseOnTimeout = true, Timeout = TimeoutDefault },
+                new ResolvedRequestOptions { CloseOnTimeout = false, Timeout = TimeoutDefault },
             ],
             router.Requests.Select((sent) =>
             {
@@ -211,7 +223,7 @@ public sealed partial class ServiceManagerTests
 
     // spec 17.2.4; debugging 4.3
     [Fact]
-    public async Task Makes_no_call_of_a_request_whose_value_does_not_write_tracing_deprecating_and_sending_nothing()
+    public async Task A_call_whose_value_does_not_write_fails_before_anything_goes_nothing_requested_traced_or_deprecated()
     {
         var router = new RecordingRouter();
         var manager = new ServiceManager(router);
@@ -246,10 +258,10 @@ public sealed partial class ServiceManagerTests
         await requester(new Text("a"))().WaitAsync(Patience, Cancelled);
         await requester(new Text("b"))().WaitAsync(Patience, Cancelled);
         Assert.Single(router.Declared);
-        Assert.All(router.Requests, (sent) =>
+        Assert.Equal([true, true], router.Requests.Select((sent) =>
         {
-            Assert.Same(series, sent.Request.Series);
-        });
+            return ReferenceEquals(series, sent.Request.Series);
+        }));
     }
 
     [Fact]

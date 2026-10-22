@@ -1,8 +1,14 @@
 import { expect, test } from '@playwright/test';
+import { ProgrammerError } from '../../../transport/shared/errors';
 import { LIMIT_DEFAULTS } from '../constants';
 import { createRouterCore } from '../router-core';
 import { limitsOf } from '../router-limits';
 import { createPort, limits } from './router-core-fixtures';
+
+// constants
+
+// the words before the rule a router's limits break
+const HOLD = "the router's limits do not hold together:";
 
 // definition
 
@@ -21,16 +27,22 @@ test.describe('createRouterCore', () => {
     test('refuse a limit that is not a whole number, or not above 0 where 0 means nothing', () => {
       const { port } = createPort();
 
-      for (const [limits, named] of [
-        [{ chunkBytes: 1_024.5 }, /^chunkBytes is a whole number above 0/],
-        [{ windowBytes: 0 }, /^windowBytes is a whole number above 0/],
-        [{ maximumPayloadBytes: Number.NaN }, /^maximumPayloadBytes is a whole number above 0/],
-        [{ maximumTransfers: -1 }, /^maximumTransfers is a whole number, not -1/],
-        [{ maximumDetailBytes: 2 ** 53 }, /^maximumDetailBytes is a whole number, not/],
+      for (const [limits, words] of [
+        [{ chunkBytes: 1_024.5 }, 'chunkBytes is a whole number above 0, not 1024.5'],
+        [{ windowBytes: 0 }, 'windowBytes is a whole number above 0, not 0'],
+        [
+          { maximumPayloadBytes: Number.NaN },
+          'maximumPayloadBytes is a whole number above 0, not NaN',
+        ],
+        [{ maximumTransfers: -1 }, 'maximumTransfers is a whole number, not -1'],
+        [
+          { maximumDetailBytes: 2 ** 53 },
+          'maximumDetailBytes is a whole number, not 9007199254740992',
+        ],
       ] as const) {
         expect(() => {
           return createRouterCore(port, { limits });
-        }, JSON.stringify(limits)).toThrow(named);
+        }, JSON.stringify(limits)).toThrow(new ProgrammerError(words));
       }
     });
 
@@ -41,7 +53,9 @@ test.describe('createRouterCore', () => {
         expect(() => {
           return createRouterCore(port, { limits: { maximumAnsweringCalls } });
         }, String(maximumAnsweringCalls)).toThrow(
-          /^maximumAnsweringCalls is a whole number above 0, not /
+          new ProgrammerError(
+            `maximumAnsweringCalls is a whole number above 0, not ${String(maximumAnsweringCalls)}`
+          )
         );
       }
 
@@ -53,24 +67,39 @@ test.describe('createRouterCore', () => {
     test('refuse limits that do not hold together, each rule by its own failure', () => {
       const { port } = createPort();
 
-      for (const [limits, rule] of [
-        [{ windowBytes: 0 }, /^windowBytes is a whole number above 0, not 0$/],
-        [{ maximumTransfers: -1 }, /^maximumTransfers is a whole number, not -1$/],
-        [{ maximumDetailBytes: -1 }, /^maximumDetailBytes is a whole number, not -1$/],
-        [{ chunkBytes: 63, maximumEnvelopeBytes: 63 }, /an envelope is 64 bytes at least/],
-        [{ chunkBytes: 63 }, /a chunk's envelope is 64 bytes at least/],
-        [{ chunkBytes: 1_024, maximumEnvelopeBytes: 1_023 }, /and an envelope at most/],
-        [{ chunkBytes: 2_049, maximumEnvelopeBytes: 2_048 }, /and an envelope at most/],
-        [{ windowBytes: 2 * 1_048_576 - 1 }, /a window holds two chunks at least/],
+      for (const [limits, words] of [
+        [{ windowBytes: 0 }, 'windowBytes is a whole number above 0, not 0'],
+        [{ maximumTransfers: -1 }, 'maximumTransfers is a whole number, not -1'],
+        [{ maximumDetailBytes: -1 }, 'maximumDetailBytes is a whole number, not -1'],
+        [{ chunkBytes: 63, maximumEnvelopeBytes: 63 }, `${HOLD} an envelope is 64 bytes at least`],
+        [
+          { chunkBytes: 63 },
+          `${HOLD} a chunk's envelope is 64 bytes at least, and an envelope at most`,
+        ],
+        [
+          { chunkBytes: 1_024, maximumEnvelopeBytes: 1_023 },
+          `${HOLD} a chunk's envelope is 64 bytes at least, and an envelope at most`,
+        ],
+        [
+          { chunkBytes: 2_049, maximumEnvelopeBytes: 2_048 },
+          `${HOLD} a chunk's envelope is 64 bytes at least, and an envelope at most`,
+        ],
+        [
+          { windowBytes: 2 * 1_048_576 - 1 },
+          `${HOLD} a window holds two chunks at least, so a sender waits for no credit it is owed`,
+        ],
         [
           { bufferedBytesBudget: LIMIT_DEFAULTS.maximumPayloadBytes - 1 },
-          /a payload fits in the budget/,
+          `${HOLD} a payload fits in the budget of the transfers received`,
         ],
-        [{ maximumPayloadBytes: 268_435_457 }, /a payload fits in the budget/],
+        [
+          { maximumPayloadBytes: 268_435_457 },
+          `${HOLD} a payload fits in the budget of the transfers received`,
+        ],
       ] as const) {
         expect(() => {
           return createRouterCore(port, { limits });
-        }, JSON.stringify(limits)).toThrow(rule);
+        }, JSON.stringify(limits)).toThrow(new ProgrammerError(words));
       }
 
       // the edges hold, a transfer's inactivity of a millisecond among them

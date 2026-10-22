@@ -290,6 +290,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `cause`, where it said nothing.
 - The C# interop service is offered whole by one service server, `checked` with its rules among
   its procedures, as the TypeScript side offers it, where a second one answered `checked`.
+- The C# side's `FailureException.Header` stays redacted, its credential's scheme alone, whatever
+  header it is given, as the TypeScript side's `FailureError` keeps it, where a header given from
+  outside the router kept its credential.
+- The TypeScript side's refusal of a debug filter given whole names a kind's number quoted as JSON
+  writes a string, `not "153"`, as the C# side does (debugging 6.7, 6.8), where it named it bare.
+- The TypeScript `failuresOf` refuses a service id that is no whole number from 1 to 65535 with a
+  `ProgrammerError`, as the C# side's `FailureCatalogue` does (spec 16.2, 16.3), where it took one.
+- The C# side refuses a router's limit out of its range by its name and its value
+  (`WindowBytes is a whole number above 0, not 0`), the limits in the order of their names, and
+  words a paced request that opens no subscription as the TypeScript side words it, where it said
+  one rule for every limit.
+- The C# metrics registry refuses a declaration in the TypeScript side's sentences, the name held
+  and the name given quoted as JSON writes them, the families it overflows named and the spec's
+  reason last, where its sentences were its own.
+- The TypeScript side's `SESSION_REQUIRED` for an `OPAQUE` call before any session, and its refusal
+  of an empty transfer opening, read as the C# side's: `no session is known for OPAQUE to stand
+  for`, and `… of its payload at least, not 0`.
+- The TypeScript side's pending calls hold a reservation's timeout as the C# side's do, refusing
+  one past the longest timer or under a millisecond, where they reserved for the default.
 
 ## [0.6.0] - 2026-10-20
 

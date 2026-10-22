@@ -220,10 +220,13 @@ public sealed class TransferTests
         Assert.Null(whole);
         Assert.Null(empty);
         Assert.Equal(
-            [((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol), ((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol)],
+            [
+                ((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol, "an opening of 4 bytes holds its whole total of 4"),
+                ((ushort)ProtocolCode.ChunkInvalid, FailureScope.Protocol, "an opening carries one byte of its payload at least, not 0"),
+            ],
             new[] { wholeRefusal!, emptyRefusal! }.Select((refusal) =>
             {
-                return (refusal.Code, refusal.Scope);
+                return (refusal.Code, refusal.Scope, refusal.Detail);
             }));
         Assert.Equal((1L, 1L, 4L), (one.Contiguous, one.CreditEnd, one.Total));
     }
@@ -404,9 +407,8 @@ public sealed class TransferTests
     }
 
     [Fact]
-    public void Halves_an_odd_window_exactly_as_the_TypeScript_side_does()
+    public void Halves_an_odd_window_exactly_64_bytes_short_of_half_of_129_and_65_not()
     {
-        // a window of 129: 64 more bytes are short of half of it, 65 are not
         var incoming = IncomingOf(PatternOf(1), (1_000, 1, 129, 1_024));
 
         Assert.Null(incoming.CreditToGrant(64));
@@ -450,6 +452,6 @@ public sealed class TransferTests
 
         // 101 chunks after the opening of 1,004 bytes; a credit each half window, not each chunk
         Assert.Equal(101, chunks);
-        Assert.InRange(credits, 2, (chunks / 2) - 1);
+        Assert.Equal(20, credits);
     }
 }

@@ -27,6 +27,14 @@ public sealed class ViolationsTests
         RuleId = "int32.lte",
     };
 
+    private static readonly Violation Name = new()
+    {
+        Bounds = MinLen,
+        FieldPath = "names[0]",
+        Message = "must be at least 1 characters",
+        RuleId = "string.min_len",
+    };
+
     // helpers
 
     private static JsonElement Load()
@@ -89,17 +97,24 @@ public sealed class ViolationsTests
         return $"{violation.RuleId} | {violation.FieldPath ?? "-"} | {violation.ForKey} | {violation.Message ?? "-"} | {bounds}";
     }
 
-    private static string WrittenOf(string[] violations, int maximumBytes)
+    // what a reader read, whole, as one line of text: its violations, its count and whether it stopped
+    private static string Shown(ViolationsRead read)
     {
-        return Violations.DetailOf(
-            new Judged
-            {
-                Violations = [.. violations.Select((fieldPath) =>
-                {
-                    return new Violation { Bounds = MinLen, FieldPath = fieldPath, Message = "must be at least 1 characters", RuleId = "string.min_len" };
-                })],
-            },
-            maximumBytes);
+        var count = read.More?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-";
+
+        return $"[{string.Join(", ", read.Violations.Select(Shown))}] more {count} stopped {read.Stopped}";
+    }
+
+    // what a reader reads of a detail, as a PAYLOAD_INVALID's, whole
+    private static string ReadOf(string detail)
+    {
+        return Shown(Violations.Of(Failure.OfProtocol(ProtocolCode.PayloadInvalid, detail)));
+    }
+
+    // what a reader read, as Shown writes it, of the violations and the count given
+    private static string ReadShown(Violation[] violations, long? more = null)
+    {
+        return Shown(new ViolationsRead { More = more, Violations = violations });
     }
 
     // definition
@@ -109,6 +124,18 @@ public sealed class ViolationsTests
     {
         return entry.GetProperty("name").GetString()!;
     }));
+
+    [Fact]
+    public void Plays_each_entry_as_a_writer_or_as_a_reader_never_both()
+    {
+        Assert.Empty(Root.GetProperty("details").EnumerateArray().Where((entry) =>
+        {
+            return entry.TryGetProperty("read", out _) == entry.TryGetProperty("write", out _);
+        }).Select((entry) =>
+        {
+            return entry.GetProperty("name").GetString();
+        }));
+    }
 
     [Theory]
     [MemberData(nameof(Details))]
@@ -142,47 +169,33 @@ public sealed class ViolationsTests
     [Fact]
     public void Keeps_the_whole_lines_of_a_detail_its_reader_cut()
     {
-        var detail = WrittenOf(["names[0]", "names[1]", "names[2]"], 1_024);
-        var whole = Violations.Read(detail);
+        var detail = Violations.DetailOf(new Judged { More = 3, Violations = [From, Name] }, 1_024);
+        var firstLine = detail.IndexOf('\n', StringComparison.Ordinal);
 
-        Assert.Equal(["names[0]", "names[1]", "names[2]"], whole.Violations.Select((violation) =>
-        {
-            return violation.FieldPath;
-        }));
-        Assert.Equal(0, whole.More);
+        Assert.Equal(ReadShown([From, Name], 3), ReadOf(detail));
 
-        // * cut within its third line, as a reader's lower bound cuts it (spec 7.3): the two lines
-        // before it kept, and what it left out not counted
-        var cut = detail[..(detail.IndexOf("names[2]", StringComparison.Ordinal) + 4)];
-        var kept = Violations.Read(cut);
+        // cut inside its second line, as a reader's lower bound cuts it (spec 7.3), the first whole;
+        // after the first, its line feed kept or not
+        Assert.Equal(ReadShown([From]), ReadOf(detail[..(firstLine + 20)]));
+        Assert.Equal(ReadShown([From]), ReadOf(detail[..(firstLine + 1)]));
+        Assert.Equal(ReadShown([From]), ReadOf(detail[..firstLine]));
 
-        Assert.Equal(["names[0]", "names[1]"], kept.Violations.Select((violation) =>
-        {
-            return violation.FieldPath;
-        }));
-        Assert.Null(kept.More);
-        Assert.False(kept.Stopped);
-
-        // and cut after a whole line, its line kept, its count still missing
-        var atLine = Violations.Read(detail[..detail.IndexOf('\n', StringComparison.Ordinal)]);
-
-        Assert.Equal("names[0]", Assert.Single(atLine.Violations).FieldPath);
-        Assert.Null(atLine.More);
+        // * no closing line: what it left out is not counted, and nothing says it stopped
+        Assert.Equal(ReadShown([From, Name]), ReadOf(detail[..detail.LastIndexOf('\n')]));
     }
 
     [Fact]
     public void Reads_no_violations_from_a_detail_empty_cut_or_of_another_form()
     {
-        var detail = WrittenOf(["names[0]"], 1_024);
-
         string[] none =
         [
             "",
             "{\"bounds\":{\"lte\"",
             "the request is invalid",
-            detail[..10],
-            "{\"error\":\"invalid\"}\n" + detail,
             "{\"error\":\"invalid\"}\n{\"more\":0}",
+
+            // a line of another form first: the lines after it are not read
+            "{\"error\":\"invalid\"}\n{\"ruleId\":\"required\"}\n{\"more\":0}",
             "[1,2,3]",
 
             // a line of 18.3's members but its ruleId, which every violation has, or with one of another type
@@ -191,23 +204,21 @@ public sealed class ViolationsTests
             "{\"message\":10,\"ruleId\":\"int32.lte\"}\n{\"more\":0}",
             "{\"forKey\":\"true\",\"ruleId\":\"required\"}\n{\"more\":0}",
             "{\"stopped\":false}",
-            "﻿{\"ruleId\":\"required\"}",
+            "\uFEFF{\"ruleId\":\"required\"}",
         ];
 
         foreach (var each in none)
         {
-            var read = Violations.Read(each);
-
-            Assert.Empty(read.Violations);
-            Assert.Null(read.More);
-            Assert.False(read.Stopped);
+            Assert.Equal($"{each}: {ReadShown([])}", $"{each}: {ReadOf(each)}");
         }
 
         // * a failure of another code carries none, whatever its detail
-        Assert.Empty(Violations.Of(Failure.OfProtocol(ProtocolCode.ProcedureFailed, detail)).Violations);
-        Assert.Empty(Violations.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, detail)).Violations);
-        Assert.Empty(Violations.Of(Failure.OfApplication(52, detail)).Violations);
-        Assert.Single(Violations.Of(Failure.OfProtocol(ProtocolCode.PayloadInvalid, detail)).Violations);
+        var detail = "{\"ruleId\":\"required\"}\n{\"more\":0}";
+
+        Assert.Equal(ReadShown([]), Shown(Violations.Of(Failure.OfProtocol(ProtocolCode.ProcedureFailed, detail))));
+        Assert.Equal(ReadShown([]), Shown(Violations.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, detail))));
+        Assert.Equal(ReadShown([]), Shown(Violations.Of(Failure.OfApplication((ushort)ProtocolCode.PayloadInvalid, detail))));
+        Assert.Equal(ReadShown([new Violation { RuleId = "required" }], 0), ReadOf(detail));
     }
 
     [Fact]
@@ -221,37 +232,27 @@ public sealed class ViolationsTests
             Message = "must be at least 2 characters",
             RuleId = "string.min_len",
         };
-        var whole = Violations.Read(Violations.DetailOf(new Judged { Violations = [key] }, 1_024));
 
-        Assert.Equal([Shown(key)], whole.Violations.Select(Shown));
-        Assert.Equal(0, whole.More);
+        Assert.Equal(ReadShown([key], 0), ReadOf(Violations.DetailOf(new Judged { Violations = [key] }, 1_024)));
 
         // * without its words, it takes those its rule and bounds give, a key's as a value's
-        var bare = Violations.Read("{\"bounds\":{\"min_len\":\"2\"},\"fieldPath\":\"labels[\\\"a\\\"]\",\"forKey\":true,\"ruleId\":\"string.min_len\"}");
-
-        Assert.Equal([Shown(key)], bare.Violations.Select(Shown));
-        Assert.Null(bare.More);
+        Assert.Equal(
+            ReadShown([key]),
+            ReadOf("{\"bounds\":{\"min_len\":\"2\"},\"fieldPath\":\"labels[\\\"a\\\"]\",\"forKey\":true,\"ruleId\":\"string.min_len\"}"));
     }
 
     [Fact]
     public void Takes_a_member_empty_as_absent_its_line_kept_and_an_empty_ruleId_as_an_id()
     {
-        var empty = Violations.Read("{\"bounds\":{},\"fieldPath\":\"\",\"forKey\":false,\"message\":\"\",\"ruleId\":\"required\"}\n{\"more\":0}");
-
-        Assert.Equal([Shown(new Violation { RuleId = "required" })], empty.Violations.Select(Shown));
-        Assert.Equal(0, empty.More);
+        Assert.Equal(
+            ReadShown([new Violation { RuleId = "required" }], 0),
+            ReadOf("{\"bounds\":{},\"fieldPath\":\"\",\"forKey\":false,\"message\":\"\",\"ruleId\":\"required\"}\n{\"more\":0}"));
 
         // * an empty message takes its rule's words, as an absent one does
-        var worded = Violations.Read("{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"\",\"ruleId\":\"int32.lte\"}");
-
-        Assert.Equal([Shown(From)], worded.Violations.Select(Shown));
-
-        var idLess = Violations.Read("{\"ruleId\":\"\"}\n{\"message\":\"must be even\",\"ruleId\":\"\"}\n{\"more\":1}");
-
+        Assert.Equal(ReadShown([From]), ReadOf("{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"\",\"ruleId\":\"int32.lte\"}"));
         Assert.Equal(
-            [Shown(new Violation { RuleId = "" }), Shown(new Violation { Message = "must be even", RuleId = "" })],
-            idLess.Violations.Select(Shown));
-        Assert.Equal(1, idLess.More);
+            ReadShown([new Violation { RuleId = "" }, new Violation { Message = "must be even", RuleId = "" }], 1),
+            ReadOf("{\"ruleId\":\"\"}\n{\"message\":\"must be even\",\"ruleId\":\"\"}\n{\"more\":1}"));
     }
 
     [Fact]
@@ -259,16 +260,14 @@ public sealed class ViolationsTests
     {
         var line = "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}";
 
-        Assert.Equal(9_007_199_254_740_991, Violations.Read(line + "\n{\"more\":9007199254740991}").More);
+        Assert.Equal(ReadShown([From], 9_007_199_254_740_991), ReadOf(line + "\n{\"more\":9007199254740991}"));
 
         // * a number is read as the double nearest it (spec 17.6), so 1e2 counts a hundred
-        Assert.Equal(100, Violations.Read(line + "\n{\"more\":1e2}").More);
+        Assert.Equal(ReadShown([From], 100), ReadOf(line + "\n{\"more\":1e2}"));
 
         foreach (var count in new[] { "9007199254740992", "1e300", "1.5", "-1", "\"3\"", "true", "null" })
         {
-            var read = Violations.Read(line + "\n{\"more\":" + count + "}");
-
-            Assert.Equal($"{count}: {Shown(From)} -", $"{count}: {string.Join(", ", read.Violations.Select(Shown))} {read.More?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "-"}");
+            Assert.Equal($"{count}: {ReadShown([From])}", $"{count}: {ReadOf(line + "\n{\"more\":" + count + "}")}");
         }
     }
 
@@ -431,6 +430,14 @@ public sealed class ViolationsTests
         {
             Assert.Equal($"{text}: ", $"{text}: {WordsOf("bytes.const", "{\"const\":\"" + text + "\"}")}");
         }
+    }
+
+    [Fact]
+    public void Bounds_a_detail_by_maximumDetailBytes_and_by_an_envelope_less_its_32_bytes_beside_it()
+    {
+        Assert.Equal(1_024, (RouterLimits.Default with { MaximumDetailBytes = 1_024, MaximumEnvelopeBytes = 16_778_240 }).DetailBytes);
+        Assert.Equal(68, (RouterLimits.Default with { MaximumDetailBytes = 1_024, MaximumEnvelopeBytes = 100 }).DetailBytes);
+        Assert.Equal(0, (RouterLimits.Default with { MaximumDetailBytes = 0, MaximumEnvelopeBytes = 64 }).DetailBytes);
     }
 
     [Fact]

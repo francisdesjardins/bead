@@ -223,6 +223,15 @@ test.describe('createCredentialResolver', () => {
     expect(
       await resolver.resolve({ ...jwtOf(tokenOf(claims)), audience: [AUDIENCE] }, signal)
     ).toMatchObject({ end: NOW + 3_660_000 });
+
+    // signed under another key, or held past its end
+    expect(
+      await resolver.resolve(jwtOf(tokenOf(claims, { key: SET_KEY_BYTES })), signal)
+    ).toBeUndefined();
+
+    await clock.tickAsync(3_660_000);
+
+    expect(await resolver.resolve(jwtOf(tokenOf(claims)), signal)).toBeUndefined();
   });
 
   test('asks its key set once a minute at most for an issuer, sharing an ask under way: a kid none names within the minute waits for the deadline and the ask then, refused once its answer does not name it', async () => {
@@ -288,17 +297,27 @@ test.describe('createCredentialResolver', () => {
     const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
 
     const leaving = resolver.resolve(named, cancelled.signal);
-    const waiting = resolver.resolve(named, new AbortController().signal);
+    const waiting = outcomeOf(resolver.resolve(named, new AbortController().signal));
 
-    await sleep(0);
+    await expect
+      .poll(() => {
+        return asks.length;
+      })
+      .toBe(1);
     cancelled.abort();
 
-    // its wait ends at its cancel, before the ask settles
+    // its wait ends at its cancel, before the ask settles, the other's going on
     await expect(leaving).rejects.toBeInstanceOf(CancelError);
+
+    expect(waiting.current).toBe('waiting');
 
     asks[0]?.settle.resolve([SET_KEY]);
 
-    expect(await waiting).toMatchObject({ identifier: { sub: 'grace' } });
+    await expect
+      .poll(() => {
+        return waiting.current;
+      })
+      .toMatchObject({ identifier: { sub: 'grace' } });
     expect(asks).toHaveLength(1);
   });
 
@@ -310,15 +329,19 @@ test.describe('createCredentialResolver', () => {
     const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
 
     const failing = resolver.resolve(named, signal);
+    const unreached = new Error('the key set cannot be reached');
 
     await expect
       .poll(() => {
         return asks.length;
       })
       .toBe(1);
-    asks[0]?.settle.reject(new Error('the key set cannot be reached'));
+    asks[0]?.settle.reject(unreached);
 
-    await expect(failing).rejects.toThrow(/key set/);
+    await expect(failing).rejects.toMatchObject({
+      cause: unreached,
+      message: `the key set's ask for ${SET_ISSUER} failed`,
+    });
 
     // within the minute, the next waits for the deadline, asking nothing before it
     const next = outcomeOf(resolver.resolve(named, signal));
@@ -328,10 +351,11 @@ test.describe('createCredentialResolver', () => {
         return duesOn(clock);
       })
       .toEqual([60_000]);
+    await clock.tickAsync(59_999);
 
     expect([next.current, asks.length]).toEqual(['waiting', 1]);
 
-    await clock.tickAsync(60_000);
+    await clock.tickAsync(1);
 
     expect(asks).toHaveLength(2);
 
@@ -347,6 +371,7 @@ test.describe('createCredentialResolver', () => {
   test('fails a call alike when its key set throws as it is asked, and has the next within the minute wait for the deadline and the ask then', async () => {
     const clock = createTestClock(NOW);
     let asked = 0;
+    const unreached = new Error('the key set cannot be reached');
     const resolver = createCredentialResolver(
       {
         audience: AUDIENCE,
@@ -355,7 +380,7 @@ test.describe('createCredentialResolver', () => {
             asked += 1;
 
             if (asked === 1) {
-              throw new Error('the key set cannot be reached');
+              throw unreached;
             }
 
             return Promise.resolve([SET_KEY]);
@@ -368,21 +393,29 @@ test.describe('createCredentialResolver', () => {
     const signal = new AbortController().signal;
     const named = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' }));
 
-    await expect(resolver.resolve(named, signal)).rejects.toThrow(/key set/);
+    await expect(resolver.resolve(named, signal)).rejects.toMatchObject({
+      cause: unreached,
+      message: `the key set's ask for ${SET_ISSUER} failed`,
+    });
 
-    const next = resolver.resolve(named, signal);
+    // within the minute, the next waits for the deadline, asking nothing before it
+    const next = outcomeOf(resolver.resolve(named, signal));
 
     await expect
       .poll(() => {
         return duesOn(clock);
       })
       .toEqual([60_000]);
+    await clock.tickAsync(59_999);
 
-    expect(asked).toBe(1);
+    expect([next.current, asked]).toEqual(['waiting', 1]);
 
-    await clock.tickAsync(60_000);
-
-    expect(await next).toMatchObject({ identifier: { sub: 'grace' } });
+    await clock.tickAsync(1);
+    await expect
+      .poll(() => {
+        return next.current;
+      })
+      .toMatchObject({ identifier: { sub: 'grace' } });
     expect(asked).toBe(2);
   });
 
@@ -449,7 +482,9 @@ test.describe('createCredentialResolver', () => {
       .poll(() => {
         return (late.current as Error | undefined)?.message;
       })
-      .toMatch(/key set/);
+      .toBe(`the key set's ask for ${SET_ISSUER} was unsettled as its deadline was reached`);
+
+    expect(late.current).toBeInstanceOf(TimeoutError);
 
     asks[0]?.settle.resolve([SET_KEY]);
     await sleep(0);
@@ -595,19 +630,56 @@ test.describe('createCredentialResolver', () => {
     const signal = new AbortController().signal;
     const kidless = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES }));
 
-    // none of its issuer's keys serve: it waits on an ask that goes at once
-    const first = resolver.resolve(kidless, signal);
+    // none of its issuer's keys serve: it waits on an ask that goes at once, and finds the one key
+    // the set answered, which then serves a token without a kid, or with its kid, asking nothing
+    const first = outcomeOf(resolver.resolve(kidless, signal));
 
     await expect
       .poll(() => {
         return asks.length;
       })
       .toBe(1);
+
+    expect(first.current).toBe('waiting');
+
     asks[0]?.settle.resolve([SET_KEY]);
 
-    expect(await first).toMatchObject({ identifier: { sub: 'grace' } });
+    await expect
+      .poll(() => {
+        return first.current;
+      })
+      .toMatchObject({ identifier: { sub: 'grace' } });
+    expect(
+      await resolver.resolve(
+        jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' })),
+        signal
+      )
+    ).toMatchObject({ identifier: { sub: 'grace' } });
     expect(await resolver.resolve(kidless, signal)).toMatchObject({ identifier: { sub: 'grace' } });
     expect(asks).toHaveLength(1);
+
+    // beside a key of the application's, two: a token without a kid finds neither
+    const twoKeyed = createCredentialResolver(
+      {
+        audience: AUDIENCE,
+        keySet: {
+          ask: () => {
+            return Promise.resolve([SET_KEY]);
+          },
+          issuers: [SET_ISSUER],
+        },
+        keys: [APP_KEY],
+      },
+      { clock }
+    );
+
+    expect(
+      await twoKeyed.resolve(
+        jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES, kid: 'set-1' })),
+        signal
+      )
+    ).toMatchObject({ identifier: { sub: 'grace' } });
+    expect(await twoKeyed.resolve(jwtOf(tokenOf(claimsOf(SET_ISSUER))), signal)).toBeUndefined();
   });
 
   test('has a token without a kid wait for nothing when its issuer has a key of the application’s, and for the deadline and the ask then after an answer that gave its issuer none', async () => {
@@ -620,7 +692,11 @@ test.describe('createCredentialResolver', () => {
     const signal = new AbortController().signal;
     const kidless = jwtOf(tokenOf(claimsOf(SET_ISSUER), { key: SET_KEY_BYTES }));
 
-    // the application's key of its issuer serves: refused at its signature, asking nothing
+    // the application's key of its issuer serves: verified, or refused at its signature, at once,
+    // asking nothing
+    expect(await resolver.resolve(jwtOf(tokenOf(claimsOf(ISSUER))), signal)).toMatchObject({
+      identifier: { issuer: ISSUER, sub: 'grace' },
+    });
     expect(
       await resolver.resolve(jwtOf(tokenOf(claimsOf(ISSUER), { key: SET_KEY_BYTES })), signal)
     ).toBeUndefined();
@@ -1152,8 +1228,9 @@ test.describe('createCredentialResolver', () => {
       .poll(() => {
         return (waiting.current as Error | undefined)?.message;
       })
-      .toMatch(/key set/);
+      .toBe(`the key set's ask for ${SET_ISSUER} was unsettled as its deadline was reached`);
 
+    expect(waiting.current).toBeInstanceOf(TimeoutError);
     expect([asks[0]?.signal.aborted, duesOn(clock)]).toEqual([true, []]);
 
     await clock.tickAsync(1);
@@ -1204,7 +1281,9 @@ test.describe('createCredentialResolver', () => {
       .poll(() => {
         return (doomed.current as Error | undefined)?.message;
       })
-      .toMatch(/key set/);
+      .toBe(`the key set's ask for ${SET_ISSUER} was unsettled as its deadline was reached`);
+
+    expect(doomed.current).toBeInstanceOf(TimeoutError);
     // the new ask's deadline, a minute past the reading at which it went, alone
     expect(duesOn(clock)).toEqual([60_000]);
 
@@ -1400,27 +1479,29 @@ test.describe('createCredentialResolver', () => {
 
   test('fails a verifier that throws at once as one that rejects', async () => {
     const clock = createTestClock(NOW);
+    const thrown = new Error('this verifier fails, on purpose');
     const resolver = createCredentialResolver(
       {
         verify: (carried) => {
           if (carried === 'throws') {
-            throw new Error('this verifier throws');
+            throw thrown;
           }
 
-          return Promise.reject(new Error('this verifier rejects'));
+          return Promise.reject(thrown);
         },
       },
       { clock }
     );
     const signal = new AbortController().signal;
     const credential = { scheme: CredentialScheme.ELSEWHERE } as const;
-    // a throw as it is asked is a rejection: the call is never answered in the turn it came
-    const throwing = resolver.resolve({ credential, transportCredential: 'throws' }, signal);
 
-    await expect(throwing).rejects.toThrow('this verifier throws');
-    await expect(
-      resolver.resolve({ credential, transportCredential: 'rejects' }, signal)
-    ).rejects.toThrow('this verifier rejects');
+    // a throw as it is asked is a rejection: the call is never answered in the turn it came
+    for (const transportCredential of ['throws', 'rejects']) {
+      await expect(
+        resolver.resolve({ credential, transportCredential }, signal),
+        transportCredential
+      ).rejects.toBe(thrown);
+    }
   });
 
   test('fails a session whose end is not a number within 2^53, and one whose id is no string', async () => {
@@ -1488,7 +1569,7 @@ test.describe('createCredentialResolver', () => {
 
     expect(() => {
       return createCredentialResolver(
-        { keys: [{ ...KEY, jwk: { k: 'A'.repeat(42), kty: 'oct' } }] },
+        { audience: AUDIENCE, keys: [{ ...KEY, jwk: { k: 'A'.repeat(42), kty: 'oct' } }] },
         { clock }
       );
     }).toThrow(ProgrammerError);

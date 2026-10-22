@@ -11,23 +11,30 @@ public sealed class EnvelopeCodecHeaderTests
 
     private static readonly SessionToken Token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
 
-    // what a writer refuses of a header's fields: one out of its range, a flag its header does not
-    // hold together with
-    private static readonly Dictionary<string, IEnvelopeHeader> Unwritable = new()
+    // what a writer refuses of a header's fields, and the words it refuses each with: one out of its
+    // range, named, a flag its header does not hold together with
+    private static readonly Dictionary<string, (IEnvelopeHeader Header, string Words)> Unwritable = new()
     {
-        ["a call id of 0"] = new ResultHeader { CallId = 0 },
-        ["a service id of 0"] = new RequestHeader { CallId = 3, ServiceId = 0, ProcedureId = 1 },
-        ["a procedure id of 0"] = new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 0 },
+        ["a call id of 0"] = (new ResultHeader { CallId = 0 }, "callId is an integer from 1 to 4294967295, got 0"),
+        ["a service id of 0"] =
+            (new RequestHeader { CallId = 3, ServiceId = 0, ProcedureId = 1 }, "serviceId is an integer from 1 to 65535, got 0"),
+        ["a procedure id of 0"] =
+            (new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 0 }, "procedureId is an integer from 1 to 65535, got 0"),
         ["a destination id of 0"] =
-            new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, DestinationId = 0 },
+            (new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, DestinationId = 0 }, "destinationId is an integer from 1 to 4294967295, got 0"),
         ["a request paced that opens no subscription"] =
-            new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Paced = true },
-        ["a negative offset"] = new ChunkHeader { CallId = 7, Offset = -1, IsLast = true },
-        ["an offset of 2^53"] = new ChunkHeader { CallId = 7, Offset = 1L << 53, IsLast = true },
-        ["an end of 2^53"] = new CreditHeader { CallId = 7, CreditEnd = 1L << 53 },
-        ["a total of 2^53"] = new ResultHeader { CallId = 3, Total = 1L << 53 },
+            (new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Paced = true }, "a 0x10 header paces nothing: a request that opens a subscription does, or a credit"),
+        ["a negative offset"] =
+            (new ChunkHeader { CallId = 7, Offset = -1, IsLast = true }, "offset is a whole number from 0 to 2⁵³ − 1, got -1"),
+        ["an offset of 2^53"] =
+            (new ChunkHeader { CallId = 7, Offset = 1L << 53, IsLast = true }, "offset is a whole number from 0 to 2⁵³ − 1, got 9007199254740992"),
+        ["a negative end"] = (new CreditHeader { CallId = 7, CreditEnd = -1 }, "creditEnd is a whole number from 0 to 2⁵³ − 1, got -1"),
+        ["an end of 2^53"] =
+            (new CreditHeader { CallId = 7, CreditEnd = 1L << 53 }, "creditEnd is a whole number from 0 to 2⁵³ − 1, got 9007199254740992"),
+        ["a total of 2^53"] =
+            (new ResultHeader { CallId = 3, Total = 1L << 53 }, "total is a whole number from 0 to 2⁵³ − 1, got 9007199254740992"),
         ["a negative total"] =
-            new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Total = -1 },
+            (new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1, Total = -1 }, "total is a whole number from 0 to 2⁵³ − 1, got -1"),
     };
 
     // what a writer refuses of a credential, and sizing alike: a scheme its kind does not take, or
@@ -105,7 +112,9 @@ public sealed class EnvelopeCodecHeaderTests
         }
         else
         {
-            Assert.Equal(Vectors.HeaderOf(header), read?.Header);
+            var expected = Vectors.HeaderOf(header);
+
+            Assert.Equal((expected, EnvelopeCodec.HeaderBytesOf(expected)), read);
         }
     }
 
@@ -172,13 +181,79 @@ public sealed class EnvelopeCodecHeaderTests
     public void Raises_its_failures_as_the_side_it_is_given()
     {
         var bytes = Vectors.FromHexadecimal("A1 11 00 02  00 00 00 00");
+        var failure = Assert.Throws<FailureException>(() =>
+        {
+            EnvelopeCodec.ReadHeader(bytes, RouterSide.Client);
+        });
+
+        Assert.Equal((FailureOrigin.Local, RouterSide.Client), (failure.Origin, failure.Side));
+    }
+
+    [Fact]
+    public void Sizes_each_header_by_its_kind_and_its_blocks()
+    {
+        var request = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
+        var result = new ResultHeader { CallId = 2 };
 
         Assert.Equal(
-            RouterSide.Client,
-            Assert.Throws<FailureException>(() =>
+            [12, 16, 32, 36, 24, 16],
+            new IEnvelopeHeader[]
             {
-                EnvelopeCodec.ReadHeader(bytes, RouterSide.Client);
-            }).Side);
+                request,
+                request with { DestinationId = 1 },
+                request with { Credential = Token },
+                request with { Credential = Token, DestinationId = 1 },
+                request with { Credential = Credential.Jwt("a.b.c") },
+                request with { Credential = Credential.Elsewhere() },
+            }.Select(EnvelopeCodec.HeaderBytesOf));
+        Assert.Equal(
+            [8, 28, 16, 20],
+            new IEnvelopeHeader[]
+            {
+                result,
+                result with { Credential = Token },
+                result with { Total = 4_096 },
+                result with { Credential = Credential.None, Total = 4_096 },
+            }.Select(EnvelopeCodec.HeaderBytesOf));
+        Assert.Equal(8, EnvelopeCodec.HeaderBytesOf(new NotificationHeader { CallId = 1 }));
+        Assert.Equal(8, EnvelopeCodec.HeaderBytesOf(new CancelHeader { CallId = 1 }));
+    }
+
+    [Fact]
+    public void Writes_big_endian_and_reads_every_call_id_unsigned()
+    {
+        var bytes = new byte[8];
+
+        EnvelopeCodec.WriteHeader(new ResultHeader { CallId = 0x01020304 }, bytes);
+
+        Assert.Equal(Vectors.FromHexadecimal("A1 11 00 02  01 02 03 04"), bytes);
+
+        foreach (var callId in new[] { 1u << 31, uint.MaxValue, (1u << 31) + 1 })
+        {
+            EnvelopeCodec.WriteHeader(new ResultHeader { CallId = callId }, bytes);
+
+            Assert.Equal(callId, EnvelopeCodec.ReadHeader(bytes, RouterSide.Server)?.Header.CallId);
+        }
+    }
+
+    [Fact]
+    public void Carries_a_64_bit_field_whole_its_high_word_first_from_0_to_2_53_minus_1()
+    {
+        foreach (var creditEnd in new[] { 0L, 1L << 31, (1L << 32) - 1, 1L << 32, (1L << 32) + 1, (1L << 53) - 1 })
+        {
+            IEnvelopeHeader header = new CreditHeader { CallId = 1, CreditEnd = creditEnd };
+            var written = new byte[16];
+
+            EnvelopeCodec.WriteHeader(header, written);
+
+            Assert.Equal(header, EnvelopeCodec.ReadHeader(written, RouterSide.Server)?.Header);
+        }
+
+        var bytes = new byte[16];
+
+        EnvelopeCodec.WriteHeader(new CreditHeader { CallId = 1, CreditEnd = (1L << 32) + 5 }, bytes);
+
+        Assert.Equal(Vectors.FromHexadecimal("00 00 00 01 00 00 00 05"), bytes[8..]);
     }
 
     // spec 4.10
@@ -188,11 +263,13 @@ public sealed class EnvelopeCodecHeaderTests
     {
         // room for any header, so what is refused is the header, never the room
         var written = new byte[1_024];
-
-        Assert.ThrowsAny<ArgumentException>(() =>
+        var (header, words) = Unwritable[name];
+        var refusal = Assert.ThrowsAny<ArgumentException>(() =>
         {
-            EnvelopeCodec.WriteHeader(Unwritable[name], written);
+            EnvelopeCodec.WriteHeader(header, written);
         });
+
+        Assert.StartsWith(words, refusal.Message, StringComparison.Ordinal);
         Assert.All(written, (value) =>
         {
             Assert.Equal(0, value);

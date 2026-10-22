@@ -172,8 +172,7 @@ public sealed class SubscriptionPlacesTests
     [Fact]
     public void An_undo_hands_the_place_over_to_a_connection_still_open_that_holds_none()
     {
-        // the TypeScript side runs the closed half alone; the open half, on places of its own, shows
-        // the hand-over the closed one does not get
+        // on places of their own, a connection still open is handed the place, one closed is not
         var (stillOpenNotifications, stillOpenPlaces, _) = PlacesOf();
 
         stillOpenPlaces.Subscribe(SubscribingOf(3), News);

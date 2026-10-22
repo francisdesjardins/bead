@@ -55,6 +55,16 @@ test.describe('failuresOf', () => {
     expect(failuresOf({ codes: { LAST: 65_535 }, serviceId: 7 }).codes.LAST).toBe(65_535);
   });
 
+  test('refuses a service outside 1 to 65535', () => {
+    for (const serviceId of [0, 65_536, -1, 1.5, Number.NaN]) {
+      expect(() => {
+        return failuresOf({ codes: { WRONG: 1 }, serviceId });
+      }, String(serviceId)).toThrow(ProgrammerError);
+    }
+
+    expect(failuresOf({ codes: { LAST: 1 }, serviceId: 65_535 }).serviceId).toBe(65_535);
+  });
+
   test('tells a failure of its service by its name, and none of another service', () => {
     const catalogue = failuresOf({ codes: { NOBODY_TO_GREET: 1, TOO_LOUD: 2 }, serviceId: 7 });
 
@@ -72,6 +82,13 @@ test.describe('failuresOf', () => {
       )
     ).toBe(false);
     expect(catalogue.is(new Error('code 1'), 'NOBODY_TO_GREET')).toBe(false);
+    // a failure that names no procedure tells no service
+    expect(
+      catalogue.is(
+        new FailureError({ code: 1, scope: FailureScope.APPLICATION }),
+        'NOBODY_TO_GREET'
+      )
+    ).toBe(false);
   });
 
   test('narrows to the failure of its name, and leaves a FailureError it is not one', () => {

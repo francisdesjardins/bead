@@ -414,7 +414,7 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
-    public async Task A_failed_notify_completes_all_the_same_and_only_debug_hears_of_it()
+    public async Task A_failed_notify_resolves_all_the_same_and_only_debug_hears_of_it()
     {
         var failure = new IOException("gone");
         var router = new RecordingRouter { NotifyError = failure };
@@ -923,19 +923,34 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
-    public void The_same_procedure_under_another_name_revision_or_limit_is_an_invalid_operation()
+    public void The_same_procedure_under_another_kind_name_revision_deprecation_or_limit_is_an_invalid_operation()
     {
         var manager = new ServiceManager(new RecordingRouter());
 
         manager.GetNotification(Echo, Notified());
 
-        foreach (var asked in new[] { Echo with { ProcedureName = "echo2" }, Echo with { ServiceRevision = 4 }, Echo with { MaximumPayloadBytes = 8 } })
+        foreach (var asked in new[]
+        {
+            Echo with { ProcedureKind = ProcedureKind.Notifies },
+            Echo with { ProcedureName = "echo2" },
+            Echo with { ServiceRevision = 4 },
+            Echo with { Deprecation = new ProcedureDeprecation() },
+            Echo with { Deprecation = new ProcedureDeprecation { Message = "soon" } },
+            Echo with { MaximumPayloadBytes = 8 },
+        })
         {
             Assert.Throws<InvalidOperationException>(() =>
             {
                 return manager.GetNotification(asked, Notified());
             });
         }
+
+        // the same deprecation, asked again, is the same ask
+        var deprecated = Echo with { ProcedureId = 70, Deprecation = new ProcedureDeprecation { Message = "use news2" } };
+
+        Assert.Same(
+            manager.GetNotification(deprecated, Notified()),
+            manager.GetNotification(deprecated with { Deprecation = new ProcedureDeprecation { Message = "use news2" } }, Notified()));
 
         // a serializer of its own, for the same ask, gets the same notification
         Assert.Same(
@@ -1061,7 +1076,7 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
-    public async Task A_router_own_handle_reaches_the_callback_for_the_session_manager_to_take()
+    public async Task A_router_s_own_handle_type_reaches_the_callback_for_the_session_manager_to_take()
     {
         var router = new RecordingRouter();
 

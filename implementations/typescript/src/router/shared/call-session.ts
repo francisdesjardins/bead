@@ -135,7 +135,7 @@ export const presentedCredentialOf = (
       if (token === undefined) {
         throw new FailureError({
           ...failures.sessionRequired,
-          detail: 'the call presents OPAQUE, and this side knows no session to present',
+          detail: 'no session is known for OPAQUE to stand for',
         });
       }
 

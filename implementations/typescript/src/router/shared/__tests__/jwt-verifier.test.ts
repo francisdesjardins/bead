@@ -80,12 +80,12 @@ test.describe.configure({ retries: 0 });
 
 test.describe('verifyJwt', () => {
   for (const { audience, keys, name, now, token, verdict } of VECTORS.jwtVerdicts) {
-    test(`give ${name} its verdict`, async () => {
+    test(`gives each JWT its verdict: ${name}`, async () => {
       expect(await verifyJwt(token, { audience, keys, now: readingOf(now) })).toEqual(verdict);
     });
   }
 
-  test('give the claims set of a token that holds whole, frozen to its depth', async () => {
+  test('gives the claims set of a token that holds whole, frozen to its depth', async () => {
     const { audience, keys, now, token } = HOLDING;
     const claims = {
       ...(JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString()) as object),
@@ -106,7 +106,7 @@ test.describe('verifyJwt', () => {
   });
 
   for (const [name, { algorithm, jwk }] of Object.entries(UNSHAPED)) {
-    test(`throw a ProgrammerError for ${name}, whatever the token`, async () => {
+    test(`throws for a key not shaped for its algorithm, whatever the token: ${name}`, async () => {
       const key = {
         algorithm: algorithm as JwtAlgorithm,
         issuer: 'https://issuer.example',
@@ -123,7 +123,7 @@ test.describe('verifyJwt', () => {
     });
   }
 
-  test('throw a ProgrammerError for an audience that is not well-formed Unicode', async () => {
+  test('throws for an audience that is not well-formed Unicode', async () => {
     const { keys, now, token } = HOLDING;
 
     await expect(
@@ -169,7 +169,7 @@ test.describe('verifyJwt', () => {
   });
 
   // ! the C# side's reading is a long, which holds no fraction: this side's type does not say so
-  test('throw a ProgrammerError for a reading that is not a whole number of milliseconds', async () => {
+  test('throws for a reading that is not a whole number of milliseconds', async () => {
     const { audience, keys, now, token } = HOLDING;
 
     await expect(
@@ -177,7 +177,7 @@ test.describe('verifyJwt', () => {
     ).rejects.toThrow(ProgrammerError);
   });
 
-  test('read the wall clock once the signature verifies, so a verification that waits past a token’s end refuses it at exp', async () => {
+  test('reads the wall clock once the signature verifies, so a verification that waits past a token’s end refuses it at exp', async () => {
     const { audience, keys, now, token } = HOLDING;
     const [header = '', claims = ''] = token.split('.');
     const { exp } = JSON.parse(Buffer.from(claims, 'base64url').toString()) as { exp: number };

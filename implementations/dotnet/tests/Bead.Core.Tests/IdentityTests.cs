@@ -31,20 +31,42 @@ public sealed class IdentityTests
     // definition
 
     [Fact]
-    public void Refuses_out_of_its_range_before_off_its_form_in_sentences_that_name_the_procedure_and_its_reason()
+    public void Refuses_an_id_or_a_revision_out_of_its_range_service_0_and_revision_0_among_them()
+    {
+        // * what no C# type holds is never given (docs/support.md, "An id or a revision no C# type holds")
+        foreach (var procedure in new[]
+        {
+            Echo with { ServiceId = 0 },
+            Echo with { ProcedureId = 0 },
+            Echo with { ServiceRevision = 0 },
+            Echo with { ServiceRevision = -1 },
+            Echo with { ServiceRevision = int.MinValue },
+        })
+        {
+            Assert.Contains("is out of its range", RefusalOf(procedure), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Refuses_a_name_off_its_form_and_refuses_out_of_its_range_first()
+    {
+        foreach (var procedureName in new[] { string.Empty, "Echo", "_OTHER", new string('a', 64), "get_thing" })
+        {
+            Assert.Contains("is off its form", RefusalOf(Echo with { ProcedureName = procedureName }), StringComparison.Ordinal);
+        }
+
+        Assert.Contains("is out of its range", RefusalOf(Echo with { ProcedureName = "Echo", ServiceId = 0 }), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Says_which_ids_revision_and_name_it_was_given()
     {
         Assert.Equal(
             "\"echo\" at 0/1, revision 1, is out of its range: a service and a procedure are from 1 to 65535, a revision from 1 to 2147483647 (spec 16.2) (Parameter 'procedure')",
             RefusalOf(Echo with { ServiceId = 0 }));
         Assert.Equal(
-            "\"Echo\" at 0/1, revision 1, is out of its range: a service and a procedure are from 1 to 65535, a revision from 1 to 2147483647 (spec 16.2) (Parameter 'procedure')",
-            RefusalOf(Echo with { ServiceId = 0, ProcedureName = "Echo" }));
-        Assert.Contains("is out of its range", RefusalOf(Echo with { ProcedureId = 0 }), StringComparison.Ordinal);
-        Assert.Contains("is out of its range", RefusalOf(Echo with { ServiceRevision = 0 }), StringComparison.Ordinal);
-        Assert.Contains("is out of its range", RefusalOf(Echo with { ServiceRevision = int.MinValue }), StringComparison.Ordinal);
-        Assert.Equal(
-            "\"Echo\" at 1/1 is off its form: a procedure's name is a lower-case ASCII letter, then up to 62 ASCII letters or digits (spec 16.4) (Parameter 'procedure')",
-            RefusalOf(Echo with { ProcedureName = "Echo" }));
+            "\"_OTHER\" at 1/1 is off its form: a procedure's name is a lower-case ASCII letter, then up to 62 ASCII letters or digits (spec 16.4) (Parameter 'procedure')",
+            RefusalOf(Echo with { ProcedureName = "_OTHER" }));
     }
 
     [Fact]
@@ -57,6 +79,55 @@ public sealed class IdentityTests
         Assert.True(Identity.AreOneName("a\ud800", "A\ud800"));
         Assert.False(Identity.AreOneName("a\ud800", "a\udc00"));
         Assert.False(Identity.AreOneName("[", "{"));
+    }
+
+    [Fact]
+    public void Reads_a_name_whole_a_character_at_a_time_never_as_a_case_mapping_or_a_regular_expression_would()
+    {
+        // a line feed past its end, a Kelvin sign, a long s, a dotted I, an e with its acute, a byte
+        // order mark, a NUL, and a surrogate alone
+        foreach (var name in new[]
+        {
+            $"echo{(char)0x0A}",
+            $"{(char)0x212A}elvin",
+            $"{(char)0x017F}tatus",
+            $"{(char)0x0130}d",
+            $"caf{(char)0x00E9}",
+            $"{(char)0xFEFF}echo",
+            $"echo{(char)0}",
+            $"echo{(char)0xD800}",
+        })
+        {
+            Assert.False(Identity.IsProcedureName(name), name);
+        }
+
+        Assert.True(Identity.IsProcedureName("x9"));
+    }
+
+    [Fact]
+    public void Folds_ASCII_letters_alone_character_by_character()
+    {
+        Assert.True(Identity.AreOneName("getHTTPStatus", "getHttpStatus"));
+        Assert.False(Identity.AreOneName("key", $"{(char)0x212A}ey"));
+        Assert.False(Identity.AreOneName($"caf{(char)0x00E9}", $"caf{(char)0x00C9}"));
+        Assert.False(Identity.AreOneName("a@", "a`"));
+        Assert.False(Identity.AreOneName("ab", "abc"));
+    }
+
+    [Fact]
+    public void Refuses_a_kind_its_way_does_not_take_against_its_kind_and_takes_a_procedure_that_states_none()
+    {
+        Assert.Equal(
+            "\"echo\" at 1/1 is against its kind: a request, which a requester on a server's router does not take; it takes a command (spec 16.11) (Parameter 'procedure')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                Identity.Check(Echo with { ProcedureKind = ProcedureKind.Request }, (DeclarationWay.ServerRequester, "procedure"));
+            }).Message);
+
+        foreach (var way in new[] { DeclarationWay.ClientRequester, DeclarationWay.ServerResolver, DeclarationWay.ClientNotification })
+        {
+            Identity.Check(Echo, (way, "procedure"));
+        }
     }
 
     [Fact]
@@ -112,7 +183,7 @@ public sealed class IdentityTests
     }
 
     [Fact]
-    public void A_manager_runs_its_router_s_check_before_its_own_reason_as_a_notification_is_asked_for()
+    public void A_manager_refuses_a_procedure_off_section_16_before_its_own_reason_a_notification_s_asked_for_otherwise()
     {
         using var client = new RouterClient(new UnconnectedClient());
 
@@ -121,11 +192,17 @@ public sealed class IdentityTests
 
         services.GetNotification(Echo, dependencies);
 
-        // asked for otherwise, and off its form: the form first
+        // asked for otherwise, and off its form or out of its range: section 16 first
         Assert.Contains("is off its form", Assert.Throws<ArgumentException>(() =>
         {
             services.GetNotification(Echo with { ProcedureName = "Echo" }, dependencies);
         }).Message, StringComparison.Ordinal);
+        Assert.Contains("is out of its range", Assert.Throws<ArgumentException>(() =>
+        {
+            services.GetNotification(Echo with { ServiceRevision = 0 }, dependencies);
+        }).Message, StringComparison.Ordinal);
+
+        // within it, its own reason
         Assert.Throws<InvalidOperationException>(() =>
         {
             services.GetNotification(Echo with { ProcedureName = "other" }, dependencies);
@@ -141,14 +218,14 @@ public sealed class IdentityTests
 
         var empty = registry.Exposition().Text;
 
-        Assert.Throws<ArgumentException>(() =>
+        Assert.Contains("is off its form", Assert.Throws<ArgumentException>(() =>
         {
             server.DeclareRequester(Echo with { ProcedureName = "Echo" });
-        });
-        Assert.Throws<ArgumentException>(() =>
+        }).Message, StringComparison.Ordinal);
+        Assert.Contains("is out of its range", Assert.Throws<ArgumentException>(() =>
         {
             server.RegisterResolver(new Resolver(Echo with { ServiceRevision = 0 }));
-        });
+        }).Message, StringComparison.Ordinal);
         Assert.Equal(empty, registry.Exposition().Text);
 
         // its address is free, at its service's first revision

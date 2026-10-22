@@ -256,7 +256,7 @@ test.describe('createRouterCore', () => {
       expect(answersOf(sent)).toEqual([['a', 'failure', 1, ProtocolCode.ENVELOPE_TOO_LARGE]]);
     });
 
-    test('cut a failure’s detail to what its envelope holds, and to its own limit, both ways', async () => {
+    test('cut a failure’s detail to its envelope’s room, and to its own limit, both ways', async () => {
       const detail = 'x'.repeat(100);
       const failure = { code: 1, detail, scope: FailureScope.APPLICATION };
 

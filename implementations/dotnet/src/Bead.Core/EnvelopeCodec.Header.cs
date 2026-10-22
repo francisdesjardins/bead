@@ -272,7 +272,7 @@ public static partial class EnvelopeCodec
             if (!request.OpensSubscription)
             {
                 throw new ArgumentException(
-                    "a request paces nothing unless it opens a subscription",
+                    $"a {HexadecimalOf((int)request.Kind)} header paces nothing: a request that opens a subscription does, or a credit",
                     nameof(request));
             }
 
