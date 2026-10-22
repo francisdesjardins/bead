@@ -520,6 +520,14 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             try
             {
                 connection = await options.Server.Accept(peer, linked.Token);
+
+                // * a cancel or a timeout holds until the connect settles: one met as its server drew
+                // the connection gives the connect up, what was drawn let go of unclean
+                if (!connecting.IsCancellationRequested && linked.IsCancellationRequested)
+                {
+                    Release(connection);
+                    linked.Token.ThrowIfCancellationRequested();
+                }
             }
             catch (OperationCanceledException reason) when (connecting.IsCancellationRequested)
             {

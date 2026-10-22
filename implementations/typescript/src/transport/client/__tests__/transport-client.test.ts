@@ -302,7 +302,9 @@ test.describe('createTransportClient #reconnect', () => {
     await client.connect(target);
     setReadyStateConnecting(client);
 
-    await expect(client.reconnect()).rejects.toThrow('cannot reconnect while connecting');
+    await expect(client.reconnect()).rejects.toThrow(
+      'the transport client cannot reconnect while connecting'
+    );
   });
 
   test('rejects with a ProgrammerError while closing', async () => {
@@ -311,7 +313,9 @@ test.describe('createTransportClient #reconnect', () => {
     await client.connect(target);
     setReadyStateClosing(client);
 
-    await expect(client.reconnect()).rejects.toThrow('cannot reconnect while closing');
+    await expect(client.reconnect()).rejects.toThrow(
+      'the transport client cannot reconnect while closing'
+    );
   });
 
   test('rejects with a ProgrammerError when already reconnecting, and leaves the first one alone', async () => {
@@ -320,7 +324,9 @@ test.describe('createTransportClient #reconnect', () => {
     await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
     const first = client.reconnect({ delay: 20 });
 
-    await expect(client.reconnect()).rejects.toThrow('already reconnecting');
+    await expect(client.reconnect()).rejects.toThrow(
+      'the transport client is already reconnecting'
+    );
     expect(client.isReconnecting()).toBe(true);
 
     await first;

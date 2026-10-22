@@ -267,8 +267,9 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
 
     /// <summary>
     /// A connect: refused with a <see cref="ConnectException"/> unless open, before anything goes;
-    /// then, in a turn of the server's own, its connection drawn and told, refused all the same when
-    /// a stop began meanwhile, and dropped when <paramref name="cancellationToken"/> was cancelled.
+    /// then, in a turn of the server's own, its connection drawn and told, handed back in the turn
+    /// after, refused all the same when a stop began meanwhile, and dropped when
+    /// <paramref name="cancellationToken"/> was cancelled.
     /// </summary>
     internal async Task<MemoryConnection> Accept(MemoryPeer peer, CancellationToken cancellationToken)
     {
@@ -324,7 +325,13 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
             }
 
             _listeners.Tell(Connection, connection.ConnectionHandle);
-            drawn.TrySetResult(connection);
+
+            // * its connect settles in a later turn, after what its listeners did in this one: a
+            // close of theirs is one its client meets as it opens, as the TypeScript side's does
+            _scheduler.Post(() =>
+            {
+                drawn.TrySetResult(connection);
+            });
         });
 
         return await drawn.Task;

@@ -363,7 +363,9 @@ test.describe('createWorkerTransportClient', () => {
 
     (client as ITransportClientInternal<object, never>)[dispose]();
 
-    await expect(disposed).rejects.toThrow(new ConnectError('disposed while connecting'));
+    await expect(disposed).rejects.toThrow(
+      new ConnectError('the transport client was disposed as it connected')
+    );
 
     for (const port of held) {
       port.close();

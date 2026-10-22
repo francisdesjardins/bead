@@ -253,9 +253,11 @@ public sealed class MemoryTransportServerTests
             },
         });
         await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var drawn = new List<string>();
         var heard = new List<string>();
         var reported = new List<string>();
 
+        server.Connection += drawn.Add;
         server.Message += (message, _) =>
         {
             heard.Add($"heard {message.Bytes.Span[0]}");
@@ -274,6 +276,7 @@ public sealed class MemoryTransportServerTests
             return client.Connect(new MemoryConnectOptions { Server = server }, cancelling.Token);
         });
         Assert.Empty(server.ConnectionHandles);
+        Assert.Empty(drawn);
         isCancelling = false;
 
         // a listener's throw reported with its connection, the transport going on
@@ -284,6 +287,8 @@ public sealed class MemoryTransportServerTests
         await client.Send(new TransportMessage(new byte[] { 1 }, false));
         await client.Send(new TransportMessage(new byte[] { 2 }, false));
         await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal("type=MEMORY;ip=local;ordinal=1", handle);
+        Assert.Equal([handle], drawn);
         Assert.Equal(["heard 1", "heard 2"], heard);
         Assert.Equal([$"a listener broke {handle}", $"a listener broke {handle}"], reported);
     }
@@ -296,6 +301,7 @@ public sealed class MemoryTransportServerTests
         await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
         var heard = new List<string>();
         var told = new List<bool>();
+        var closedAtClient = new List<string>();
 
         server.Message += (message, _) =>
         {
@@ -304,6 +310,10 @@ public sealed class MemoryTransportServerTests
         server.Close += (isClean, _) =>
         {
             told.Add(isClean);
+        };
+        client.Close += (isClean, isQuick) =>
+        {
+            closedAtClient.Add($"{isClean} {isQuick}");
         };
         await server.Start();
         await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
@@ -338,6 +348,7 @@ public sealed class MemoryTransportServerTests
 
         Assert.Equal(["heard 1"], heard);
         Assert.Equal([true], told);
+        Assert.Equal(["False False"], closedAtClient);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
         Assert.Empty(server.ConnectionHandles);
     }

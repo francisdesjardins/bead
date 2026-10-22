@@ -667,7 +667,9 @@ test.describe('createHTTPTransportClient', () => {
     drawn.calls[0]?.answer({ headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 });
     (client as ITransportClientInternal<object, never>)[dispose]();
 
-    await expect(connecting).rejects.toThrow(new ConnectError('disposed while connecting'));
+    await expect(connecting).rejects.toThrow(
+      new ConnectError('the transport client was disposed as it connected')
+    );
     expect(drawn.calls[1]?.init).toMatchObject({
       headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) },
       method: 'DELETE',
@@ -851,7 +853,9 @@ test.describe('createHTTPTransportClient', () => {
 
     (disposed as ITransportClientInternal<object, never>)[dispose]();
 
-    await expect(attempt).rejects.toThrow(new ConnectError('disposed while connecting'));
+    await expect(attempt).rejects.toThrow(
+      new ConnectError('the transport client was disposed as it connected')
+    );
   });
 
   test('disconnects quickly without waiting on the server, which is told all the same', async () => {

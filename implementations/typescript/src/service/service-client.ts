@@ -144,7 +144,9 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
   for (const name of Object.keys(windows)) {
     if (!notifying(name)) {
-      throw new ProgrammerError(`${name} does not notify, and takes no window`);
+      throw new ProgrammerError(
+        `a window is given for ${name}, which is no procedure of this service that notifies`
+      );
     }
   }
 
@@ -196,12 +198,12 @@ export const createServiceClient = <const S extends ServiceProcedures>(
 
       if (typeof admission === 'object') {
         throw new ProgrammerError(
-          `${procedure.procedureName} is admitted by the hook ${admission.hook}, and a client side is given no hook`
+          `${procedure.procedureName} is admitted by the hook ${admission.hook}, which a client side is given none of`
         );
       }
 
       if (callbacks.has(name)) {
-        throw new ProgrammerError(`${name} has a resolver already`);
+        throw new ProgrammerError(`${name} is already a registered resolver`);
       }
 
       // * a command's session, as a server's requireSession, with the client router's own refusal

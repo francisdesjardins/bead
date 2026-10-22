@@ -428,6 +428,7 @@ public sealed class MemoryTransportClientTests
         await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
         using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
         var closedAtClient = new List<string>();
+        var closedAtServer = new List<bool>();
 
         await server.Start();
         await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
@@ -435,8 +436,14 @@ public sealed class MemoryTransportClientTests
         {
             closedAtClient.Add($"{isClean} {isQuick}");
         };
+        server.Close += (isClean, _) =>
+        {
+            closedAtServer.Add(isClean);
+        };
 
-        // * the reconnection cancelled in the very turn its server draws the connection
+        // * the reconnection cancelled in the very turn its server draws the connection: the
+        // cancel holds until its attempt's connect settles, which fails, what was drawn closed
+        // unclean and no close told here
         server.Connection += (_) =>
         {
             cancelling.Cancel();
@@ -451,7 +458,8 @@ public sealed class MemoryTransportClientTests
 
         Assert.Equal("the reconnection was cancelled", cancelled.Message);
         Assert.Equal(ReadyState.Closed, client.ReadyState);
-        Assert.Equal(["True False"], closedAtClient);
+        Assert.Empty(closedAtClient);
+        Assert.Equal([false, false], closedAtServer);
         Assert.Empty(server.ConnectionHandles);
     }
 
@@ -563,6 +571,82 @@ public sealed class MemoryTransportClientTests
 
         Assert.Equal(["heard 1", "heard 2"], heard);
         Assert.Equal(ReadyState.Open, client.ReadyState);
+
+        // the TypeScript side plays it too through a server of the test's own, which hands what it
+        // sent before it accepts; a C# client connects to a MemoryTransportServer alone
+    }
+
+    [Fact]
+    public async Task Fails_a_connect_its_server_closed_as_it_opened_what_it_sent_before_unheard()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+
+        // * sent and closed in the turn its server draws it, before its client opened
+        server.Connection += (handle) =>
+        {
+            _ = server.Send(new TransportMessage(new byte[] { 1 }, false), handle);
+            _ = server.CloseConnection(handle);
+        };
+        client.Message += (message) =>
+        {
+            heard.Add($"heard {message.Bytes.Span[0]}");
+        };
+        client.Close += (isClean, isQuick) =>
+        {
+            heard.Add($"closed {isClean} {isQuick}");
+        };
+        await server.Start();
+
+        Assert.Equal("the in-memory transport server closed the connection as it opened", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        })).Message);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Empty(heard);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Closes_at_once_unclean_a_connection_its_server_draws_once_a_dispose_gave_up_on_its_connect()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+        var closedAtServer = new List<bool>();
+
+        // * its dispose in the turn its server draws the connection, before its client opened; what
+        // its server sends after goes unheard
+        server.Connection += (handle) =>
+        {
+            _ = client.DisposeAsync().AsTask();
+            _ = server.Send(new TransportMessage(new byte[] { 1 }, false), handle);
+        };
+        server.Close += (isClean, _) =>
+        {
+            closedAtServer.Add(isClean);
+        };
+        client.Message += (message) =>
+        {
+            heard.Add($"heard {message.Bytes.Span[0]}");
+        };
+        await server.Start();
+
+        Assert.Equal("the transport client was disposed as it connected", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        })).Message);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal([false], closedAtServer);
+        Assert.Empty(heard);
+        Assert.Empty(server.ConnectionHandles);
     }
 
     [Fact]

@@ -1,8 +1,17 @@
 import { expect, test } from '@playwright/test';
 import { createMemoryTransportServer } from '../../server/memory-transport-server';
 import type { MemoryTransportServer } from '../../server/types';
-import { ProgrammerError, ReadyStateError } from '../../shared/errors';
+import { createTestClock } from '../../shared/__tests__/fixtures';
+import {
+  CancelError,
+  ConnectError,
+  ProgrammerError,
+  ReadyStateError,
+  ReconnectError,
+} from '../../shared/errors';
+import { ReadyState } from '../../shared/ready-state';
 import type {
+  IMemoryAcceptOptions,
   IMemoryEndLike,
   IMemoryPeerLike,
   IMemoryTransportServerLike,
@@ -27,6 +36,11 @@ const recordOf = ({ address, credential, data, port }: ITransportMessage) => {
     credential,
     port,
   };
+};
+
+/** The bytes of a message as their numbers. */
+const bytesOf = ({ data }: ITransportMessage): number[] => {
+  return [...new Uint8Array(data as ArrayBuffer)];
 };
 
 /**
@@ -75,12 +89,14 @@ const connected = async () => {
 
 /**
  * A server of the test's own, which accepts each connect once the test resolves it: each peer it
- * met, each accept it holds, and each close its end was told, clean or not.
+ * met, the signal its connect handed it, each accept it holds, and each close its end was told,
+ * clean or not.
  */
 const createHeldServer = () => {
   const accepts: { reject: (reason: Error) => void; resolve: (end: IMemoryEndLike) => void }[] = [];
   const closes: boolean[] = [];
   const peers: IMemoryPeerLike[] = [];
+  const signals: (AbortSignal | undefined)[] = [];
   const end: IMemoryEndLike = {
     close: (wasClean) => {
       closes.push(wasClean);
@@ -88,8 +104,9 @@ const createHeldServer = () => {
     receive: () => {},
   };
   const server: IMemoryTransportServerLike = {
-    accept: (peer) => {
+    accept: (peer, options?: IMemoryAcceptOptions) => {
       peers.push(peer);
+      signals.push(options?.signal);
 
       return new Promise((resolve, reject) => {
         accepts.push({ reject, resolve });
@@ -97,7 +114,7 @@ const createHeldServer = () => {
     },
   };
 
-  return { accepts, closes, end, peers, server };
+  return { accepts, closes, end, peers, server, signals };
 };
 
 // definition
@@ -269,79 +286,179 @@ test.describe('createMemoryTransportClient', () => {
 
   // spec 15.13
   test('hears what its server sent before the connection opened once it has, in its order', async () => {
-    const held = createHeldServer();
-    await using client = createMemoryTransportClient({ server: held.server });
-    const heard: number[][] = [];
+    {
+      const held = createHeldServer();
+      await using client = createMemoryTransportClient({ server: held.server });
+      const heard: number[][] = [];
 
-    client.on('message', ({ data }) => {
-      heard.push([...new Uint8Array(data as ArrayBuffer)]);
-    });
+      client.on('message', (message) => {
+        heard.push(bytesOf(message));
+      });
 
-    const connecting = client.connect({});
+      const connecting = client.connect({});
 
-    await turn();
-    held.peers[0]?.receive({ data: new Uint8Array([1]) });
-    held.peers[0]?.receive({ data: new Uint8Array([2]) });
-    expect(heard).toEqual([]);
-    held.accepts[0]?.resolve(held.end);
-    await connecting;
+      await turn();
+      held.peers[0]?.receive({ data: new Uint8Array([1]) });
+      held.peers[0]?.receive({ data: new Uint8Array([2]) });
+      expect(heard).toEqual([]);
+      held.accepts[0]?.resolve(held.end);
+      await connecting;
 
-    expect([heard, client.isOpen()]).toEqual([[[1], [2]], true]);
+      expect([heard, client.isOpen()]).toEqual([[[1], [2]], true]);
+    }
+
+    {
+      await using server = createMemoryTransportServer();
+      await using client = createMemoryTransportClient({ server });
+      const heard: number[][] = [];
+
+      // * sent in the turn its server draws it, before its client opened: heard once it has, in order
+      server.on('connection', (...[, , connectionHandle]) => {
+        void server.send({ data: new Uint8Array([1]) }, connectionHandle);
+        void server.send({ data: new Uint8Array([2]) }, connectionHandle);
+      });
+      client.on('message', (message) => {
+        heard.push(bytesOf(message));
+      });
+      await server.start();
+      await client.connect({});
+      await turn();
+
+      expect([heard, client.isOpen()]).toEqual([[[1], [2]], true]);
+    }
   });
 
   // spec 15.13
   test('fails a connect its server closed as it opened, what it sent before unheard', async () => {
-    const held = createHeldServer();
-    await using client = createMemoryTransportClient({ server: held.server });
-    const heard: unknown[] = [];
+    {
+      const held = createHeldServer();
+      await using client = createMemoryTransportClient({ server: held.server });
+      const heard: unknown[] = [];
 
-    client.on('message', (message) => {
-      heard.push(message);
-    });
+      client.on('message', (message) => {
+        heard.push(message);
+      });
+      client.on('close', (...params) => {
+        heard.push(['close', ...params]);
+      });
 
-    const connecting = client.connect({});
+      const connecting = client.connect({});
 
-    await turn();
-    held.peers[0]?.close(false);
-    held.peers[0]?.receive({ data: new Uint8Array([1]) });
-    held.accepts[0]?.resolve(held.end);
+      await turn();
+      held.peers[0]?.close(false);
+      held.peers[0]?.receive({ data: new Uint8Array([1]) });
+      held.accepts[0]?.resolve(held.end);
 
-    await expect(connecting).rejects.toThrow(
-      'the in-memory transport server closed the connection as it opened'
-    );
-    expect([heard, client.isClosed()]).toEqual([[], true]);
+      await expect(connecting).rejects.toThrow(
+        new ConnectError('the in-memory transport server closed the connection as it opened')
+      );
+      expect([heard, client.isClosed()]).toEqual([[], true]);
+    }
+
+    {
+      await using server = createMemoryTransportServer();
+      await using client = createMemoryTransportClient({ server });
+      const heard: unknown[] = [];
+
+      // * sent and closed in the turn its server draws it, before its client opened
+      server.on('connection', (...[, , connectionHandle]) => {
+        void server.send({ data: new Uint8Array([1]) }, connectionHandle);
+        void server.close(connectionHandle);
+      });
+      client.on('message', (message) => {
+        heard.push(message);
+      });
+      client.on('close', (...params) => {
+        heard.push(['close', ...params]);
+      });
+      await server.start();
+
+      await expect(client.connect({})).rejects.toThrow(
+        new ConnectError('the in-memory transport server closed the connection as it opened')
+      );
+      await turn();
+
+      expect([heard, client.isClosed(), server.clients]).toEqual([[], true, []]);
+    }
   });
 
   // spec 15.13
   test('closes at once, unclean, a connection its server draws once a dispose gave up on its connect', async () => {
-    const held = createHeldServer();
-    const client = createMemoryTransportClient({ server: held.server });
-    const heard: unknown[] = [];
+    {
+      const held = createHeldServer();
+      const client = createMemoryTransportClient({ server: held.server });
+      const heard: unknown[] = [];
 
-    client.on('message', (message) => {
-      heard.push(message);
-    });
+      client.on('message', (message) => {
+        heard.push(message);
+      });
 
-    const connecting = client.connect({});
+      const connecting = client.connect({});
 
-    await turn();
-    (client as unknown as ITransportClientInternal)[dispose]();
-    await expect(connecting).rejects.toThrow('disposed while connecting');
-    expect(client.isClosed()).toBe(true);
+      await turn();
+      (client as unknown as ITransportClientInternal)[dispose]();
+      await expect(connecting).rejects.toThrow(
+        new ConnectError('the transport client was disposed as it connected')
+      );
+      expect(client.isClosed()).toBe(true);
 
-    held.accepts[0]?.resolve(held.end);
-    held.peers[0]?.receive({ data: new Uint8Array([1]) });
-    await turn();
+      held.accepts[0]?.resolve(held.end);
+      held.peers[0]?.receive({ data: new Uint8Array([1]) });
+      await turn();
 
-    expect([held.closes, heard]).toEqual([[false], []]);
+      expect([held.closes, heard]).toEqual([[false], []]);
+    }
+
+    {
+      await using server = createMemoryTransportServer();
+      const client = createMemoryTransportClient({ server });
+      const heard: unknown[] = [];
+      const closedAtServer: boolean[] = [];
+
+      // * its dispose in the turn its server draws the connection, before its client opened; what
+      // its server sends after goes unheard
+      server.on('connection', (...[, , connectionHandle]) => {
+        (client as unknown as ITransportClientInternal)[dispose]();
+        void server.send({ data: new Uint8Array([1]) }, connectionHandle);
+      });
+      server.on('close', (wasClean) => {
+        closedAtServer.push(wasClean);
+      });
+      client.on('message', (message) => {
+        heard.push(message);
+      });
+      await server.start();
+
+      await expect(client.connect({})).rejects.toThrow(
+        new ConnectError('the transport client was disposed as it connected')
+      );
+      await turn();
+
+      expect([client.isClosed(), closedAtServer, heard, server.clients]).toEqual([
+        true,
+        [false],
+        [],
+        [],
+      ]);
+    }
   });
 
   test('refuses a send or a disconnect unless open, and a send of what is no bytes', async () => {
     {
       await using client = createMemoryTransportClient({ server: createHeldServer().server });
+      const unopened = { expected: ReadyState.OPEN, got: ReadyState.UNINITIALIZED };
 
+      // * never connected: nothing to send on, nor to close
       await expect(client.send({ data: new Uint8Array([1]) })).rejects.toThrow(ReadyStateError);
+      await expect(client.send({ data: new Uint8Array([1]) })).rejects.toMatchObject({
+        ...unopened,
+        message: 'the transport client is uninitialized, not open',
+      });
       await expect(client.disconnect()).rejects.toThrow(ReadyStateError);
+      await expect(client.disconnect()).rejects.toMatchObject({
+        ...unopened,
+        message: 'the transport client is uninitialized, not open',
+      });
     }
 
     {
@@ -355,5 +472,218 @@ test.describe('createMemoryTransportClient', () => {
 
       expect([atServer, client.isOpen()]).toEqual([[], true]);
     }
+  });
+
+  // spec 15.13
+  test('refuses a reconnect never connected, and a connect unless closed, nothing changed', async () => {
+    await using server = createMemoryTransportServer();
+    await using client = createMemoryTransportClient({ server });
+    const aborted = AbortSignal.abort();
+
+    // * never connected: nothing to connect again to
+    await expect(client.reconnect()).rejects.toThrow(
+      new ProgrammerError('the transport client was never connected')
+    );
+
+    // its token, a signal on this side, aborted already, and a server not started: refused, the
+    // first leaving its state as it was
+    await expect(client.connect({ signal: aborted })).rejects.toBeInstanceOf(CancelError);
+    expect(client.isUninitialized()).toBe(true);
+    await expect(client.connect({})).rejects.toThrow(
+      new ConnectError('the in-memory transport server is uninitialized, not open')
+    );
+    expect(client.isClosed()).toBe(true);
+
+    // open: a second connect refused, and a reconnection whose signal is aborted already leaves it
+    // open
+    await server.start();
+    await client.connect({});
+    await expect(client.connect({})).rejects.toThrow(
+      new ProgrammerError('the transport client is already open')
+    );
+    await expect(client.reconnect({ signal: aborted })).rejects.toBeInstanceOf(CancelError);
+
+    expect([client.isOpen(), server.clients.length]).toEqual([true, 1]);
+  });
+
+  // spec 15.13
+  test('reconnects with its last connect’s options, replacing its connection without a close', async () => {
+    await using server = createMemoryTransportServer();
+    await using client = createMemoryTransportClient({ server });
+    const drawn: string[] = [];
+    const closedAtServer: string[] = [];
+    const closedAtClient: string[] = [];
+    const reported: string[] = [];
+    let starts = 0;
+
+    server.on('connection', (...[, , connectionHandle]) => {
+      drawn.push(connectionHandle);
+    });
+    server.on('close', (wasClean, connectionHandle) => {
+      closedAtServer.push(`${connectionHandle} ${String(wasClean)}`);
+    });
+    client.on('close', (isClean, isQuick) => {
+      closedAtClient.push(`${String(isClean)} ${String(isQuick)}`);
+    });
+    client.on('error', (error) => {
+      reported.push(error.message);
+    });
+
+    // * each listener of its start told, the one that throws reported, and the reconnection goes on
+    client.on('reconnect', () => {
+      starts += 1;
+    });
+    client.on('reconnect', () => {
+      throw new Error('a listener broke');
+    });
+
+    await server.start();
+    await client.connect({ address: '10.0.0.1', port: 4_000 });
+    await client.reconnect();
+    await turn();
+
+    expect([client.isOpen(), drawn, closedAtServer, closedAtClient, starts, reported]).toEqual([
+      true,
+      ['type=MEMORY;ip=10.0.0.1;ordinal=1', 'type=MEMORY;ip=10.0.0.1;ordinal=2'],
+      ['type=MEMORY;ip=10.0.0.1;ordinal=1 false'],
+      [],
+      1,
+      ['a listener broke'],
+    ]);
+
+    // its server gone: each attempt refused, until they run out, CLOSED with no close of its own
+    await server.stop();
+    await turn();
+    expect(closedAtClient).toEqual(['false false']);
+
+    const gaveUp = await client.reconnect({ maxAttempts: 1 }).then(
+      () => {
+        throw new Error('the reconnection was taken');
+      },
+      (reason: unknown) => {
+        return reason;
+      }
+    );
+
+    expect(gaveUp).toBeInstanceOf(ReconnectError);
+    expect((gaveUp as ReconnectError).cause).toBeInstanceOf(ConnectError);
+    expect([client.isClosed(), closedAtClient.length]).toEqual([true, 1]);
+  });
+
+  // spec 15.13
+  test('closes what its last attempt opened as its reconnection was cancelled', async () => {
+    await using server = createMemoryTransportServer();
+    await using client = createMemoryTransportClient({ server });
+    const cancelling = new AbortController();
+    const closedAtClient: string[] = [];
+    const closedAtServer: boolean[] = [];
+
+    await server.start();
+    await client.connect({});
+    client.on('close', (isClean, isQuick) => {
+      closedAtClient.push(`${String(isClean)} ${String(isQuick)}`);
+    });
+    server.on('close', (wasClean) => {
+      closedAtServer.push(wasClean);
+    });
+
+    // * the reconnection cancelled in the very turn its server draws the connection: the cancel
+    // holds until its attempt's connect settles, which fails, what was drawn closed unclean and no
+    // close told here
+    server.on('connection', () => {
+      cancelling.abort();
+    });
+
+    await expect(client.reconnect({ signal: cancelling.signal })).rejects.toBeInstanceOf(
+      CancelError
+    );
+    await turn();
+
+    expect([client.isClosed(), closedAtClient, closedAtServer, server.clients]).toEqual([
+      true,
+      [],
+      [false, false],
+      [],
+    ]);
+  });
+
+  // spec 15.13
+  test('gives up a connect its dispose, its token or its clock ends before its server drew it', async () => {
+    // * a server that holds each connect, as a peer that never answers; its token, on this side,
+    // the connect's signal
+    const held = createHeldServer();
+    const clock = createTestClock();
+
+    // its clock past its timeout
+    {
+      await using timed = createMemoryTransportClient({ clock, server: held.server });
+      const timing = timed.connect({ timeout: 1_000 });
+      const timedOut = expect(timing).rejects.toMatchObject({
+        message: 'timed out after 1000ms',
+        name: 'TimeoutError',
+      });
+
+      await turn();
+      expect(held.peers).toHaveLength(1);
+      await clock.tickAsync(1_000);
+      await timedOut;
+      expect(timed.isClosed()).toBe(true);
+    }
+
+    // its token cancelled
+    {
+      await using asked = createMemoryTransportClient({ server: held.server });
+      const cancelling = new AbortController();
+      const asking = asked.connect({ signal: cancelling.signal });
+
+      await turn();
+      expect(held.peers).toHaveLength(2);
+      cancelling.abort();
+      await expect(asking).rejects.toBeInstanceOf(CancelError);
+      expect(asked.isClosed()).toBe(true);
+    }
+
+    // its dispose
+    {
+      const disposed = createMemoryTransportClient({ server: held.server });
+      const disposing = disposed.connect({});
+
+      await turn();
+      expect(held.peers).toHaveLength(3);
+      await disposed[Symbol.asyncDispose]();
+      await expect(disposing).rejects.toThrow(
+        new ConnectError('the transport client was disposed as it connected')
+      );
+      expect(disposed.isClosed()).toBe(true);
+    }
+
+    // each connect its server held told it was given up, so none is drawn for it
+    expect(
+      held.signals.map((signal) => {
+        return signal?.aborted;
+      })
+    ).toEqual([true, true, true]);
+  });
+
+  // spec 15.13
+  test('hears nothing once it let go of its connection, and tells one close at each end', async () => {
+    await using pair = await connected();
+    const { atClient, atServer, client, connectionHandle, server } = pair;
+
+    // * its server sends and ends it as its client closes it, in one turn: none of it heard, one
+    // close told at each end
+    const sending = server.send({ data: new Uint8Array([8]) }, connectionHandle);
+    const ending = server.close(connectionHandle);
+
+    await client.disconnect();
+
+    expect(await Promise.all([sending, ending])).toEqual([undefined, true]);
+
+    await turn();
+
+    expect([atClient, atServer]).toEqual([
+      [['close', true, false]],
+      [['close', true, connectionHandle]],
+    ]);
   });
 });

@@ -378,12 +378,16 @@ test.describe('createServiceClient', () => {
     client.on('clock', answer);
     expect(() => {
       client.on('clock', answer);
-    }).toThrow(new ProgrammerError('clock has a resolver already'));
+    }).toThrow(new ProgrammerError('clock is already a registered resolver'));
     expect(() => {
       return createServiceClient(GreeterProcedures, connected.client, {
         windows: { toString: 1 } as never,
       });
-    }).toThrow(new ProgrammerError('toString does not notify, and takes no window'));
+    }).toThrow(
+      new ProgrammerError(
+        'a window is given for toString, which is no procedure of this service that notifies'
+      )
+    );
   });
 
   test('sends a command’s unlisted code as written, and reports it', async () => {

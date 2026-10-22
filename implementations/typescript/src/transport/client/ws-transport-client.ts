@@ -577,7 +577,7 @@ export const createWSTransportClient = (options?: IWSTransportClientOptions): WS
         [dispose]: () => {
           const { socket } = client;
 
-          rejectConnect?.(new ConnectError('disposed while connecting'));
+          rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           resolveDisconnect?.(true);
           stopBeating();
 

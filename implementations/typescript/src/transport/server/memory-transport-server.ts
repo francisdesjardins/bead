@@ -8,10 +8,15 @@ import {
   MESSAGE_EVENT,
   TRANSPORT_MEMORY,
 } from '../shared/constants';
-import { ConnectError, ProgrammerError } from '../shared/errors';
+import { ConnectError, ProgrammerError, toCancelError } from '../shared/errors';
 import { getReadyStateName } from '../shared/ready-state';
 import { transferableOf } from '../shared/transferable';
-import type { IMemoryEndLike, IMemoryPeerLike, ITransportMessage } from '../shared/types';
+import type {
+  IMemoryAcceptOptions,
+  IMemoryEndLike,
+  IMemoryPeerLike,
+  ITransportMessage,
+} from '../shared/types';
 import { createTransportServer, generateHandle } from './transport-server';
 import type {
   IMemoryTransportServerOptions,
@@ -21,7 +26,12 @@ import type {
 } from './types';
 
 export { TRANSPORT_MEMORY } from '../shared/constants';
-export type { IMemoryEndLike, IMemoryPeerLike, IMemoryTransportServerLike } from '../shared/types';
+export type {
+  IMemoryAcceptOptions,
+  IMemoryEndLike,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
+} from '../shared/types';
 export type { IMemoryTransportServerOptions, MemoryTransportServer } from './types';
 
 // constants
@@ -58,7 +68,10 @@ export const createMemoryTransportServer = (
 ): MemoryTransportServer => {
   // `accept` reaches the registry and `tell`, which only `define` is handed: replaced by it, which
   // `createTransportServer` calls before it returns
-  let acceptOf = (_peer: IMemoryPeerLike): Promise<IMemoryEndLike> => {
+  let acceptOf = (
+    _peer: IMemoryPeerLike,
+    _options?: IMemoryAcceptOptions
+  ): Promise<IMemoryEndLike> => {
     return Promise.reject(new ConnectError('the in-memory transport server is not built'));
   };
 
@@ -86,10 +99,17 @@ export const createMemoryTransportServer = (
         tell(CLOSE_EVENT, [wasClean, connectionHandle]);
       };
 
-      acceptOf = (peer) => {
+      acceptOf = (peer, acceptOptions) => {
+        const signal = acceptOptions?.signal;
+
         return new Promise((resolve, reject) => {
           // * a later turn than the connect, so its client's router is never entered from it
           queueMicrotask(() => {
+            // a connect its client gave up on draws no connection
+            if (signal?.aborted) {
+              return (reject(toCancelError(signal)), undefined);
+            }
+
             if (!server.isOpen()) {
               return (
                 reject(
@@ -199,8 +219,8 @@ export const createMemoryTransportServer = (
   );
 
   return Object.assign(transport, {
-    accept: (peer: IMemoryPeerLike): Promise<IMemoryEndLike> => {
-      return acceptOf(peer);
+    accept: (peer: IMemoryPeerLike, options?: IMemoryAcceptOptions): Promise<IMemoryEndLike> => {
+      return acceptOf(peer, options);
     },
   });
 };

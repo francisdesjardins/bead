@@ -1077,7 +1077,7 @@ const connectTimed = async (
         'a connection started': hasMoved(),
         'a target kept for a reconnection': !(
           reconnection instanceof ProgrammerError &&
-          reconnection.message === 'transport was never connected'
+          reconnection.message === 'the transport client was never connected'
         ),
         'the client initialized': !client.isUninitialized(),
       }),
