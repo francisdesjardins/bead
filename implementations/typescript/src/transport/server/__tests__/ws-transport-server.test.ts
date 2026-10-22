@@ -313,7 +313,7 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         expect(server.isOpen()).toBe(true);
       });
 
-      test('rejects with EADDRINUSE on a port taken, ending CLOSED, and can start again', async () => {
+      test('rejects with EADDRINUSE on a port taken, ending CLOSED, and starts again on a free one and after a stop', async () => {
         const other = createWSTransportServer({ WebSocketServer });
 
         await expect(other.start({ address: host, port })).rejects.toHaveProperty(
@@ -322,13 +322,34 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
         );
         expect(other.isClosed()).toBe(true);
 
+        const free = await other.start({ address: host, findOpenPort: true });
+
+        expect(free.port).not.toBe(port);
+        expect(other.isOpen()).toBe(true);
+
+        await other.stop();
         await other.start({ address: host, findOpenPort: true });
+
         expect(other.isOpen()).toBe(true);
         await other.stop();
       });
 
-      test('rejects a second start with a ProgrammerError', async () => {
-        await expect(server.start()).rejects.toBeInstanceOf(ProgrammerError);
+      test('refuses a second start and keeps serving', async () => {
+        const refused = server.start();
+
+        await expect(refused).rejects.toBeInstanceOf(ProgrammerError);
+        await expect(refused).rejects.toHaveProperty(
+          'message',
+          'the transport server is already open'
+        );
+        expect(server.isOpen()).toBe(true);
+
+        const [, , connectionHandle] = await connectClient(client);
+        const heard = nextServerEvent(server, 'message');
+
+        await client.send({ data: Uint8Array.of(1) });
+
+        expect((await heard)[1]).toBe(connectionHandle);
       });
     });
 
@@ -405,24 +426,48 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
 
     test.describe('WSTransportServer "message" event', () => {
       test('delivers text as a string and binary as an ArrayBuffer, stamping the activity', async () => {
-        await connectClient(client);
-        const [before] = server.clients;
-        expect(before?.lastActivity).toBeUndefined();
+        // a server of its own, on the test clock, whose stamps are its readings
+        const clock = createTestClock(DATED);
+        const dated = createWSTransportServer({ clock, WebSocketServer });
+        const { port: datedPort } = await dated.start({ address: host, findOpenPort: true });
 
-        const text = nextServerEvent(server, 'message');
-        await client.send({ data: 'hello' });
-        expect(await text).toEqual([
-          { ...FROM, credential: undefined, data: 'hello' },
-          before?.connectionHandle,
-        ]);
+        try {
+          const connection = nextServerEvent(dated, 'connection');
 
-        const binary = nextServerEvent(server, 'message');
-        await client.send({ data: new TextEncoder().encode('bytes') });
-        const [{ data }] = await binary;
-        expect(data).toBeInstanceOf(ArrayBuffer);
-        expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
+          await client.connect({ host, port: datedPort });
 
-        expect(server.clients[0]?.lastActivity).toBeGreaterThan(0);
+          const [, , connectionHandle] = await connection;
+
+          expect(dated.clients[0]?.lastActivity).toBeUndefined();
+
+          clock.tick(1_000);
+
+          const text = nextServerEvent(dated, 'message');
+
+          await client.send({ data: 'hello' });
+
+          expect(await text).toEqual([
+            { ...FROM, credential: undefined, data: 'hello' },
+            connectionHandle,
+          ]);
+          expect(dated.clients[0]?.lastActivity).toBe(DATED + 1_000);
+
+          // each message stamps it again
+          clock.tick(1_000);
+
+          const binary = nextServerEvent(dated, 'message');
+
+          await client.send({ data: new TextEncoder().encode('bytes') });
+
+          const [{ data }] = await binary;
+
+          expect(data).toBeInstanceOf(ArrayBuffer);
+          expect(new TextDecoder().decode(data as ArrayBuffer)).toBe('bytes');
+          expect(dated.clients[0]?.lastActivity).toBe(DATED + 2_000);
+        } finally {
+          await client.disconnect();
+          await dated.stop();
+        }
       });
 
       test('hears the next message after a message listener throws, the throw reported with its connection', async () => {
@@ -495,13 +540,31 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
     });
 
     test.describe('WSTransportServer #send', () => {
-      test('reaches the client', async () => {
-        await connectClient(client);
-        const received = nextClientEvent(client, 'message');
+      test('sends to a connection in order, one message at a time', async () => {
+        const [, , connectionHandle] = await connectClient(client);
+        const received: unknown[] = [];
+        const all = new Promise<void>((resolve) => {
+          client.on('message', ({ credential, data }) => {
+            received.push([credential, [...new Uint8Array(data as ArrayBuffer)]]);
 
-        await server.send({ data: 'hello' }, server.clients[0]!.connectionHandle);
+            if (received.length === 20) {
+              resolve();
+            }
+          });
+        });
 
-        expect(await received).toEqual([{ credential: undefined, data: 'hello' }]);
+        await Promise.all(
+          Array.from({ length: 20 }, (_, index) => {
+            return server.send({ data: Uint8Array.of(index + 1) }, connectionHandle);
+          })
+        );
+        await all;
+
+        expect(received).toEqual(
+          Array.from({ length: 20 }, (_, index) => {
+            return [undefined, [index + 1]];
+          })
+        );
       });
 
       test('resolves for a handle nobody holds', async () => {
@@ -538,7 +601,14 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('resolves false for a handle nobody holds', async () => {
+        const closes: unknown[] = [];
+
+        server.on('close', (...args) => {
+          closes.push(args);
+        });
+
         await expect(server.close('type=WS;ip=0.0.0.0;port=1;ordinal=1')).resolves.toBe(false);
+        expect(closes).toEqual([]);
       });
 
       test('"closeAll" closes every connection', async () => {
@@ -677,6 +747,50 @@ test.describe('WSTransportServer, on the wire', () => {
   test.afterEach(async () => {
     await server.stop();
     await allClosed();
+  });
+
+  test('delivers a message sent in frames as one, and names its connection', async () => {
+    const connection = nextServerEvent(server, 'connection');
+    const message = nextServerEvent(server, 'message');
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
+
+    socket.addEventListener('error', () => {});
+    await once(socket, 'open');
+
+    // one binary message, its two fragments each a frame of its own (RFC 6455 §5.4)
+    socket.send(Uint8Array.of(0xa1, 0x11), { fin: false });
+    socket.send(Uint8Array.of(0x00, 0x02), { fin: true });
+
+    const [, , connectionHandle] = await connection;
+    const [{ data }, heardOn] = await message;
+
+    expect([[...new Uint8Array(data as ArrayBuffer)], heardOn]).toEqual([
+      [0xa1, 0x11, 0x00, 0x02],
+      connectionHandle,
+    ]);
+    expect(connectionHandle).toMatch(/^type=WS;ip=127\.0\.0\.1;port=\d+;ordinal=\d+$/u);
+    socket.close();
+  });
+
+  test('answers a close at once and says it was clean', async () => {
+    const connection = nextServerEvent(server, 'connection');
+    const closed = nextServerEvent(server, 'close');
+    const [, TrackedWsWebSocket] = IMPLEMENTATIONS[1];
+    const socket = new TrackedWsWebSocket(`ws://${host}:${String(port)}`);
+
+    socket.addEventListener('error', () => {});
+    await once(socket, 'open');
+
+    const [, , connectionHandle] = await connection;
+    const answered = once(socket, 'close');
+
+    socket.close(1000);
+
+    // its 1000 answered with 1000: a close waited out to its timeout would end unclean
+    expect((await answered)[0]).toBe(1000);
+    expect(await closed).toEqual([true, connectionHandle]);
+    expect(server.clients).toEqual([]);
   });
 
   test('emits "error" with the handle, then that connection\'s "close", on a protocol error', async () => {
@@ -1734,7 +1848,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await server.stop();
   });
 
-  test('an abort before listening rejects the start with a CancelError and closes what was opened', async () => {
+  test('an abort before listening rejects the start with a CancelError, closes what was opened, and can start again', async () => {
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
     const controller = new AbortController();
@@ -1746,6 +1860,14 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
     await expect(starting).rejects.toHaveProperty('cause', 'why');
     expect(fake.instances[0]?.closeCount).toBe(1);
     expect(server.isClosed()).toBe(true);
+
+    const again = server.start(SCRIPTED);
+
+    fake.instances[1]?.emit('listening');
+    await again;
+
+    expect(server.isOpen()).toBe(true);
+    await server.stop();
   });
 
   test('an error before listening rejects the start and closes what was opened', async () => {
@@ -2032,6 +2154,7 @@ test.describe('WSTransportServer, with a scripted WebSocketServer', () => {
 
 test.describe('WSTransportServer, heartbeat', () => {
   test('pings each connection every heartbeat, and drops one that left a ping unanswered, or could not be sent one', async () => {
+    using timers = spyIntervals();
     const fake = createFakeWebSocketServer();
     const server = createWSTransportServer({
       heartbeat: 20,
@@ -2042,6 +2165,14 @@ test.describe('WSTransportServer, heartbeat', () => {
     const closing = createFakeSocket();
     const closes: [wasClean: boolean, connectionHandle: string][] = [];
     const errors: unknown[] = [];
+    // a beat of every heartbeat still armed, in the order its connections came
+    const beat = (): void => {
+      for (const timer of timers.armed) {
+        if (!timers.cleared.includes(timer)) {
+          timer.beat();
+        }
+      }
+    };
 
     const starting = server.start(SCRIPTED);
     fake.instances[0]?.emit('listening');
@@ -2061,39 +2192,49 @@ test.describe('WSTransportServer, heartbeat', () => {
     // a socket in its close handshake is sent no ping, and is dropped all the same
     (closing as { readyState: number }).readyState = 2;
 
-    await expect
-      .poll(() => {
-        return [silent.wasTerminated, closing.wasTerminated];
+    expect(
+      timers.armed.map(({ delay }) => {
+        return delay;
       })
-      .toEqual([true, true]);
+    ).toEqual([20, 20, 20]);
 
-    expect([silent.pings, closing.pings]).toEqual([1, 0]);
-    expect(closes).toHaveLength(2);
-    expect(closes).toEqual(
-      expect.arrayContaining([
-        [false, silentHandle],
-        [false, closingHandle],
-      ])
-    );
+    beat();
+
+    expect([answering.pings, silent.pings, closing.pings]).toEqual([1, 1, 0]);
+    expect([answering.wasTerminated, silent.wasTerminated, closing.wasTerminated]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+
+    // the beat after a ping left unanswered drops its peer
+    beat();
+
+    expect([answering.pings, silent.pings, closing.pings]).toEqual([2, 1, 0]);
+    expect([answering.wasTerminated, silent.wasTerminated, closing.wasTerminated]).toEqual([
+      false,
+      true,
+      true,
+    ]);
+    expect(closes).toEqual([
+      [false, silentHandle],
+      [false, closingHandle],
+    ]);
     // a peer the heartbeat dropped, gone without a word, is no error on its connection
     expect(errors).toEqual([]);
 
-    await expect
-      .poll(() => {
-        return answering.pings;
-      })
-      .toBeGreaterThan(2);
+    beat();
 
-    expect(answering.wasTerminated).toBe(false);
+    expect([answering.pings, answering.wasTerminated]).toEqual([3, false]);
 
     await server.stop();
 
-    // closed, it beats no more: five of its beats pass, and none pings
-    const pings = answering.pings;
-
-    await sleep(100);
-
-    expect(answering.pings).toBe(pings);
+    // closed, it beats no more: every heartbeat it armed is cleared
+    expect(
+      timers.armed.every((timer) => {
+        return timers.cleared.includes(timer);
+      })
+    ).toBe(true);
   });
 
   test('beats every HEARTBEAT when told nothing', async () => {

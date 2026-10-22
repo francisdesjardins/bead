@@ -2735,7 +2735,8 @@ public sealed class WebSocketTransportServerTests : IAsyncLifetime
 
             await heard.Task.WaitAsync(Patience, Cancelled);
 
-            Assert.NotSame(closing, await Task.WhenAny(closing, Task.Delay(200, Cancelled)));
+            // the listener holds its gate: the close cannot have resolved before it is let go
+            Assert.False(closing.IsCompleted);
             gate.Set();
             Assert.True(await closing.WaitAsync(Patience, Cancelled));
             Assert.Empty(_server.ConnectionHandles);
