@@ -67,6 +67,28 @@ jobs:
         run: test -z "$(git status --porcelain -- spec)"
       - run: python spec/check.py
 
+  # ── Playwright ───────────────────────────────────────────────────────────────
+  # The version of `@playwright/test` the TypeScript side pins, which names Microsoft's image of it:
+  # the jobs that run a browser run in that image, Chromium and what it needs already there, so no
+  # job installs a browser, and no copy of the version stands anywhere else.
+  playwright:
+    name: Playwright's version
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: implementations/typescript/package.json
+          sparse-checkout-cone-mode: false
+      # ! an exact version alone names an image: a range names none
+      - id: version
+        run: >-
+          node -e "const v = require('./implementations/typescript/package.json').devDependencies['@playwright/test'];
+          if (!/^[0-9]+[.][0-9]+[.][0-9]+$/.test(v)) { throw new Error('@playwright/test is ' + v + ', no exact version'); }
+          console.log('version=' + v)" >> "$GITHUB_OUTPUT"
+
   # ── TypeScript ───────────────────────────────────────────────────────────────
   # The TypeScript side's own gate: types, lint and its plugin's cases, format, comment budget, doc
   # examples, the generated `Probe` held to its generator, the generated interop's types and lint,
@@ -75,8 +97,13 @@ jobs:
   # `engines.node` declares, so the floor holds by a run.
   typescript:
     name: TypeScript (Node ${{ matrix.node }})
+    needs: playwright
     runs-on: ubuntu-26.04
     timeout-minutes: 15
+    # the image of the Playwright the side pins, Chromium in it: no browser to install
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
     strategy:
       fail-fast: false
       matrix:
@@ -123,10 +150,8 @@ jobs:
       # The demo's static build, the folder francisdesjardins.ca serves: bundling it is the check.
       - run: $YARN playground:build:file
       # The DevTools extension, built, then tested on the current line: its pure modules, and itself
-      # loaded in Chromium against the static build above, which needs the browser installed.
+      # loaded in Chromium against the static build above, the image's own browser.
       - run: $YARN devtools:build
-      - if: matrix.node == '26'
-        run: $YARN playwright install --with-deps chromium
       - if: matrix.node == '26'
         run: $YARN test:devtools
       # The demo's own tests on the current line: its procedures in Node, and its page, the static
@@ -148,7 +173,7 @@ jobs:
   # TypeScript server, which `dotnet test` starts with Node, then the TypeScript client against the
   # C# server; then a page of another origin in Chromium against both sides' HTTP servers, what
   # proves a browser reads their CORS answer. Only the TypeScript side is installed, for its interop
-  # server and its page, and Chromium.
+  # server and its page; Chromium is the Playwright image's.
   #
   # `BEAD_INTEROP_REQUIRED=1` turns an interop that would skip into one that fails: here a skip
   # could only be a path to the other side gone wrong.
@@ -158,8 +183,13 @@ jobs:
   # `Directory.Build.props`: a restore that would change a `packages.lock.json` fails.
   dotnet:
     name: .NET
+    needs: playwright
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    # the image of the Playwright the TypeScript side pins, for the page of another origin's Chromium
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
+      options: --ipc=host
     env:
       BEAD_INTEROP_REQUIRED: 1
     defaults:
@@ -197,8 +227,6 @@ jobs:
           path: implementations/dotnet/TestResults/coverage/*.cobertura.xml
           retention-days: 14
       - run: $YARN test:interop
-        working-directory: implementations/typescript
-      - run: $YARN playwright install --with-deps chromium
         working-directory: implementations/typescript
       - run: $YARN test:browser
         working-directory: implementations/typescript
@@ -660,6 +688,7 @@ jobs:
     needs:
       [
         spec,
+        playwright,
         typescript,
         dotnet,
         builder,
