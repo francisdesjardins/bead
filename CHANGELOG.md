@@ -187,6 +187,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
+- The TypeScript side refuses a procedure's declaration in the C# side's words, naming it and the
+  clause: `"echo" at 0/1, revision 3, is out of its range: a service and a procedure are from 1 to
+  65535, a revision from 1 to 2147483647 (spec 16.2)`, and alike off its form and against its kind.
 - The TypeScript side's json and text payloads refuse in the C# side's words, naming their encoding:
   `a json payload is not UTF-8`, `a text payload is not UTF-8`, `a json payload is not one JSON
   text`, `a json value holds a surrogate alone`, and the rest alike.

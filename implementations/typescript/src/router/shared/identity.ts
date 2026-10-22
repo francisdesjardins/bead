@@ -26,26 +26,26 @@ export const IdentityRefusal = Object.freeze({
 
 /**
  * The kinds each way a side declares a procedure takes (spec 16.11), by `spec/identities.json`'s
- * ids, and what the way does, for a refusal's words.
+ * ids, and the way in a refusal's words, the C# side's.
  */
 const WAYS = Object.freeze({
   'client-notification': {
-    does: "a client's notification is of a request that notifies",
     takes: [ProcedureKind.NOTIFIES],
+    way: "a notification on a client's router",
   },
   'client-requester': {
-    does: "a client's router makes requests",
     takes: [ProcedureKind.REQUEST, ProcedureKind.NOTIFIES],
+    way: "a requester on a client's router",
   },
-  'client-resolver': { does: "a client's router answers commands", takes: [ProcedureKind.COMMAND] },
+  'client-resolver': { takes: [ProcedureKind.COMMAND], way: "a resolver on a client's router" },
   'server-notification-resolver': {
-    does: "a server's resolver that notifies answers a request that notifies",
     takes: [ProcedureKind.NOTIFIES],
+    way: "a resolver on a server's router that notifies",
   },
-  'server-requester': { does: "a server's router makes commands", takes: [ProcedureKind.COMMAND] },
+  'server-requester': { takes: [ProcedureKind.COMMAND], way: "a requester on a server's router" },
   'server-resolver': {
-    does: "a server's resolver that notifies nothing answers a plain request",
     takes: [ProcedureKind.REQUEST],
+    way: "a resolver on a server's router that notifies nothing",
   },
 } as const);
 
@@ -138,8 +138,8 @@ export const areOneName = (one: string, other: string): boolean => {
 
 /**
  * Refuses a declaration of `procedure` — a resolver registered, a requester made, a notification
- * registered — off spec section 16, with a {@link ProgrammerError} whose message ends with the
- * first reason of 16.10 that applies: its service id or its procedure id not a whole number from 1
+ * registered — off spec section 16, with a {@link ProgrammerError} whose message names the
+ * procedure, then the first reason of 16.10 that applies, after `is`: its service id or its procedure id not a whole number from 1
  * to 65535, or its revision not one from 1 to 2³¹ − 1, `out of its range`; its name no procedure's
  * name, `off its form`. A function of the procedure alone, which holds nothing: a router runs it
  * before any reason of its own, and before its registry's.
@@ -156,39 +156,39 @@ export const checkDeclaration = (procedure: IProcedure): void => {
     !isInRange(serviceRevision, LARGEST_REVISION)
   ) {
     throw new ProgrammerError(
-      `a procedure is declared at a service and a procedure from 1 to 65535, of a revision from 1 to 2147483647, not at ${String(serviceId)}/${String(procedureId)} of revision ${String(serviceRevision)}: ${IdentityRefusal.OUT_OF_ITS_RANGE}`
+      `"${String(procedureName)}" at ${String(serviceId)}/${String(procedureId)}, revision ${String(serviceRevision)}, is ${IdentityRefusal.OUT_OF_ITS_RANGE}: a service and a procedure are from 1 to 65535, a revision from 1 to 2147483647 (spec 16.2)`
     );
   }
 
   if (!isProcedureName(procedureName)) {
     throw new ProgrammerError(
-      `a procedure's name is a lower-case ASCII letter, then 62 ASCII letters and digits at most, not ${JSON.stringify(procedureName)}: ${IdentityRefusal.OFF_ITS_FORM}`
+      `"${String(procedureName)}" at ${String(serviceId)}/${String(procedureId)} is ${IdentityRefusal.OFF_ITS_FORM}: a procedure's name is a lower-case ASCII letter, then up to 62 ASCII letters or digits (spec 16.4)`
     );
   }
 };
 
 /**
  * Refuses a declaration of `procedure` by `way` whose kind that way does not take (spec 16.11), with
- * a {@link ProgrammerError} whose message ends with `against its kind`: a requester on a client's
+ * a {@link ProgrammerError} whose message names the procedure, then `is against its kind`: a requester on a client's
  * router takes a request, and one that notifies; on a server's, a command; a resolver on a server's,
  * a request where it notifies nothing and one that notifies where it notifies; on a client's, a
  * command; a notification on a client's, a request that notifies. A procedure that states no kind
  * is taken every way. Run after {@link checkDeclaration}, before any reason of the router's own.
  */
 export const checkProcedureKind = (procedure: IProcedure, way: DeclarationWay): void => {
-  const { procedureKind, procedureName } = procedure;
-  const { does, takes } = WAYS[way];
+  const { procedureId, procedureKind, procedureName, serviceId } = procedure;
+  const { takes, way: named } = WAYS[way];
 
   if (procedureKind === undefined || (takes as readonly ProcedureKind[]).includes(procedureKind)) {
     return;
   }
 
   // a caller without types may state a kind no table names
-  const words =
-    (KIND_WORDS as Readonly<Record<string, string>>)[procedureKind] ??
-    `kind ${procedureKind as string}`;
+  const wordsOf = (kind: ProcedureKind): string => {
+    return (KIND_WORDS as Readonly<Record<string, string>>)[kind] ?? `kind ${kind as string}`;
+  };
 
   throw new ProgrammerError(
-    `${procedureName} is ${words}; ${does}: ${IdentityRefusal.AGAINST_ITS_KIND}`
+    `"${procedureName}" at ${String(serviceId)}/${String(procedureId)} is ${IdentityRefusal.AGAINST_ITS_KIND}: ${wordsOf(procedureKind)}, which ${named} does not take; it takes ${takes.map(wordsOf).join(', or ')} (spec 16.11)`
   );
 };

@@ -56,13 +56,13 @@ test.describe('createServiceManager', () => {
 
       expect(() => {
         manager.getRequestResolver(named, { serializer: serverSerializer });
-      }).toThrow(/: off its form$/);
+      }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getCommandResolver(named, { serializer: serverSerializer });
-      }).toThrow(/: off its form$/);
+      }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getNotificationResolver(ranged, { serializer: serverSerializer });
-      }).toThrow(/: out of its range$/);
+      }).toThrow(/ is out of its range: /);
     });
 
     test('makes and registers the resolver only once it is given its callback', () => {

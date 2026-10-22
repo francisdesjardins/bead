@@ -1030,13 +1030,13 @@ test.describe('createRouterCore', () => {
       ]) {
         expect(() => {
           core.registerResolver(resolverOf({ ...echo, procedureId: 2, ...procedure }));
-        }, JSON.stringify(procedure)).toThrow(/: out of its range$/);
+        }, JSON.stringify(procedure)).toThrow(/ is out of its range: /);
       }
 
       for (const procedureName of ['Echo', '_OTHER', 'echo\n', 'get_thing', 'a'.repeat(64)]) {
         expect(() => {
           core.registerResolver(resolverOf({ ...echo, procedureId: 2, procedureName }));
-        }, procedureName).toThrow(/: off its form$/);
+        }, procedureName).toThrow(/ is off its form: /);
       }
 
       // its identity before any reason of the router's: a payload limit of 0, at service 0
@@ -1045,7 +1045,7 @@ test.describe('createRouterCore', () => {
       }).toThrow(ProgrammerError);
       expect(() => {
         core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 0, serviceId: 0 }));
-      }).toThrow(/: out of its range$/);
+      }).toThrow(/ is out of its range: /);
 
       core.registerResolver(
         resolverOf({

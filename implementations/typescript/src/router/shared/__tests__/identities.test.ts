@@ -157,7 +157,8 @@ const reasonOf = (thrown: unknown): string | undefined => {
 
   return (
     REASONS.find((reason) => {
-      return message.endsWith(`: ${reason}`);
+      // * the procedure named, then its reason after `is`, as the C# side words it
+      return message.includes(` is ${reason}: `);
     }) ?? message
   );
 };
