@@ -871,7 +871,7 @@ export const createHTTPTransportClient = (
         [dispose]: () => {
           const connection = drawn;
 
-          rejectConnect?.(new ConnectError('disposed while connecting'));
+          rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           drawn = undefined;
           client.socket = null;
 

@@ -6,7 +6,8 @@
 // member names, at its path under the output whichever the source, as protoc and buf write a file
 // at the path its descriptor names, or `<name>_bead.ts` at the output's root for a service with no
 // `proto` member; each under beadc's header, and `/* eslint-disable */` where it marks a deprecation
-// or names a message protobuf deprecates.
+// or names a message protobuf deprecates. An output with `http: true` writes `bead_http.ts` besides,
+// at its root, its route table and the document (`http.ts`, decision 0037).
 
 // dependencies
 
@@ -27,6 +28,7 @@ import {
   Messages,
   sourceNameOf,
 } from '../target.ts';
+import { HTTP_FILE, printHttp } from './http.ts';
 import type { ITypeScriptOptions } from './options.ts';
 import { printService } from './templates.ts';
 import { printValidators } from './validators.ts';
@@ -98,6 +100,7 @@ const parameterOf = (options: ITypeScriptOptions): string => {
 export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
   name: 'typescript',
   features: new Set([VALIDATE_FEATURE]),
+  http: true,
   generate: (input: ITargetInput, options: ITypeScriptOptions): readonly IGeneratedFile[] => {
     const { blueprint } = input;
     const set =
@@ -167,6 +170,37 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
           );
           f.print('void ', f.import('GENERATED_CODE_SUPPORTS_VERSION_4', runtime), ';');
         }
+
+        // * an output with http: true: its route table and the document, over every service
+        if (options.http !== undefined) {
+          const f = schema.generateFile(HTTP_FILE);
+          const httpRuntime = RELATIVE.test(options.http.runtime)
+            ? `${options.http.runtime}.js`
+            : options.http.runtime;
+
+          if (
+            blueprint.services.some((service) => {
+              return (
+                marksDeprecation(service) ||
+                boundOf(service).some((fullName) => {
+                  return isDeprecated(messageOf(fullName));
+                })
+              );
+            })
+          ) {
+            silenced.add(HTTP_FILE);
+          }
+
+          printHttp(f, {
+            blueprint,
+            http: options.http,
+            runtime: httpRuntime,
+            messageOf,
+            serviceModuleOf: (service) => {
+              return `./${fileNameOf(service).replace(/\.ts$/u, '.js')}`;
+            },
+          });
+        }
       },
     });
     const response = plugin.run(
@@ -191,11 +225,12 @@ export const typescriptTarget: ITarget<ITypeScriptOptions> = Object.freeze({
     }
 
     return response.file.map((file) => {
-      const [service] = files.get(file.name) ?? [];
+      // * the route table is every service's, its header the first's
+      const held = file.name === HTTP_FILE ? blueprint.services : (files.get(file.name) ?? []);
+      const [service] = held;
       const header = headerOf(blueprint, {
         source: sourceNameOf(input.sources, service?.proto?.file),
-        ...(options.messages === Messages.GENERATE &&
-        (files.get(file.name) ?? []).some(bindsMessages)
+        ...(options.messages === Messages.GENERATE && held.some(bindsMessages)
           ? {
               messages: `protoc-gen-es ${protocGenEsVersion()}, for @bufbuild/protobuf ${PROTOBUF_FLOOR} or later`,
             }

@@ -286,15 +286,17 @@ export const createTransportClient = <
       } = options ?? {};
 
       if (client.isReconnecting()) {
-        throw new ProgrammerError('already reconnecting');
+        throw new ProgrammerError('the transport client is already reconnecting');
       }
 
       if (lastConnectOptions === undefined) {
-        throw new ProgrammerError('transport was never connected');
+        throw new ProgrammerError('the transport client was never connected');
       }
 
       if (client.isConnecting() || client.isClosing()) {
-        throw new ProgrammerError(`cannot reconnect while ${getReadyStateName(client)}`);
+        throw new ProgrammerError(
+          `the transport client cannot reconnect while ${getReadyStateName(client)}`
+        );
       }
 
       if (Number.isNaN(maxAttempts)) {

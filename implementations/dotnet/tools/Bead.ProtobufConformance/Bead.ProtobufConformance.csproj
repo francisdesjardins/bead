@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- The C# side's testee of protobuf's conformance suite (0028): each message read and written
-       through the codec beadc generates, the check of its records in front of Google.Protobuf.
+  <!-- The C# side's testee of protobuf's conformance suite (0028, 0037): each message read and written
+       through the codec beadc generates, the check of its records in front of Google.Protobuf,
+       its JSON by Bead's own mapping.
        tools/protobuf-conformance.mjs generates Generated/ at run time, never committed, so the
        project stays outside Bead.slnx; it builds under this side's gates all the same. -->
   <PropertyGroup>
@@ -12,6 +13,8 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Bead.Core/Bead.Core.csproj" />
     <ProjectReference Include="../../src/Bead.Protobuf/Bead.Protobuf.csproj" />
+    <!-- the JSON a message is read and written as, Bead's own mapping (0037) -->
+    <ProjectReference Include="../../src/Bead.Transcoding/Bead.Transcoding.csproj" />
     <PackageReference Include="Google.Protobuf" />
   </ItemGroup>
 </Project>

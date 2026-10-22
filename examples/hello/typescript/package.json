@@ -7,6 +7,10 @@
     "#hello": {
       "external": "./gen/external/hello/v1/hello_bead.ts",
       "default": "./gen/generate/hello/v1/hello_bead.ts"
+    },
+    "#hello/http": {
+      "external": "./gen/external/bead_http.ts",
+      "default": "./gen/generate/bead_http.ts"
     }
   },
   "scripts": {

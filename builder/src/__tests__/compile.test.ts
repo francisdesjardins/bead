@@ -103,9 +103,9 @@ test("compiles the roots after beadc's options, imports and source info included
   expect(names).toContain('bead/interop/v1/interop.proto');
   expect(names).toContain('buf/validate/validate.proto');
   expect(set.file.at(-1)?.sourceCodeInfo?.location.length).toBeGreaterThan(0);
-  // * the root's file, beadc's two and their imports: descriptor.proto, then the duration, the
-  // timestamp and the field mask protovalidate's options name
-  expect(fromBinary(FileDescriptorSetSchema, compile([UNCOMPILED])).file.length).toBe(7);
+  // * the root's file, beadc's four and their imports: descriptor.proto, then the duration, the
+  // timestamp and the field mask protovalidate's options name, and googleapis' pair
+  expect(fromBinary(FileDescriptorSetSchema, compile([UNCOMPILED])).file.length).toBe(9);
 });
 
 test("buf's refusal is an input error, its messages as they came", () => {

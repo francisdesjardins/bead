@@ -29,6 +29,7 @@ import type { IBlueprint } from './model/blueprint.ts';
 import { BEADC_FILES } from './roots.ts';
 import { pascalOf } from './targets/names.ts';
 import type { IGeneratedFile } from './targets/target.ts';
+import { withoutHttpOptions } from './http-options.ts';
 import { withoutValidateOptions } from './validate-options.ts';
 import { IMAGE } from './wrappers.ts';
 
@@ -187,11 +188,14 @@ export const generateCSharpMessages = (
     readonly blueprint: IBlueprint;
     readonly folder?: string;
     readonly keepValidateOptions?: boolean;
+    readonly keepHttpOptions?: boolean;
   }
 ): readonly IGeneratedFile[] => {
   // * protovalidate's options taken out of what protoc is handed, beadc compiling a request's rules
   // itself, unless the output keeps them (decision 0035)
-  const set = options.keepValidateOptions === true ? given : withoutValidateOptions(given);
+  // * and google.api.http, beadc writing a route table itself, unless the output keeps it (0037)
+  const validated = options.keepValidateOptions === true ? given : withoutValidateOptions(given);
+  const set = options.keepHttpOptions === true ? validated : withoutHttpOptions(validated);
   const descriptors = fromBinary(FileDescriptorSetSchema, set);
   const dependencies = new Map(
     descriptors.file.map((file) => {

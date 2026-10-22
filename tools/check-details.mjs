@@ -7,7 +7,7 @@
 //   node tools/check-details.mjs <file…>     those files alone
 //
 // The TypeScript side builds a detail by `detail: <error>.message`; the C# side hands
-// `<error>.Message` to a failure's constructor. A site not in `ALLOWED` fails, with its file and
+// `<error>.Message` to a failure's constructor, or to one of a gateway's `HttpProblems`. A site not in `ALLOWED` fails, with its file and
 // line: a new site is added here by decision, with the test that shows what its detail says.
 // Exit 1 on a site that is not allowed, or an allowed one gone.
 
@@ -16,19 +16,26 @@ import { execFileSync } from 'node:child_process';
 
 // the sites allowed, by file: how many each holds. Each reports alone (a payload or an envelope
 // that does not decode), but router-core.ts's CapacityError, a bound of the side's own, whose words
-// the C# side writes as the detail itself
+// the C# side writes as the detail itself, and the gateways': Bead's mapping's own words, of the
+// request its client sent, answered to that client PAYLOAD_UNDECODABLE, and of a result it holds
+// no form of, `unwritable` and reported, each the mapping's own refusal, `JsonFormError` and
+// `JsonFormException`, which nothing else throws; transcoding.json's readings and writings fix
+// those words, its failures "a body the gateway's reading refuses, its pointer" and "a result
+// Bead's proto JSON form holds none of" their problems
 export const ALLOWED = Object.freeze({
   'implementations/typescript/src/router/shared/notification.ts': 1,
   'implementations/typescript/src/router/shared/router-core.ts': 2,
   'implementations/typescript/src/router/shared/service-requester.ts': 1,
+  'implementations/typescript/src/transcoding/http-gateway.ts': 2,
   'implementations/dotnet/src/Bead.Core/Notification.cs': 1,
   'implementations/dotnet/src/Bead.Core/RouterCore.cs': 2,
   'implementations/dotnet/src/Bead.Core/ServiceManager.Requester.cs': 1,
+  'implementations/dotnet/src/Bead.Transcoding.Http/HttpGateway.cs': 2,
 });
 
 const TYPESCRIPT = /\bdetail\s*(?::|=)\s*[^,;\n]*\.message\b/;
 const CSHARP =
-  /\b(?:Failure|ProtocolFailureOf|OfProtocol|FailureException)\w*\s*\([^\n]*\.Message\b/;
+  /\b(?:Failure|ProtocolFailureOf|OfProtocol|FailureException|HttpProblems\.\w+)\w*\s*\([^\n]*\.Message\b/;
 
 /** The 1-based lines of `text` that put an exception's message in a detail. */
 export const sitesOf = (text, path) => {

@@ -3,7 +3,8 @@
 // (decision 0008). It stages, commits and pushes nothing, and tags nothing but the documents.
 //
 //   node tools/release.mjs prepare [<version>] [--spec <move>] [--debugging <move>]
-//                                  [--date YYYY-MM-DD] [--python <path>] [--dry-run]
+//                                  [--transcoding <move>] [--date YYYY-MM-DD] [--python <path>]
+//                                  [--dry-run]
 //   node tools/release.mjs tag [<version>]
 //
 // `prepare`, on a release/* or hotfix/* branch, the product's <version> defaulting to the branch's:
@@ -20,7 +21,7 @@
 // brought to it, and both benches' reports, compared with the last release's.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
-// tags spec-v… and debugging-v… at the commit v<version> tags, for each document whose version no
+// tags spec-v…, debugging-v… and transcoding-v… at the commit v<version> tags, for each document whose version no
 // tag names yet; runs the gate as main's run will, then over the branch checked out; takes out of
 // CI's `beadc breaking` step on the branch checked out, develop at its back-merge, each waiver the
 // tagged commit carries, which the release makes moot, and prints the commit that keeps it; and
@@ -782,7 +783,7 @@ export const tag = (root, options = {}) => {
 if (import.meta.main) {
   const usage = () => {
     console.error(
-      'usage: node tools/release.mjs prepare [<version>] [--spec <move>] [--debugging <move>] [--date YYYY-MM-DD] [--python <path>] [--dry-run]'
+      'usage: node tools/release.mjs prepare [<version>] [--spec <move>] [--debugging <move>] [--transcoding <move>] [--date YYYY-MM-DD] [--python <path>] [--dry-run]'
     );
     console.error('       node tools/release.mjs tag [<version>]');
     process.exit(2);
@@ -794,6 +795,7 @@ if (import.meta.main) {
       options: {
         spec: { type: 'string' },
         debugging: { type: 'string' },
+        transcoding: { type: 'string' },
         date: { type: 'string' },
         python: { type: 'string' },
         'dry-run': { type: 'boolean' },
@@ -817,7 +819,7 @@ if (import.meta.main) {
     if (command === 'prepare') {
       prepare(root, {
         version,
-        moves: { spec: values.spec, debugging: values.debugging },
+        moves: { spec: values.spec, debugging: values.debugging, transcoding: values.transcoding },
         date: values.date,
         python: values.python,
         dryRun: values['dry-run'],

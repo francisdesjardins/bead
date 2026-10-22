@@ -1,0 +1,18 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "idempotencyLevel": "NO_SIDE_EFFECTS",
+        "rules": []
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "HTTP_GET_UNBINDABLE",
+      "pointer": "/services/0/procedures/0/http/idempotencyLevel"
+    }
+  ]
+}

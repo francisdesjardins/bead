@@ -117,7 +117,8 @@ const readIstanbul = (files, text) => {
 
 /**
  * Reports, each a cobertura `.xml` or an istanbul `.json` by its name, merged, then each file
- * below one of `unders` (every file when there is none) as a row, and the totals.
+ * below one of `unders` (every file when there is none), but what a build writes under an `obj/`
+ * folder, as a row, and the totals.
  */
 export const measure = (reports, unders) => {
   const files = new Map();
@@ -131,6 +132,11 @@ export const measure = (reports, unders) => {
   }
 
   const kept = [...files.entries()].filter(([name]) => {
+    // ! what a build writes under obj/, a source generator's code among it, is no source of the side
+    if (name.split('/').includes('obj')) {
+      return false;
+    }
+
     return (
       unders.length === 0 ||
       unders.some((under) => {

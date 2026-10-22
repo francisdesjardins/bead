@@ -23,6 +23,14 @@ describe('sitesOf', () => {
     assert.deepEqual(sitesOf(text, CS), [1]);
   });
 
+  test('finds a C# problem of a gateway built from an exception message', () => {
+    const text =
+      'return HttpProblems.Own(OwnFailure.Unwritable, (reason.Message, _options.Challenge));\n' +
+      'var field = descriptor is { FieldType: FieldType.Message };';
+
+    assert.deepEqual(sitesOf(text, CS), [1]);
+  });
+
   test('leaves a fixed detail and a transport event alone', () => {
     assert.deepEqual(sitesOf('{ ...f, detail: "the bound" };', TS), []);
     assert.deepEqual(sitesOf('transport.Message += OnMessage;', CS), []);

@@ -5,8 +5,9 @@ notifications of a subscription and the commands a server sends back, written at
 This project is its TypeScript implementation — a WebSocket, an HTTP, a Web Worker and an in-memory
 transport, each a client and a server, a server's transports joined into one, a client and a server
 router over them, the service, session and
-notification managers, the client and server that put the three layers together, and the service
-layer a service is served and called through. Nothing in it imports a framework at run time. The
+notification managers, the client and server that put the three layers together, the service
+layer a service is served and called through, and a gateway that answers its procedures over HTTP
+and JSON. Nothing in it imports a framework at run time. The
 specification and the conformance files both sides play are in [`spec/`](../../spec/).
 
 ```ts
@@ -1201,6 +1202,67 @@ their handles, each listener within its guard; its stop stops each, and its gaug
 Two transports of one type, whose handles might be one, are refused as the join is built: one
 transport binds both addresses. The join starts nothing: each transport is started where it
 listens, and one port for two still comes from a proxy in front.
+
+### HTTP/JSON transcoding, a gateway
+
+`http-gateway`'s `createHTTPGateway` answers a service's procedures as routes of HTTP
+([`spec/transcoding.md`](../../spec/transcoding.md), decision 0037), beside the wire, never in its
+place: each call goes through one more Bead client of the application's own server, across an
+in-memory transport that server joined beside its WebSocket or HTTP one, so it meets the same
+router, admission, sessions and services, each offered once. It reads everything from the route
+table beadc writes in an output with `http: true`, `bead_http.ts`, whose `HTTP_ROUTES`,
+`OPENAPI_DOCUMENT` and `HTTP_PROBLEM_TYPES` it is given; `transcoding` is the layer it reads them
+with, pure, no socket.
+
+```ts
+const memory = createMemoryTransportServer();
+const server = createServer({ transport: joinTransports([memory, webSocket]) });
+const gateway = createHTTPGateway({
+  createServer: (listener) => createNodeServer(listener),
+  document: OPENAPI_DOCUMENT,
+  problemTypes: HTTP_PROBLEM_TYPES,
+  routes: HTTP_ROUTES,
+  transport: memory,
+});
+
+await memory.start();
+await gateway.start({ port: 8080 });
+```
+
+Every procedure a client calls answers `POST /api/<Service>/<procedure>`, its body the request
+whole; one marked `option idempotency_level = NO_SIDE_EFFECTS` answers `GET` and `HEAD` there too,
+its request from the query, unless the query cannot carry a field of it; and each `google.api.http`
+rule is served as written, a path matched raw, by the peers' precedence, a literal before `*`
+before `**`. A multi-segment variable keeps each `%2F` as it came, so its resolver reads three
+characters where the path held an encoded `/`.
+
+**The route is no guard.** A procedure answers its default route whatever rules map it, so a
+proxy's rule on a rule's path guards nothing the default route leaves open: what guards a procedure
+is its admission, which every route meets alike.
+
+A `proto` body is read by Bead's own mapping of protobuf's JSON over its message's schema, and a
+result written in Bead's proto JSON form, one sequence of bytes on both sides: fields in their
+numbers' order, a map's entries sorted, a `float` at its shortest, each well-known type in its one
+form; protobuf-es's `fromJson` and `toJson` are never called, and the binary payload stays its
+own. A failure is an `application/problem+json`, its status by where its code arose:
+`PAYLOAD_INVALID` 422 with each violation's `pointer` or `parameter`, `SESSION_REQUIRED` 401 with
+`www-authenticate`, a server's answer the gateway could not take 502. A request whose `accept`
+names `text/event-stream` to a procedure that notifies is a stream of Server-Sent Events: its
+result, each notification a `message`, the failure that ends it, each an `id`, paced by what its
+response takes, 16 at once; one that carries `Last-Event-ID` is answered 204, so an `EventSource`
+stops rather than calls again.
+
+Each exchange draws one Bead connection, closed as its response ends: a connection's session, a
+subscription, a bound of the calls it answers, are one caller's, never every caller's. Its
+`authorization` is presented whole as `ELSEWHERE`, or under `authorization: 'bearer-jwt'` its
+`Bearer` token as a `JWT`; a command its server sends is answered `SERVICE_UNKNOWN`, and a
+connection's session ends with its exchange. It judges a request in the order of `transcoding.md`
+10.1 by the HTTP transport's own gates — hosts, origins and CORS, Fetch Metadata, its bounds, calls
+and streams counted apart — from one policy object, `httpPolicyOf`, which `createHTTPTransportServer`
+takes too, so two listeners never keep two lists alike; a member given in the policy and beside it
+is refused. It listens on its own port, or answers as `listener` on a server the application builds;
+one origin for `/bead` and `/api/…` comes from a proxy in front. It serves the document at
+`/openapi.json`, byte for byte, with its `etag`; Swagger UI is the application's to serve.
 
 ### What a server holds
 

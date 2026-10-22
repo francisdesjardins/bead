@@ -4,7 +4,7 @@
     "Bead's durations: what every place that takes a duration an application gives a side makes of every input (spec 1.4, decision 0014), which every implementation's harness plays at every place, by every way its surface takes that duration.",
     "inputs is one table, each input named, in one of five forms: milliseconds, a JSON number, given as it is on the TypeScript side and through TimeSpan.FromMilliseconds on the C# side; seconds, a JSON number as a user writes seconds, seconds * 1000 and TimeSpan.FromSeconds, each platform's arithmetic; never, Infinity and Timeout.InfiniteTimeSpan, which JSON has no number for; nan, IEEE 754's NaN, which JSON has none for either; json, a value that is no number, a string or a boolean, as a limit read from JSON may be.",
     "A place is keyed by its id, its owner and its duration, which nothing but a decision changes. name says what it is, for a reader. kind is delay, a wait before an act, which takes 0 as at once, or timeout, any other, which is never 0. never is taken, held without end, arming nothing; refused; or default, held as the place's default; neverClause is the clause that says so, where 1.4 does not alone.",
-    "clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default's clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8.",
+    "clauses are the units of spec.md a place checks, each for what the place observes of it, and nothing else: 1.4, which holds and refuses its durations; its neverClause; and its default's clause. A unit is a clause, 9.2; an item of its numbered list, 9.2.5; or a row of its table, counted from 1, 15.12.8. A gateway's place cites the units of transcoding.md behind transcoding:, transcoding:9.2.",
     "ways are each way the surface takes that duration, by an id stable in its place: each harness keeps a table from each place and way to a function that builds the place on its side's test clock, given one input or none, and fails when that table and this file differ by one. required marks a way whose duration cannot be left out.",
     "default is where a clause states one: its milliseconds, or never, with that clause, one of the place's own; ways, those a harness builds with nothing given to read it; state, where it holds only so. A default no clause states is left out.",
     "observed is held, where what the place holds is read: an option read back, the due of the timer it arms on the side's test clock, or the wait a listen asks; at once, no timer armed and the act done; never, no timer armed. Or refusal, for a place on the real clock (decision 0011), whose harness reads whether it refuses alone.",
@@ -1948,7 +1948,7 @@
     },
     {
       "id": "httpTransportServer.sendGracePeriod",
-      "name": "the least time an HTTP server gives an answer's bytes to be taken by its socket",
+      "name": "the least time an HTTP server, or a gateway, gives an answer's bytes to be taken by its socket",
       "clauses": [
         "1.4",
         "15.12"
@@ -1960,6 +1960,10 @@
         {
           "id": "options",
           "name": "the transport server's options, as it is built"
+        },
+        {
+          "id": "gateway",
+          "name": "a gateway's options, as it is built"
         }
       ],
       "observed": "refusal",
@@ -2074,7 +2078,7 @@
     },
     {
       "id": "httpTransportServer.headersTimeout",
-      "name": "how long an HTTP server lets a request's head take to come whole",
+      "name": "how long an HTTP server, or a gateway, lets a request's head take to come whole",
       "clauses": [
         "1.4",
         "15.12"
@@ -2086,6 +2090,10 @@
         {
           "id": "options",
           "name": "the transport server's options, as it is built"
+        },
+        {
+          "id": "gateway",
+          "name": "a gateway's options, as it is built"
         }
       ],
       "observed": "refusal",
@@ -2200,7 +2208,7 @@
     },
     {
       "id": "httpTransportServer.bodyGracePeriod",
-      "name": "how long an HTTP server lets a body come before its rate is held",
+      "name": "how long an HTTP server, or a gateway, lets a body come before its rate is held",
       "clauses": [
         "1.4",
         "15.12",
@@ -2213,13 +2221,18 @@
         {
           "id": "options",
           "name": "the transport server's options, as it is built"
+        },
+        {
+          "id": "gateway",
+          "name": "a gateway's options, as it is built"
         }
       ],
       "default": {
         "milliseconds": 5000,
         "clause": "15.12.16",
         "ways": [
-          "options"
+          "options",
+          "gateway"
         ]
       },
       "observed": "held",
@@ -3506,6 +3519,270 @@
           "input": "never",
           "outcome": "refused",
           "reason": "never refused"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "gateway.timeout",
+      "name": "a gateway's call timeout",
+      "clauses": [
+        "1.4",
+        "transcoding:9.2"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "transcoding:9.2",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the gateway's options, as it is built"
+        }
+      ],
+      "default": {
+        "milliseconds": 5000,
+        "clause": "transcoding:9.2",
+        "ways": [
+          "options"
+        ]
+      },
+      "observed": "held",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "held",
+          "held": 1
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "held",
+          "held": 2
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "held",
+          "held": 3
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "held",
+          "held": 410
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "held",
+          "held": 2010
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "held",
+          "held": 2147483647
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "never"
+        },
+        {
+          "input": "-2 ms",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "-1 ms",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration of -1 ms",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "NaN",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "\"1000\"",
+          "outcome": "refused",
+          "reason": "not a number"
+        },
+        {
+          "input": "true",
+          "outcome": "refused",
+          "reason": "not a number"
+        }
+      ]
+    },
+    {
+      "id": "gateway.heartbeat",
+      "name": "a gateway's heartbeat on a stream nothing else goes on",
+      "clauses": [
+        "1.4",
+        "transcoding:8.7"
+      ],
+      "kind": "timeout",
+      "never": "taken",
+      "neverClause": "transcoding:8.7",
+      "ways": [
+        {
+          "id": "options",
+          "name": "the gateway's options, as it is built"
+        }
+      ],
+      "observed": "refusal",
+      "outcomes": [
+        {
+          "input": "0",
+          "outcome": "refused",
+          "reason": "0 refused"
+        },
+        {
+          "input": "0.00001 ms, under a tick",
+          "outcome": "refused",
+          "reason": "under the floor",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "half a millisecond",
+          "outcome": "refused",
+          "reason": "under the floor"
+        },
+        {
+          "input": "a millisecond",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.4 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "1.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.5 ms",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.41 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "2.01 s, as written",
+          "outcome": "taken"
+        },
+        {
+          "input": "the ceiling",
+          "outcome": "taken"
+        },
+        {
+          "input": "0.00001 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling",
+          "differs": [
+            {
+              "row": "A duration finer than a tick",
+              "language": "C#"
+            }
+          ]
+        },
+        {
+          "input": "0.4 ms past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "half a millisecond past the ceiling",
+          "outcome": "refused",
+          "reason": "past the ceiling"
+        },
+        {
+          "input": "never",
+          "outcome": "taken"
         },
         {
           "input": "-2 ms",

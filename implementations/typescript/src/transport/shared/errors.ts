@@ -71,6 +71,10 @@ export class ProgrammerError extends GenericError {
   public override readonly name: string = 'ProgrammerError';
 }
 
+/**
+ * A transport client asked for what its state does not allow, in the C# side's words: `the
+ * transport client is uninitialized, not open`.
+ */
 export class ReadyStateError extends GenericError {
   public override readonly name: string = 'ReadyStateError';
 
@@ -79,7 +83,7 @@ export class ReadyStateError extends GenericError {
 
   public constructor(got: ReadyState, expected: ReadyState) {
     super(
-      `ReadyState Error: got ${READY_STATE_NAMES[got]} expected ${READY_STATE_NAMES[expected]}`
+      `the transport client is ${READY_STATE_NAMES[got].toLowerCase()}, not ${READY_STATE_NAMES[expected].toLowerCase()}`
     );
 
     this.got = got;

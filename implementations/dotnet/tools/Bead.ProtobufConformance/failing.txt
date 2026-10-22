@@ -1,9 +1,14 @@
-# The tests protobuf's conformance suite fails through the C# side's generated codec, each with the
-# runner's message, its reason on the comment line above (decision 0028). The runner fails a listed
-# test that passes, so the list is held both ways.
+# The tests protobuf's conformance suite fails through the C# side's generated codec and Bead's
+# mapping of protobuf's JSON, each with the runner's message, its reason on the comment line above
+# (decisions 0028 and 0037). The runner fails a listed test that passes, so the list is held both
+# ways.
 
 # an extension is read as an unknown field: the generated codec gives no registry
 Recommended.Editions.ProtobufInput.RejectInvalidUtf8.String.Extension # Should have failed to parse, but didn't.
 # Google.Protobuf writes a message's unknown fields back by number and wire type, not in their
 # order: docs/support.md, "A proto message's unknown fields, written back"
 Required.*.ProtobufInput.UnknownOrdering.ProtobufOutput # Unknown field mismatch
+# an extension's JSON name, `[full.name]`, names no field of its message: Bead's mapping reads a
+# message's own fields alone, as its route table names no extension (transcoding 5.2, item 2)
+Recommended.Editions_Proto2.JsonInput.FieldNameExtension.Validator # Expected JSON payload but got type 1
+Recommended.Proto2.JsonInput.FieldNameExtension.Validator # Expected JSON payload but got type 1

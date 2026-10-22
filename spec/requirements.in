@@ -3,3 +3,6 @@
 jsonschema==4.26.0
 # RE2 itself, which spec/generators/make_validations.py matches the verdicts' patterns by
 google-re2==1.1.20251105
+# protobuf's own Python library, upb, which spec/generators/make_transcoding.py reads and writes protobuf's
+# JSON beside its own mapping by, at the release of the conformance suite the sides run
+protobuf==7.36.2

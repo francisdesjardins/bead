@@ -14,7 +14,9 @@
   the files of `spec/` read whole are [0004](0004-one-behaviour-in-every-language.md)'s, the
   builder's place among the toolchains [0005](0005-a-toolchain-per-language.md)'s, its gates
   [0006](0006-a-rule-has-its-gate.md)'s, its names and its options' number
-  [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s
+  [0008](0008-three-version-axes-and-names-qualified-by-their-owner.md)'s; what a gateway answers of
+  a blueprint's routes, the rules beadc holds them to and the OpenAPI document it writes of them
+  [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s
 
 ## Context
 
@@ -171,7 +173,15 @@ it has them. A binding is its encoding, and for `proto` alone its message's full
 end read of a `.proto` — its files and packages, the messages a `proto` binding names and, under
 the feature `validate`, the fields of a request's message that hold a rule or lead to one, each
 with its rules in protovalidate's own shape, a service's file and full name — sits in `proto`
-members, which a blueprint written by hand leaves out; each path among them is a path from its
+members, which a blueprint written by hand leaves out. Beside them, under no feature, each
+procedure's `http`, its `google.api.http` rules, each of its `additional_bindings` a rule of its
+own in their order, and its `idempotency_level`, the `.proto`'s words resolved; every field of every
+message a binding names or a field of one reaches, by its name, number, JSON name, type, label, key,
+presence and `oneof`, and the enums they name, each value by its name and number, aliases in their
+order; a well-known type by its full name alone. A procedure's default routes are no member: beadc
+derives them, its prefix `beadc.yaml`'s, so a blueprint written by hand, its bindings all native,
+has them with nothing written
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)); each path among them is a path from its
 root, as an import names it, parts by `/`, none `.` or `..`, which the schema holds and
 `PROTO_FILE` holds to a file `proto.files` lists, as protoc's plugin protocol
 holds a file's name. No language's option and no rpc's name: a C# namespace is the set's
@@ -187,7 +197,11 @@ when it does not know one, as JOSE's `crit` does
 ([RFC 7515 §4.1.11](https://www.rfc-editor.org/rfc/rfc7515#section-4.1.11)), and each target
 declares the features it generates, `beadc generate` refusing one that lacks a feature its
 blueprint requires, `FEATURE_UNGENERATED`; removing a member, or changing its meaning, makes
-`/2`. `specVersion` names the version of `spec/spec.md` whose sections
+`/2`. `requires` names what a target must play, a rule unplayed letting through what a server must
+refuse, and never what a target may leave unserved, as a route is, which refuses what no client was
+promised. Adding a member is a minor of `bead-blueprint/1` that every older reader refuses by its
+schema, `additionalProperties: false` on each of its objects, before it reads `requires`:
+fail-closed, a blueprint written by hand held as strictly as the schema holds it. `specVersion` names the version of `spec/spec.md` whose sections
 16 and 17 its producer follows. Its schema, `spec/schemas/bead-blueprint.schema.json`, is the format,
 a description on every member.
 
@@ -263,7 +277,12 @@ protoc gives its source, and prints each: under `clean` the generated files' kin
 folder are beadc's alone, and a project's own files stay, where buf's `clean` empties the folder.
 Messages are the stock generators' — protoc-gen-es with `erasable_syntax=true`, run in beadc's
 process, and protoc's C# generator over buf's set — or `external`, a project's own generator writing
-them.
+them. An output with `http: true`, as `keepValidateOptions` is an output's, writes its route table,
+its HTTP client once beadc writes one (decision 0037), and embeds the OpenAPI document byte for byte,
+the one `beadc.yaml`'s `openapi:` writes of the blueprint, in the blueprint's own form; any other
+writes neither and embeds nothing, so
+no assembly carries a document it never serves, and a target that generates no HTTP is refused such
+an output, `HTTP_UNGENERATED`.
 
 **Generated code passes its language's gates but its formatter.** `*_bead.ts` passes oxlint, its
 type-aware half included, and the types, and stays out of oxfmt; the C# passes the build's

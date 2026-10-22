@@ -313,3 +313,65 @@ test("reads keepValidateOptions, protovalidate's options kept in the messages an
     "outputs[0].keepValidateOptions keeps protovalidate's options in the messages beadc generates, and only then"
   );
 });
+
+test("reads http's prefix, openapi's out, title, security and problemTypes, an output's http, httpRuntime and keepHttpOptions, and refuses each off its form", () => {
+  const folder = '/work';
+  const read = (text: string): IConfig => {
+    return parseConfig(`version: 1\nsource:\n  proto: [proto]\n${text}`, {
+      folder,
+      path: path.posix,
+    });
+  };
+  const output = (keys: string): string => {
+    return `outputs:\n  - language: typescript\n    out: gen/ts\n${keys}`;
+  };
+
+  expect(read('').http).toBeUndefined();
+  expect(read('http:\n  prefix: /rpc/v1\n').http).toEqual({ prefix: '/rpc/v1' });
+  expect(read('http: {}\n').http).toEqual({ prefix: '/api' });
+  expect(
+    read(
+      'openapi:\n  out: gen/openapi.json\n  title: Hello\n  security: {type: apiKey, in: header, name: x-key}\n  problemTypes: https://example.com/problems/\n'
+    ).openapi
+  ).toEqual({
+    out: '/work/gen/openapi.json',
+    title: 'Hello',
+    security: { type: 'apiKey', in: 'header', name: 'x-key' },
+    problemTypes: 'https://example.com/problems/',
+  });
+
+  const [typescript] = read(output('    http: true\n    keepHttpOptions: true\n')).outputs ?? [];
+
+  expect(typescript).toMatchObject({
+    http: true,
+    httpRuntime: '@francisdesjardins/bead/transcoding',
+    keepHttpOptions: true,
+  });
+  expect(read(output('')).outputs?.[0]).not.toHaveProperty('httpRuntime');
+  expect(
+    read(output('    http: true\n    httpRuntime: ../runtime/transcoding\n')).outputs?.[0]
+  ).toMatchObject({ httpRuntime: '../runtime/transcoding' });
+
+  for (const [text, refusal] of [
+    ['http:\n  prefix: api\n', 'http.prefix is / and segments'],
+    ['http:\n  prefix: /api/\n', 'http.prefix is / and segments'],
+    ['http:\n  prefix: /a/../b\n', 'http.prefix is / and segments'],
+    ['http:\n  port: 80\n', 'http.port, a key beadc does not read'],
+    [
+      'openapi:\n  security: {type: magic}\n',
+      'openapi.security is an OpenAPI Security Scheme Object',
+    ],
+    ['openapi:\n  problemTypes: problems/\n', 'openapi.problemTypes is an absolute URI'],
+    ['openapi:\n  out: ../openapi.json\n', 'openapi.out: ../openapi.json is outside the folder'],
+    [output('    http: yes\n'), 'outputs[0].http is true or false'],
+    [output('    httpRuntime: ../runtime\n'), 'outputs[0].httpRuntime names the route table'],
+    [
+      output('    messages: external\n    messagesOut: gen/messages\n    keepHttpOptions: true\n'),
+      'outputs[0].keepHttpOptions keeps google.api.http in the messages beadc generates, and only then',
+    ],
+  ] as const) {
+    expect(() => {
+      return read(text);
+    }, text).toThrow(refusal);
+  }
+});

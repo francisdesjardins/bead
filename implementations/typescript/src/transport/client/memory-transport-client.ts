@@ -24,7 +24,12 @@ import type {
 } from './types';
 
 export { TRANSPORT_MEMORY } from '../shared/constants';
-export type { IMemoryEndLike, IMemoryPeerLike, IMemoryTransportServerLike } from '../shared/types';
+export type {
+  IMemoryAcceptOptions,
+  IMemoryEndLike,
+  IMemoryPeerLike,
+  IMemoryTransportServerLike,
+} from '../shared/types';
 export type {
   IMemoryTransportClientConnectOptions,
   IMemoryTransportClientOptions,
@@ -111,7 +116,14 @@ export const createMemoryTransportClient = ({
           // what the server sent before this end opened, heard once it has, in its order
           const early: ITransportMessage[] = [];
           // held in an object, which its ends' calls change behind the narrowing of a `let`
-          const attempt = { isClosedEarly: false, isGivenUp: false, isOpened: false };
+          const attempt: {
+            accepted?: IMemoryEndLike | undefined;
+            isClosedEarly: boolean;
+            isGivenUp: boolean;
+            isOpened: boolean;
+          } = { isClosedEarly: false, isGivenUp: false, isOpened: false };
+          // aborted as the connect is given up on, so its server draws no connection for it
+          const givenUp = new AbortController();
           const isCurrent = (): boolean => {
             return current?.peer === peer;
           };
@@ -156,36 +168,42 @@ export const createMemoryTransportClient = ({
 
                 giveUp = (reason) => {
                   attempt.isGivenUp = true;
+                  givenUp.abort(reason);
                   reject(reason);
                 };
-                server.accept(peer).then(
-                  (accepted) => {
-                    // a connection drawn once its connect was given up on is closed at once
-                    if (attempt.isGivenUp) {
-                      queueMicrotask(() => {
-                        accepted.close(false);
-                      });
-                    }
+                server
+                  .accept(peer, {
+                    signal:
+                      signal === undefined
+                        ? givenUp.signal
+                        : AbortSignal.any([signal, givenUp.signal]),
+                  })
+                  .then(
+                    (accepted) => {
+                      // a connection drawn once its connect was given up on is closed at once;
+                      // otherwise held, for a give-up that comes before its connect settled
+                      if (attempt.isGivenUp) {
+                        queueMicrotask(() => {
+                          accepted.close(false);
+                        });
+                      } else {
+                        attempt.accepted = accepted;
+                      }
 
-                    resolve(accepted);
-                  },
-                  (reason: unknown) => {
-                    reject(toError(reason));
-                  }
-                );
+                      resolve(accepted);
+                    },
+                    (reason: unknown) => {
+                      reject(toError(reason));
+                    }
+                  );
               },
               { clock: client.clock, signal, timeout }
             );
 
-            // given up on as its connection was drawn, which then closes; or closed by its server
+            // given up on as its connection was drawn, which the catch below closes; or closed by
+            // its server
             if (attempt.isGivenUp) {
-              const accepted = end;
-
-              queueMicrotask(() => {
-                accepted.close(false);
-              });
-
-              throw new ConnectError('disposed while connecting');
+              throw new ConnectError('the transport client was disposed as it connected');
             }
 
             if (attempt.isClosedEarly) {
@@ -194,7 +212,19 @@ export const createMemoryTransportClient = ({
               );
             }
           } catch (reason) {
+            const { accepted } = attempt;
+
             attempt.isGivenUp = true;
+            attempt.accepted = undefined;
+            givenUp.abort(reason);
+
+            // ! a connection its server drew as the connect was given up on, its signal, its
+            // clock or a dispose, before it settled: closed at once, unclean
+            if (accepted !== undefined) {
+              queueMicrotask(() => {
+                accepted.close(false);
+              });
+            }
 
             if (!client.isReconnecting()) {
               setReadyStateClosed(client);
@@ -275,7 +305,7 @@ export const createMemoryTransportClient = ({
         },
 
         [dispose]: () => {
-          giveUp?.(new ConnectError('disposed while connecting'));
+          giveUp?.(new ConnectError('the transport client was disposed as it connected'));
 
           const end = drop();
 

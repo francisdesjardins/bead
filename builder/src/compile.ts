@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 import { temporaryFolderOf } from './config.ts';
 import { bufDiagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
-import { BEADC_FILES, displayOf } from './roots.ts';
+import { BEADC_FILES, displayOf, holdsHttpCopy, HTTP_FILES } from './roots.ts';
 
 // constants
 
@@ -85,8 +85,9 @@ const moduleOf = (ancestor: string, folder: string): string => {
   return path === '' ? '.' : path;
 };
 
-// buf's configuration and its folder: the options' root and `roots`, one module each, under the folder
-// that holds them all
+// buf's configuration and its folder: beadc's files copied into the work area and `roots`, one module
+// each, under the folder that holds them all; beadc's `google/api` left out of the copy where a root's
+// stands for it, since buf refuses one file in two modules
 const workspaceOf = (
   roots: readonly string[],
   options: { readonly folder?: string }
@@ -105,8 +106,13 @@ const workspaceOf = (
 
   try {
     const include = join(folder, 'include');
+    const copied = holdsHttpCopy(roots);
 
     for (const file of BEADC_FILES) {
+      if (copied && HTTP_FILES.includes(file)) {
+        continue;
+      }
+
       const copy = join(include, file);
 
       mkdirSync(dirname(copy), { recursive: true });

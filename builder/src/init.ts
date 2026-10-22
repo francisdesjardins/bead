@@ -28,7 +28,7 @@ import { dirname, join } from 'node:path';
 import { CONFIG_FILE } from './config.ts';
 import { InputError } from './diagnostics.ts';
 import { EDITOR_COPY, writeEditorCopy } from './generate.ts';
-import { BEADC_FILES, VALIDATE_FILE } from './roots.ts';
+import { BEADC_FILES, HTTP_FOLDER, VALIDATE_FILE } from './roots.ts';
 import { WRAPPERS, wrapperText } from './wrappers.ts';
 
 // types
@@ -187,8 +187,8 @@ const BUF = [
   '      use: [STANDARD]',
   "      # bead/options.proto's package is `bead`, as protobuf's own options name none",
   '      except: [PACKAGE_VERSION_SUFFIX]',
-  "      # protovalidate's validate.proto is Buf's to lint",
-  `      ignore: [${EDITOR_COPY}/${VALIDATE_FILE}]`,
+  "      # protovalidate's validate.proto is Buf's to lint, googleapis' google/api Google's",
+  `      ignore: [${EDITOR_COPY}/${VALIDATE_FILE}, ${EDITOR_COPY}/${HTTP_FOLDER}]`,
   '',
 ].join('\n');
 

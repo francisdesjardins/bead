@@ -1,0 +1,16 @@
+{
+  "WIRE": [
+    {
+      "rule": "HTTP_ROUTE_SHADOWED",
+      "line": 33,
+      "column": 7
+    }
+  ],
+  "API": [
+    {
+      "rule": "HTTP_ROUTE_SHADOWED",
+      "line": 33,
+      "column": 7
+    }
+  ]
+}

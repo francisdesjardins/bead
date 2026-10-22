@@ -55,6 +55,29 @@ export interface IRange {
   readonly last: number;
 }
 
+/** An HTTP method a `google.api.http` rule's pattern names, in upper case (decision 0037). */
+export type HttpMethod = 'GET' | 'PUT' | 'POST' | 'DELETE' | 'PATCH';
+
+/** A `google.api.http` rule: its method, its path template, its body and its response body. */
+export interface IHttpRule {
+  readonly method: HttpMethod;
+  readonly template: string;
+  /** `*`, the request whole, or a top-level field's name; none for no body. */
+  readonly body?: string;
+  /** A top-level field of the result, whose JSON is the response's body. */
+  readonly responseBody?: string;
+}
+
+/** `descriptor.proto`'s `MethodOptions.idempotency_level`, but `IDEMPOTENCY_UNKNOWN`. */
+export type IdempotencyLevel = 'NO_SIDE_EFFECTS' | 'IDEMPOTENT';
+
+/** What a method's options say of its procedure over HTTP: its idempotency and its rules. */
+export interface IHttpEntry {
+  readonly idempotencyLevel?: IdempotencyLevel;
+  /** Its rules, each of `additional_bindings` one of its own, in their order. */
+  readonly rules: readonly IHttpRule[];
+}
+
 /** A procedure, resolved: no default, no inheritance. */
 export interface IProcedureEntry {
   readonly procedureId: number;
@@ -66,6 +89,8 @@ export interface IProcedureEntry {
   readonly admission: AdmissionRule;
   readonly failures: readonly string[];
   readonly maximumPayloadBytes?: number;
+  /** What its method's options say of it over HTTP, where they say anything (decision 0037). */
+  readonly http?: IHttpEntry;
   readonly description?: string;
   readonly deprecation?: IDeprecation;
 }
@@ -170,18 +195,48 @@ export interface IMessageRules {
   readonly oneofs: readonly IOneofRulesEntry[];
 }
 
-/** A message a binding names or a request's rules reach, with the file that declares it. */
+/** A field of a message, as a route binds it and a document describes it (decision 0037). */
+export interface IFieldEntry {
+  readonly fieldName: string;
+  readonly fieldNumber: number;
+  readonly jsonName: string;
+  readonly type: FieldType;
+  /** `repeated`, or `map` with its key's scalar; none for a singular field. */
+  readonly label?: 'repeated' | 'map';
+  readonly key?: ScalarName;
+  /** Whether it tracks presence: a repeated field and a map never do. */
+  readonly presence: 'explicit' | 'implicit';
+  /** The `oneof` it is a member of, by its name; a synthetic one never. */
+  readonly oneof?: string;
+  readonly description?: string;
+  readonly deprecated?: true;
+}
+
+/** A message a binding names, or a field of one reaches, or a request's rules reach, with its file. */
 export interface IMessageEntry {
   readonly fullName: string;
   readonly file: string;
+  /**
+   * Its fields, by number (decision 0037): left out of a well-known type, whose JSON is its own
+   * form, and of a blueprint an earlier beadc wrote.
+   */
+  readonly fields?: readonly IFieldEntry[];
   /** Under the feature `validate`: its rules, where a request's rules reach it (decision 0035). */
   readonly rules?: IMessageRules;
 }
 
-/** What a front end read of a `.proto`: its files and the messages a `proto` binding names. */
+/** An enum a field names: its values in their declaration's order, an alias among them. */
+export interface IEnumEntry {
+  readonly fullName: string;
+  readonly file: string;
+  readonly values: readonly { readonly name: string; readonly number: number }[];
+}
+
+/** What a front end read of a `.proto`: its files, the messages its bindings reach, their enums. */
 export interface IProtoSource {
   readonly files: readonly { readonly path: string; readonly package: string }[];
   readonly messages: readonly IMessageEntry[];
+  readonly enums?: readonly IEnumEntry[];
 }
 
 /** A blueprint, `bead-blueprint/1`. */
@@ -297,7 +352,7 @@ const RULE_OF_PLACE: readonly (readonly [RegExp, RuleName, string])[] = [
     "a failure's name is upper-case ASCII letters and digits in words parted by one underscore (builder/README.md)",
   ],
   [
-    /^\/(?:services\/\d+\/proto\/file|proto\/messages\/\d+\/file|proto\/files\/\d+\/path)$/u,
+    /^\/(?:services\/\d+\/proto\/file|proto\/(?:messages|enums)\/\d+\/file|proto\/files\/\d+\/path)$/u,
     'PROTO_FILE',
     'a proto path is a path from its root, parts by /, none . or .., ending in .proto',
   ],

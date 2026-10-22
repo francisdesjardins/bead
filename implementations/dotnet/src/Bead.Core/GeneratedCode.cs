@@ -19,4 +19,11 @@ public static class GeneratedCode
     /// <c>IViolationSink</c>, <c>ViolationRule</c>, <c>PatternTable</c> and <c>Pattern</c>.
     /// </summary>
     public const bool SupportsVersion4 = true;
+
+    /// <summary>
+    /// The runtime carries all of 4, and what the route table of an output with <c>http: true</c>
+    /// names (decision 0037): <c>Bead.Transcoding</c>'s <c>HttpRoute</c>, <c>HttpRouteTemplate</c>
+    /// and <c>HttpPayload</c>, which a gateway reads its routes and its messages' JSON by.
+    /// </summary>
+    public const bool SupportsVersion5 = true;
 }

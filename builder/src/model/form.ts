@@ -85,10 +85,11 @@ const compareKeys = (
   return 0;
 };
 
-// each array the form sorts, by its place: files by path, messages by full name, a message's rules'
-// fields by number and its oneofs by index, services by id, procedures by id, failures by code, a
-// procedure's failures in their codes' order, ranges ascending, names in their code points' order;
-// a rule's own lists, `in` and a message's `oneof`, keep the order their `.proto` writes
+// each array the form sorts, by its place: files by path, messages and enums by full name, a
+// message's fields and its rules' fields by number and its oneofs by index, services by id,
+// procedures by id, failures by code, a procedure's failures in their codes' order, ranges
+// ascending, names in their code points' order; a rule's own lists, `in` and a message's `oneof`, an
+// enum's values and a procedure's HTTP rules keep the order their `.proto` writes
 const arraysOf = (blueprint: unknown): ISortedArray[] => {
   const arrays: ISortedArray[] = [
     { pointer: '/requires', items: arrayAt(blueprint, 'requires'), key: byName },
@@ -100,11 +101,18 @@ const arraysOf = (blueprint: unknown): ISortedArray[] => {
 
     arrays.push(
       { pointer: '/proto/files', items: arrayAt(proto, 'files'), key: byMember('path') },
-      { pointer: '/proto/messages', items: messages, key: byMember('fullName') }
+      { pointer: '/proto/messages', items: messages, key: byMember('fullName') },
+      { pointer: '/proto/enums', items: arrayAt(proto, 'enums'), key: byMember('fullName') }
     );
 
     messages.forEach((message, at) => {
       const rules = isRecord(message) ? message['rules'] : undefined;
+
+      arrays.push({
+        pointer: `/proto/messages/${String(at)}/fields`,
+        items: arrayAt(message, 'fields'),
+        key: byMember('fieldNumber'),
+      });
 
       if (rules !== undefined) {
         arrays.push(
@@ -220,6 +228,14 @@ export const sortedOf = <T>(blueprint: T): T => {
   }
 
   return copy;
+};
+
+/**
+ * `value` in the blueprint's own form but for its arrays, which keep their order: its members in RFC
+ * 8785's order, two spaces, a final line feed, as the OpenAPI document is written (decision 0037).
+ */
+export const membersSortedTextOf = (value: unknown): string => {
+  return `${JSON.stringify(withSortedMembers(value), null, 2)}\n`;
 };
 
 /** `blueprint` written in its form: its arrays sorted, its members ordered, two spaces, a final line feed. */

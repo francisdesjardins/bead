@@ -136,13 +136,20 @@ export interface IMemoryPeerLike extends IMemoryEndLike {
   readonly port: number | undefined;
 }
 
+/** What an in-memory connect hands its server beside its end. */
+export interface IMemoryAcceptOptions {
+  /** Aborted once its client gave the connect up: a server draws no connection for it then. */
+  readonly signal?: AbortSignal | undefined;
+}
+
 /**
  * What an in-memory client connects to: its server, which meets it, or anything that accepts a
  * connection as it does. `accept` resolves, in a later turn, with the server's end of a connection
- * it drew, or rejects with a {@link ConnectError} when it takes none.
+ * it drew, or rejects with a {@link ConnectError} when it takes none, and with a `CancelError`,
+ * none drawn, when its signal was aborted by the turn it would draw it in.
  */
 export interface IMemoryTransportServerLike {
-  accept(peer: IMemoryPeerLike): Promise<IMemoryEndLike>;
+  accept(peer: IMemoryPeerLike, options?: IMemoryAcceptOptions): Promise<IMemoryEndLike>;
 }
 
 /** A message as a port or a worker's scope delivers it: its data, and the ports it carried. */

@@ -9,14 +9,47 @@
     ],
     "messages": [
       {
+        "fields": [
+          {
+            "fieldName": "question",
+            "fieldNumber": 1,
+            "jsonName": "question",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.AskNameRequest"
       },
       {
+        "fields": [
+          {
+            "fieldName": "name",
+            "fieldNumber": 1,
+            "jsonName": "name",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.AskNameResponse"
       },
       {
+        "fields": [
+          {
+            "fieldName": "from",
+            "fieldNumber": 1,
+            "jsonName": "from",
+            "presence": "implicit",
+            "type": {
+              "scalar": "int32"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.CountDownRequest",
         "rules": {
@@ -40,18 +73,62 @@
         }
       },
       {
+        "fields": [
+          {
+            "fieldName": "ticks",
+            "fieldNumber": 1,
+            "jsonName": "ticks",
+            "presence": "implicit",
+            "type": {
+              "scalar": "int32"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.CountDownResponse"
       },
       {
+        "fields": [
+          {
+            "fieldName": "name",
+            "fieldNumber": 1,
+            "jsonName": "name",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.SayHelloRequest"
       },
       {
+        "fields": [
+          {
+            "fieldName": "greeting",
+            "fieldNumber": 1,
+            "jsonName": "greeting",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.SayHelloResponse"
       },
       {
+        "fields": [
+          {
+            "fieldName": "remaining",
+            "fieldNumber": 1,
+            "jsonName": "remaining",
+            "presence": "implicit",
+            "type": {
+              "scalar": "int32"
+            }
+          }
+        ],
         "file": "hello/v1/hello.proto",
         "fullName": "hello.v1.Tick"
       }

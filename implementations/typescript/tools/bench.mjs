@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// node --expose-gc implementations/typescript/tools/bench.mjs [--runs 3] [--seconds 3] [--json]
+// node --expose-gc implementations/typescript/tools/bench.mjs [--runs 3] [--seconds 3] [--json] [--transcoding]
 // The README defines bead-bench/1 and the scope of each measurement.
 
 import { build } from 'esbuild';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { cpus, platform, release, arch, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,12 +21,14 @@ const CONCURRENCY = 32;
 const MEMORY_CALLS = 2_000;
 const TRANSFER_SIZE = 20 * 1_048_576;
 const args = process.argv.slice(2);
-const options = { runs: 3, seconds: 3, json: false };
+const options = { runs: 3, seconds: 3, json: false, transcoding: false };
 
 for (let at = 0; at < args.length; at++) {
   const flag = args[at];
   if (flag === '--json') {
     options.json = true;
+  } else if (flag === '--transcoding') {
+    options.transcoding = true;
   } else if (flag === '--runs' || flag === '--seconds') {
     const value = Number(args[++at]);
     if (!Number.isSafeInteger(value) || value < 1) {
@@ -53,6 +55,9 @@ const entry = `
   export { PAYLOAD_CODECS } from './src/router/shared/payloads.ts';
   export { InteropClient } from './interop/generated/interop_bead.ts';
   export { offerInterop } from './interop/handlers.ts';
+  export { fromBinary, fromJsonString, toBinary, toJsonString } from '@bufbuild/protobuf';
+  export { readProtoJson, typeRegistryOf, writeProtoJson } from './src/transcoding/json-form.ts';
+  export { EverythingSchema } from './src/transcoding/__tests__/generated/transcoding_pb.ts';
 `;
 
 const percentile = (sorted, share) => {
@@ -94,6 +99,58 @@ const codec = (once, batch) => {
     rounds += batch;
   }
   return ((performance.now() - started) * 1_000_000) / rounds;
+};
+
+// Bead's mapping of protobuf's JSON against protobuf-es's, fromJsonString and toJsonString, on
+// transcoding.json's message of every kind of field, as a gateway reads a request and writes a
+// result: a body read to its message's bytes, and bytes written to a body (decision 0037)
+const transcoding = (reader) => {
+  const file = JSON.parse(readFileSync(join(REPO, 'spec', 'transcoding.json'), 'utf8'));
+  const every = file.writings.find((entry) => {
+    return entry.message === 'bead.transcoding.v1.Everything' && entry.body !== undefined;
+  });
+  const payload = Uint8Array.from(every.payload.split(' ').filter(Boolean), (pair) => {
+    return Number.parseInt(pair, 16);
+  });
+  const schema = reader.EverythingSchema;
+  const registry = reader.typeRegistryOf([schema]);
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const body = encoder.encode(
+    reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
+  );
+  const row = { sizeBytes: body.length, unit: 'ns' };
+
+  record(
+    'transcoding.read.bead',
+    codec(() => {
+      return reader.toBinary(schema, reader.readProtoJson(schema, { bytes: body, registry }));
+    }, 100),
+    row
+  );
+  record(
+    'transcoding.read.stock',
+    codec(() => {
+      return reader.toBinary(schema, reader.fromJsonString(schema, decoder.decode(body)));
+    }, 100),
+    row
+  );
+  record(
+    'transcoding.write.bead',
+    codec(() => {
+      return encoder.encode(
+        reader.writeProtoJson(schema, { message: reader.fromBinary(schema, payload), registry })
+      );
+    }, 100),
+    row
+  );
+  record(
+    'transcoding.write.stock',
+    codec(() => {
+      return encoder.encode(reader.toJsonString(schema, reader.fromBinary(schema, payload)));
+    }, 100),
+    row
+  );
 };
 
 // The normal interop launcher reports both ports and serves until stdin closes.
@@ -388,9 +445,13 @@ try {
     nodePaths: [join(ROOT, 'node_modules')],
   });
   const reader = await import(pathToFileURL(outfile).href);
-  remote = await startInterop();
+  remote = options.transcoding ? undefined : await startInterop();
   for (let run = 0; run < options.runs; run++) {
     console.error(`run ${run + 1}/${options.runs}`);
+    transcoding(reader);
+    if (options.transcoding) {
+      continue;
+    }
     for (const sizeBytes of SIZES) {
       const envelope = {
         header: {

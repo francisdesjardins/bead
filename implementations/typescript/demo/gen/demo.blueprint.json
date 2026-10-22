@@ -9,6 +9,48 @@
     ],
     "messages": [
       {
+        "fields": [
+          {
+            "description": "A DNS label's shape (RFC 1035 2.3.1): a lower-case letter, then letters, digits or hyphens.",
+            "fieldName": "name",
+            "fieldNumber": 1,
+            "jsonName": "name",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          },
+          {
+            "description": "From 1 to 10.",
+            "fieldName": "seats",
+            "fieldNumber": 2,
+            "jsonName": "seats",
+            "presence": "implicit",
+            "type": {
+              "scalar": "int32"
+            }
+          },
+          {
+            "description": "A local part, an @ and a domain with a dot, within RFC 5321's 254 octets of a path.",
+            "fieldName": "email",
+            "fieldNumber": 3,
+            "jsonName": "email",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          },
+          {
+            "description": "An E.164 number: a +, then 7 to 15 digits, the first not 0.",
+            "fieldName": "phone",
+            "fieldNumber": 4,
+            "jsonName": "phone",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
         "file": "demo/v1/sign_up.proto",
         "fullName": "demo.v1.SignUpRequest",
         "rules": {
@@ -85,6 +127,17 @@
         }
       },
       {
+        "fields": [
+          {
+            "fieldName": "welcome",
+            "fieldNumber": 1,
+            "jsonName": "welcome",
+            "presence": "implicit",
+            "type": {
+              "scalar": "string"
+            }
+          }
+        ],
         "file": "demo/v1/sign_up.proto",
         "fullName": "demo.v1.SignUpResponse"
       }

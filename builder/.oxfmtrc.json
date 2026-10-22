@@ -16,6 +16,7 @@
   "proseWrap": "preserve",
   "sortPackageJson": true,
   // `_pb.ts` is protoc-gen-es's, which `tools/check-options.mjs` holds to its generator; a golden
-  // blueprint and a raw case of the form are bytes a test reads, which oxfmt would lay out otherwise
-  "ignorePatterns": [".yarn/**", "**/*_pb.ts", "test/golden/**", "test/form/**"]
+  // blueprint, a raw case of the form and OpenAPI's vendored schema are bytes a test reads, which
+  // oxfmt would lay out otherwise
+  "ignorePatterns": [".yarn/**", "**/*_pb.ts", "test/golden/**", "test/form/**", "test/openapi/**"]
 }

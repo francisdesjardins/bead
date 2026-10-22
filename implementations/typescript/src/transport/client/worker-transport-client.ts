@@ -234,7 +234,7 @@ export const createWorkerTransportClient = ({
         [dispose]: () => {
           const dropped = port;
 
-          rejectConnect?.(new ConnectError('disposed while connecting'));
+          rejectConnect?.(new ConnectError('the transport client was disposed as it connected'));
           port = undefined;
           client.socket = null;
           worker.removeEventListener?.('error', onError);

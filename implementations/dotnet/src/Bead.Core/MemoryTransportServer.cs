@@ -45,6 +45,9 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     // what names a connection whose client gave no address, and the server's own place
     private const string Local = "local";
 
+    // what refuses a text message at either end, as the TypeScript side words it
+    internal const string TextRefused = "an in-memory connection carries envelopes, as bytes";
+
     private readonly TimeProvider _clock;
     // where what comes to it is told, one turn at a time, in order
     private readonly SerialScheduler _scheduler;
@@ -238,10 +241,15 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
     /// Hands a copy of the bytes of <paramref name="message"/> to its connection's client, in a later
     /// turn, after what went before; nothing is carried beside them. What goes to a connection not
     /// open goes nowhere, and says nothing, for the router refuses what is for a connection it does
-    /// not hold itself.
+    /// not hold itself. A text message, which is no envelope, is an <see cref="ArgumentException"/>.
     /// </summary>
     public Task Send(TransportMessage message, string connectionHandle)
     {
+        if (message.IsText)
+        {
+            return Task.FromException(new ArgumentException(TextRefused, nameof(message)));
+        }
+
         if (_connections.TryGetValue(connectionHandle, out var connection) && !connection.IsClosedAtServer)
         {
             // * copied as it is sent: the sender's buffer stays its own, as a socket's does
@@ -259,8 +267,9 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
 
     /// <summary>
     /// A connect: refused with a <see cref="ConnectException"/> unless open, before anything goes;
-    /// then, in a turn of the server's own, its connection drawn and told, refused all the same when
-    /// a stop began meanwhile, and dropped when <paramref name="cancellationToken"/> was cancelled.
+    /// then, in a turn of the server's own, its connection drawn and told, handed back in the turn
+    /// after, refused all the same when a stop began meanwhile, and dropped when
+    /// <paramref name="cancellationToken"/> was cancelled.
     /// </summary>
     internal async Task<MemoryConnection> Accept(MemoryPeer peer, CancellationToken cancellationToken)
     {
@@ -316,7 +325,13 @@ public sealed class MemoryTransportServer : IServerTransport, IAsyncDisposable
             }
 
             _listeners.Tell(Connection, connection.ConnectionHandle);
-            drawn.TrySetResult(connection);
+
+            // * its connect settles in a later turn, after what its listeners did in this one: a
+            // close of theirs is one its client meets as it opens, as the TypeScript side's does
+            _scheduler.Post(() =>
+            {
+                drawn.TrySetResult(connection);
+            });
         });
 
         return await drawn.Task;

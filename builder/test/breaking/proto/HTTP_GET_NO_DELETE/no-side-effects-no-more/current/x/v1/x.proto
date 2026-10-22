@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request.
+message Request {
+  string name = 1;
+}
+
+// Routed.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+
+  // Get.
+  rpc Get(Request) returns (Request) {
+    option (bead.procedure) = {id: 1};
+  }
+}

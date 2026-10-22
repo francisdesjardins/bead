@@ -20,8 +20,21 @@ namespace Bead.Transport.Http;
 /// <summary>How an HTTP transport server holds its connections, and what it bounds.</summary>
 public sealed record HttpTransportServerOptions
 {
+    private readonly long _bodyBytesBudget = 268_435_456;
+
     /// <summary>The bytes of body the exchanges under way may hold together: 256 MiB by default; past it, 503.</summary>
-    public long BodyBytesBudget { get; init; } = 268_435_456;
+    public long BodyBytesBudget
+    {
+        get
+        {
+            return _bodyBytesBudget;
+        }
+        init
+        {
+            _bodyBytesBudget = value;
+            _given |= HttpPolicyMembers.BodyBytesBudget;
+        }
+    }
 
     /// <summary>
     /// How long a request handed on waits for its answer: 5 minutes by default; from 1 to
@@ -29,6 +42,8 @@ public sealed record HttpTransportServerOptions
     /// for none; zero is refused.
     /// </summary>
     public TimeSpan ExchangeTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
+    private readonly IReadOnlyList<string>? _hosts;
 
     /// <summary>
     /// The hosts a request may name besides those every server takes — <c>localhost</c>, a name
@@ -49,7 +64,23 @@ public sealed record HttpTransportServerOptions
     /// cluster, names it here, or refuses it 403, <c>host-refused</c>, which the transport tells
     /// through <see cref="HttpTransportServer.Refusal"/>.
     /// </summary>
-    public IReadOnlyList<string>? Hosts { get; init; }
+    public IReadOnlyList<string>? Hosts
+    {
+        get
+        {
+            return _hosts;
+        }
+        init
+        {
+            _hosts = value;
+
+            // null is none given, as an option left out is
+            if (value is not null)
+            {
+                _given |= HttpPolicyMembers.Hosts;
+            }
+        }
+    }
 
     /// <summary>
     /// How long a connection may go with no exchange under way: 5 minutes by default; from 1 to
@@ -58,14 +89,53 @@ public sealed record HttpTransportServerOptions
     /// </summary>
     public TimeSpan InactivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
+    private readonly int _maximumBodyBytes = LimitDefaults.MaximumEnvelopeBytes;
+
     /// <summary>The largest body: a router's largest envelope by default; past it, 413.</summary>
-    public int MaximumBodyBytes { get; init; } = LimitDefaults.MaximumEnvelopeBytes;
+    public int MaximumBodyBytes
+    {
+        get
+        {
+            return _maximumBodyBytes;
+        }
+        init
+        {
+            _maximumBodyBytes = value;
+            _given |= HttpPolicyMembers.MaximumBodyBytes;
+        }
+    }
+
+    private readonly int _maximumConnections = 10_000;
 
     /// <summary>The connections drawn at once: 10,000 by default.</summary>
-    public int MaximumConnections { get; init; } = 10_000;
+    public int MaximumConnections
+    {
+        get
+        {
+            return _maximumConnections;
+        }
+        init
+        {
+            _maximumConnections = value;
+            _given |= HttpPolicyMembers.MaximumConnections;
+        }
+    }
+
+    private readonly int _maximumConnectionsPerAddress = 64;
 
     /// <summary>The connections one address holds at once: 64 by default.</summary>
-    public int MaximumConnectionsPerAddress { get; init; } = 64;
+    public int MaximumConnectionsPerAddress
+    {
+        get
+        {
+            return _maximumConnectionsPerAddress;
+        }
+        init
+        {
+            _maximumConnectionsPerAddress = value;
+            _given |= HttpPolicyMembers.MaximumConnectionsPerAddress;
+        }
+    }
 
     /// <summary>
     /// The bytes one connection's outbox holds: two of the largest envelopes by default; past it, the
@@ -73,6 +143,8 @@ public sealed record HttpTransportServerOptions
     /// <c>maximumOutboxBytes</c> and its value (spec 15.9).
     /// </summary>
     public long MaximumOutboxBytes { get; init; } = 2L * LimitDefaults.MaximumEnvelopeBytes;
+
+    private readonly int _minimumSendBytesPerSecond = ServerBounds.MinimumSendBytesPerSecond;
 
     /// <summary>
     /// The slowest a client may take an answer, or a listen's batch, in bytes a second, once
@@ -84,14 +156,40 @@ public sealed record HttpTransportServerOptions
     /// below 0 is an <see cref="ArgumentOutOfRangeException"/> as the transport is built. On the real
     /// clock, as what it bounds is the platform's socket.
     /// </summary>
-    public int MinimumSendBytesPerSecond { get; init; } = ServerBounds.MinimumSendBytesPerSecond;
+    public int MinimumSendBytesPerSecond
+    {
+        get
+        {
+            return _minimumSendBytesPerSecond;
+        }
+        init
+        {
+            _minimumSendBytesPerSecond = value;
+            _given |= HttpPolicyMembers.MinimumSendBytesPerSecond;
+        }
+    }
+
+    private readonly TimeSpan _sendGracePeriod = ServerBounds.SendGracePeriod;
 
     /// <summary>
     /// The least time an answer is given to be taken by its socket: 5 seconds by default; from 1 to
     /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
     /// infinite are refused (spec 15.12). On the real clock.
     /// </summary>
-    public TimeSpan SendGracePeriod { get; init; } = ServerBounds.SendGracePeriod;
+    public TimeSpan SendGracePeriod
+    {
+        get
+        {
+            return _sendGracePeriod;
+        }
+        init
+        {
+            _sendGracePeriod = value;
+            _given |= HttpPolicyMembers.SendGracePeriod;
+        }
+    }
+
+    private readonly TimeSpan _headersTimeout = ServerBounds.HeadersTimeout;
 
     /// <summary>
     /// How long a request's head may take to come whole: 30 seconds by default, Kestrel's
@@ -100,7 +198,20 @@ public sealed record HttpTransportServerOptions
     /// milliseconds, rounded to the nearest whole one; zero and infinite are refused. On the real
     /// clock, as the platform's parser holds it.
     /// </summary>
-    public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
+    public TimeSpan HeadersTimeout
+    {
+        get
+        {
+            return _headersTimeout;
+        }
+        init
+        {
+            _headersTimeout = value;
+            _given |= HttpPolicyMembers.HeadersTimeout;
+        }
+    }
+
+    private readonly int _minimumBodyBytesPerSecond = ServerBounds.MinimumBodyBytesPerSecond;
 
     /// <summary>
     /// The slowest a body may come, in bytes a second, once <see cref="BodyGracePeriod"/> passed since
@@ -110,14 +221,38 @@ public sealed record HttpTransportServerOptions
     /// connection kept (spec 15.12). A whole number above 0; any other is an
     /// <see cref="ArgumentOutOfRangeException"/> as the transport is built.
     /// </summary>
-    public int MinimumBodyBytesPerSecond { get; init; } = ServerBounds.MinimumBodyBytesPerSecond;
+    public int MinimumBodyBytesPerSecond
+    {
+        get
+        {
+            return _minimumBodyBytesPerSecond;
+        }
+        init
+        {
+            _minimumBodyBytesPerSecond = value;
+            _given |= HttpPolicyMembers.MinimumBodyBytesPerSecond;
+        }
+    }
+
+    private readonly TimeSpan _bodyGracePeriod = ServerBounds.BodyGracePeriod;
 
     /// <summary>
     /// How long a body comes before its rate is held: 5 seconds by default; from 1 to
     /// <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the nearest whole one; zero and
     /// infinite are refused (spec 15.12). On the server's clock.
     /// </summary>
-    public TimeSpan BodyGracePeriod { get; init; } = ServerBounds.BodyGracePeriod;
+    public TimeSpan BodyGracePeriod
+    {
+        get
+        {
+            return _bodyGracePeriod;
+        }
+        init
+        {
+            _bodyGracePeriod = value;
+            _given |= HttpPolicyMembers.BodyGracePeriod;
+        }
+    }
 
     /// <summary>
     /// The longest a listen waits for something to bring back: 30 seconds by default, under an
@@ -146,6 +281,8 @@ public sealed record HttpTransportServerOptions
     // takes its router's number for none given alone
     internal bool IsMaximumWaitingExchangesGiven { get; private init; }
 
+    private readonly IReadOnlyList<string> _origins = [];
+
     /// <summary>
     /// The origins an exchange that sends an <c>Origin</c> may come from besides the server's own,
     /// <c>http://</c> or <c>https://</c> followed by its request's authority when its host is taken
@@ -159,10 +296,23 @@ public sealed record HttpTransportServerOptions
     /// <see cref="ArgumentException"/> as the transport is built: a page that sends <c>null</c> is
     /// served from an origin, which is named here.
     /// </summary>
-    public IReadOnlyList<string> Origins { get; init; } = [];
+    public IReadOnlyList<string> Origins
+    {
+        get
+        {
+            return _origins;
+        }
+        init
+        {
+            _origins = value;
+            _given |= HttpPolicyMembers.Origins;
+        }
+    }
 
     /// <summary>The path the transport answers on.</summary>
     public string Pathname { get; init; } = HttpTransport.Pathname;
+
+    private readonly IReadOnlyList<string>? _trustedProxies;
 
     /// <summary>
     /// The proxies it believes <c>X-Forwarded-For</c> from (spec 15.12): none by default, the
@@ -181,7 +331,25 @@ public sealed record HttpTransportServerOptions
     /// near its ceiling. A bound by address counts as one the users behind one NAT, and as many the
     /// addresses of one IPv6 network.
     /// </summary>
-    public IReadOnlyList<string>? TrustedProxies { get; init; }
+    public IReadOnlyList<string>? TrustedProxies
+    {
+        get
+        {
+            return _trustedProxies;
+        }
+        init
+        {
+            _trustedProxies = value;
+
+            // null is none given, as an option left out is
+            if (value is not null)
+            {
+                _given |= HttpPolicyMembers.TrustedProxies;
+            }
+        }
+    }
+
+    private readonly int _unnamedProxies;
 
     /// <summary>
     /// How many proxies on every path to it <see cref="TrustedProxies"/> does not name (spec 15.12):
@@ -196,7 +364,18 @@ public sealed record HttpTransportServerOptions
     /// such proxies, straight to its socket or past one it counts, is read by entries its client
     /// wrote, so a server so reachable names its proxies instead.
     /// </summary>
-    public int UnnamedProxies { get; init; }
+    public int UnnamedProxies
+    {
+        get
+        {
+            return _unnamedProxies;
+        }
+        init
+        {
+            _unnamedProxies = value;
+            _given |= HttpPolicyMembers.UnnamedProxies;
+        }
+    }
 
     /// <summary>The certificate it serves TLS with, HTTP/2 and HTTP/1.1 on one port; plain HTTP/1.1 when none.</summary>
     public X509Certificate2? Certificate { get; init; }
@@ -214,6 +393,53 @@ public sealed record HttpTransportServerOptions
     /// stop's grace bounds the platform's own, on the real clock.
     /// </summary>
     public TimeProvider? Clock { get; init; }
+
+    /// <summary>
+    /// The policy every listener of its application judges by (decision 0037): its hosts, its
+    /// origins, its proxies and its bounds, given once to this transport and a gateway alike, each
+    /// member it gives taken in place of this record's of its name, which it leaves ungiven. A
+    /// member given in it and beside it, whatever its value, its default among them, is an
+    /// <see cref="ArgumentException"/>; none, this record's members alone.
+    /// </summary>
+    public HttpPolicy? Policy { get; init; }
+
+    // ! the members a policy may give that this record was given, each init marking its own: a with
+    // expression copies them, so a record built from another keeps what that one was given
+    private readonly HttpPolicyMembers _given;
+
+    // whether a member a policy may give was given here, whatever its value
+    internal bool IsGiven(HttpPolicyMembers member)
+    {
+        return (_given & member) == member;
+    }
+
+    // the policy's members in place of this record's, where it is given: one given in it and beside
+    // it refused, so that a listener never takes one value of two in silence
+    internal HttpTransportServerOptions PolicyApplied()
+    {
+        if (Policy is not { } policy)
+        {
+            return this;
+        }
+
+        return this with
+        {
+            Policy = null,
+            Hosts = HttpPolicy.Taken(nameof(Hosts), (Hosts, IsGiven(HttpPolicyMembers.Hosts), policy.Hosts)),
+            Origins = HttpPolicy.Taken(nameof(Origins), (Origins, IsGiven(HttpPolicyMembers.Origins), policy.Origins)) ?? [],
+            TrustedProxies = HttpPolicy.Taken(nameof(TrustedProxies), (TrustedProxies, IsGiven(HttpPolicyMembers.TrustedProxies), policy.TrustedProxies)),
+            UnnamedProxies = HttpPolicy.Taken(nameof(UnnamedProxies), (UnnamedProxies, IsGiven(HttpPolicyMembers.UnnamedProxies), policy.UnnamedProxies)),
+            BodyBytesBudget = HttpPolicy.Taken(nameof(BodyBytesBudget), (BodyBytesBudget, IsGiven(HttpPolicyMembers.BodyBytesBudget), policy.BodyBytesBudget)),
+            MaximumBodyBytes = HttpPolicy.Taken(nameof(MaximumBodyBytes), (MaximumBodyBytes, IsGiven(HttpPolicyMembers.MaximumBodyBytes), policy.MaximumBodyBytes)),
+            HeadersTimeout = HttpPolicy.Taken(nameof(HeadersTimeout), (HeadersTimeout, IsGiven(HttpPolicyMembers.HeadersTimeout), policy.HeadersTimeout)),
+            MinimumBodyBytesPerSecond = HttpPolicy.Taken(nameof(MinimumBodyBytesPerSecond), (MinimumBodyBytesPerSecond, IsGiven(HttpPolicyMembers.MinimumBodyBytesPerSecond), policy.MinimumBodyBytesPerSecond)),
+            BodyGracePeriod = HttpPolicy.Taken(nameof(BodyGracePeriod), (BodyGracePeriod, IsGiven(HttpPolicyMembers.BodyGracePeriod), policy.BodyGracePeriod)),
+            MinimumSendBytesPerSecond = HttpPolicy.Taken(nameof(MinimumSendBytesPerSecond), (MinimumSendBytesPerSecond, IsGiven(HttpPolicyMembers.MinimumSendBytesPerSecond), policy.MinimumSendBytesPerSecond)),
+            SendGracePeriod = HttpPolicy.Taken(nameof(SendGracePeriod), (SendGracePeriod, IsGiven(HttpPolicyMembers.SendGracePeriod), policy.SendGracePeriod)),
+            MaximumConnections = HttpPolicy.Taken(nameof(MaximumConnections), (MaximumConnections, IsGiven(HttpPolicyMembers.MaximumConnections), policy.MaximumConnections)),
+            MaximumConnectionsPerAddress = HttpPolicy.Taken(nameof(MaximumConnectionsPerAddress), (MaximumConnectionsPerAddress, IsGiven(HttpPolicyMembers.MaximumConnectionsPerAddress), policy.MaximumConnectionsPerAddress)),
+        };
+    }
 }
 
 /// <summary>Where an HTTP transport server listens.</summary>
@@ -327,7 +553,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// </summary>
     public HttpTransportServer(HttpTransportServerOptions? options = null)
     {
-        var given = options ?? new HttpTransportServerOptions();
+        var given = (options ?? new HttpTransportServerOptions()).PolicyApplied();
 
         HostsAndOrigins.AssertHosts(given.Hosts, nameof(HttpTransportServerOptions.Hosts));
         HostsAndOrigins.AssertOrigins(given.Origins, nameof(HttpTransportServerOptions.Origins));

@@ -23,6 +23,8 @@
     <!-- a relay over HTTP to a target behind a WebSocket -->
     <ProjectReference Include="../../src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
     <ProjectReference Include="../../interop/Bead.Interop/Bead.Interop.csproj" />
+    <!-- a gateway's durations, which the durations' harness plays beside the transports' -->
+    <ProjectReference Include="../../src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
   </ItemGroup>
 
   <ItemGroup>

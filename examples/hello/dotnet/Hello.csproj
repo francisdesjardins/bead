@@ -12,6 +12,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../implementations/dotnet/src/Bead.Transport.WebSockets/Bead.Transport.WebSockets.csproj" />
+    <!-- the gateway its server answers HTTP/JSON by, beside WebSocket, in process (decision 0037) -->
+    <ProjectReference Include="../../../implementations/dotnet/src/Bead.Transcoding.Http/Bead.Transcoding.Http.csproj" />
     <!-- the check a proto codec runs before Google.Protobuf reads, which it carries -->
     <ProjectReference Include="../../../implementations/dotnet/src/Bead.Protobuf/Bead.Protobuf.csproj" />
     <PackageReference Include="Google.Protobuf" />

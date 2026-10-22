@@ -27,6 +27,8 @@ import { Category } from '../rules.ts';
 export interface IBufOptions {
   readonly earlier: Uint8Array;
   readonly category: Category;
+  /** Whether the category `HTTP` is held: buf's `WIRE_JSON` rules over the names the JSON reads. */
+  readonly json?: boolean;
   /** The current's `.proto` roots, where a finding's file is found. */
   readonly roots: readonly string[];
   /** The earlier's `.proto` roots, where a file the current lost is found, when on disk. */
@@ -142,11 +144,33 @@ export const BUF_CATEGORY: Readonly<Record<Category, string>> = Object.freeze({
 });
 
 /**
+ * buf's category a `WIRE` run uses where the category `HTTP` is held (decision 0037): `WIRE_JSON`,
+ * `WIRE`'s and what the JSON reads, since the mapping names what the binary wire numbers. `API`'s
+ * `FILE` holds it already.
+ */
+export const BUF_JSON_CATEGORY = 'WIRE_JSON';
+
+/** buf's `WIRE_JSON` rules beyond `WIRE`'s, at the buf beadc pins. */
+export const BUF_JSON_RULES: readonly string[] = Object.freeze([
+  'ENUM_SAME_JSON_FORMAT',
+  'ENUM_VALUE_NO_DELETE_UNLESS_NAME_RESERVED',
+  'ENUM_VALUE_SAME_NAME',
+  'FIELD_NO_DELETE_UNLESS_NAME_RESERVED',
+  'FIELD_SAME_JSON_NAME',
+  'FIELD_SAME_NAME',
+  'FIELD_WIRE_JSON_COMPATIBLE_CARDINALITY',
+  'FIELD_WIRE_JSON_COMPATIBLE_TYPE',
+  'MESSAGE_SAME_JSON_FORMAT',
+]);
+
+/**
  * The rules each of buf's categories runs, at the buf beadc pins: a waiver of buf's names one its
- * category runs, or it would waive nothing under any call.
+ * category runs, or it would waive nothing under any call; under `WIRE`, buf's `WIRE_JSON` rules
+ * among them, which a run holds where the category `HTTP` is.
  */
 export const BUF_RULES_RUN: Readonly<Record<Category, ReadonlySet<string>>> = Object.freeze({
   [Category.WIRE]: new Set([
+    ...BUF_JSON_RULES,
     'ENUM_VALUE_NO_DELETE_UNLESS_NUMBER_RESERVED',
     'FIELD_NO_DELETE_UNLESS_NUMBER_RESERVED',
     'FIELD_SAME_DEFAULT',
@@ -233,12 +257,19 @@ const require = createRequire(import.meta.url);
 
 // definition
 
-/** The configuration `buf breaking` takes under `category`. */
-export const bufConfigOf = (category: Category): object => {
+/** The configuration `buf breaking` takes under `category`, and buf's `WIRE_JSON` rules under `json`. */
+export const bufConfigOf = (
+  category: Category,
+  options: { readonly json?: boolean } = {}
+): object => {
   return {
     version: 'v2',
     breaking: {
-      use: [BUF_CATEGORY[category]],
+      use: [
+        options.json === true && category === Category.WIRE
+          ? BUF_JSON_CATEGORY
+          : BUF_CATEGORY[category],
+      ],
       except: [...BUF_EXCEPTED],
       ignore: [...BEADC_FILES],
     },
@@ -285,7 +316,7 @@ export const bufFindings = (current: Uint8Array, options: IBufOptions): IBufFind
         '--error-format',
         'json',
         '--config',
-        JSON.stringify(bufConfigOf(options.category)),
+        JSON.stringify(bufConfigOf(options.category, { json: options.json === true })),
       ],
       { encoding: 'utf8', maxBuffer: LARGEST_OUTPUT, stdio: ['ignore', 'pipe', 'pipe'] }
     );

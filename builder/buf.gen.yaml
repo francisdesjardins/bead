@@ -1,5 +1,6 @@
-# The code protoc-gen-es writes for bead/options.proto and buf/validate/validate.proto, which the
-# front end reads a .proto's options through, Bead's and protovalidate's: run by buf, both from npm. `yarn options:generate` writes it; `yarn check` writes it again
+# The code protoc-gen-es writes for bead/options.proto, buf/validate/validate.proto and
+# google/api/annotations.proto with the http.proto it imports, which the front end reads a .proto's
+# options through, Bead's, protovalidate's and google.api.http: run by buf, both from npm. `yarn options:generate` writes it; `yarn check` writes it again
 # apart and fails on a difference. The plugin runs under the Node that runs buf, so no PATH is read.
 version: v2
 inputs:

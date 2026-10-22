@@ -6,13 +6,20 @@ import { fileURLToPath } from 'node:url';
 import { expect, test } from '@playwright/test';
 
 import { checkRoots } from '../../../check.ts';
+import { hasError } from '../../../diagnostics.ts';
+import { documentOf } from '../../../openapi/document.ts';
 import { generateMessages } from '../../../messages.ts';
 import { checkValue, type IBlueprint } from '../../../model/blueprint.ts';
 import { applyPatch, blueprintCases } from '../../../model/__tests__/patch.ts';
 import { RULES, Severity } from '../../../rules.ts';
 import { beadcVersion, PROTOBUF_FLOOR, protocGenEsVersion } from '../../../version.ts';
 import { type IGeneratedFile, type ITargetInput, Messages } from '../../target.ts';
-import { DEFAULT_PROTO_RUNTIME, DEFAULT_RUNTIME, type ITypeScriptOptions } from '../options.ts';
+import {
+  DEFAULT_HTTP_RUNTIME,
+  DEFAULT_PROTO_RUNTIME,
+  DEFAULT_RUNTIME,
+  type ITypeScriptOptions,
+} from '../options.ts';
 import { typescriptTarget } from '../typescript.ts';
 
 const BUILDER = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -38,6 +45,13 @@ const OXLINT = fileURLToPath(
   new URL('../../../../node_modules/oxlint/bin/oxlint', import.meta.url)
 );
 const MESSAGES_PROTO = 'bead/messages/v1/messages.proto';
+// spec/transcoding.proto's output with http: true, a golden folder of its own, and its document
+const SPEC = fileURLToPath(new URL('../../../../../spec/', import.meta.url));
+const TRANSCODING_PROTO = 'transcoding.proto';
+const HTTP_GOLDEN = 'transcoding/';
+const DOCUMENT_GOLDEN = fileURLToPath(
+  new URL('../../../../test/golden/transcoding.openapi.json', import.meta.url)
+);
 
 // what the root's beadc.yaml asks of the interop's output
 const INTEROP_OPTIONS: ITypeScriptOptions = {
@@ -163,7 +177,7 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   ).toEqual(
     filesUnder(GOLDEN)
       .filter((name) => {
-        return !GOLDEN_CONFIGS.has(name);
+        return !GOLDEN_CONFIGS.has(name) && !name.startsWith(HTTP_GOLDEN);
       })
       .sort()
   );
@@ -175,11 +189,75 @@ test("writes the comments fixture's and the messages fixture's goldens byte for 
   }
 });
 
+test("writes spec/transcoding.proto's output with http: true as its goldens byte for byte: its route table, the document embedded as beadc writes it", () => {
+  // * the spec's own .proto, its warnings the gateway's gates answer, no error
+  const checked = checkRoots([SPEC], { files: [TRANSCODING_PROTO] });
+
+  expect(hasError(checked.diagnostics)).toBe(false);
+
+  if (checked.blueprint === undefined || checked.set === undefined) {
+    throw new Error('spec/transcoding.proto: no blueprint');
+  }
+
+  const document = documentOf(checked.blueprint, { prefix: '/api' });
+  const input: ITargetInput = {
+    blueprint: checked.blueprint,
+    set: checked.set,
+    sources: { proto: new Map([[TRANSCODING_PROTO, '../spec/transcoding.proto']]) },
+  };
+  const written = outputOf(input, {
+    ...DEFAULTS,
+    http: {
+      prefix: '/api',
+      document,
+      problemTypes: 'https://example.com/problems/',
+      runtime: DEFAULT_HTTP_RUNTIME,
+    },
+  });
+
+  if (process.env['BEADC_WRITE_GOLDEN'] === '1') {
+    writeFileSync(DOCUMENT_GOLDEN, document);
+
+    for (const file of written) {
+      mkdirSync(dirname(join(GOLDEN, HTTP_GOLDEN, file.name)), { recursive: true });
+      writeFileSync(join(GOLDEN, HTTP_GOLDEN, file.name), file.content);
+    }
+  }
+
+  expect(document).toBe(readFileSync(DOCUMENT_GOLDEN, 'utf8'));
+  expect(
+    written
+      .map((file) => {
+        return file.name;
+      })
+      .sort()
+  ).toEqual(filesUnder(join(GOLDEN, HTTP_GOLDEN)).sort());
+
+  for (const file of written) {
+    expect(file.content, file.name).toBe(
+      today(
+        readFileSync(join(GOLDEN, HTTP_GOLDEN, file.name), 'utf8'),
+        checked.blueprint.specVersion
+      )
+    );
+  }
+
+  // * the document embedded byte for byte, which the gateway encodes once
+  const table = contentOf(written, 'bead_http.ts');
+  const embedded = /^export const OPENAPI_DOCUMENT = (".*");$/mu.exec(table)?.[1] ?? '""';
+
+  expect(JSON.parse(embedded)).toBe(document);
+});
+
 test("an accepted case's output differs from the interop's by its patch alone: SPEC_VERSION_NEWER's header, NOTIFICATION_RESULT's codec", () => {
+  // * an HTTP member writes no line of a service's file: a route table's, under http: true
   const accepted = blueprintCases().filter((each) => {
-    return each.findings.every((finding) => {
-      return RULES[finding.rule as keyof typeof RULES].severity === Severity.WARNING;
-    });
+    return (
+      !each.rule.startsWith('HTTP_') &&
+      each.findings.every((finding) => {
+        return RULES[finding.rule as keyof typeof RULES].severity === Severity.WARNING;
+      })
+    );
   });
   const lines = contentOf(
     typescriptTarget.generate(interopInput(), INTEROP_OPTIONS),

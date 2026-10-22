@@ -36,6 +36,53 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transports, each handle its own transport's (spec 15.14, decision 0036).
 - Each side's bench measures calls in memory, and `exchange.*`: a connection drawn, called once and
   closed, as a gateway draws one per HTTP exchange.
+- HTTP/JSON transcoding, on both sides: a gateway that answers each procedure's
+  `POST /api/<Service>/<procedure>`, `GET` there for one marked `NO_SIDE_EFFECTS`, and each
+  `google.api.http` rule as written, one route a path by the peers' precedence, one Bead connection
+  per exchange through the in-memory transport into the application's own server, joined;
+  protobuf's JSON mapping read and written by Bead's own mapping, one form on both sides, the binary
+  payload its stock library's; failures as `application/problem+json`, a status by where its code
+  arose, `PAYLOAD_INVALID` 422 with its violations, a body, a query or a variable its reading
+  refuses 400 in the mapping's words, where the request carried it in a `pointer`, a JSON Pointer
+  into the body as written that names what holds a key past 64 bytes, or a `parameter`, its name
+  cut; a refusal of its own in the companion's words, which `spec/transcoding.json`
+  holds, naming its gate or its bound and nothing its request carried, a request of no type to a
+  route that takes a body 415 and a body HTTP cannot frame refused as HTTP refuses it; each failure
+  it answers 500 or above but `PROCEDURE_FAILED` reported on the gateway's `error`, an error of its
+  own answered with its code alone, and none of an exception's words in a problem (spec 9.0);
+  notifications as Server-Sent Events at the reader's pace, each event an id, a reconnection
+  answered 204 (`spec/transcoding.md` 0.1.0, decision 0037). A gateway counts an `accept` weight it
+  cannot read as 1, refuses two `content-type` fields 415, answers 304 an `if-none-match` that holds
+  `*` among other tags, takes a raw or text route's query of empty sequences, and drops a stream
+  past `maximumUnsentBytes` before any byte of it goes. It refuses, as it is built, a route whose
+  method is none of `http.proto`'s, that has no template or whose template is off its grammar,
+  naming the route, and a notification where its procedure does not notify, or none where it does.
+  The TypeScript gateway's own listener listens on `localhost`, both loopbacks, by default, once
+  until it stops, and gives its address.
+- beadc reads `google.api.http` and `idempotency_level` into the blueprint's routes and messages'
+  shapes, under no feature, and writes one OpenAPI 3.1.1 document a blueprint, embedded byte for byte
+  with a route table in each output with `http: true`; its rules `HTTP_*`; `beadc breaking`'s
+  category `HTTP`, held under `WIRE` and `API` wherever a blueprint states a route, buf's
+  `WIRE_JSON` among it.
+- `spec/transcoding.md`, the transcoding's companion, its units in `spec/transcoding-units.txt`,
+  which `spec/check.py` holds as it holds the spec's; `spec/transcoding.proto` and
+  `spec/transcoding.json`, written by `spec/generators/make_transcoding.py`, which reads and writes
+  every body beside protobuf's own Python library, pinned in `spec/requirements.txt`, and names each
+  edge where it parts; an entry cites `spec.md`'s units behind `spec:`, `spec:9.2.5`.
+- Protobuf's conformance suite's JSON tests through each side's mapping of protobuf's JSON, 5,601
+  tests binary and JSON, the same two failures listed on both sides.
+- `tools/check-transcoding.mjs`, which holds each side's route table and document of
+  `spec/transcoding.proto` to what beadc writes, in CI's `builder` job.
+- Each side's bench measures `transcoding.read.*` and `transcoding.write.*`: Bead's mapping of
+  protobuf's JSON against its stock library's, on a message of every kind of field, and
+  `--transcoding` runs those alone.
+- `examples/hello` serves its service over HTTP too, by a gateway on a port of its own beside its
+  WebSocket one, one server joined; `pairs.mjs` asks each server's gateway what a person asks with
+  curl, and `transcript.txt` holds its answers.
+- `spec/durations.json`'s places `gateway.timeout` and `gateway.heartbeat`, and the way `gateway` of
+  `httpTransportServer.headersTimeout`, `httpTransportServer.bodyGracePeriod` and
+  `httpTransportServer.sendGracePeriod`, a gateway's bounds being 15.12's; a gateway's place cites
+  `transcoding.md`'s units, `transcoding:9.2`.
 - The DevTools panel reads a `PAYLOAD_INVALID`'s detail with the package's own reader: a call's
   Overview tables its violations, a row each with its field, rule, words and bounds, then what the
   closing line counts, that its side stopped, or that the detail was cut; the Wire view sums one up
@@ -71,6 +118,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   what it carries beside an envelope.
 - `spec/durations.json`'s `transportClient.connectTimeout` gains the way `memory`, the in-memory
   client's connect.
+- Generated code that writes a route table names `GENERATED_CODE_SUPPORTS_VERSION_5`,
+  `GeneratedCode.SupportsVersion5`; the runtimes carry 4 and 5, so a project that generates no route
+  table regenerates nothing.
+- The HTTP transport's options take one policy object of hosts, origins, proxies and bounds, which a
+  gateway takes too; a member given in it and beside it is refused, whatever its value.
+- Decision 0008's axis carries the transcoding's companion beside the debugging one: its file repeats
+  its `transcodingVersion`, and a release whose transcoding moved tags `transcoding-v`;
+  `tools/release.mjs prepare` takes `--transcoding <move>`, and `tools/check-versions.mjs` holds its
+  version and its tag.
+- Decision 0022 states that a member the blueprint adds under no feature is a minor of
+  `bead-blueprint/1`, which every older reader refuses by its closed schema, and that `requires`
+  names what a target must play.
 - The C# side's `IServerTransport` names the type its handles begin with, `Type`, which a join
   reads, and a connect refused before anything goes is a `ConnectException`, as the TypeScript
   side's `ConnectError`.
@@ -92,7 +151,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `httpTransport.inactivityTimeout`, by two ways, `client` and `server`, where
   `httpTransportServer.inactivityTimeout` and `httpTransportClient.inactivityTimeout` held the same
   outcomes apart: two owners share a place where the spec names one option for both and every
-  column of the file agrees (decision 0014). The file holds 25 places, by 38 ways.
+  column of the file agrees (decision 0014). The file holds 27 places, by 43 ways.
 - Each destination a server's router lists says whether its connection closed, `isClosed` and
   `Destination.IsClosed`, its registration's as it is now; `registerDestination` takes `replaces`,
   the registration the caller holds, whose id the new one takes at once, under one lock on the C#
@@ -112,7 +171,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not clean (spec 15.1, decision 0036).
 - The TypeScript side's transport client and server refuse a start or a connect in the C# side's
   words: `the transport client is already open`, `the transport server is already connecting`,
-  `the transport server is starting`.
+  `the transport server is starting`; a reconnect and a dispose as it connects too:
+  `the transport client is already reconnecting`, `the transport client was never connected`,
+  `the transport client cannot reconnect while <state>` and `the transport client was disposed as
+  it connected`. Its service client and server refuse a second resolver as `<name> is already a
+  registered resolver`, a window for what does not notify as `a window is given for <name>, which is
+  no procedure of this service that notifies`, and a command a hook admits as `<name> is admitted by
+  the hook <hook>, which a client side is given none of`. A send or a disconnect unless open is a
+  `ReadyStateError` in those words too, `the transport client is uninitialized, not open`, its `got`
+  and `expected` kept.
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
@@ -177,6 +244,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   registration, unreachable at once, and never forwarded to (spec 14.4).
 - A Web Worker client whose worker errs before the connection opens, its script failing to load,
   fails its connect with a `ConnectError` at once, rather than after its timeout.
+- The C# in-memory server settles a connect in the turn after its listeners heard the connection,
+  as the TypeScript side does, so a close of theirs fails the connect, where the client opened on a
+  connection already closed.
+- An in-memory connect given up on, by a dispose, its token or its clock, draws no connection: the
+  TypeScript client hands its server an aborted signal, `accept(peer, { signal })`, which the
+  TypeScript server honours. A cancel or a timeout met as its server draws the connection holds on
+  both sides until the connect settles, what was drawn closed unclean and no close told, where the
+  C# client opened it and a reconnection then closed it clean, and the TypeScript client left it
+  open.
 
 ## [0.6.0] - 2026-10-20
 

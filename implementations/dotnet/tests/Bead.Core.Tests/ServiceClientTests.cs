@@ -3,7 +3,8 @@ namespace Bead.Tests;
 /// <summary>
 /// <see cref="ServiceClient{TService}"/>: the greeter's client side, over a client linked in memory
 /// to a server whose <see cref="ServiceServer{TService, TData}"/> serves it; the twins of the
-/// TypeScript side's <c>service-client.test.ts</c>.
+/// TypeScript side's <c>service-client.test.ts</c>, but a command's unlisted code, which no C# failure
+/// class holds.
 /// </summary>
 public sealed class ServiceClientTests
 {
@@ -173,6 +174,46 @@ public sealed class ServiceClientTests
                 link.Client,
                 new ServiceClientOptions<GreeterProcedures> { Windows = new GreeterWindows { News = 0 } });
         });
+    }
+
+    [Fact]
+    public async Task Refuses_to_answer_what_is_no_command_of_its_service_a_command_twice_and_a_window_of_what_it_does_not_hold()
+    {
+        await using var link = await ServiceLink.Open();
+        var client = new ServiceClient<GreeterProcedures>(GreeterProcedures.All, link.Client);
+
+        // * a descriptor the service does not hold, at its command's address, is no command it
+        // answers: a request, or a name, does not compile
+        var other = new CommandProcedure<GreeterProcedures, string, string, NoFailure>(
+            GreeterProcedures.Clock.Procedure,
+            GreeterProcedures.Clock.Bindings);
+
+        Assert.StartsWith("clock is no procedure of this service", Assert.Throws<ArgumentException>(() =>
+        {
+            client.On(other, (_, response) =>
+            {
+                return response.Answer("noon");
+            });
+        }).Message, StringComparison.Ordinal);
+
+        client.On(GreeterProcedures.Clock, (_, response) =>
+        {
+            return response.Answer("noon");
+        });
+        Assert.StartsWith("clock is already a registered resolver", Assert.Throws<ArgumentException>(() =>
+        {
+            client.On(GreeterProcedures.Clock, (_, response) =>
+            {
+                return response.Answer("noon");
+            });
+        }).Message, StringComparison.Ordinal);
+        Assert.StartsWith("a window is given for toString, which is no procedure of this service that notifies", Assert.Throws<ArgumentException>(() =>
+        {
+            return new ServiceClient<GreeterProcedures>(
+                GreeterProcedures.All,
+                link.Client,
+                new ServiceClientOptions<GreeterProcedures> { Windows = new AnyNames(windows: new Dictionary<string, int?> { ["toString"] = 1 }) });
+        }).Message, StringComparison.Ordinal);
     }
 
     [Fact]

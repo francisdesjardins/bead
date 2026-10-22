@@ -10,7 +10,9 @@
 // as protoc's and gRPC's own files open, the namespace, each service, the rules of each message its
 // requests' rules reach (decision 0035), and once the contract with the runtime. A message is named from its descriptor as
 // protoc's C# generator names it: its file's namespace, then its enclosing messages, each followed
-// by `Types`, every name qualified from `global::`.
+// by `Types`, every name qualified from `global::`. An output with `http: true` writes `BeadHttp.cs`
+// besides, beside the first service's file, its route table and the document (`http.ts`, decision
+// 0037).
 
 // dependencies
 
@@ -35,6 +37,7 @@ import {
   Messages,
   sourceNameOf,
 } from '../target.ts';
+import { HTTP_FILE, printCSharpHttp } from './http.ts';
 import type { ICSharpOptions } from './options.ts';
 import { printService } from './templates.ts';
 import { printCSharpValidators } from './validators.ts';
@@ -83,6 +86,7 @@ const messageTypesOf = (files: readonly FileDescriptorProto[]): Map<string, stri
 export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
   name: 'csharp',
   features: new Set([VALIDATE_FEATURE]),
+  http: true,
   generate: (input: ITargetInput, options: ICSharpOptions): readonly IGeneratedFile[] => {
     const { blueprint } = input;
     const set =
@@ -142,7 +146,7 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
       files.set(key, entry);
     }
 
-    return [...files.values()].map(({ name, namespace, services }) => {
+    const written = [...files.values()].map(({ name, namespace, services }) => {
       const [first] = services;
       const pin = protocPin();
       const header = headerOf(blueprint, {
@@ -180,5 +184,40 @@ export const csharpTarget: ITarget<ICSharpOptions> = Object.freeze({
 
       return { name, content: `${header}${body.join('\n')}` };
     });
+    const [first] = blueprint.services;
+    const firstFile = [...files.values()][0];
+
+    if (options.http === undefined || first === undefined || firstFile === undefined) {
+      return written;
+    }
+
+    // * the route table beside the first service's file, in its namespace
+    const folder = firstFile.name.includes('/')
+      ? firstFile.name.slice(0, firstFile.name.lastIndexOf('/') + 1)
+      : '';
+    const header = headerOf(blueprint, {
+      source: sourceNameOf(input.sources, first.proto?.file),
+      ...(options.messages === Messages.GENERATE && blueprint.services.some(bindsMessages)
+        ? {
+            messages: `protoc ${protocPin().version}, for Google.Protobuf ${protocPin().googleProtobuf} or later`,
+          }
+        : {}),
+      marker: GENERATED_MARKER,
+    });
+    const namespaceOfService = (service: IServiceEntry): string => {
+      const protoFile =
+        service.proto === undefined ? undefined : protoFiles.get(service.proto.file);
+
+      return protoFile === undefined ? (options.namespace ?? '') : namespaceOf(protoFile);
+    };
+    const lines = printCSharpHttp({
+      blueprint,
+      http: options.http,
+      namespace: firstFile.namespace,
+      namespaceOf: namespaceOfService,
+      messageOf,
+    });
+
+    return [...written, { name: `${folder}${HTTP_FILE}`, content: `${header}${lines.join('\n')}` }];
   },
 });

@@ -1,0 +1,67 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "x/v1/x.proto",
+            "package": "x.v1"
+          }
+        ],
+        "messages": [
+          {
+            "fullName": "x.v1.Request",
+            "file": "x/v1/x.proto",
+            "fields": [
+              {
+                "fieldName": "name",
+                "fieldNumber": 1,
+                "jsonName": "name",
+                "type": {
+                  "scalar": "string"
+                },
+                "presence": "implicit"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Request"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/result",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Request"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "rules": [
+          {
+            "method": "GET",
+            "template": "/v1/echo/{name}"
+          }
+        ]
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "HTTP_GET_UNMARKED",
+      "pointer": "/services/0/procedures/0/http/rules/0/method"
+    }
+  ]
+}

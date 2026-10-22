@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package x.v1;
+
+import "bead/options.proto";
+import "google/api/annotations.proto";
+
+option (bead.file) = {
+  admission: {
+    none: {}
+  }
+};
+
+// A request whose update_mask is no FieldMask.
+message Request {
+  Inner thing = 1;
+  string update_mask = 2;
+}
+
+// What a request updates.
+message Inner {
+  string name = 1;
+}
+
+// A result.
+message Response {
+  string name = 1;
+}
+
+// A patch with a mask of another type.
+service XService {
+  option (bead.service) = {
+    id: 1
+    revision: 1
+  };
+  // Updates.
+  rpc Update(Request) returns (Response) {
+    option (bead.procedure) = {id: 1};
+    option (google.api.http) = {
+      patch: "/v1/{thing.name}"
+      body: "thing"
+    };
+  }
+}

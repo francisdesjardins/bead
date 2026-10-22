@@ -461,7 +461,7 @@ export const createServiceServer = <const S extends ServiceProcedures, Data = un
       }
 
       if (callbacks.has(name)) {
-        throw new ProgrammerError(`${name} has a resolver already`);
+        throw new ProgrammerError(`${name} is already a registered resolver`);
       }
 
       callbacks.set(name, callback);

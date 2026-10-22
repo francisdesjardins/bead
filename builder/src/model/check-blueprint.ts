@@ -4,7 +4,8 @@
 // id and one name a scope, folded as spec 16.6 folds; the reservations; a binding's encoding its
 // message's; a notification's result; a failure its service lacks; a `proto` binding's source, and a
 // `proto` path's file; the names every official target generates or reserves, and the descriptions
-// every one writes; and, under `validate`, a field's rules of its own type (VALIDATE_RULE_FIT).
+// every one writes; under `validate`, a field's rules of its own type (VALIDATE_RULE_FIT); and the
+// HTTP rules any blueprint can judge (`check-http.ts`, decision 0037).
 
 // dependencies
 
@@ -20,6 +21,7 @@ import {
   xmlExcludedOf,
 } from '../targets/names.ts';
 import type { IBinding, IBlueprint, IRange, IServiceEntry } from './blueprint.ts';
+import { httpFindingsOf } from './check-http.ts';
 import { foldOf } from './identity.ts';
 import { fitFindingsOf } from './rules.ts';
 
@@ -132,6 +134,9 @@ export const checkBlueprint = (
 
   (blueprint.proto?.messages ?? []).forEach((message, at) => {
     checkProtoFile(message.file, `/proto/messages/${String(at)}/file`);
+  });
+  (blueprint.proto?.enums ?? []).forEach((entry, at) => {
+    checkProtoFile(entry.file, `/proto/enums/${String(at)}/file`);
   });
 
   const checkService = (service: IServiceEntry, index: number): void => {
@@ -391,6 +396,10 @@ export const checkBlueprint = (
   // fields here, a wrapper's its scalar's, as buf's PROTOVALIDATE holds them on a .proto
   for (const finding of fitFindingsOf(blueprint)) {
     report('VALIDATE_RULE_FIT', { at: finding.pointer, message: finding.message });
+  }
+
+  for (const finding of httpFindingsOf(blueprint)) {
+    report(finding.rule, { at: finding.pointer, message: finding.message });
   }
 
   return diagnostics;

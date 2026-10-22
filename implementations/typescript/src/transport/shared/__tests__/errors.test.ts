@@ -49,7 +49,7 @@ test.describe('errors', () => {
 
   test('ReadyStateError names both states', () => {
     const error = new ReadyStateError(ReadyState.CLOSED, ReadyState.OPEN);
-    expect(error.message).toBe('ReadyState Error: got CLOSED expected OPEN');
+    expect(error.message).toBe('the transport client is closed, not open');
     expect(error.got).toBe(ReadyState.CLOSED);
     expect(error.expected).toBe(ReadyState.OPEN);
   });

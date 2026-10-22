@@ -9,15 +9,23 @@ outputs:
   - language: typescript
     out: typescript/gen/generate
     importExtension: ts
+    http: true
   - language: typescript
     out: typescript/gen/external
     importExtension: ts
     messages: external
     messagesOut: typescript/gen/messages
+    http: true
   - language: csharp
     out: dotnet/gen/generate
+    http: true
   - language: csharp
     out: dotnet/gen/external
     messages: external
+    http: true
+# the OpenAPI document of hello's routes, which an output with http: true embeds and its
+# gateway serves
+openapi:
+  out: gen/openapi.json
 # the output folders are beadc's own: generate takes out what it no longer writes there
 clean: true

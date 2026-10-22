@@ -9,10 +9,18 @@ import type { IDiagnostic } from '../../diagnostics.ts';
 import { checkValue, type IBlueprint, type PlaceOf, readBlueprint } from '../../model/blueprint.ts';
 import { formOf } from '../../model/form.ts';
 import { applyPatch, type IOperation, type IVerdict } from '../../model/__tests__/patch.ts';
-import { Category, type IRule, isRuleName, RULES, type RuleName } from '../../rules.ts';
+import {
+  Category,
+  HTTP_CATEGORY,
+  type IRule,
+  isRuleName,
+  RULES,
+  type RuleName,
+} from '../../rules.ts';
 import { againstOfFolder, type IEarlier } from '../against.ts';
 import { breaking } from '../breaking.ts';
 import { compareBlueprints, messageIndexOf } from '../compare.ts';
+import { holdsHttp } from '../http.ts';
 
 const INTEROP = new URL('../../../../spec/interop-blueprint.json', import.meta.url);
 const COMMENTS = new URL('../../../test/golden/comments.blueprint.json', import.meta.url);
@@ -123,15 +131,17 @@ const protoVerdictsOf = (diagnostics: readonly IDiagnostic[]): IProtoVerdict[] =
   });
 };
 
+// the category HTTP, held where the earlier states an HTTP member, as a run holds it
+const httpOf = (earlier: IBlueprint): { http?: { prefix: string } } => {
+  return holdsHttp(earlier) ? { http: { prefix: '/api' } } : {};
+};
+
 // a case's findings under `category`
 const runCase = (each: IBreakingCase, category: Category): IDiagnostic[] => {
   const { blueprint, placeOf } = currentOf(applyPatch(interop(), each.current));
+  const earlier = earlierOf(applyPatch(interop(), each.earlier));
 
-  return compareBlueprints(blueprint, {
-    earlier: earlierOf(applyPatch(interop(), each.earlier)),
-    category,
-    placeOf,
-  });
+  return compareBlueprints(blueprint, { earlier, category, placeOf, ...httpOf(earlier) });
 };
 
 // spec 16.8: an id or a name a release declared stays its declaration's, or is reserved, and the
@@ -158,9 +168,9 @@ test("a WIRE case's findings under API hold its findings under WIRE", () => {
       wire.every((verdict) => {
         const rule: IRule = RULES[verdict.rule as RuleName];
 
-        return rule.category === Category.WIRE;
+        return rule.category === Category.WIRE || rule.category === HTTP_CATEGORY;
       }),
-      `${each.rule}/${each.name}: WIRE runs its own rules alone`
+      `${each.rule}/${each.name}: WIRE runs its own rules alone, and HTTP's where it is held`
     ).toBe(true);
   }
 });
@@ -353,6 +363,7 @@ test('each .proto case gives its rules at their lines and columns', () => {
                 earlier: earlier.blueprint,
                 category,
                 placeOf: current.placeOf,
+                ...httpOf(earlier.blueprint),
                 messages: {
                   earlier: messageIndexOf(earlier.image),
                   current: messageIndexOf(current.set),

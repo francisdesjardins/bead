@@ -30,6 +30,7 @@ const ROOT = [
   'docs',
   'spec/spec.md',
   'spec/debugging.md',
+  'spec/transcoding.md',
   'spec/interop-service.json',
   'spec/schemas',
   'tools',

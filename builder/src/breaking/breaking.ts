@@ -17,13 +17,15 @@ import { fromBinary } from '@bufbuild/protobuf';
 import { FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 
 import { checkBlueprintFile, checkRoots, type IChecked } from '../check.ts';
-import type { IAgainstConfig, Source } from '../config.ts';
+import { asksHttp, type IAgainstConfig, type IConfig, type Source } from '../config.ts';
 import { diagnosticOf, hasError, type IDiagnostic, InputError } from '../diagnostics.ts';
 import type { IBlueprint, IServiceEntry } from '../model/blueprint.ts';
 import { areOneName } from '../model/identity.ts';
+import { DEFAULT_PREFIX } from '../model/routes.ts';
 import { displayOf, pathOnDisk } from '../roots.ts';
 import {
   Category,
+  HTTP_CATEGORY,
   type IRule,
   isRuleName,
   Level,
@@ -42,6 +44,7 @@ import {
   isUnderScope,
 } from './buf.ts';
 import { compareBlueprints, hooksOf, messageIndexOf } from './compare.ts';
+import { holdsHttp } from './http.ts';
 
 // types
 
@@ -53,7 +56,7 @@ export interface IBreakingOptions {
   /** Each `--except`, as the call gave it. */
   readonly except?: readonly string[];
   /** The current `beadc.yaml`, when the call read one. */
-  readonly config?: IAgainstConfig;
+  readonly config?: IAgainstConfig | IConfig;
   /** The tar `--against -` read from standard input. */
   readonly archive?: Uint8Array;
 }
@@ -160,6 +163,9 @@ const SHAPES_OF_RULE: Readonly<Partial<Record<RuleName, readonly Shape[]>>> = Ob
   PROCEDURE_SAME_MESSAGES: ['procedure'],
   PROCEDURE_SAME_HOOK: ['procedure'],
   PROCEDURE_FAILURE_NO_DELETE: ['listed'],
+  HTTP_ROUTE_NO_DELETE: ['procedure'],
+  HTTP_GET_NO_DELETE: ['procedure'],
+  HTTP_ROUTE_SHADOWED: ['procedure'],
   FAILURE_NO_DELETE: ['failure'],
   FAILURE_SAME_NAME: ['failure'],
   NAME_NO_DELETE: ['service', 'procedure', 'failure'],
@@ -188,7 +194,10 @@ const runs = (name: RuleName, category: Category): boolean => {
   }
 
   return (
-    rule.category === undefined || category === Category.API || rule.category === Category.WIRE
+    rule.category === undefined ||
+    category === Category.API ||
+    rule.category === Category.WIRE ||
+    rule.category === HTTP_CATEGORY
   );
 };
 
@@ -543,10 +552,17 @@ export const breaking = (source: Source, options: IBreakingOptions): IBreaking =
   }
 
   const image = fromProto ? checked.set : undefined;
+  // * the category HTTP, held where the earlier states an HTTP member or the project writes HTTP
+  const config: Partial<IConfig> | undefined = options.config;
+  const http =
+    holdsHttp(earlier.blueprint) || (config !== undefined && asksHttp(config))
+      ? { prefix: config?.http?.prefix ?? DEFAULT_PREFIX }
+      : undefined;
   const bead = compareBlueprints(current, {
     earlier: earlier.blueprint,
     category,
     placeOf,
+    ...(http === undefined ? {} : { http }),
     ...(image === undefined || earlier.image === undefined
       ? {}
       : { messages: { earlier: messageIndexOf(earlier.image), current: messageIndexOf(image) } }),
@@ -559,6 +575,7 @@ export const breaking = (source: Source, options: IBreakingOptions): IBreaking =
     buf = bufFindings(image, {
       earlier: earlier.image,
       category,
+      ...(http === undefined ? {} : { json: true }),
       roots,
       ...(earlier.roots === undefined ? {} : { earlierRoots: earlier.roots }),
     });

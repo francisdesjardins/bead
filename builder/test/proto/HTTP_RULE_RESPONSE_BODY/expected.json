@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "HTTP_RULE_RESPONSE_BODY",
+    "line": 36,
+    "column": 7
+  }
+]

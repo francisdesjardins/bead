@@ -17,6 +17,11 @@
     <InternalsVisibleTo Include="Bead.Interop" />
     <!-- the fuzz targets read the parsers held here, the transports' fields and the JWT verifier among them -->
     <InternalsVisibleTo Include="Bead.Fuzz" />
+    <!-- a gateway reads and writes JSON by the payloads' own tokens, and judges a request by the
+         HTTP server's gates, its hosts, its origins, its proxies and its bounds (decision 0037) -->
+    <InternalsVisibleTo Include="Bead.Transcoding" />
+    <InternalsVisibleTo Include="Bead.Transcoding.Http" />
+    <InternalsVisibleTo Include="Bead.Transcoding.Tests" />
   </ItemGroup>
 
   <ItemGroup>

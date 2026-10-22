@@ -767,7 +767,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await client.connect({ host, port });
         const disconnecting = client.disconnect();
 
-        await expect(client.reconnect()).rejects.toThrow('cannot reconnect while closing');
+        await expect(client.reconnect()).rejects.toThrow(
+          'the transport client cannot reconnect while closing'
+        );
         await disconnecting;
       });
 
@@ -1045,7 +1047,7 @@ test.describe('WSTransportClient, with a scripted WebSocket', () => {
     expect(() => {
       drop(client);
     }).not.toThrow();
-    await expect(connecting).rejects.toThrow('disposed while connecting');
+    await expect(connecting).rejects.toThrow('the transport client was disposed as it connected');
     expect(sockets[0]?.closeCodes).toEqual([undefined]);
     expect(client.socket).toBeNull();
   });
@@ -1281,7 +1283,7 @@ test.describe('WSTransportClient, what it carries', () => {
 
     // nothing moved: no state, no target a reconnection replays, no upgrade sent
     expect([called, client.isUninitialized(), heard]).toEqual([0, true, []]);
-    await expect(client.reconnect()).rejects.toThrow('transport was never connected');
+    await expect(client.reconnect()).rejects.toThrow('the transport client was never connected');
 
     // a provider's value, held alike once handed: the connect fails, and a reconnection does not
     // try again what no attempt would mend

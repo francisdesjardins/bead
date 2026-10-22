@@ -1,0 +1,65 @@
+{
+  "patch": [
+    {
+      "op": "add",
+      "path": "/proto",
+      "value": {
+        "files": [
+          {
+            "path": "x/v1/x.proto",
+            "package": "x.v1"
+          }
+        ],
+        "messages": [
+          {
+            "fullName": "x.v1.Request",
+            "file": "x/v1/x.proto",
+            "fields": [
+              {
+                "fieldName": "labels",
+                "fieldNumber": 1,
+                "jsonName": "labels",
+                "type": {
+                  "scalar": "int32"
+                },
+                "label": "map",
+                "key": "string",
+                "presence": "implicit"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/request",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Request"
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/services/0/procedures/0/result",
+      "value": {
+        "encoding": "proto",
+        "message": "x.v1.Request"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/services/0/procedures/0/http",
+      "value": {
+        "idempotencyLevel": "NO_SIDE_EFFECTS",
+        "rules": []
+      }
+    }
+  ],
+  "findings": [
+    {
+      "rule": "HTTP_GET_UNBINDABLE",
+      "pointer": "/services/0/procedures/0/http/idempotencyLevel"
+    }
+  ]
+}

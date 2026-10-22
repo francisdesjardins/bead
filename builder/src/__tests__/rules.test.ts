@@ -54,7 +54,7 @@ test('every rule has its cases, at each of its levels', () => {
   }
 });
 
-test('the warnings are the seven a run may give, WAIVER_UNUSED the one nothing leaves out', () => {
+test('the warnings are the thirteen a run may give, WAIVER_UNUSED the one nothing leaves out', () => {
   expect(
     Object.entries(RULES)
       .filter(([, rule]) => {
@@ -66,6 +66,12 @@ test('the warnings are the seven a run may give, WAIVER_UNUSED the one nothing l
   ).toEqual([
     'SERVICE_SKIPPED',
     'VALIDATE_RULES_UNPLAYED',
+    'HTTP_RULE_BODY_DIFFERS',
+    'HTTP_QUERY_UNBINDABLE',
+    'HTTP_UPDATE_MASK',
+    'HTTP_ANY',
+    'HTTP_GET_UNMARKED',
+    'HTTP_GET_UNBINDABLE',
     'NOTIFICATION_RESULT',
     'SPEC_VERSION_NEWER',
     'PROTO_SKIPPED',

@@ -5,6 +5,8 @@ using System.Text.Json;
 using Bead.Interop;
 using Bead.Tests;
 using Bead.Transport.Http;
+using Bead.Transcoding.V1;
+using Google.Protobuf;
 using Bead.Transport.WebSockets;
 
 namespace Bead.Benchmarks;
@@ -27,6 +29,7 @@ internal static class Program
         public int Runs { get; init; } = 3;
         public int Seconds { get; init; } = 3;
         public bool Json { get; init; }
+        public bool TranscodingOnly { get; init; }
     }
 
     private sealed record Dimensions
@@ -105,7 +108,11 @@ internal static class Program
         for (var at = 0; at < args.Length; at++)
         {
             var flag = args[at];
-            if (flag == "--json")
+            if (flag == "--transcoding")
+            {
+                options = options with { TranscodingOnly = true };
+            }
+            else if (flag == "--json")
             {
                 options = options with { Json = true };
             }
@@ -152,6 +159,40 @@ internal static class Program
         }
 
         return clock.Elapsed.TotalMilliseconds * 1_000_000 / rounds;
+    }
+
+    // Bead's mapping of protobuf's JSON against the stock library's, JsonParser and JsonFormatter, on
+    // transcoding.json's message of every kind of field, as a gateway reads a request and writes a
+    // result: a body read to its message's bytes, and bytes written to a body (decision 0037)
+    private static void Transcoding(Measurements results, int seconds)
+    {
+        using var file = JsonDocument.Parse(File.ReadAllText(Path.Combine(Root(), "spec", "transcoding.json")));
+        var every = file.RootElement.GetProperty("writings").EnumerateArray().First((entry) =>
+        {
+            return entry.GetProperty("message").GetString() == "bead.transcoding.v1.Everything" && entry.TryGetProperty("body", out _);
+        });
+        var payload = Convert.FromHexString(every.GetProperty("payload").GetString()!.Replace(" ", "", StringComparison.Ordinal));
+        var form = new Transcoding.JsonForm([Everything.Descriptor]);
+        var body = form.Write(Everything.Parser.ParseFrom(payload));
+        var row = new Dimensions { SizeBytes = body.Length, Unit = "ns" };
+
+        results.Record("transcoding.read.bead", Codec(() =>
+        {
+            _ = form.Read(Everything.Descriptor, body).ToByteArray();
+        }, (100, seconds)), row);
+        results.Record("transcoding.read.stock", Codec(() =>
+        {
+            _ = JsonParser.Default.Parse<Everything>(System.Text.Encoding.UTF8.GetString(body)).ToByteArray();
+        }, (100, seconds)), row);
+        results.Record("transcoding.write.bead", Codec(() =>
+        {
+            _ = form.Write(Everything.Parser.ParseFrom(payload));
+        }, (100, seconds)), row);
+        results.Record("transcoding.write.stock", Codec(() =>
+        {
+            _ = System.Text.Encoding.UTF8.GetBytes(JsonFormatter.Default.Format(Everything.Parser.ParseFrom(payload)));
+        }, (100, seconds)), row);
+
     }
 
     private static void Codecs(Measurements results, int seconds)
@@ -662,16 +703,23 @@ internal static class Program
     {
         var options = Parse(args);
         var results = new Measurements();
-        await using var remote = await InteropProcess.Create();
+        await using var remote = options.TranscodingOnly ? null : await InteropProcess.Create();
         for (var run = 0; run < options.Runs; run++)
         {
             await Console.Error.WriteLineAsync($"run {run + 1}/{options.Runs}");
+            Transcoding(results, options.Seconds);
+
+            if (options.TranscodingOnly)
+            {
+                continue;
+            }
+
             Codecs(results, options.Seconds);
             foreach (var transport in new[] { "websocket", "http" })
             {
                 foreach (var scenario in new[] { "local", "interop" })
                 {
-                    var port = scenario == "interop" ? (int?)(transport == "http" ? remote.Ports.HttpPort : remote.Ports.Port) : null;
+                    var port = scenario == "interop" ? (int?)(transport == "http" ? remote!.Ports.HttpPort : remote!.Ports.Port) : null;
                     await using var connection = await Connect(transport, new ConnectOptions(Port: port));
                     await Calls(connection, (results, new Dimensions { Scenario = scenario, Transport = transport }, options.Seconds));
                     if (scenario == "local")

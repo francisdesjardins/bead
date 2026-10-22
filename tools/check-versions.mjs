@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Every version agrees with itself, a released section of the CHANGELOG stays as its tag shipped
 // it, and a release moves each version its changes owe (decision 0008): the product's, the spec's
-// and its companion's.
+// and its companions'.
 //
 //   node tools/check-versions.mjs                   judged as the branch checked out
 //   node tools/check-versions.mjs --ref <ref>       judged as that ref: a branch, or refs/tags/…
@@ -81,7 +81,10 @@ export const STATED = /^\*\*Version: (\d+\.\d+\.\d+)\*\*/m;
 export const unversioned = (text) => {
   return text
     .replace(/^\*\*Version: \d+\.\d+\.\d+\*\*/gm, '**Version: x.y.z**')
-    .replace(/"(specVersion|debuggingVersion)"(\s*:\s*)"[^"]*"/g, '"$1"$2"x.y.z"');
+    .replace(
+      /"(specVersion|debuggingVersion|transcodingVersion)"(\s*:\s*)"[^"]*"/g,
+      '"$1"$2"x.y.z"'
+    );
 };
 
 const isObject = (value) => {
@@ -160,6 +163,13 @@ export const DOCUMENTS = Object.freeze([
     path: 'spec/debugging.md',
     key: 'debuggingVersion',
   }),
+  Object.freeze({
+    id: 'transcoding',
+    name: "the transcoding's companion",
+    prefix: 'transcoding-v',
+    path: 'spec/transcoding.md',
+    key: 'transcodingVersion',
+  }),
 ]);
 
 // a conformance file: a JSON file directly under spec/
@@ -172,28 +182,38 @@ const SCHEMA = /^spec\/schemas\/([^/]+)\.schema\.json$/;
 const TOOLING = /^spec\/(?:generators\/|check\.py$|requirements\.(?:in|txt)$)/;
 
 // the keys a conformance file may gain without a minor: its schema's link, a comment, its version
-const UNCOUNTED_KEYS = new Set(['$schema', '$comment', 'specVersion', 'debuggingVersion']);
+const UNCOUNTED_KEYS = new Set([
+  '$schema',
+  '$comment',
+  'specVersion',
+  'debuggingVersion',
+  'transcodingVersion',
+]);
 
 // the documents a file of the repository belongs to, a conformance file's content read through
-// `read(path)`, which gives a text or null: the companion's text, the conformance files that repeat
-// its version and their schemas are the companion's; common.schema.json is both's; tooling and
-// what lies outside spec/ are none's; every other file of spec/ is the spec's
+// `read(path)`, which gives a text or null: a companion's text, the files named after it, the
+// conformance files that repeat its version and their schemas are that companion's;
+// common.schema.json is every document's; tooling and what lies outside spec/ are none's; every
+// other file of spec/ is the spec's
 export const documentOf = (path, read) => {
   if (!path.startsWith('spec/') || TOOLING.test(path)) {
     return [];
   }
   if (path === 'spec/schemas/common.schema.json') {
-    return ['spec', 'debugging'];
+    return DOCUMENTS.map((document) => document.id);
   }
-  if (path.startsWith('spec/debugging')) {
-    return ['debugging'];
+  const companion = DOCUMENTS.find((document) => {
+    return document.id !== 'spec' && path.startsWith(`spec/${document.id}`);
+  });
+  if (companion !== undefined) {
+    return [companion.id];
   }
   const schema = SCHEMA.exec(path);
   const file = schema === null ? path : `spec/${schema[1]}.json`;
-  if (CONFORMANCE.test(file) && keysOf(read(file)).has('debuggingVersion')) {
-    return ['debugging'];
-  }
-  return ['spec'];
+  const repeated = DOCUMENTS.find((document) => {
+    return document.id !== 'spec' && CONFORMANCE.test(file) && keysOf(read(file)).has(document.key);
+  });
+  return [repeated === undefined ? 'spec' : repeated.id];
 };
 
 // the project ranges of a lock file: each dependency that an entry of `"type": "Project"` takes on
@@ -727,7 +747,8 @@ const tagOf = (document) => {
 //                 second parent, the release branch a back-merge of the branch brings in; whether
 //                 it is the release judged; what its tree states and gives of each document; and
 //                 its CHANGELOG
-//   documentTags  every spec-v* and debugging-v* in the repository, peeled to its commit
+//   documentTags  every spec-v*, debugging-v* and transcoding-v* in the repository, peeled to its
+//                 commit
 //   documents     on a strict mode, each document's last release, and what of it changed and was
 //                 added since
 export const gatherReleases = (root, { mode, commit }) => {

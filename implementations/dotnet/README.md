@@ -43,6 +43,12 @@ src/
   Bead.Transport.WebSockets/    the server on Kestrel and the client on ClientWebSocket, one
                                 connection class for both
   Bead.Transport.Http/          the server on Kestrel and the client on HttpClient
+  Bead.Transcoding/             the transcoding layer, pure, no socket: a route table's types, its
+                                templates matched raw, a request bound from its route, Bead's own
+                                mapping of protobuf's JSON over a message's descriptor, a
+                                failure's problem and a stream's events
+  Bead.Transcoding.Http/        the gateway on Kestrel, which answers a service's procedures as
+                                HTTP routes, one more client of the application's server
   BannedSymbols.txt             what the banned-API analyzer refuses: the clock is given
 interop/
   Bead.Interop/                 the interop service, which both sides serve alike
@@ -80,6 +86,47 @@ turn, a credential and the client's address beside each request (spec 15.13). On
 its connections from several transports through `JoinedServerTransport`, each handle its own
 transport's, two of one type refused (spec 15.14): an in-memory transport beside a WebSocket one,
 say, its service offered once.
+
+### HTTP/JSON transcoding, a gateway
+
+`HttpGateway`, in `Bead.Transcoding.Http`, answers a service's procedures as routes of HTTP
+([`spec/transcoding.md`](../../spec/transcoding.md), decision 0037), beside the wire, never in its
+place: each call goes through one more Bead client of the application's own server, across a
+`MemoryTransportServer` that server joined beside its WebSocket or HTTP one, so it meets the same
+router, admission, sessions and services, each offered once. It reads everything from the route
+table beadc writes in an output with `http: true`, `BeadHttp.cs`, whose `HttpRoutes.All`,
+`OpenApiDocument` and `ProblemTypes` it is given; `Bead.Transcoding` is the layer it reads them
+with.
+
+```csharp
+await using var memory = new MemoryTransportServer();
+await using var server = new Server<string>(new JoinedServerTransport([memory, webSocket]));
+await using var gateway = new HttpGateway(new HttpGatewayOptions
+{
+    Transport = memory,
+    Routes = HttpRoutes.All,
+    Document = HttpRoutes.OpenApiDocument.ToArray(),
+    ProblemTypes = HttpRoutes.ProblemTypes,
+});
+
+await memory.Start();
+await gateway.Start(new HttpGatewayStartOptions { Port = 8080 });
+```
+
+It routes, binds, reads and writes as the TypeScript side's gateway does, one form of every body
+on both sides, and its README says it whole: every procedure a client calls at
+`POST /api/<Service>/<procedure>`, one marked `NO_SIDE_EFFECTS` at `GET` and `HEAD` there too
+where the query carries its request, each `google.api.http` rule as written; Bead's own mapping of
+protobuf's JSON, never `JsonParser` or `JsonFormatter`; failures as `application/problem+json`;
+notifications as Server-Sent Events, paced by what the response takes. **The route is no guard**:
+a procedure answers its default route whatever rules map it, and what guards it is its admission.
+Each exchange draws one Bead connection, closed as its response ends. It judges a request by the
+HTTP transport's own gates from one `HttpPolicy`, which `HttpTransportServerOptions.Policy` takes
+too; a member given in the policy and beside it, at its default as at any value, is refused.
+It listens on its own port, or answers in the application's own Kestrel pipeline,
+`endpoints.MapBeadGateway(gateway)`, its fallback endpoint; one origin for `/bead` and `/api/…`
+comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
+`etag`; Swagger UI is the application's to serve.
 
 ### The parts of the core, the manager and the HTTP server
 
