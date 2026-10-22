@@ -187,6 +187,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
+- The TypeScript side's `TimeoutError` says what the C# side says at each wait: a call past its
+  timeout `no answer came in 10 milliseconds`, a key set's ask at its deadline `the key set's ask
+  for <issuer> was unsettled as its deadline was reached`, and a connection `timed out after 10ms`;
+  it takes its words beside its `timeout`, which it keeps. A call on an ask unsettled at its
+  deadline fails with that `TimeoutError`, as the C# side's with its `TimeoutException`, and one on
+  an ask that failed with `the key set's ask for <issuer> failed`, its issuer unquoted.
 
 ### Fixed
 

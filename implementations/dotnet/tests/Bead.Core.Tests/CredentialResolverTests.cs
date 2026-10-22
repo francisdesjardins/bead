@@ -445,10 +445,10 @@ public sealed class CredentialResolverTests
         // unsettled at its deadline, it has failed, whatever it does with its signal
         clock.Advance(TimeSpan.FromMilliseconds(1));
         Assert.True(keySet.Asks[0].Signal.IsCancellationRequested);
-        Assert.Contains("key set", (await Assert.ThrowsAnyAsync<Exception>(() =>
+        Assert.Equal($"the key set's ask for {Issuer} was unsettled as its deadline was reached", (await Assert.ThrowsAsync<TimeoutException>(() =>
         {
             return waiting;
-        })).Message, StringComparison.Ordinal);
+        })).Message);
 
         // the next ask goes at once, its own signal live
         var next = ResolvedOf((resolver, token));

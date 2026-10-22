@@ -96,14 +96,19 @@ export class ReconnectError extends GenericError {
   public override readonly name: string = 'ReconnectError';
 }
 
+/**
+ * Something that waited past its timeout, worded as the C# side words it there: a call no answer
+ * came for, a key set's ask unsettled at its deadline; `timed out after 10ms` for any other wait,
+ * a connection's say.
+ */
 export class TimeoutError extends GenericError {
   public override readonly name: string = 'TimeoutError';
 
   /** The milliseconds waited. */
   public readonly timeout: number;
 
-  public constructor(timeout: number) {
-    super(`timed out after ${String(timeout)}ms`);
+  public constructor(timeout: number, message = `timed out after ${String(timeout)}ms`) {
+    super(message);
 
     this.timeout = timeout;
   }

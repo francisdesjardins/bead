@@ -865,7 +865,7 @@ test.describe('createRelay', () => {
       [new Error('the socket refused it'), 'refused'],
       [new DisconnectError('the relay’s router was disposed'), 'never'],
       [new DisconnectError('the connection closed before the answer'), 'handed'],
-      [new TimeoutError(250), 'handed'],
+      [new TimeoutError(250, 'no answer came in 250 milliseconds'), 'handed'],
       [new FailureError({ ...CLIENT_FAILURES.transferStalled, detail: 'nothing came' }), 'handed'],
       ['a reason that is no error', 'never'],
       // any other refusal of leg B's own before the hand-off: nothing was tried
@@ -906,7 +906,7 @@ test.describe('createRelay', () => {
       ['the socket refused it', true],
       ['the relay’s router was disposed', true],
       ['the connection closed before the answer', true],
-      ['timed out after 250ms', true],
+      ['no answer came in 250 milliseconds', true],
       ['local client protocol failure 51 TRANSFER_STALLED: nothing came', true],
       ['a reason that is no error', true],
       ['local client protocol failure 51 TRANSFER_STALLED: nothing came', true],

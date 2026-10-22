@@ -426,7 +426,10 @@ const callOfRouter: Way = async (given) => {
     const ended = await asking.settled;
 
     expect(ended).toBeInstanceOf(TimeoutError);
-    expect(ended).toHaveProperty('timeout', held);
+    expect(ended).toMatchObject({
+      message: `no answer came in ${String(held)} milliseconds`,
+      timeout: held,
+    });
   }
 
   return { held };
@@ -1099,7 +1102,7 @@ const connectTimed = async (
     expect(ended).toBeInstanceOf(CancelError);
   } else {
     expect(ended).toBeInstanceOf(TimeoutError);
-    expect(ended).toHaveProperty('timeout', held);
+    expect(ended).toMatchObject({ message: `timed out after ${String(held)}ms`, timeout: held });
   }
 
   expect(client.isClosed()).toBe(true);

@@ -1003,7 +1003,10 @@ test.describe('createRouterServer', () => {
       const timing = request(first, 10);
 
       await expect(timing).rejects.toBeInstanceOf(TimeoutError);
-      await expect(timing).rejects.toMatchObject({ message: 'timed out after 10ms', timeout: 10 });
+      await expect(timing).rejects.toMatchObject({
+        message: 'no answer came in 10 milliseconds',
+        timeout: 10,
+      });
 
       const closing = request(first);
       const staying = request(second);
@@ -2009,7 +2012,10 @@ test.describe('createRouterServer', () => {
 
       // its own timer's, after the delay it was given
       await expect(asking).rejects.toBeInstanceOf(TimeoutError);
-      await expect(asking).rejects.toMatchObject({ message: 'timed out after 20ms', timeout: 20 });
+      await expect(asking).rejects.toMatchObject({
+        message: 'no answer came in 20 milliseconds',
+        timeout: 20,
+      });
       expect(answersOf(sent)).toEqual([
         [first, EnvelopeKind.REQUEST, 2, 'ping'],
         [first, EnvelopeKind.CANCEL, 2, undefined],
