@@ -33,6 +33,7 @@ import {
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
 import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
+import { mountSides } from './sides';
 import { mountSignUp } from './sign-up';
 import {
   answeredOf,
@@ -873,6 +874,7 @@ watchDebug(client, { quiet: READS });
 
 // the sign-up, its request held to the rules of its .proto
 mountSignUp(client, { reasonOf });
+mountSides();
 
 // an exposition opened is written at once, from its last text
 for (const details of [shown.clientExposition, shown.serverExposition]) {

@@ -24,6 +24,7 @@
   // formatter: `beadc generate --check` holds it (decision 0022), and so is its route table,
   // `bead_http.ts`, in an output with `http: true` (decision 0037). A `.blueprint.json`, the demo's
   // in `demo/gen/`, is beadc's too, in its one form, which `generate --check` holds alike.
+  // `demo/samples.ts` is `demo/make-samples.ts`'s, which the demo's tests hold it to.
   "ignorePatterns": [
     ".yarn/**",
     "**/*.min.js",
@@ -31,6 +32,7 @@
     "**/*_pb.ts",
     "**/*_bead.ts",
     "**/bead_http.ts",
-    "**/*.blueprint.json"
+    "**/*.blueprint.json",
+    "demo/samples.ts"
   ]
 }

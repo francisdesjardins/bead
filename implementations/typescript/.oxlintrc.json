@@ -219,6 +219,8 @@
     // protoc-gen-es's, committed as it writes it: `tools/check-protobuf.mjs` holds it to its
     // generator
     "**/*_pb.ts",
+    // `demo/make-samples.ts`'s, which the demo's tests hold it to
+    "demo/samples.ts",
     // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
     "tools/oxlint-plugin.cases.ts",
     // what beadc generates for spec/validations.proto, committed as it writes it:

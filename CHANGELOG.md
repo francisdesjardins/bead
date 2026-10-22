@@ -9,6 +9,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The demo shows the same service on both sides: `examples/hello`'s resolvers, server and client,
+  its TypeScript file beside its C# one, one tab a role, written from the repository's files by
+  `demo/make-samples.ts` and held to them by the demo's tests.
 - Three more fuzz targets: `jwt`, the JWT verifier, and `ws-handshake`, the WebSocket upgrade's
   judgement, on both sides, seeded from `spec/vectors.json`'s verdicts and `spec/transports.json`'s
   upgrades; `blueprint`, beadc's blueprint reader and its form, from `builder/tools/fuzz/`, seeded
