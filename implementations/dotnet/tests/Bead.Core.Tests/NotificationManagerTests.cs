@@ -70,6 +70,16 @@ public sealed class NotificationManagerTests
         Assert.Equal([(First, 1u), (First, 3u), (First, 5u), (First, 7u)], notifications.Candidates(ProcedureOf(10, 1)));
         Assert.Equal(grace, notifications.SubscriptionAt(3, First)!.Value.Session);
         Assert.Null(notifications.SubscriptionAt(1, First)!.Value.Session);
+
+        // the one of a credential's session taken away, every other place stays
+        notifications.Unregister(3, First);
+
+        Assert.Equal(
+            [1u, null, 5u, 7u],
+            new SessionIdentifier?[] { null, grace, grace with { Issuer = "https://b.example" }, grace with { Sub = "Grace" } }.Select((identifier) =>
+            {
+                return notifications.SubscriptionOf(ProcedureOf(10, 1), new Subscriber { ConnectionHandle = First, Identifier = identifier });
+            }));
     }
 
     [Fact]
@@ -93,9 +103,8 @@ public sealed class NotificationManagerTests
     [Fact]
     public void Keeps_its_subscriptions_and_candidates_in_the_order_they_were_made_one_taken_away_between()
     {
-        // C# only: a JavaScript map keeps the order its entries were made in, which the wire sees — the
-        // failures a session's end sends, the connections a notification goes to — where a .NET
-        // dictionary reuses the place of an entry gone
+        // the order the wire sees — the failures a session's end sends, the connections a notification
+        // goes to — where a .NET dictionary would reuse the place of an entry gone
         const string third = "type=WS;ip=127.0.0.1;port=50003;ordinal=1";
 
         var notifications = new NotificationManager(PacingLimits.Default);
@@ -197,6 +206,20 @@ public sealed class NotificationManagerTests
         Assert.False(notifications.Has(1, First));
     }
 
+    // a subscription is a value here: the list alone is there to change
+    [Fact]
+    public void Hands_out_copies_of_its_subscriptions()
+    {
+        var notifications = new NotificationManager(PacingLimits.Default);
+
+        notifications.Register(ProcedureOf(10, 1), CallOf(1, First));
+        notifications.Subscriptions().Clear();
+        notifications.Subscriptions(First).Clear();
+
+        Assert.Equal([new Subscription(1, First, ProcedureOf(10, 1))], notifications.Subscriptions());
+        Assert.True(notifications.Has(1, First));
+    }
+
     [Fact]
     public void Unregisters_one_subscription_of_its_own_connection_pruning_what_empties_any_other_is_none()
     {
@@ -278,19 +301,33 @@ public sealed class NotificationManagerTests
     {
         var notifications = new NotificationManager(PacingLimits.Default);
 
+        (long Paused, long Queued) Paused()
+        {
+            var counts = notifications.Gauges().Counts;
+
+            return (counts["pausedSubscriptions"], counts["queuedNotifications"]);
+        }
+
         notifications.Register(ProcedureOf(10, 1), CallOf(1, First, paced: true));
         notifications.Register(ProcedureOf(10, 2), CallOf(3, First, paced: true));
 
-        // its first credit spent, a pacing kept would queue what comes next
-        notifications.PacingOf(1, First)?.Offer(new byte[1], null);
+        // each its first credit spent, and one queued: a pacing kept would queue what comes next
+        foreach (var callId in new uint[] { 1, 1, 3, 3 })
+        {
+            notifications.PacingOf(callId, First)?.Offer(new byte[1], null);
+        }
+
+        Assert.Equal((2, 2), Paused());
+
         notifications.Unregister(1, First);
 
         Assert.Null(notifications.PacingOf(1, First));
+        Assert.Equal((1, 1), Paused());
 
         notifications.Clean(First);
 
         Assert.Null(notifications.PacingOf(3, First));
-        Assert.Equal((0, 0), (notifications.Gauges().Counts["pausedSubscriptions"], notifications.Gauges().Counts["queuedNotifications"]));
+        Assert.Equal((0, 0), Paused());
 
         // registered again, it starts anew
         notifications.Register(ProcedureOf(10, 1), CallOf(1, First, paced: true));
@@ -376,7 +413,7 @@ public sealed class NotificationManagerTests
     }
 
     [Fact]
-    public void Queues_at_the_defaults_when_its_options_say_nothing()
+    public void Queues_at_the_defaults_when_its_options_say_nothing_and_refuses_a_limit_that_is_none()
     {
         Assert.Equal(
             new Dictionary<string, long>
@@ -385,5 +422,9 @@ public sealed class NotificationManagerTests
                 ["largestQueuedNotifications"] = PacingLimits.Default.MaximumQueuedNotifications,
             },
             new NotificationManager(PacingLimits.Default).Gauges().Ceilings);
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new NotificationManager(new PacingLimits { MaximumQueuedNotifications = 0 });
+        });
     }
 }

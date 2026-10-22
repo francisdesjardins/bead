@@ -65,6 +65,16 @@ test.describe('createNotificationManager', () => {
       sub: 'grace',
     } as const;
     const graceElsewhere = { ...grace, issuer: 'https://b.example' };
+    const graceUpper = { ...grace, sub: 'Grace' };
+    // the call each session holds its place with, looked up by a copy of its identifier
+    const placesOf = () => {
+      return [undefined, grace, graceElsewhere, graceUpper].map((identifier) => {
+        return notifications.subscriptionOf(procedure, {
+          connectionHandle: first,
+          identifier: identifier === undefined ? undefined : { ...identifier },
+        });
+      });
+    };
 
     notifications.register(procedure, { callId: 1, connectionHandle: first });
     notifications.register(procedure, { callId: 3, connectionHandle: first, identifier: grace });
@@ -73,32 +83,78 @@ test.describe('createNotificationManager', () => {
       connectionHandle: first,
       identifier: graceElsewhere,
     });
+    // its sub in another case: another session
+    notifications.register(procedure, {
+      callId: 7,
+      connectionHandle: first,
+      identifier: graceUpper,
+    });
 
     // a second of one session is refused, a copy of its identifier the same session
     expect(() => {
       return notifications.register(procedure, {
-        callId: 7,
+        callId: 9,
         connectionHandle: first,
         identifier: { ...grace },
       });
     }).toThrow(ProgrammerError);
-    expect(
-      [undefined, grace, graceElsewhere].map((identifier) => {
-        return notifications.subscriptionOf(procedure, { connectionHandle: first, identifier });
-      })
-    ).toEqual([1, 3, 5]);
+    expect(placesOf()).toEqual([1, 3, 5, 7]);
     expect(notifications.candidates(procedure)).toEqual([
       { callId: 1, connectionHandle: first, ...procedure },
       { callId: 3, connectionHandle: first, identifier: grace, ...procedure },
       { callId: 5, connectionHandle: first, identifier: graceElsewhere, ...procedure },
+      { callId: 7, connectionHandle: first, identifier: graceUpper, ...procedure },
     ]);
 
+    // the one of a credential's session taken away, every other place stays
     notifications.unregister(3, first);
 
+    expect(placesOf()).toEqual([1, undefined, 5, 7]);
+  });
+
+  test('keeps its subscriptions and candidates in the order they were made, one taken away between', () => {
+    // the order the wire sees: the failures a session's end sends, the connections a notification
+    // goes to
+    const third: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
+    const notifications = createNotificationManager();
+
+    notifications.register(
+      { procedureId: 1, serviceId: 10 },
+      { callId: 1, connectionHandle: first }
+    );
+    notifications.register(
+      { procedureId: 2, serviceId: 10 },
+      { callId: 3, connectionHandle: first }
+    );
+    notifications.register(
+      { procedureId: 1, serviceId: 10 },
+      { callId: 7, connectionHandle: second }
+    );
+    notifications.unregister(1, first);
+    notifications.register(
+      { procedureId: 3, serviceId: 10 },
+      { callId: 5, connectionHandle: first }
+    );
+    notifications.register(
+      { procedureId: 1, serviceId: 10 },
+      { callId: 9, connectionHandle: third }
+    );
+
     expect(
-      notifications.subscriptionOf(procedure, { connectionHandle: first, identifier: grace })
-    ).toBeUndefined();
-    expect(notifications.subscriptions(first)).toHaveLength(2);
+      notifications.subscriptions(first).map(({ callId }) => {
+        return callId;
+      })
+    ).toEqual([3, 5]);
+    expect(
+      notifications
+        .candidates({ procedureId: 1, serviceId: 10 })
+        .map(({ callId, connectionHandle }) => {
+          return [connectionHandle, callId];
+        })
+    ).toEqual([
+      [second, 7],
+      [third, 9],
+    ]);
   });
 
   test('takes the same call id on two connections as two subscriptions', () => {
@@ -216,7 +272,7 @@ test.describe('createNotificationManager', () => {
     expect(notifications.has(1, first)).toBe(false);
   });
 
-  test('unregisters one subscription of its own connection, pruning what empties; any other is undefined', () => {
+  test('unregisters one subscription of its own connection, pruning what empties; any other is none', () => {
     const notifications = createNotificationManager();
 
     notifications.register(
@@ -369,19 +425,31 @@ test.describe('createNotificationManager', () => {
     const notifications = createNotificationManager();
     const paced = { connectionHandle: first, paced: true };
 
+    const pausedOf = () => {
+      const { pausedSubscriptions, queuedNotifications } = notifications.gauges().counts;
+
+      return [pausedSubscriptions, queuedNotifications];
+    };
+
     notifications.register({ procedureId: 1, serviceId: 10 }, { ...paced, callId: 1 });
     notifications.register({ procedureId: 2, serviceId: 10 }, { ...paced, callId: 3 });
+
+    // each its first credit spent, and one queued: a pacing kept would queue what comes next
+    for (const callId of [1, 1, 3, 3]) {
+      notifications.pacingOf(callId, first)?.offer({ payload: new Uint8Array(1) });
+    }
+
+    expect(pausedOf()).toEqual([2, 2]);
+
     notifications.unregister(1, first);
 
     expect(notifications.pacingOf(1, first)).toBeUndefined();
+    expect(pausedOf()).toEqual([1, 1]);
 
     notifications.clean(first);
 
     expect(notifications.pacingOf(3, first)).toBeUndefined();
-    expect(notifications.gauges().counts).toMatchObject({
-      pausedSubscriptions: 0,
-      queuedNotifications: 0,
-    });
+    expect(pausedOf()).toEqual([0, 0]);
 
     // registered again, it starts anew
     notifications.register({ procedureId: 1, serviceId: 10 }, { ...paced, callId: 1 });

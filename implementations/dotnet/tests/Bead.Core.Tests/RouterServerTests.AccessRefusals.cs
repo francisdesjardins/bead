@@ -126,26 +126,24 @@ public sealed partial class RouterServerTests
         DeliverFrom(First, new Envelope { Header = (RequestHeader)RequestOf(9).Header with { DestinationId = 4 } });
         await Settle();
 
+        // told in the turn each is answered, a JWT's in a later turn, each answered as it would be
+        // untold
         Assert.Equal(
-            ["1 CredentialUnsupported", "3 SessionRequired", "5 SessionRequired", "7 AccessDenied", "9 AccessDenied"],
+            ["1 CredentialUnsupported", "3 SessionRequired", "7 AccessDenied", "9 AccessDenied", "5 SessionRequired"],
             _transport.Sent
                 .Select((entry) =>
                 {
                     return $"{entry.Envelope.Header.CallId} {CodeOf(entry.Envelope.Failure!)}";
-                })
-                .Order(StringComparer.Ordinal));
+                }));
         Assert.Equal(
             [
+                RefusalOf((AccessRefusalStage.Credential, ProtocolCode.CredentialUnsupported, "scheme"), (CredentialScheme)4),
+                RefusalOf((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, "session"), CredentialScheme.Opaque),
                 RefusalOf((AccessRefusalStage.Admission, ProtocolCode.AccessDenied, null), null),
                 RefusalOf((AccessRefusalStage.Admission, ProtocolCode.AccessDenied, "no-before-route"), null) with { DestinationId = 4 },
                 RefusalOf((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, "exp"), CredentialScheme.Jwt),
-                RefusalOf((AccessRefusalStage.Credential, ProtocolCode.CredentialUnsupported, "scheme"), (CredentialScheme)4),
-                RefusalOf((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, "session"), CredentialScheme.Opaque),
             ],
-            told.OrderBy((refusal) =>
-            {
-                return $"{refusal.Stage} {refusal.Reason}";
-            }, StringComparer.Ordinal));
+            told);
 
         // never the credential, nor an admission's detail
         Assert.All(told, (refusal) =>
@@ -164,14 +162,16 @@ public sealed partial class RouterServerTests
         var vector = Vectors.Of("jwtVerdicts", name);
         var audience = vector.GetProperty("audience");
 
-        // ! a set of audiences is a relay's that verifies: a token it refuses names none of them,
-        // and so not the first, which the router holds it to alone
+        // a set of audiences is a relay's that verifies, one of its destinations each
+        var isSet = audience.ValueKind == JsonValueKind.Array;
+
         _time.SetUtcNow(DateTimeOffset.Parse(vector.GetProperty("now").GetString()!, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
         Start(new RouterServerOptions
         {
+            Relay = isSet ? Admitting with { Verifies = true } : null,
             Credentials = new Credentials
             {
-                Audience = audience.ValueKind == JsonValueKind.Array ? audience[0].GetString() : audience.GetString(),
+                Audience = isSet ? audience[0].GetString() : audience.GetString(),
                 Keys = [.. vector.GetProperty("keys").EnumerateArray().Select((key) =>
                 {
                     return new JwtKey
@@ -189,13 +189,30 @@ public sealed partial class RouterServerTests
             return response.Answer("ran");
         });
 
-        var told = Told();
+        if (isSet)
+        {
+            var destinationId = 7u;
 
-        DeliverFrom(First, Presenting(RequestOf(1), Credential.Jwt(vector.GetProperty("token").GetString()!)));
+            _transport.Open(Second);
+
+            foreach (var each in audience.EnumerateArray())
+            {
+                Router.RegisterDestination(new ConnectionTarget(Second), new DestinationOptions { DestinationId = destinationId, Audience = each.GetString() });
+                destinationId += 1;
+            }
+        }
+
+        var told = Told();
+        var request = Presenting(RequestOf(1), Credential.Jwt(vector.GetProperty("token").GetString()!));
+
+        DeliverFrom(First, isSet ? To(7, request) : request);
         await Settle();
 
         Assert.Equal(
-            RefusalOf((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, vector.GetProperty("verdict").GetProperty("reason").GetString()), CredentialScheme.Jwt),
+            RefusalOf((AccessRefusalStage.Credential, ProtocolCode.SessionRequired, vector.GetProperty("verdict").GetProperty("reason").GetString()), CredentialScheme.Jwt) with
+            {
+                DestinationId = isSet ? 7 : null,
+            },
             Assert.Single(told));
     }
 
@@ -347,6 +364,7 @@ public sealed partial class RouterServerTests
                     return $"{entry.Envelope.Header.CallId} {(entry.Envelope.Failure is { } failure ? CodeOf(failure) : "result")}";
                 })
                 .Order(StringComparer.Ordinal));
+        Assert.Equal(["the admission broke first", "the verifier broke first"], Reported());
         Assert.Empty(told);
     }
 
@@ -369,10 +387,11 @@ public sealed partial class RouterServerTests
         var told = Told();
 
         DeliverFrom(First, Presenting(RequestOf(1), Credential.Of((CredentialScheme)4, [])));
+        DeliverFrom(First, RequestOf(3));
         await Settle();
 
-        // refused as it would be, the listener after it told all the same
-        Assert.Equal((ushort)ProtocolCode.CredentialUnsupported, _transport.Sent.Single().Envelope.Failure!.Code);
+        // refused as it would be, the call after it answered, the listener after it told all the same
+        Assert.Equal(["first failure 1 CredentialUnsupported", "first result 3 ran"], SentSince());
         Assert.Single(told);
         Assert.Equal([(thrown, (string?)First)], _errors.Select((error) =>
         {

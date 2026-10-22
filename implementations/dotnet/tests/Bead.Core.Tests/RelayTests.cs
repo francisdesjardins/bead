@@ -208,15 +208,32 @@ public sealed class RelayTests
         relay.Register(new RecordingTarget { IsSecure = false }, new DestinationOptions { Audience = "bead-interop", DestinationId = 10 });
         relay.Register(new RecordingTarget(), new DestinationOptions { Audience = "bead-interop", DestinationId = 11 });
 
-        ushort? CodeOf((uint DestinationId, Credential? Credential) call)
+        Failure? RefusalOf((uint DestinationId, Credential? Credential) call)
         {
             var header = HeaderOf(1, call.DestinationId) with { Credential = call.Credential };
 
-            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = "Interop sub=ada" })?.Code;
+            return relay.HandlerOf(header)!.Admit(new AdmissionRequest(First, header) { TransportCredential = "Interop sub=ada" });
         }
 
+        static Failure Unreachable((uint DestinationId, string Why) refused)
+        {
+            return Failure.OfProtocol(ProtocolCode.DestinationUnreachable, $"destination {refused.DestinationId} is unreachable: {refused.Why}");
+        }
+
+        const string Audience = "it verifies another audience than the one the token names, or none";
+        const string InTheClear = "its transport leaves the machine in the clear, which a bearer credential never crosses";
+
         // a JWT whose aud names another, or none, or that does not read
-        Assert.All(
+        Assert.Equal(
+            [
+                Unreachable((7, Audience)),
+                Unreachable((8, Audience)),
+                Unreachable((8, "it was registered with no audience")),
+                Unreachable((9, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another")),
+                Unreachable((10, InTheClear)),
+                Unreachable((10, InTheClear)),
+                Unreachable((11, Audience)),
+            ],
             new (uint, Credential?)[]
             {
                 (7, interop),
@@ -226,18 +243,14 @@ public sealed class RelayTests
                 (10, interop),
                 (10, Credential.Elsewhere()),
                 (11, Credential.Jwt("a.b.c")),
-            },
-            (call) =>
-            {
-                Assert.Equal((ushort)ProtocolCode.DestinationUnreachable, CodeOf(call));
-            });
+            }.Select(RefusalOf));
 
         // what it can carry goes on; none and OPAQUE cross any leg B
         Assert.All(
             new (uint, Credential?)[] { (11, interop), (11, Credential.Elsewhere()), (9, interop), (8, null), (10, Opaque()) },
             (call) =>
             {
-                Assert.Null(CodeOf(call));
+                Assert.Null(RefusalOf(call));
             });
     }
 
@@ -289,6 +302,7 @@ public sealed class RelayTests
             {
                 return asked.Options.Credential!.Value;
             }));
+        Assert.Equal(4, test.Answers.Count);
     }
 
     [Fact]
@@ -459,7 +473,7 @@ public sealed class RelayTests
             FailuresOf(test.Answers));
         Assert.Single(target.Asked);
 
-        // C# only: one its router admitted already goes on, not asked again
+        // one its router admitted already goes on, not asked again
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)));
 
         Assert.Equal(2, target.Asked.Count);
@@ -693,6 +707,7 @@ public sealed class RelayTests
         await Handled(test.Relay.HandlerOf(7), PropsOf(HeaderOf(1)) with { Signal = source.Token });
 
         Assert.Empty(test.Answers);
+        Assert.Empty(test.Reports);
     }
 
     // a destination is a uint here: one below 0, past 2³² − 1 or not whole has no twin
@@ -731,8 +746,7 @@ public sealed class RelayTests
     [Fact]
     public void Draws_a_destination_again_when_0_or_in_use()
     {
-        // its TypeScript twin, identifiers.test.ts:184, draws through the shared identifiers, a module
-        // this side does not have: its draw is the relay's own
+        // the relay's own draw, from the bytes the test fills
         var fills = new Queue<byte[]>([[0, 0, 0, 0], [0, 0, 0, 5], [0, 0, 1, 7]]);
         var relay = new TestRelay(Admitting with
         {
@@ -861,7 +875,7 @@ public sealed class RelayTests
 
         Assert.Equal(unreachable, test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1))));
 
-        // C# only: a subscription is refused before a connection closed, as the TypeScript side checks
+        // a subscription is refused before a connection closed
         Assert.Equal(
             Failure.OfProtocol(ProtocolCode.SubscriptionUnsupported, "this relay carries no subscription"),
             test.Relay.HandlerOf(7)!.Admit(new AdmissionRequest(First, HeaderOf(1) with { OpensSubscription = true })));

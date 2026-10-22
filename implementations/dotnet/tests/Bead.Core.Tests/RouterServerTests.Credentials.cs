@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -124,10 +125,11 @@ public sealed partial class RouterServerTests
     // milliseconds past the wall clock as it verifies, on the first connection: news subscribes,
     // then answers — a request of `hold` once `_released`, one of `late` subscribing only then — and
     // echo answers its session's id and end
-    private void StartKeeping()
+    private void StartKeeping(TimeProvider? clock = null)
     {
         Start(new RouterServerOptions
         {
+            Clock = clock,
             Credentials = new Credentials
             {
                 Verify = (carried, _) =>
@@ -167,6 +169,18 @@ public sealed partial class RouterServerTests
         _transport.Carrying(connectionHandle, (EnvelopeCodec.WriteEnvelope(Presenting(SubscribingOf(request.CallId), Credential.Elsewhere())), request.Carried));
     }
 
+    // the credentials' sessions a router keeps, and those of them timed, as its gauges count them
+    private static Dictionary<string, long> KeptOf((long Kept, long Timed) counts)
+    {
+        return new Dictionary<string, long> { ["credentialSessions"] = counts.Kept, ["timedCredentialSessions"] = counts.Timed };
+    }
+
+    // what the router's gauges count of them now
+    private async Task<Dictionary<string, long>> KeptCounts()
+    {
+        return Among((await Router.Gauges().WaitAsync(Patience, Cancelled)).Counts, KeptOf((0, 0)));
+    }
+
     private async Task AdvanceBy(long milliseconds)
     {
         _time.Advance(TimeSpan.FromMilliseconds(milliseconds));
@@ -189,17 +203,31 @@ public sealed partial class RouterServerTests
     public async Task Keeps_a_credential_s_session_from_its_first_subscription_on_a_connection_to_its_last_timing_its_end_meanwhile_its_connection_s_session_it_never_keeps()
     {
         StartKeeping();
+        NotifierOf(
+            (_, response) =>
+            {
+                return response.Answer("ok");
+            },
+            Other);
 
         SubscribeElsewhere(First, (1, "ada +1000"));
+        _transport.Carrying(First, (EnvelopeCodec.WriteEnvelope(Presenting(SubscribingOf(7, "in", Other), Credential.Elsewhere())), "ada +1000"));
         await Settle();
         Deliver(First, SubscribingOf(3));
         await Settle();
-        Assert.Equal(["first result 1 ok", "first result 3 ok"], SentSince());
+        Assert.Equal(["first result 1 ok", "first result 7 ok", "first result 3 ok"], SentSince());
+        Assert.Equal(KeptOf((1, 1)), await KeptCounts());
+
+        // its first subscription gone, it is kept still, and timed
+        Deliver(First, CancelOf(1));
+        await Settle();
+        Assert.Equal(KeptOf((1, 1)), await KeptCounts());
 
         // its last subscription gone, it is kept no more, nor timed
-        Deliver(First, CancelOf(1));
+        Deliver(First, CancelOf(7));
         await AdvanceBy(1_000);
         Assert.Empty(SentSince());
+        Assert.Equal(KeptOf((0, 0)), await KeptCounts());
 
         // kept anew, it ends at its end, its connection's own subscription staying
         SubscribeElsewhere(First, (5, "ada +2000"));
@@ -214,16 +242,24 @@ public sealed partial class RouterServerTests
     [Fact]
     public async Task Times_an_end_past_a_timer_s_ceiling_in_steps_the_wall_clock_read_again_at_each_due_and_ends_it_at_once_once_reached_no_timer_armed()
     {
-        StartKeeping();
+        var clock = new SetBack(_time);
+
+        StartKeeping(clock);
 
         SubscribeElsewhere(First, (1, "ada +2147484647"));
         await Settle();
         Assert.Equal(["first result 1 ok"], SentSince());
         await AdvanceBy(2_147_483_647);
+
+        // a wall clock set back by hand takes effect at the next due: read again, never counted down
+        clock.By = TimeSpan.FromSeconds(-1);
+        await AdvanceBy(1_000);
+        Assert.Empty(SentSince());
         await AdvanceBy(999);
         Assert.Empty(SentSince());
         await AdvanceBy(1);
         Assert.Equal(["first failure 1 SessionRequired"], SentSince());
+        clock.By = TimeSpan.Zero;
 
         // reached while the call that subscribed it was in flight: kept as its answer goes, it ends
         // then, behind that answer
@@ -266,6 +302,59 @@ public sealed partial class RouterServerTests
                 new Subscriber { ConnectionHandle = First, Identifier = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "ada" } },
             ],
             seen);
+    }
+
+    [Fact]
+    public async Task Holds_one_subscription_a_procedure_per_session_of_a_connection_its_connection_s_and_each_credential_s_each_notified_alone_and_ends_a_credential_s_by_its_identifier()
+    {
+        var bob = new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "bob" };
+
+        StartVerifying((carried, _) =>
+        {
+            return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = carried });
+        });
+        NotifierOf((_, response) =>
+        {
+            return response.Answer("subscribed");
+        });
+
+        Deliver(First, SubscribingOf(1));
+        SubscribeElsewhere(First, (3, "ada"));
+        SubscribeElsewhere(First, (5, "bob"));
+        SubscribeElsewhere(First, (7, "ada"));
+        await Settle();
+
+        // ada's second call is answered, its session holding its one subscription already
+        Assert.Equal(
+            ["first result 1 subscribed", "first result 3 subscribed", "first result 5 subscribed", "first result 7 subscribed"],
+            SentSince());
+
+        await Router.Notify(BytesOf("to ada"), new NotifyRequest
+        {
+            Procedure = News.Address,
+            Filter = (subscriber) =>
+            {
+                return subscriber.Identifier?.Id == "ada";
+            },
+        }).WaitAsync(Patience, Cancelled);
+        await Router.Notify(BytesOf("to all"), new NotifyRequest { Procedure = News.Address }).WaitAsync(Patience, Cancelled);
+        await Router.EndSession(bob).WaitAsync(Patience, Cancelled);
+
+        // none keeps it now: it ends nothing
+        await Router.EndSession(bob).WaitAsync(Patience, Cancelled);
+        await Settle();
+
+        Assert.Equal(
+            [
+                "first notification 3 to ada",
+                "first notification 1 to all",
+                "first notification 3 to all",
+                "first notification 5 to all",
+                "first failure 5 SessionRequired",
+            ],
+            SentSince());
+        Assert.Equal(["first 1", "first 3"], await SubscribedTo(News));
+        Assert.Empty(Reported());
     }
 
     [Fact]
@@ -324,6 +413,12 @@ public sealed partial class RouterServerTests
 
         // the later end, whichever came first, and the call that brought an earlier one runs with it
         Assert.Equal(["first result 1 ok", "first result 3 ada 5000", "first result 5 ada 5000"], SentSince());
+
+        // another connection keeps nothing of it: its call runs with its own end
+        _transport.Open(Second);
+        DeliverElsewhere(Second, (1, "ada +2000"));
+        await Settle();
+        Assert.Equal(["second result 1 ada 2000"], SentSince());
         await AdvanceBy(1_000);
         await AdvanceBy(3_999);
         Assert.Empty(SentSince());
@@ -437,6 +532,18 @@ public sealed partial class RouterServerTests
         // a refusal and a resolver's answer, in one turn, come in no order of their own
         Assert.Equal([(" Interop  sub=ada ", true)], asked);
         Assert.Equal(
+            ["5 the credential does not hold", "7 OPAQUE, ELSEWHERE", "9 no credential came"],
+            _transport.Sent
+                .Where((entry) =>
+                {
+                    return entry.Envelope.Failure is not null;
+                })
+                .Select((entry) =>
+                {
+                    return $"{entry.Envelope.Header.CallId} {entry.Envelope.Failure!.Detail}";
+                })
+                .Order(StringComparer.Ordinal));
+        Assert.Equal(
             ["first failure 5 SessionRequired", "first failure 7 CredentialUnsupported", "first failure 9 SessionRequired", "first result 1 ada", "first result 3 none"],
             SentSince().Order(StringComparer.Ordinal));
     }
@@ -473,27 +580,33 @@ public sealed partial class RouterServerTests
         _transport.Open(Second);
 
         DeliverElsewhere(First, (1, Carried));
+        DeliverElsewhere(First, (3, Carried));
         DeliverElsewhere(Second, (1, Carried));
         await Settle();
         Deliver(First, CancelOf(1));
         _transport.Closed(Second);
         await Settle();
 
-        Assert.All(pending, (call) =>
-        {
-            Assert.True(call.Signal.IsCancellationRequested);
-        });
+        // the call beside the cancelled one resolves on
+        Assert.Equal(
+            [true, false, true],
+            pending.Select((call) =>
+            {
+                return call.Signal.IsCancellationRequested;
+            }));
 
         // its call id free at once, for a request that opens a new call
         Deliver(First, RequestOf(1));
         await Settle();
         Assert.Equal(["first result 1 none"], SentSince());
 
-        // a session, and a failure, settled once their calls ended: no answer, no report
+        // a session, and a failure, settled once their calls ended: no answer, no report; the one
+        // whose call goes on answered as it settles
         pending[0].Settling.SetResult(new ElsewhereSession { Id = "ada" });
-        pending[1].Settling.SetException(new InvalidOperationException("this verifier fails, on purpose"));
+        pending[2].Settling.SetException(new InvalidOperationException("this verifier fails, on purpose"));
+        pending[1].Settling.SetResult(null);
         await Settle();
-        Assert.Empty(SentSince());
+        Assert.Equal(["first failure 3 SessionRequired"], SentSince());
         Assert.Empty(Reported());
     }
 
@@ -557,13 +670,17 @@ public sealed partial class RouterServerTests
 
         Assert.Equal(["first failure 1 ProcedureFailed", "first failure 3 SessionRequired", "first failure 5 SessionRequired"], SentSince());
         Assert.DoesNotContain(Secret, told, StringComparison.Ordinal);
-        Assert.All(traced.Where((envelope) =>
-        {
-            return envelope.Header is RequestHeader;
-        }), (envelope) =>
-        {
-            Assert.Equal(Credential.Elsewhere(), ((RequestHeader)envelope.Header).Credential);
-        });
+
+        // each of the three requests traced, by its scheme alone
+        Assert.Equal(
+            [Credential.Elsewhere(), Credential.Elsewhere(), Credential.Elsewhere()],
+            traced.Where((envelope) =>
+            {
+                return envelope.Header is RequestHeader;
+            }).Select((envelope) =>
+            {
+                return ((RequestHeader)envelope.Header).Credential;
+            }));
     }
 
     [Fact]
@@ -608,6 +725,13 @@ public sealed partial class RouterServerTests
         _ = Router.Request(BytesOf("ho"), elsewhere with { Options = elsewhere.Options with { Credential = Credential.Elsewhere(Carried) } });
         await Settle();
 
+        // the JWT in its header; the ELSEWHERE its scheme alone, what it stands for beside it
+        Assert.Equal(
+            [Credential.Jwt("a.b.c"), Credential.Elsewhere()],
+            _transport.Sent.Select((entry) =>
+            {
+                return ((RequestHeader)entry.Envelope.Header).Credential;
+            }));
         Assert.Equal(["first request 2 hi", "third request 4 ho"], SentSince());
         Assert.Equal([null, Carried], _transport.Carried);
         Assert.Empty(Reported());
@@ -1019,6 +1143,7 @@ public sealed partial class RouterServerTests
             });
         Deliver(First, RequestOf(1));
         await Settle();
+        Assert.Equal("short of its scope", _transport.Sent.Single().Envelope.Failure!.Detail);
         Assert.Equal(["first failure 1 SessionRequired"], SentSince());
 
         _transport.Peer = clientEnd;
@@ -1078,6 +1203,12 @@ public sealed partial class RouterServerTests
         await Settle();
         Assert.Equal(5, SentSince().Count);
 
+        // an issuer none names, another case of its string among them, ends nothing
+        await Router.EndSessionsOf("https://none.example").WaitAsync(Patience, Cancelled);
+        await Router.EndSessionsOf(Issuer.ToUpperInvariant()).WaitAsync(Patience, Cancelled);
+        await Settle();
+        Assert.Empty(SentSince());
+
         await Router.EndSessionsOf(Issuer).WaitAsync(Patience, Cancelled);
         await Settle();
         Assert.Equal(
@@ -1085,10 +1216,8 @@ public sealed partial class RouterServerTests
             SentSince().Order(StringComparer.Ordinal));
         Assert.Equal(["first 5", "first 7"], await SubscribedTo(News));
 
-        // again, and for an issuer none names — another case of its string among them — nothing
+        // again: nothing
         await Router.EndSessionsOf(Issuer).WaitAsync(Patience, Cancelled);
-        await Router.EndSessionsOf("https://none.example").WaitAsync(Patience, Cancelled);
-        await Router.EndSessionsOf(Issuer.ToUpperInvariant()).WaitAsync(Patience, Cancelled);
         await Settle();
         Assert.Empty(SentSince());
 
@@ -1126,6 +1255,35 @@ public sealed partial class RouterServerTests
         Assert.Empty(SentSince());
         Assert.Equal(["first 1"], await SubscribedTo(News));
         Assert.Empty(Reported());
+    }
+
+    // the test's clock, its wall reading set back by what the test gives it; its timers the test's
+    private sealed class SetBack(FakeTimeProvider time) : TimeProvider
+    {
+        public TimeSpan By { get; set; }
+
+        public override long TimestampFrequency
+        {
+            get
+            {
+                return time.TimestampFrequency;
+            }
+        }
+
+        public override long GetTimestamp()
+        {
+            return time.GetTimestamp();
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return time.GetUtcNow() + By;
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return time.CreateTimer(callback, state, dueTime, period);
+        }
     }
 
     // what a key set and a resolver were asked
