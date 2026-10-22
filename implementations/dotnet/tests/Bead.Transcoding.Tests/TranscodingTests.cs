@@ -306,7 +306,7 @@ public sealed class TranscodingTests
 
             if (StringOf(given, "own") is { } own)
             {
-                problem = HttpProblems.Own(Enum.Parse<OwnFailure>(own, true), (StringOf(given, "detail")!, "Bearer"));
+                problem = HttpProblems.Own(Enum.Parse<OwnFailure>(own, true), (StringOf(given, "detail")!, StringOf(given, "challenge") ?? Root.GetProperty("defaults").GetProperty("challenge").GetString()!));
             }
             else
             {
@@ -324,7 +324,7 @@ public sealed class TranscodingTests
                     Arose = Enum.Parse<FailureArising>(given.GetProperty("arose").GetString()!, true),
                     Encoding = StringOf(given, "encoding") is { } encoding ? Enum.Parse<HttpEncoding>(encoding, true) : HttpEncoding.Proto,
                     Credential = given.TryGetProperty("credential", out _),
-                    Challenge = StringOf(given, "challenge") ?? "Bearer",
+                    Challenge = StringOf(given, "challenge") ?? Root.GetProperty("defaults").GetProperty("challenge").GetString()!,
                     ProblemTypes = entry.TryGetProperty("problemTypes", out var types) ? types.GetString() : Root.GetProperty("defaults").GetProperty("problemTypes").GetString(),
                     Failures = RouteOf("fail").Failures,
                     Request = procedure?.Request.Descriptor,
