@@ -70,8 +70,12 @@ test.describe('mountScenes', () => {
     await expect(page.locator('#scene-tabs [aria-selected="true"]')).toHaveText('OpenAPI');
     await expect(page.locator('#sign-up-openapi-document')).toContainText('"openapi": "3.1.1"');
 
-    await page.goto(`${served?.url ?? ''}#nowhere`);
+    // * corrected in its place: Back leaves the page rather than landing on the same scene
+    await page.goto(`${served?.url ?? ''}#/`);
     expect(await shownOf(page)).toEqual(['calls']);
+    expect(new URL(page.url()).hash).toBe('#calls');
+    await page.goBack();
+    await expect(page.locator('#openapi-scene')).toBeVisible();
   });
 
   test('folds the logs away, and keeps them folded at the next visit', async ({ page }) => {

@@ -75,8 +75,11 @@ export const mountScenes = (): void => {
         panel.hidden = each !== tab;
       }
 
-      // * a scene chosen is a step in the history; the one the address already names is not
-      if (named() !== tab) {
+      // * a scene chosen is a step in the history; the one the address already names is not, and a
+      // fragment of no scene, `#/` say, is corrected in its place
+      if (named() === undefined) {
+        history.replaceState(null, '', `#${sceneOf(tab)}`);
+      } else if (named() !== tab) {
         history.pushState(null, '', `#${sceneOf(tab)}`);
       }
 
