@@ -1288,6 +1288,7 @@ internal sealed partial class RouterCore : IDisposable
             var raised = new FailureException.Raised(FailureOrigin.Local, _side);
 
             _port.Report(
+                // ! a detail of the side's own words: the codec's, for the side's report alone (spec 9.0)
                 new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), (raised, reason)),
                 connectionHandle);
 
@@ -1335,6 +1336,7 @@ internal sealed partial class RouterCore : IDisposable
             var raised = new FailureException.Raised(FailureOrigin.Local, _side);
 
             _port.Report(
+                // ! a detail of the side's own words: the codec's, for the side's report alone (spec 9.0)
                 new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed, reason.Message), (raised, reason)),
                 connectionHandle);
             Gate(new FailureException(ProtocolFailureOf(ProtocolCode.EnvelopeMalformed), (raised, reason)), (connectionHandle, prefix, true));

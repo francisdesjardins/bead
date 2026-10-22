@@ -116,6 +116,7 @@ const failureOf = (reason: unknown, failures: Pick<IRouterFailures, 'envelopeMal
   return reason instanceof FailureError
     ? reason
     : new FailureError(
+        // ! a detail of the side's own words: the codec's, for the side's report alone (spec 9.0)
         { ...failures.envelopeMalformed, detail: toError(reason).message },
         { cause: reason }
       );
@@ -999,6 +1000,7 @@ export const createRouterCore = <Handle extends string>(
     // a bound of the side's own refuses the call: nothing failed, so nothing is reported
     const fail = (reason: unknown): void => {
       if (reason instanceof CapacityError) {
+        // ! a detail of the side's own words: a bound of the side's own, its own words
         const detail = reason.message;
 
         return (refuse({ ...failures.capacityExceeded, detail }, dispatched), undefined);

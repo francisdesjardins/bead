@@ -864,6 +864,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             // * the mapping's own words of the client's own request, fixed in transcoding.json, and
             // where the request carried what it refuses, cut, never in its words (7.4)
+            // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
             await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, refused.Message), problems with { Place = refused.Place }));
 
             return;
@@ -1100,6 +1101,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             Report(unwritable);
 
+            // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
             return HttpProblems.Own(OwnFailure.Unwritable, (unwritable.Message, _options.Challenge));
         }
 
