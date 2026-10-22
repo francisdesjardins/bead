@@ -110,6 +110,15 @@ public sealed class ViolationsTests
         return entry.GetProperty("name").GetString()!;
     }));
 
+    [Fact]
+    public void Plays_each_entry_as_a_writer_or_as_a_reader_never_both()
+    {
+        Assert.DoesNotContain(Root.GetProperty("details").EnumerateArray(), (entry) =>
+        {
+            return entry.TryGetProperty("write", out _) == entry.TryGetProperty("read", out _);
+        });
+    }
+
     [Theory]
     [MemberData(nameof(Details))]
     public void The_details(string name)
@@ -163,11 +172,29 @@ public sealed class ViolationsTests
         Assert.Null(kept.More);
         Assert.False(kept.Stopped);
 
-        // and cut after a whole line, its line kept, its count still missing
+        // and cut after a whole line, its line feed kept or not, its line kept, its count still missing
         var atLine = Violations.Read(detail[..detail.IndexOf('\n', StringComparison.Ordinal)]);
+        var afterLine = Violations.Read(detail[..(detail.IndexOf('\n', StringComparison.Ordinal) + 1)]);
 
         Assert.Equal("names[0]", Assert.Single(atLine.Violations).FieldPath);
         Assert.Null(atLine.More);
+        Assert.Equal("names[0]", Assert.Single(afterLine.Violations).FieldPath);
+        Assert.Null(afterLine.More);
+
+        // * no closing line: what it left out is not counted, and nothing says it stopped
+        var unclosed = Violations.Read(detail[..detail.LastIndexOf('\n')]);
+
+        Assert.Equal(3, unclosed.Violations.Count);
+        Assert.Null(unclosed.More);
+        Assert.False(unclosed.Stopped);
+    }
+
+    [Fact]
+    public void Bounds_a_detail_by_MaximumDetailBytes_and_by_an_envelope_less_its_32_bytes_beside_it()
+    {
+        Assert.Equal(1_024, (RouterLimits.Default with { MaximumDetailBytes = 1_024, MaximumEnvelopeBytes = 16_778_240 }).DetailBytes);
+        Assert.Equal(68, (RouterLimits.Default with { MaximumDetailBytes = 1_024, MaximumEnvelopeBytes = 100 }).DetailBytes);
+        Assert.Equal(0, (RouterLimits.Default with { MaximumDetailBytes = 0, MaximumEnvelopeBytes = 64 }).DetailBytes);
     }
 
     [Fact]
@@ -259,10 +286,14 @@ public sealed class ViolationsTests
     {
         var line = "{\"bounds\":{\"lte\":10},\"fieldPath\":\"from\",\"message\":\"must be less than or equal to 10\",\"ruleId\":\"int32.lte\"}";
 
-        Assert.Equal(9_007_199_254_740_991, Violations.Read(line + "\n{\"more\":9007199254740991}").More);
+        var largest = Violations.Read(line + "\n{\"more\":9007199254740991}");
+
+        Assert.Equal(((long?)9_007_199_254_740_991, Shown(From)), (largest.More, Shown(Assert.Single(largest.Violations))));
 
         // * a number is read as the double nearest it (spec 17.6), so 1e2 counts a hundred
-        Assert.Equal(100, Violations.Read(line + "\n{\"more\":1e2}").More);
+        var hundred = Violations.Read(line + "\n{\"more\":1e2}");
+
+        Assert.Equal(((long?)100, Shown(From)), (hundred.More, Shown(Assert.Single(hundred.Violations))));
 
         foreach (var count in new[] { "9007199254740992", "1e300", "1.5", "-1", "\"3\"", "true", "null" })
         {

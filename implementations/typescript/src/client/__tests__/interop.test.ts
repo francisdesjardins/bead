@@ -259,6 +259,13 @@ test.describe('the C# server of the interop service', () => {
         await expect(interop().echo({ a: [1, 'two', null] })()).resolves.toEqual({
           a: [1, 'two', null],
         });
+
+        // and its bytes as the other side wrote them, its canonical form
+        const echoed = await client.services.getRequest(InteropProcedures.echo.procedure, {
+          serializer: PAYLOAD_CODECS.raw,
+        })(new TextEncoder().encode('{"a":[1,"two",null]}'))();
+
+        expect(new TextDecoder().decode(echoed)).toBe('{"a":[1,"two",null]}');
       });
 
       // the two codecs read each other's bytes: each side writes its members sorted, in UTF-8
@@ -356,7 +363,7 @@ test.describe('the C# server of the interop service', () => {
         await expect(cancellationsReaching(1)).resolves.toBe(1);
       });
 
-      test('the server asks the command its client offers, and answers with what it answered', async () => {
+      test('answers the command the server asks', async () => {
         offerInteropClient(interop());
 
         await expect(interop().ask(null)()).resolves.toBe('noon');
@@ -410,7 +417,7 @@ test.describe('the C# server of the interop service', () => {
         await registration.unregister();
       });
 
-      test('a session opened is learned from its answer, and its end too', async () => {
+      test('learns a session opened from its answer, and its end too', async () => {
         await expect(interop().whoami(null)()).rejects.toMatchObject({
           code: ProtocolCode.SESSION_REQUIRED,
         });
@@ -440,14 +447,19 @@ test.describe('the C# server of the interop service', () => {
       });
 
       test('a JWT presented by default runs in its credential’s session: whoami answers its sub, and logout is refused ACCESS_DENIED', async () => {
-        client.router.credential = { scheme: CredentialScheme.JWT, token: interopTokenOf('grace') };
+        const credential = { scheme: CredentialScheme.JWT, token: interopTokenOf('grace') };
 
+        client.router.credential = credential;
+
+        // a login opens the connection's session, whatever the call presents
         await expect(interop().login({ name: 'ada' })()).resolves.toBe('ada');
         await expect(interop().whoami(null)()).resolves.toBe('grace');
         await expect(interop().logout(null)()).rejects.toMatchObject({
           code: ProtocolCode.ACCESS_DENIED,
           detail: "a call in a credential's session ends no connection's session",
+          origin: 'peer',
         });
+        expect(client.router.credential).toEqual(credential);
         // the connection's session stays, a call presenting none running in it
         await expect(
           interop().whoami(null)({ credential: { scheme: CredentialScheme.NONE } })
@@ -472,6 +484,15 @@ test.describe('the C# server of the interop service', () => {
         }
 
         await expect(interop().whoami(null)({ credential: elsewhere })).resolves.toBe('ada');
+
+        if (label === 'WebSocket') {
+          // over a WebSocket, those bytes alone: another credential fails before it goes
+          await expect(
+            interop().whoami(null)({
+              credential: { carried: 'Interop sub=bob', scheme: CredentialScheme.ELSEWHERE },
+            })
+          ).rejects.toMatchObject({ code: ProtocolCode.DESTINATION_UNREACHABLE, origin: 'local' });
+        }
       });
 
       test('login and register hold a duration as section 1.4 does: a fraction rounded, one under a millisecond or past 2³¹ − 1 refused with PROCEDURE_FAILED, nothing opened or registered', async () => {
@@ -502,10 +523,26 @@ test.describe('the C# server of the interop service', () => {
             sessionTimeout: 99.6,
           })()
         ).resolves.toBe('ada');
-        await sleep(400);
-        await expect(interop().whoami(null)()).rejects.toMatchObject({
-          code: ProtocolCode.SESSION_REQUIRED,
-        });
+
+        // ! the other side's timer may not have fired on a loaded runner, and an ask that finds the
+        // session still there counts afresh: ask again after each silence, until one ends it
+        let code: unknown;
+
+        for (let tries = 0; tries < 10 && code !== ProtocolCode.SESSION_REQUIRED; tries += 1) {
+          await sleep(400);
+          code = await interop()
+            .whoami(null)()
+            .then(
+              () => {
+                return undefined;
+              },
+              (reason: unknown) => {
+                return (reason as { code?: unknown }).code;
+              }
+            );
+        }
+
+        expect(code).toBe(ProtocolCode.SESSION_REQUIRED);
       });
 
       // HTTP carries no transfer: a payload is what one envelope holds

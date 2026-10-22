@@ -54,18 +54,47 @@ public sealed partial class DurationsTests
 
     // gateway.timeout
 
-    // the gateway's options, as it is built: the timeout its calls are given, as it holds it
-    private static Task<Observed> TimeoutByGateway(TimeSpan? given)
+    // the gateway's options, as it is built: the due of the timer a call arms as it goes, its body
+    // whole, its server answering never; refused, none built
+    private static async Task<Observed> TimeoutByGateway(TimeSpan? given)
     {
-        return GatewayBuilt(
-            (options) =>
+        var clock = new SteppingClock(Epoch);
+        await using var memory = new MemoryTransportServer();
+        HttpGateway gateway;
+
+        try
+        {
+            var options = GatewayOptionsOf(memory) with { Clock = clock };
+
+            gateway = new HttpGateway(given is { } timeout ? options with { Timeout = timeout } : options);
+        }
+        catch (ArgumentOutOfRangeException refused)
+        {
+            return Refused(refused);
+        }
+
+        await using (gateway)
+        {
+            var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            await memory.Start();
+
+            memory.Message += (_, _) =>
             {
-                return given is { } timeout ? options with { Timeout = timeout } : options;
-            },
-            (gateway) =>
-            {
-                return HeldAt(gateway.Timeout);
-            });
+                asked.TrySetResult();
+            };
+
+            var port = (await gateway.Start(new HttpGatewayStartOptions { Address = Host, FindOpenPort = true }, Cancelled)).Port;
+            using var socket = new TcpClient();
+
+            await socket.ConnectAsync(IPAddress.Loopback, port, Cancelled);
+            await socket.GetStream().WriteAsync(
+                Encoding.ASCII.GetBytes($"POST /api/Echo/echo HTTP/1.1\r\nHost: {Host}\r\nContent-Type: application/octet-stream\r\nContent-Length: 1\r\n\r\n\u0001"),
+                Cancelled);
+            await asked.Task.WaitAsync(Patience, Cancelled);
+
+            return HeldAt(DueOf(clock.Dues()));
+        }
     }
 
     // gateway.heartbeat
@@ -153,7 +182,7 @@ public sealed partial class DurationsTests
                 dues = clock.Dues();
             }
 
-            return HeldAt(dues is [var due] ? due : Never);
+            return HeldAt(DueOf(dues));
         }
     }
 }

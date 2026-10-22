@@ -175,7 +175,7 @@ export const interopCredentialsOf = (clock: IClock, limits?: RouterLimitsOptions
         });
 
         if (named === undefined) {
-          return Promise.reject(new Error(`the interop key set answers for no issuer ${issuer}`));
+          return Promise.reject(new Error(`the interop key set names no issuer ${issuer}`));
         }
 
         if (issuer === STALLED_ISSUER) {

@@ -159,7 +159,7 @@ public sealed class ValidatorsTests
         // * fields by their numbers, then the message's own rules
         Assert.Equal(["inner.name string.min_len", "early int32.gt", "late string.min_len", "- message.oneof", "choice required"], PathsOf(whole));
         Assert.False(whole.Stopped);
-        Assert.Equal([PathsOf(whole)[0]], PathsOf(first));
+        Assert.Equal([Shown(whole.Violations[0])], first.Violations.Select(Shown));
         Assert.True(first.Stopped);
         Assert.Equal(0, first.More);
         Assert.EndsWith("\n{\"stopped\":true}", Violations.DetailOf(first, 1_024), StringComparison.Ordinal);
@@ -230,6 +230,9 @@ public sealed class ValidatorsTests
         Assert.InRange(Encoding.UTF8.GetByteCount(detail), 1, 1_024);
         Assert.EndsWith($"\n{{\"more\":{judged.More}}}", detail, StringComparison.Ordinal);
         Assert.InRange(allocated, 0, 256 * 1_024);
+
+        // unbounded, it holds every one
+        Assert.Equal(100_000, JudgedBy(ValidationsProcedures.JudgeRepeated, (breaking, new ValidateOptions())).Violations.Count);
     }
 
     [Fact]
@@ -241,8 +244,14 @@ public sealed class ValidatorsTests
 
         // * unset, a wrapper is judged by its required alone; set, by its scalar's rules on its value,
         // its path the field, never its value
-        Assert.Equal(["title required"], PathsOf(unset));
-        Assert.Equal(["count int32.gt", "title string.min_len", "port uint32.lte"], PathsOf(set));
+        Assert.Equal(["required | title | False | value is required | -"], unset.Violations.Select(Shown));
+        Assert.Equal(
+            [
+                "int32.gt | count | False | must be greater than 0 | {\"gt\":0}",
+                "string.min_len | title | False | must be at least 1 characters | {\"min_len\":\"1\"}",
+                "uint32.lte | port | False | must be less than or equal to 65535 | {\"lte\":65535}",
+            ],
+            set.Violations.Select(Shown));
         Assert.Equal((object)0, set.Violations[0].Value);
         Assert.Same(Judged.None, taken);
     }
@@ -281,7 +290,7 @@ public sealed class ValidatorsTests
         var stopped = validate(new object(), new ValidateOptions { FailFast = true });
 
         Assert.Equal(["names[0] string.min_len", "names[1] string.min_len", "names[2] string.min_len"], PathsOf(validate(new object(), new ValidateOptions())));
-        Assert.Equal(["names[0] string.min_len"], PathsOf(stopped));
+        Assert.Equal(["string.min_len | names[0] | False | must be at least 1 characters | {\"min_len\":\"1\"}"], stopped.Violations.Select(Shown));
         Assert.Equal(0, stopped.More);
         Assert.True(stopped.Stopped);
 

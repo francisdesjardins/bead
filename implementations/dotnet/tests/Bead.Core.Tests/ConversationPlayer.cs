@@ -109,16 +109,20 @@ internal static class ConversationPlayer
         var options = new RelayOptions { Verifies = relay.TryGetProperty("verifies", out var verifies) && verifies.GetBoolean() };
 
         // an admission of the server's, read once it is built, with the refusal it gives
-        RelayOptions Admitting(Func<Server<string>, BeforeRequest> admission)
+        RelayOptions Admitting(string name, Func<Server<string>, BeforeRequest> admission)
         {
             return options with
             {
+                // ! under the name of the server's own, which a refusal it marks reports as its reason
                 BeforeRoute = new BeforeRequest(
                     (request) =>
                     {
                         return admission(given.Built()).Admits(request);
                     },
-                    Failure.OfProtocol(ProtocolCode.SessionRequired)),
+                    Failure.OfProtocol(ProtocolCode.SessionRequired))
+                {
+                    Name = name,
+                },
             };
         }
 
@@ -126,11 +130,11 @@ internal static class ConversationPlayer
         {
             false => options,
             true when beforeRoute.GetString() == "requireCredential" => options,
-            true when beforeRoute.GetString() == "shareLegBSession" => Admitting((server) =>
+            true when beforeRoute.GetString() == "shareLegBSession" => Admitting("shareLegBSession", (server) =>
             {
                 return server.ShareLegBSession;
             }),
-            true when beforeRoute.GetString() == "requireSession" => Admitting((server) =>
+            true when beforeRoute.GetString() == "requireSession" => Admitting("requireSession", (server) =>
             {
                 return server.RequireSession;
             }),
@@ -139,14 +143,53 @@ internal static class ConversationPlayer
     }
 
     // a header's credential, as vectors.json writes it, a JWT's token a character a byte; an
-    // OPAQUE's token in hexadecimal
+    // OPAQUE's token and a scheme to come's bytes in hexadecimal, a scheme to come by its number
     private static string CredentialOf(Credential credential)
     {
-        return credential.Scheme switch
+        switch (credential.Scheme)
         {
-            CredentialScheme.Jwt => $"credential JWT {credential.Token}",
-            CredentialScheme.Opaque => $"credential OPAQUE {credential.SessionToken}",
-            var scheme => $"credential {scheme.ToString().ToUpperInvariant()}",
+            case CredentialScheme.Jwt:
+                {
+                    return $"credential JWT {credential.Token}";
+                }
+
+            case CredentialScheme.Opaque:
+                {
+                    var token = new byte[SessionToken.Bytes];
+
+                    credential.SessionToken!.Value.CopyTo(token);
+
+                    return $"credential OPAQUE {Convert.ToHexString(token)}";
+                }
+
+            case CredentialScheme.None or CredentialScheme.Elsewhere:
+                {
+                    return $"credential {credential.Scheme.ToString().ToUpperInvariant()}";
+                }
+
+            default:
+                {
+                    return $"credential {(ushort)credential.Scheme} {Convert.ToHexString(credential.Bytes.Span)}";
+                }
+        }
+    }
+
+    // a credential a request presents, as a conversation writes it, written as CredentialOf writes
+    // what was sent
+    private static string PresentedOf(JsonElement credential)
+    {
+        var scheme = credential.GetProperty("scheme");
+
+        if (scheme.ValueKind == JsonValueKind.Number)
+        {
+            return $"credential {scheme.GetInt32()} {Convert.ToHexString(Vectors.FromHexadecimal(credential.GetProperty("bytes").GetString()!))}";
+        }
+
+        return scheme.GetString() switch
+        {
+            "JWT" => $"credential JWT {credential.GetProperty("token").GetString()}",
+            "OPAQUE" => $"credential OPAQUE {Convert.ToHexString(Vectors.FromHexadecimal(credential.GetProperty("bytes").GetString()!))}",
+            var name => $"credential {name}",
         };
     }
 
@@ -281,13 +324,7 @@ internal static class ConversationPlayer
 
         if (expected.TryGetProperty("procedureId", out var procedureId))
         {
-            var presented = announced.ValueKind == JsonValueKind.Object
-                ? announced.GetProperty("scheme").GetString() switch
-                {
-                    "JWT" => $" credential JWT {announced.GetProperty("token").GetString()}",
-                    var scheme => $" credential {scheme}",
-                }
-                : "";
+            var presented = announced.ValueKind == JsonValueKind.Object ? $" {PresentedOf(announced)}" : "";
 
             return $"{kind} {callId} flags {expected.GetProperty("flags").GetInt32()} {expected.GetProperty("serviceId").GetInt32()}/{procedureId.GetInt32()} {hexadecimal}"
                 + presented
@@ -649,7 +686,7 @@ internal static class ConversationPlayer
                 _ports[name] = port;
             }
 
-            var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+            var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock, Scheduler = scheduler });
             var drawn = new List<string>();
 
             void Drawn(string connectionHandle)
