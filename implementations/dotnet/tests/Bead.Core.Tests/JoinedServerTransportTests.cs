@@ -65,12 +65,30 @@ public sealed class JoinedServerTransportTests
         {
             told.Add($"message {message.Bytes.Span[0]} {connectionHandle}");
         };
+
+        // and one that throws on the first message alone, reported with its connection
+        var isThrown = false;
+
+        joined.Message += (_, _) =>
+        {
+            if (!isThrown)
+            {
+                isThrown = true;
+
+                throw new InvalidOperationException("a message listener that throws");
+            }
+        };
         joined.Listen += (isHeld, connectionHandle) =>
         {
             told.Add($"listen {isHeld} {connectionHandle}");
         };
+
+        // * a refusal is told whole, every field as its transport gave it
+        TransportServerRefusal? forwarded = null;
+
         joined.Refusal += (refused) =>
         {
+            forwarded = refused;
             told.Add($"refusal {refused.Reason}");
         };
         joined.Close += (isClean, connectionHandle) =>
@@ -103,6 +121,7 @@ public sealed class JoinedServerTransportTests
                 $"error a listener of {drawn} throws {drawn}",
                 $"after {drawn}",
                 $"message 1 {drawn}",
+                $"error a message listener that throws {drawn}",
                 $"close True {drawn}",
                 $"connection {Socket}",
                 $"error a listener of {Socket} throws {Socket}",
@@ -114,6 +133,7 @@ public sealed class JoinedServerTransportTests
                 $"close False {Socket}",
             ],
             told);
+        Assert.Equal(refusal, forwarded);
     }
 
     [Fact]
@@ -122,7 +142,10 @@ public sealed class JoinedServerTransportTests
         var scheduler = new SerialScheduler();
         await using var memory = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
         var paired = new PairedTransport(scheduler) { IsSecured = false, IsCarrying = true, IsBothWays = false };
-        await using var joined = new JoinedServerTransport([memory, paired]);
+
+        // a transport that says nothing of a flag: none carried, none secure, two-way
+        var silent = new SilentTransport();
+        await using var joined = new JoinedServerTransport([memory, paired, silent]);
         await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
         var heard = new List<string>();
 
@@ -138,6 +161,7 @@ public sealed class JoinedServerTransportTests
 
         Assert.Equal((true, false, true), (joined.IsSecure(drawn), joined.CarriesCredential(drawn), joined.IsTwoWay(drawn)));
         Assert.Equal((false, true, false), (joined.IsSecure(Socket), joined.CarriesCredential(Socket), joined.IsTwoWay(Socket)));
+        Assert.Equal((false, false, true), (joined.IsSecure(SilentTransport.Handle), joined.CarriesCredential(SilentTransport.Handle), joined.IsTwoWay(SilentTransport.Handle)));
 
         // a handle none of them drew is none of theirs, nor one no handle's form holds: neither
         // secure, nor carrying, nor two-way, and closes nothing
@@ -162,6 +186,7 @@ public sealed class JoinedServerTransportTests
 
         Assert.Equal((ReadyState.Closed, 0), (client.ReadyState, memory.ConnectionHandles.Count));
         Assert.Equal(["send 02", $"close {Socket}"], paired.Calls);
+        Assert.Empty(silent.Calls);
     }
 
     [Fact]
@@ -191,12 +216,18 @@ public sealed class JoinedServerTransportTests
         {
             return new JoinedServerTransport([]);
         });
-        await using var elsewhere = new MemoryTransportServer(new MemoryTransportServerOptions { Clock = new SteppingClock(DateTimeOffset.UnixEpoch) });
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var elsewhere = new MemoryTransportServer(new MemoryTransportServerOptions { Clock = clock });
 
         Assert.Throws<ArgumentException>(() =>
         {
             return new JoinedServerTransport([paired, elsewhere]);
         });
+
+        // * one clock is the join's
+        await using var together = new JoinedServerTransport([elsewhere, new PairedTransport(new SerialScheduler()) { Clock = clock }]);
+
+        Assert.Same(clock, together.Clock);
     }
 
     [Fact]
@@ -242,6 +273,9 @@ public sealed class JoinedServerTransportTests
         Assert.Equal((ReadyState.Closed, ReadyState.Closed, ReadyState.Closed), (memory.ReadyState, first.ReadyState, second.ReadyState));
         Assert.Equal(["shutdown"], paired.Calls);
         Assert.Equal(["shutdown"], uncounted.Calls);
+
+        // what each counts once stopped: none of the memory's left, the paired one's as it says
+        Assert.Equal(new Dictionary<string, long> { ["connections"] = 1, ["largestAddressConnections"] = 1 }, joined.Gauges().Counts);
 
         // one that fails to stop fails the join's, once every other settled
         var failing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -295,17 +329,41 @@ public sealed class JoinedServerTransportTests
         await using var byMemory = new ServiceLink.LinkedClient(new RouterClient(inMemory));
         await using var bySocket = new ServiceLink.LinkedClient(new RouterClient(paired.Client));
 
-        // * offered once, on the one server: each transport's client reaches it
+        var callers = new List<string>();
+
+        // * offered once, on the one server: each transport's client reaches it, both at once
         InteropHandlers.Offer(server);
+        server.Services.Debug += (_, step) =>
+        {
+            if (step.Direction == DebugDirection.Rx && step.ConnectionHandle is { } connectionHandle)
+            {
+                lock (callers)
+                {
+                    callers.Add(connectionHandle);
+                }
+            }
+        };
         await memory.Start();
         await inMemory.Connect(new MemoryConnectOptions { Server = memory }, Cancelled);
         paired.Open();
 
-        var fromMemory = await new InteropClient(byMemory).Echo(JsonOf("from memory"))().WaitAsync(Patience, Cancelled);
-        var fromSocket = await new InteropClient(bySocket).Echo(JsonOf("from a socket"))().WaitAsync(Patience, Cancelled);
+        var echoed = await Task.WhenAll(
+            new InteropClient(byMemory).Echo(JsonOf("from memory"))(),
+            new InteropClient(bySocket).Echo(JsonOf("from a socket"))()).WaitAsync(Patience, Cancelled);
 
-        Assert.Equal(("from memory", "from a socket"), (fromMemory.GetString(), fromSocket.GetString()));
+        Assert.Equal(["from memory", "from a socket"], echoed.Select((value) =>
+        {
+            return value.GetString();
+        }));
+
+        lock (callers)
+        {
+            Assert.Equal(["type=MEMORY;ip=local;ordinal=1", Socket], callers.Order(StringComparer.Ordinal));
+        }
+
         Assert.Same(joined, server.Transport);
+        Assert.Same(joined.Clock, server.Router.Clock);
+        Assert.Equal(HealthStatus.Pass, (await server.Health()).Status);
 
         var gauges = await server.Gauges();
 
@@ -352,13 +410,7 @@ public sealed class JoinedServerTransportTests
 
         public Func<Task>? Stopping { get; init; }
 
-        public TimeProvider Clock
-        {
-            get
-            {
-                return TimeProvider.System;
-            }
-        }
+        public TimeProvider Clock { get; init; } = TimeProvider.System;
 
         public bool IsSecured { get; init; } = true;
 
@@ -460,6 +512,85 @@ public sealed class JoinedServerTransportTests
             {
                 Deliver(new TransportMessage(bytes, false));
             });
+        }
+    }
+
+    // a transport of the tests' own that says nothing of a connection's flags, each the default its
+    // interface gives, and records each call it is given
+    private sealed class SilentTransport : IServerTransport
+    {
+        public const string Handle = "type=WORKER;ip=local;ordinal=1";
+
+        public event Action<string>? Connection
+        {
+            add
+            {
+            }
+
+            remove
+            {
+            }
+        }
+
+        public event Action<TransportMessage, string>? Message
+        {
+            add
+            {
+            }
+
+            remove
+            {
+            }
+        }
+
+        public event Action<bool, string>? Close
+        {
+            add
+            {
+            }
+
+            remove
+            {
+            }
+        }
+
+        public string? Type
+        {
+            get
+            {
+                return "WORKER";
+            }
+        }
+
+        public TimeProvider Clock
+        {
+            get
+            {
+                return TimeProvider.System;
+            }
+        }
+
+        public List<string> Calls { get; } = [];
+
+        public Task<bool> CloseConnection(string connectionHandle)
+        {
+            Calls.Add($"close {connectionHandle}");
+
+            return Task.FromResult(true);
+        }
+
+        public Task Shutdown()
+        {
+            Calls.Add("shutdown");
+
+            return Task.CompletedTask;
+        }
+
+        public Task Send(TransportMessage message, string connectionHandle)
+        {
+            Calls.Add($"send {connectionHandle}");
+
+            return Task.CompletedTask;
         }
     }
 

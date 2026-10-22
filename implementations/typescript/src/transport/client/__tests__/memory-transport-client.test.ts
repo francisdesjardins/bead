@@ -1,4 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { createRouterClient } from '../../../router/client/router-client';
+import { createRouterServer } from '../../../router/server/router-server';
+import { CredentialScheme } from '../../../router/shared/constants';
+import { PAYLOAD_CODECS } from '../../../router/shared/payloads';
+import { createServiceManager } from '../../../router/shared/service-manager';
+import type { IProcedure } from '../../../router/shared/types';
 import { createMemoryTransportServer } from '../../server/memory-transport-server';
 import type { MemoryTransportServer } from '../../server/types';
 import { createTestClock } from '../../shared/__tests__/fixtures';
@@ -20,6 +26,16 @@ import type {
 import { createMemoryTransportClient } from '../memory-transport-client';
 import { dispose } from '../transport-client';
 import type { ITransportClientInternal } from '../types';
+
+// constants
+
+/** A procedure that answers the name of its call's session. */
+const whoami: IProcedure = {
+  procedureId: 1,
+  procedureName: 'whoami',
+  serviceId: 2,
+  serviceRevision: 1,
+};
 
 // helpers
 
@@ -126,6 +142,7 @@ test.describe('createMemoryTransportClient', () => {
     const { atClient, atServer, client, connectionHandle, server } = pair;
     const first = new Uint8Array([1, 2, 3]);
     const second = new Uint8Array([4, 5]);
+    const answer = new Uint8Array([8]);
 
     // a view on a larger buffer crosses as its own bytes alone
     const pooled = new Uint8Array([9, 6, 7, 9]).subarray(1, 3);
@@ -134,14 +151,16 @@ test.describe('createMemoryTransportClient', () => {
       client.send({ data: first }),
       client.send({ data: second.buffer }),
       client.send({ data: pooled }),
-      server.send({ data: new Uint8Array([8]) }, connectionHandle),
+      server.send({ data: answer }, connectionHandle),
     ];
 
-    // nothing within the send; the sender's buffers its own once sent
+    // nothing within the send; the sender's buffers its own once sent, both ways
     expect([atServer, atClient]).toEqual([[], []]);
 
-    first.fill(0);
-    second.fill(0);
+    for (const bytes of [first, second, pooled, answer]) {
+      bytes.fill(0);
+    }
+
     await Promise.all(sends);
     await turn();
 
@@ -188,23 +207,53 @@ test.describe('createMemoryTransportClient', () => {
     );
 
     await client.send({ credential: 'Bearer token', data: new Uint8Array([1]) });
+    await client.send({ data: new Uint8Array([2]) });
     // an empty field carries none
-    await client.send({ credential: '', data: new Uint8Array([2]) });
+    await client.send({ credential: '', data: new Uint8Array([3]) });
     await expect(
-      client.send({ credential: 'Bearer token ', data: new Uint8Array([3]) })
+      client.send({ credential: 'Bearer token ', data: new Uint8Array([4]) })
     ).rejects.toThrow('a credential holds visible ASCII, spaces and tabs alone');
-    await server.send({ credential: 'Bearer back', data: new Uint8Array([4]) }, connectionHandle);
+    await server.send({ credential: 'Bearer back', data: new Uint8Array([5]) }, connectionHandle);
     await turn();
 
     expect(
       atServer.map(([, message]) => {
         return (message as { credential: unknown }).credential;
       })
-    ).toEqual(['Bearer token', undefined]);
+    ).toEqual(['Bearer token', undefined, undefined]);
     expect(atClient).toEqual([
-      ['message', { address: undefined, bytes: [4], credential: undefined, port: undefined }],
+      ['message', { address: undefined, bytes: [5], credential: undefined, port: undefined }],
     ]);
     expect(client.isOpen()).toBe(true);
+
+    // * through both routers: a call presenting ELSEWHERE stands for what came beside it
+    const carried = 'Interop sub=ada';
+    await using transport = createMemoryTransportServer();
+    await using caller = createMemoryTransportClient({ server: transport });
+    using router = createRouterServer(transport, {
+      credentials: {
+        verify: (given) => {
+          return given === carried ? { data: 'ada', id: 'ada' } : undefined;
+        },
+      },
+    });
+    using routerClient = createRouterClient(caller, {
+      credential: { carried, scheme: CredentialScheme.ELSEWHERE },
+    });
+
+    createServiceManager(router).getRequestResolver(whoami, { serializer: PAYLOAD_CODECS.text })(
+      ({ session }, response) => {
+        return response(String(session?.data));
+      }
+    );
+    await transport.start();
+    await caller.connect({});
+
+    await expect(
+      createServiceManager(routerClient).getRequest(whoami, { serializer: PAYLOAD_CODECS.text })(
+        ''
+      )()
+    ).resolves.toBe('ada');
   });
 
   // spec 15.13
@@ -594,11 +643,18 @@ test.describe('createMemoryTransportClient', () => {
       cancelling.abort();
     });
 
-    await expect(client.reconnect({ signal: cancelling.signal })).rejects.toBeInstanceOf(
-      CancelError
-    );
+    const cancelled = await client
+      .reconnect({ signal: cancelling.signal })
+      .catch((error: unknown) => {
+        return error;
+      });
+
     await turn();
 
+    // * worded as the C# side words it, the reason its signal was aborted with its cause
+    expect(cancelled).toBeInstanceOf(CancelError);
+    expect(cancelled).toHaveProperty('message', 'the reconnection was cancelled');
+    expect((cancelled as CancelError).cause).toBe(cancelling.signal.reason);
     expect([client.isClosed(), closedAtClient, closedAtServer, server.clients]).toEqual([
       true,
       [],

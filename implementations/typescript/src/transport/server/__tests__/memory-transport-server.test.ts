@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { createRouterClient } from '../../../router/client/router-client';
 import { createRouterServer } from '../../../router/server/router-server';
-import { CredentialScheme, ProtocolCode } from '../../../router/shared/constants';
+import { CredentialScheme, EnvelopeKind, ProtocolCode } from '../../../router/shared/constants';
 import { PAYLOAD_CODECS } from '../../../router/shared/payloads';
 import { createServiceManager } from '../../../router/shared/service-manager';
 import type { IAccessRefusal, IProcedure } from '../../../router/shared/types';
@@ -136,6 +136,23 @@ test.describe('createMemoryTransportServer', () => {
       })
     ).toEqual(['type=MEMORY;ip=local;ordinal=2', 'type=MEMORY;ip=local;ordinal=3']);
     expect(server.type).toBe('MEMORY');
+
+    // so is one reconnected, and one after a stop and a start, which reset no rank
+    await second.reconnect();
+    await server.stop();
+    await turn();
+    await server.start();
+    await first.connect({});
+
+    expect(drawn.slice(3)).toEqual([
+      ['local', undefined, 'type=MEMORY;ip=local;ordinal=4'],
+      ['local', undefined, 'type=MEMORY;ip=local;ordinal=5'],
+    ]);
+    expect(
+      server.clients.map(({ connectionHandle }) => {
+        return connectionHandle;
+      })
+    ).toEqual(['type=MEMORY;ip=local;ordinal=5']);
   });
 
   // spec 15.13
@@ -182,6 +199,32 @@ test.describe('createMemoryTransportServer', () => {
       new ConnectError('the in-memory transport server is closed, not open')
     );
     expect([server.clients, first.isClosed()]).toEqual([[], true]);
+
+    // * a connect its server took as it listened, its draw still queued as a stop begins: judged
+    // in the turn it would be drawn in, refused, and no connection drawn
+    const drawn: string[] = [];
+
+    server.on('connection', (...[, , connectionHandle]) => {
+      drawn.push(connectionHandle);
+    });
+    await server.start();
+
+    const queued = first.connect({});
+    const stopping = server.stop();
+
+    await expect(queued).rejects.toThrow(
+      new ConnectError('the in-memory transport server is closing, not open')
+    );
+    await stopping;
+    await turn();
+
+    expect([drawn, server.clients, server.isClosed(), first.isClosed()]).toEqual([
+      [],
+      [],
+      true,
+      true,
+    ]);
+    expect(server.gauges().counts).toMatchObject({ connections: 0 });
   });
 
   // spec 15.13
@@ -194,9 +237,13 @@ test.describe('createMemoryTransportServer', () => {
     using router = createRouterServer(server, { limits });
     using client = createRouterClient(caller, { limits });
     let crossed = 0;
+    const kinds: Record<string, number[]> = { rx: [], tx: [] };
 
     server.on('message', () => {
       crossed += 1;
+    });
+    client.on('debug', ({ direction, header }) => {
+      kinds[direction]?.push(header.kind);
     });
     createServiceManager(router).getRequestResolver(echo, { serializer: PAYLOAD_CODECS.text })(
       (request, response) => {
@@ -213,6 +260,15 @@ test.describe('createMemoryTransportServer', () => {
     expect(echoed).toBe(payload);
     // its request's chunks, more than 64 of them, and the credit its result's chunks were granted
     expect(crossed).toBeGreaterThan(64);
+    // * chunks each way, each crossing as its other end credits it
+    for (const direction of ['tx', 'rx']) {
+      expect(kinds[direction]).toContain(EnvelopeKind.CREDIT);
+      expect(
+        kinds[direction]?.filter((kind) => {
+          return kind === EnvelopeKind.CHUNK;
+        }).length
+      ).toBeGreaterThan(2);
+    }
     expect(router.gauges().counts).toMatchObject({ receivingTransfers: 0, sendingTransfers: 0 });
   });
 
@@ -260,6 +316,41 @@ test.describe('createMemoryTransportServer', () => {
     await turn();
 
     expect([heard, told, closed, server.clients]).toEqual([[[1]], [true], [true], []]);
+
+    // * ended twice, then a send its client made before it heard so, queued behind both ends:
+    // neither heard nor ended again, its client told unclean
+    await using client = createMemoryTransportClient({ server });
+    const closedAtClient: unknown[] = [];
+
+    client.on('close', (...params) => {
+      closedAtClient.push(params);
+    });
+    await client.connect({});
+    await client.send({ data: new Uint8Array([3]) });
+    await turn();
+
+    const [{ connectionHandle: held } = { connectionHandle: undefined }] = server.clients;
+
+    if (held === undefined) {
+      throw new Error('the server holds no connection');
+    }
+
+    const ending = server.close(held);
+    const again = server.close(held);
+
+    await client.send({ data: new Uint8Array([4]) });
+
+    expect(await Promise.all([ending, again])).toEqual([true, true]);
+
+    await turn();
+
+    expect([heard, closed, closedAtClient, client.isClosed(), server.clients]).toEqual([
+      [[1], [3]],
+      [true, true],
+      [[false, false]],
+      true,
+      [],
+    ]);
   });
 
   // spec 15.13

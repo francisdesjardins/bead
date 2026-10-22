@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -95,10 +96,14 @@ public sealed class MemoryTransportServerTests
             Assert.StartsWith("an in-memory connect's address", refused.Message, StringComparison.Ordinal);
         }
 
-        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        foreach (var port in new[] { -1, 65_536 })
         {
-            return named.Connect(new MemoryConnectOptions { Server = server, Port = 65_536 }, Cancelled);
-        });
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            {
+                return named.Connect(new MemoryConnectOptions { Server = server, Port = port }, Cancelled);
+            });
+        }
+
         Assert.Equal(ReadyState.Uninitialized, named.ReadyState);
         Assert.Equal(6, drawn.Count);
     }
@@ -106,8 +111,10 @@ public sealed class MemoryTransportServerTests
     [Fact]
     public async Task Hands_its_router_the_address_and_the_port_its_client_gave_as_it_connected()
     {
+        // a clock that never moves: what the server reads of it is the instant it starts at
+        var instant = new DateTimeOffset(2026, 10, 21, 0, 0, 0, TimeSpan.Zero);
         var scheduler = new SerialScheduler();
-        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Clock = new FakeTimeProvider(instant), Scheduler = scheduler });
         await using var given = new MemoryTransportClient();
         await using var none = new MemoryTransportClient();
         var heard = new List<(string? Address, int? Port, string ConnectionHandle)>();
@@ -116,7 +123,7 @@ public sealed class MemoryTransportServerTests
         {
             heard.Add((message.Address, message.Port, connectionHandle));
         };
-        await server.Start();
+        Assert.Equal(new TransportServerAddress("local", 0), await server.Start());
         await given.Connect(new MemoryConnectOptions { Server = server, Address = "203.0.113.7", Port = 50_123 }, Cancelled);
         await none.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
         await given.Send(new TransportMessage(new byte[] { 1 }, false));
@@ -126,12 +133,19 @@ public sealed class MemoryTransportServerTests
         Assert.Equal(
             [("203.0.113.7", 50_123, "type=MEMORY;ip=203.0.113.7;ordinal=1"), ("local", null, "type=MEMORY;ip=local;ordinal=2")],
             heard);
+        Assert.Equal(
+            [
+                new TransportServerClient("203.0.113.7", "type=MEMORY;ip=203.0.113.7;ordinal=1", instant, 50_123, TransportTypes.Memory),
+                new TransportServerClient("local", "type=MEMORY;ip=local;ordinal=2", instant, 0, TransportTypes.Memory),
+            ],
+            server.Clients);
 
-        // * and its router tells an access it refuses by them (spec 13.12)
+        // * and its router tells an access it refuses by them (spec 13.12): one with no verifier
+        // refuses the ELSEWHERE it was handed, and tells who asked
         var transport = new MemoryTransportServer();
         await using var built = new Server<string>(transport);
         await using var caller = new MemoryTransportClient();
-        await using var linked = new ServiceLink.LinkedClient(new RouterClient(caller));
+        await using var linked = new ServiceLink.LinkedClient(new RouterClient(caller, new RouterClientOptions { Credential = Credential.Elsewhere("Bearer token") }));
         var refused = new TaskCompletionSource<AccessRefusal>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         InteropHandlers.Offer(built);
@@ -142,16 +156,16 @@ public sealed class MemoryTransportServerTests
         await transport.Start();
         await caller.Connect(new MemoryConnectOptions { Server = transport, Address = "198.51.100.4", Port = 61_000 }, Cancelled);
 
-        await Assert.ThrowsAsync<FailureException>(() =>
+        var failed = await Assert.ThrowsAsync<FailureException>(() =>
         {
-            return new InteropClient(linked).Denied(JsonOf<object?>(null))().WaitAsync(Patience, Cancelled);
+            return new InteropClient(linked).Echo(JsonOf("hi"))().WaitAsync(Patience, Cancelled);
         });
-
         var refusal = await refused.Task.WaitAsync(Patience, Cancelled);
 
+        Assert.Equal((ushort)ProtocolCode.CredentialUnsupported, failed.Code);
         Assert.Equal(
-            ("198.51.100.4", (int?)61_000, "type=MEMORY;ip=198.51.100.4;ordinal=1"),
-            (refusal.Address, refusal.Port, refusal.ConnectionHandle));
+            ("198.51.100.4", (int?)61_000, "type=MEMORY;ip=198.51.100.4;ordinal=1", ProtocolCode.CredentialUnsupported),
+            (refusal.Address, refusal.Port, refusal.ConnectionHandle, refusal.Code));
     }
 
     [Fact]
@@ -206,7 +220,40 @@ public sealed class MemoryTransportServerTests
         Assert.Equal("the in-memory transport server is closed, not open", late.Message);
         Assert.Equal(ReadyState.Closed, first.ReadyState);
 
-        // a connect its server holds as a stop begins is refused all the same
+        // * a connect its server took as it listened, its draw still queued as a stop begins: judged
+        // in the turn it would be drawn in, refused, and no connection drawn
+        var drawn = new List<string>();
+
+        server.Connection += drawn.Add;
+        await server.Start();
+
+        using (var gate = new ManualResetEventSlim())
+        {
+            scheduler.Post(() =>
+            {
+                gate.Wait(Patience);
+            });
+
+            var queued = first.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            var stopping = server.Stop();
+
+            gate.Set();
+
+            var closing = await Assert.ThrowsAsync<ConnectException>(() =>
+            {
+                return queued.WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal("the in-memory transport server is closing, not open", closing.Message);
+            await stopping.WaitAsync(Patience, Cancelled);
+        }
+
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Empty(drawn);
+        Assert.Equal((ReadyState.Closed, ReadyState.Closed), (server.ReadyState, first.ReadyState));
+        Assert.Equal(0, server.Gauges().Counts["connections"]);
+
+        // and one its server holds before it draws it, until a stop ended: refused all the same
         var holding = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var held = new MemoryTransportServer(new MemoryTransportServerOptions
@@ -218,6 +265,7 @@ public sealed class MemoryTransportServerTests
             },
         });
 
+        held.Connection += drawn.Add;
         await held.Start();
 
         var connecting = second.Connect(new MemoryConnectOptions { Server = held }, Cancelled);
@@ -226,11 +274,15 @@ public sealed class MemoryTransportServerTests
         await held.Stop();
         holding.TrySetResult();
 
-        await Assert.ThrowsAsync<ConnectException>(() =>
+        var stopped = await Assert.ThrowsAsync<ConnectException>(() =>
         {
             return connecting.WaitAsync(Patience, Cancelled);
         });
-        Assert.Empty(held.ConnectionHandles);
+
+        Assert.Equal("the in-memory transport server is closed, not open", stopped.Message);
+        Assert.Empty(drawn);
+        Assert.Equal(ReadyState.Closed, second.ReadyState);
+        Assert.Equal(0, held.Gauges().Counts["connections"]);
     }
 
     [Fact]
@@ -396,5 +448,10 @@ public sealed class MemoryTransportServerTests
             }) > 2);
             Assert.Contains(EnvelopeKind.Credit, received);
         }
+
+        // and no transfer left held at its server, either way
+        var counts = (await server.Router.Gauges().WaitAsync(Patience, Cancelled)).Counts;
+
+        Assert.Equal((0L, 0L), (counts["receivingTransfers"], counts["sendingTransfers"]));
     }
 }

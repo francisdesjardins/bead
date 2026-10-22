@@ -24,6 +24,12 @@ import { noop } from '../../shared/noop';
 import * as errors from '../../shared/errors';
 import * as readyState from '../../shared/ready-state';
 
+/** What a reconnection its signal ended rejects with, as both sides word it. */
+const RECONNECTION_CANCELLED = Object.freeze({
+  message: 'the reconnection was cancelled',
+  name: 'CancelError',
+});
+
 /** The drop only an implementation reaches, as the base and the transport use it. */
 const drop = (client: ITransportClient<object, never>): void => {
   (client as ITransportClientInternal<object, never>)[dispose]();
@@ -353,7 +359,7 @@ test.describe('createTransportClient #reconnect', () => {
     );
 
     controller.abort();
-    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
   });
 
   test('passes on what "tap" throws, ending CLOSED, with no attempt after it and no wait left armed', async () => {
@@ -564,8 +570,8 @@ test.describe('createTransportClient #reconnect', () => {
       },
     });
 
-    await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
-    await expect(reconnecting).rejects.toHaveProperty('message', '');
+    // * worded as the C# side words it, its signal's reason kept as its cause
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
     await expect(reconnecting).rejects.toHaveProperty('cause', 'why');
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(calls).toEqual(['connect:1', 'connect:1']);
@@ -577,7 +583,7 @@ test.describe('createTransportClient #reconnect', () => {
     await opened.client.connect(target);
     await expect(
       opened.client.reconnect({ delay: 0, signal: AbortSignal.abort() })
-    ).rejects.toBeInstanceOf(CancelError);
+    ).rejects.toMatchObject(RECONNECTION_CANCELLED);
     expect(opened.client.isOpen()).toBe(true);
     expect(opened.calls).toEqual(['connect:1']);
 
@@ -592,7 +598,7 @@ test.describe('createTransportClient #reconnect', () => {
           controller.abort();
         },
       })
-    ).rejects.toBeInstanceOf(CancelError);
+    ).rejects.toMatchObject(RECONNECTION_CANCELLED);
     expect(failing.calls).toEqual(['connect:1', 'connect:1']);
   });
   test('aborts the attempt in flight when the signal aborts', async () => {
@@ -609,6 +615,7 @@ test.describe('createTransportClient #reconnect', () => {
     });
     controller.abort('why');
 
+    await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
     await expect(reconnecting).rejects.toHaveProperty('cause', 'why');
     expect(calls).toEqual(['connect:1', 'connect:1']);
     expect(client.isClosed()).toBe(true);
@@ -636,8 +643,8 @@ test.describe('createTransportClient #reconnect', () => {
       controller.abort();
     };
 
-    await expect(client.reconnect({ delay: 0, signal: controller.signal })).rejects.toBeInstanceOf(
-      CancelError
+    await expect(client.reconnect({ delay: 0, signal: controller.signal })).rejects.toMatchObject(
+      RECONNECTION_CANCELLED
     );
 
     expect(calls).toEqual(['connect:1', 'dispose', 'connect:1', 'disconnect']);

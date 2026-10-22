@@ -43,11 +43,13 @@ const turn = (): Promise<void> => {
 const createFake = (
   type: string,
   {
+    anomalies = [],
     counts = {},
     ceilings = {},
     flags,
     stopping = Promise.resolve(),
   }: {
+    anomalies?: string[];
     ceilings?: Record<string, number>;
     counts?: Record<string, number>;
     flags: { carriesCredential?: boolean; isSecure?: boolean; isTwoWay?: boolean };
@@ -93,7 +95,7 @@ const createFake = (
       return Promise.resolve(true);
     },
     gauges: () => {
-      return gaugesOf({ ceilings, connectionHandles: handles, counts });
+      return gaugesOf({ anomalies, ceilings, connectionHandles: handles, counts });
     },
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: emitter.off,
@@ -169,7 +171,13 @@ test.describe('joinTransports', () => {
       });
     }
 
-    // what a listener throws is reported with its connection, and the others hear all the same
+    // * what a listener throws is reported with its connection, and the next is told all the same
+    joined.on('connection', (...[, , connectionHandle]) => {
+      throw new Error(`a listener of ${connectionHandle} throws`);
+    });
+    joined.on('connection', (...[, , connectionHandle]) => {
+      heard.push(['after', connectionHandle]);
+    });
     joined.once('message', () => {
       throw thrown;
     });
@@ -188,7 +196,7 @@ test.describe('joinTransports', () => {
       .poll(() => {
         return heard.length;
       })
-      .toBe(5);
+      .toBe(9);
     http.emitter.emit('listen', true, 'type=HTTP;ip=127.0.0.1;ordinal=1');
     http.emitter.emit('refusal', {
       address: '127.0.0.1',
@@ -198,13 +206,15 @@ test.describe('joinTransports', () => {
       reason: 'busy',
       status: 503,
     });
+    // and what a transport reports of its own
+    http.emitter.emit('error', new Error('a socket broke'), 'type=HTTP;ip=127.0.0.1;ordinal=1');
     await byMemory.disconnect();
     await byWorker.disconnect();
     await expect
       .poll(() => {
         return heard.length;
       })
-      .toBe(9);
+      .toBe(14);
 
     const memoryHandle = 'type=MEMORY;ip=local;ordinal=1';
     const workerHandle = 'type=WORKER;ip=local;ordinal=1';
@@ -216,7 +226,11 @@ test.describe('joinTransports', () => {
       })
     ).toEqual([
       ['connection', memoryHandle],
+      ['error', `a listener of ${memoryHandle} throws`, memoryHandle],
+      ['after', memoryHandle],
       ['connection', workerHandle],
+      ['error', `a listener of ${workerHandle} throws`, workerHandle],
+      ['after', workerHandle],
       ['message', [1], memoryHandle],
       ['error', 'a listener that throws', memoryHandle],
       ['message', [2], workerHandle],
@@ -232,6 +246,7 @@ test.describe('joinTransports', () => {
           status: 503,
         },
       ],
+      ['error', 'a socket broke', 'type=HTTP;ip=127.0.0.1;ordinal=1'],
       ['close', true, memoryHandle],
       ['close', true, workerHandle],
     ]);
@@ -242,7 +257,7 @@ test.describe('joinTransports', () => {
   // spec 15.14
   test('asks each connection’s flags of the transport that drew it, and sends and closes through it', async () => {
     const webSocket = createFake('WS', {
-      flags: { carriesCredential: false, isSecure: false, isTwoWay: true },
+      flags: { carriesCredential: true, isSecure: false, isTwoWay: true },
     });
     const http = createFake('HTTP', {
       flags: { carriesCredential: false, isSecure: true, isTwoWay: false },
@@ -280,7 +295,7 @@ test.describe('joinTransports', () => {
         return flagsOf(connectionHandle as TransportServerConnectionHandle);
       })
     ).toEqual([
-      [false, false, true],
+      [true, false, true],
       [false, true, false],
       [false, false, true],
       [false, true, true],
@@ -349,6 +364,16 @@ test.describe('joinTransports', () => {
     ]);
 
     expect(joined.clock).toBe(clock);
+
+    // * a join names no type of its own, so no join takes it, past the types
+    expect('type' in joined).toBe(false);
+    expect(() => {
+      return joinTransports([joined as never, createFake('HTTP', { flags: {} }).transport]);
+    }).toThrow(
+      new ProgrammerError(
+        'a join takes transports that name the type of their handles, never a join'
+      )
+    );
   });
 
   // spec 15.14
@@ -356,6 +381,7 @@ test.describe('joinTransports', () => {
     using worker = createWorker();
     const memory = createMemoryTransportServer();
     const http = createFake('HTTP', {
+      anomalies: ['a socket held twice'],
       ceilings: { connections: 64, exchanges: 128 },
       counts: { connections: 0, exchanges: 2 },
       flags: {},
@@ -385,7 +411,12 @@ test.describe('joinTransports', () => {
 
     const gauges = joined.gauges();
 
-    expect([gauges.counts, gauges.ceilings, [...gauges.connectionHandles].toSorted()]).toEqual([
+    expect([
+      gauges.counts,
+      gauges.ceilings,
+      [...gauges.connectionHandles].toSorted(),
+      gauges.anomalies,
+    ]).toEqual([
       { connections: 4, exchanges: 2 },
       { connections: 64, exchanges: 128 },
       [
@@ -394,6 +425,7 @@ test.describe('joinTransports', () => {
         'type=WORKER;ip=local;ordinal=1',
         webSocketHandle,
       ],
+      ['a socket held twice'],
     ]);
 
     uncountedEmitter.emit('close', false, webSocketHandle);
@@ -448,7 +480,8 @@ test.describe('joinTransports', () => {
     const clock = createTestClock();
     using worker = createWorker(clock);
     const memory = createMemoryTransportServer({ clock });
-    await using server = createServer({ transport: joinTransports([memory, worker.server]) });
+    const joined = joinTransports([memory, worker.server]);
+    await using server = createServer({ transport: joined });
     await using byMemory = createMemoryTransportClient({ clock, server: memory });
     await using byWorker = createWorkerTransportClient({ clock, worker: worker.worker });
     using memoryRouter = createRouterClient(byMemory);
@@ -482,5 +515,11 @@ test.describe('joinTransports', () => {
       'type=WORKER;ip=local;ordinal=1',
     ]);
     expect([server.router.clock, server.health().status]).toEqual([clock, 'pass']);
+    expect(server.transport).toBe(joined);
+
+    // both transports' connections counted as one transport's, and none of the router's left out
+    const { router, transport } = server.gauges();
+
+    expect([transport.counts['connections'], router.orphans]).toEqual([2, 0]);
   });
 });
