@@ -53,7 +53,8 @@ the global `WebSocket`, whose `error` cannot be told from a drop, tells its clos
 15.3). The `closeTimeout` of each end, 5 seconds, `CLOSE_TIMEOUT`, bounds each close it begins, and
 `ws` is given it; over the global `WebSocket`, the client's close is its platform's to bound. A WebSocket server judges a request at its address in the order of spec
 15.2: 400 as HTTP answers it to a field holding a control character but a tab or an octet past
-ASCII, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
+ASCII, to a target holding an octet other than visible ASCII or a path whose percent-decoding holds
+NUL, to a `Host` missing, repeated or no host, or to a target in absolute-form that names none;
 403 to a host it does not take, whatever the request; 405 to a method but `GET` or `HEAD`; 426 to a
 request that asks no WebSocket, a `HEAD` and an `HTTP/1.0` request among them, and to a version but
 13, the one it speaks; 400 to a malformed upgrade, two `Authorization` lines among it; 403 to an
@@ -1000,7 +1001,11 @@ unmarked, before anything else of it is read (RFC 9112 §3.2); over HTTP/2, its 
 `PROTOCOL_ERROR`, nothing written (RFC 9113 §8.1.1). An empty `Host` is a host, and so is a name of
 invalid punycode. So is a request answered whose field holds a control character but a tab, or an
 octet past ASCII: RFC 9110 §5.5 calls the first invalid and keeps the second out of every field
-defined since, and Node's parser answers the first itself. So is one whose field value starts or
+defined since, and Node's parser answers the first itself. So is one whose target holds an octet
+other than visible ASCII, in its path or its query, or whose path's percent-decoding holds NUL,
+`%00`: a target holds a URI's characters (RFC 3986 §2); Node's parser answers each such octet
+itself over HTTP/1.1, and nghttp2 resets a control character in `:path`, the transport the rest;
+`%00` in a query, and every other octet percent-encoded, are taken. So is one whose field value starts or
 ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed over HTTP/2; over HTTP/1.1 the
 parser strips it first (RFC 9110 §5.5). Node's HTTP/2 parser drops a field whose value starts or
 ends with a space or a tab, and a control character's, so the request is judged without it; a

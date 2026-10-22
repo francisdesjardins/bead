@@ -158,10 +158,11 @@ first `?`, never normalized, no dot segment removed and nothing percent-decoded 
 segment, `/` alone among them, which is one, or a segment that is `.` or `..`, raw or once
 percent-decoded, matches no route, a `**` of none among them. A literal matches a segment that is
 its text exactly, `*` one segment, and `**` zero or more, as `http.proto` has it, its template's
-last but its verb. A target that holds an octet past US-ASCII, which no URI holds
-([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)), is what HTTP refuses of its own
-(section 10.1, step 1): 400 unmarked over HTTP/1.1, as section 15.12 of `spec.md` answers a field
-value that holds one, before anything else of it is judged.
+last but its verb. A target that holds an octet other than visible ASCII, or a path whose
+percent-decoding holds NUL, is what HTTP refuses of its own (section 10.1, step 1), answered as
+section 15.12 of `spec.md` answers it — 400 unmarked over HTTP/1.1, its stream reset over HTTP/2 —
+before anything else of it is judged; `#` and the other visible characters a URI leaves out are
+characters of its path or its query, matched and decoded as any other.
 
 3.7. A path's verb is what follows the last `:` of its last segment that is not percent-encoded, and
 that segment is matched without it; a path whose last segment holds no such `:` has none. A route

@@ -8,6 +8,7 @@ import {
   HOST_REFUSAL,
   isTakenHost,
   isTakenOrigin,
+  isVisibleTarget,
   ORIGIN_REFUSAL,
   originOf,
   ownAuthorityOf,
@@ -215,8 +216,10 @@ export const toldOfHandshake = (
  * the order of spec 15.2, the first that applies answering; none for an upgrade it takes:
  *
  * 1. what HTTP refuses of its own, a field value holding a control character but a tab or an
- *    octet past ASCII (RFC 9110 §5.5), a `Host` missing, repeated or no host, or a target in
- *    absolute-form that names none or another scheme (RFC 9112 §3.2, §3.2.2), 400 unmarked;
+ *    octet past ASCII (RFC 9110 §5.5), a target holding an octet other than visible ASCII or a
+ *    path whose percent-decoding holds NUL (RFC 3986 §2), a `Host` missing, repeated or no host, or
+ *    a target in absolute-form that names none or another scheme (RFC 9112 §3.2, §3.2.2), 400
+ *    unmarked;
  * 2. a request whose authority — its absolute-form target's, else its `Host` — names a host it
  *    does not take (spec 15.12), or none, whatever else the request holds, 403 `host-refused`;
  * 3. a method but `GET` or `HEAD`, 405 `method-refused`, its `Allow` naming both;
@@ -240,8 +243,8 @@ export const refusalOfHandshake = (
   const { httpVersion, method } = request;
 
   // * before anything else: Node's parser answers a control character itself, so this meets an
-  // octet past ASCII alone
-  if (!hasVisibleFields(request.rawHeaders)) {
+  // octet past ASCII alone, and a NUL percent-encoded in a target's path
+  if (!hasVisibleFields(request.rawHeaders) || !isVisibleTarget(request.url)) {
     return HOST_MALFORMED;
   }
 

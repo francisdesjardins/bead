@@ -208,6 +208,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# HTTP server resets, over HTTP/2, the stream of a request with neither `:authority` nor
   `host`, `PROTOCOL_ERROR`, under any hosts, `*` among them (RFC 9113 §8.3.1), as the TypeScript
   side's does, where it answered 403 `host-refused`.
+- Both HTTP servers, both WebSocket servers and both gateways answer a request whose target holds an
+  octet other than visible ASCII — a control character, HTAB and a bare CR among them, a space, DEL
+  or an octet past US-ASCII — in its path or its query, or whose path's percent-decoding holds NUL,
+  400 unmarked over HTTP/1.1 and its stream reset `PROTOCOL_ERROR` over HTTP/2, before anything else
+  of it is judged, and tell no refusal (spec 15.12, transcoding 3.6, decision 0026): the C# side
+  took a control character, which it upgraded at a WebSocket's address and answered a marked 404 at
+  a path not its own, and the TypeScript side took `%00` in a path, which its gateway bound in a
+  variable. `%00` in a query, and every other octet percent-encoded, stay taken.
+- The C# gateway resets over HTTP/2 the stream of a request whose field or target HTTP refuses of
+  its own, `PROTOCOL_ERROR`, nothing written, as the TypeScript gateway does, where it answered 400.
 - The C# WebSocket server refuses an upgrade whose `Content-Length` is not zeros alone, a line it
   cannot read or two lines among them, 400 `malformed`, as the TypeScript side does.
 - The C# WebSocket server tells a peer that drops without its closing handshake, its TCP

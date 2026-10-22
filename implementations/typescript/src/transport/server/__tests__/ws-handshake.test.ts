@@ -239,6 +239,30 @@ test.describe('refusalOfHandshake', () => {
     expect(answerOf(requestOf([['Origin', 'http://a.example\tb']]))).toEqual(ORIGIN);
   });
 
+  test('refuses first, unmarked, a target holding an octet other than visible ASCII or a path whose percent-decoding holds NUL, whatever else the request holds, over HTTP/2 among it, and takes one percent-encoded', () => {
+    // in its path or its query, in absolute-form; from a host it does not take, under another
+    // method, with no upgrade, over HTTP/2
+    expect(
+      [
+        requestOf([], { url: '/?a\u0001b' }),
+        requestOf([], { url: '/\u007F' }),
+        requestOf([], { url: '/a\tb' }),
+        requestOf([], { url: '/é' }),
+        requestOf([], { url: '/%00' }),
+        requestOf([], { url: 'http://bead.test/a\u0001b' }),
+        requestOf([['Host', 'elsewhere.test']], { url: '/\u0001', without: ['host'] }),
+        requestOf([], { method: 'POST', url: '/\u0001', without: ['upgrade'] }),
+        requestOf([], { httpVersion: '2.0', url: '/\u0001' }),
+      ].map(answerOf)
+    ).toEqual(
+      Array.from({ length: 9 }, () => {
+        return HOST;
+      })
+    );
+    // what a target percent-encodes is no octet of it, NUL in a query among them
+    expect(answerOf(requestOf([], { url: '/?a%01%00' }))).toBe('taken');
+  });
+
   test('refuses a host it does not take before anything else of the request is read', () => {
     const elsewhere = [['Host', 'elsewhere.test']] as const;
 

@@ -287,6 +287,33 @@ public sealed class WebSocketHandshakeTests
     }
 
     [Fact]
+    public void Refuses_first_unmarked_a_target_holding_an_octet_other_than_visible_ASCII_or_a_path_whose_percent_decoding_holds_NUL_whatever_else_the_request_holds_over_HTTP_2_among_it_and_takes_one_percent_encoded()
+    {
+        // in its path or its query, in absolute-form; from a host it does not take, under another
+        // method, with no upgrade, over HTTP/2
+        (string Start, string[] Fields)[] requests =
+        [
+            ("GET /?a\u0001b HTTP/1.1", []),
+            ("GET /\u007f HTTP/1.1", []),
+            ("GET /a\tb HTTP/1.1", []),
+            ("GET /é HTTP/1.1", []),
+            ("GET /%00 HTTP/1.1", []),
+            ("GET http://bead.test/a\u0001b HTTP/1.1", []),
+            ("GET /\u0001 HTTP/1.1", ["Host: elsewhere.test"]),
+            ("POST /\u0001 HTTP/1.1", ["Upgrade"]),
+            ("GET /\u0001 HTTP/2", []),
+        ];
+
+        Assert.All(requests, (request) =>
+        {
+            Assert.Equal((400, (string?)null), AnswerOf(request, Options));
+        });
+
+        // what a target percent-encodes is no octet of it, NUL in a query among them
+        Assert.Equal((101, (string?)null), AnswerOf(("GET /?a%01%00 HTTP/1.1", []), Options));
+    }
+
+    [Fact]
     public void Tells_a_request_s_authority_its_port_included_and_its_Origin_its_lines_joined_by_a_comma_and_a_space_as_the_judgement_reads_them_or_none()
     {
         // an empty Host the wire's cases hold, a request no socket carries dropping an empty field

@@ -1130,6 +1130,71 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_whose_target_or_a_field_holds_an_octet_past_visible_ASCII_PROTOCOL_ERROR_nothing_written()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+
+        // an exchange over HTTP/2 as Kestrel hands it on, its :path its target as it came: a control
+        // character, é, a NUL percent-encoded in its path, a path no route matches among them, and a
+        // field past ASCII, each reset before its path is matched
+        (string Target, string? Field)[] requests =
+        [
+            ("/v1/books/a\u0001b", null),
+            ("/v1/books/é", null),
+            ("/v1/books/a%00b", null),
+            ("/nowhere%00", null),
+            ("/v1/books/2", "café"),
+        ];
+
+        foreach (var (target, field) in requests)
+        {
+            var (status, reset, body) = await Http2Of(gateway, (target, field));
+
+            Assert.Equal((StatusCodes.Status200OK, 0x1, ""), (status, reset, body));
+        }
+
+        // what its target percent-encodes is no octet of it
+        Assert.Equal((StatusCodes.Status200OK, (int?)null, "{\"name\":\"a\\u0001b\",\"title\":\"A tale\"}"), await Http2Of(gateway, ("/v1/books/a%01b", null)));
+    }
+
+    // what the gateway answers an exchange over HTTP/2 of the target and the field given: its status,
+    // the code its stream was reset with, none when it was not, and its body
+    private static async Task<(int Status, int? Reset, string Body)> Http2Of(HttpGateway gateway, (string Target, string? Field) request)
+    {
+        var context = new DefaultHttpContext();
+        var reset = new ResetFeature();
+        var body = new MemoryStream();
+
+        context.Request.Method = "GET";
+        context.Request.Protocol = "HTTP/2";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = request.Target;
+        context.Features.Set<IHttpResetFeature>(reset);
+        context.Response.Body = body;
+
+        if (request.Field is { } field)
+        {
+            context.Request.Headers["x-other"] = field;
+        }
+
+        await gateway.Answer(context);
+
+        return (context.Response.StatusCode, reset.Code, Encoding.UTF8.GetString(body.ToArray()));
+    }
+
+    // a stream's reset, as Kestrel's feature takes it: the code it was reset with
+    private sealed class ResetFeature : IHttpResetFeature
+    {
+        public int? Code { get; private set; }
+
+        public void Reset(int errorCode)
+        {
+            Code = errorCode;
+        }
+    }
+
+    [Fact]
     public async Task Answers_as_the_endpoint_an_application_maps_and_a_caller_of_no_address_as_local()
     {
         await using var service = await TranscodingService.Start();

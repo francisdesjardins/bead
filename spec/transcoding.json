@@ -7971,11 +7971,12 @@
       ]
     },
     {
-      "name": "a target holding an octet past US-ASCII, refused as HTTP refuses it, unmarked, its body empty",
+      "name": "a target holding an octet other than visible ASCII, or a path whose percent-decoding holds NUL, refused as HTTP refuses it, unmarked, its body empty, before its path is matched; one percent-encoded is taken, and a # is a character of its path",
       "clauses": [
         "3.6",
         "10.1",
-        "10.1.1"
+        "10.1.1",
+        "spec:15.12"
       ],
       "steps": [
         {
@@ -8011,6 +8012,150 @@
             "body": ""
           },
           "on": "b"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a\u0001b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "c"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "c"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a\tb HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "d"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "d"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/ab HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "e"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "e"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/2?revision=\u0001 HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "f"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "f"
+        },
+        {
+          "send": {
+            "head": "GET /nowhere\u0001 HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "g"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "g"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a%00b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "h"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "h"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a%01b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "i"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "36",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"a\\u0001b\",\"title\":\"A tale\"}"
+          },
+          "on": "i"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/a#b HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "j"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "31",
+              "bead-refusal": null
+            },
+            "body": "{\"name\":\"a#b\",\"title\":\"A tale\"}"
+          },
+          "on": "j"
         }
       ]
     },

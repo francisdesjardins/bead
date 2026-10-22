@@ -3727,15 +3727,25 @@ EXCHANGES = [
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'a'}]),
     # * a head's characters are its octets, so a character past U+007F is one octet past US-ASCII: é as
-    # the two octets of its UTF-8, in the path and in the query
-    exchange("a target holding an octet past US-ASCII, refused as HTTP refuses it, unmarked, its body empty",
-             ['3.6', '10.1', '10.1.1'],
-             [send('GET', '/v1/books/' + chr(0xC3) + chr(0xA9), on='a'),
-              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'a'},
-              send('GET', '/v1/books/2?tags=' + chr(0xC3) + chr(0xA9), on='b'),
-              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
-               'on': 'b'}]),
+    # the two octets of its UTF-8, in the path and in the query; each control character the octet
+    # itself, judged before the path is matched, so a path no route matches is 400 and not 404
+    exchange("a target holding an octet other than visible ASCII, or a path whose percent-decoding holds NUL, "
+             "refused as HTTP refuses it, unmarked, its body empty, before its path is matched; one percent-encoded "
+             "is taken, and a # is a character of its path",
+             ['3.6', '10.1', '10.1.1', 'spec:15.12'],
+             [*[step for on, target in (('a', '/v1/books/' + chr(0xC3) + chr(0xA9)),
+                                        ('b', '/v1/books/2?tags=' + chr(0xC3) + chr(0xA9)),
+                                        ('c', '/v1/books/a' + chr(1) + 'b'), ('d', '/v1/books/a' + chr(9) + 'b'),
+                                        ('e', '/v1/books/a' + chr(0x7F) + 'b'),
+                                        ('f', '/v1/books/2?revision=' + chr(1)), ('g', '/nowhere' + chr(1)),
+                                        ('h', '/v1/books/a%00b'))
+                for step in (send('GET', target, on=on),
+                             {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None},
+                                         'body': ''}, 'on': on})],
+              send('GET', '/v1/books/a%01b', on='i'),
+              answered(result('Book', {'name': 'a' + chr(1) + 'b', 'title': 'A tale'}), on='i'),
+              send('GET', '/v1/books/a#b', on='j'),
+              answered(result('Book', {'name': 'a#b', 'title': 'A tale'}), on='j')]),
     exchange("a body past maximumBodyBytes as it comes, 413", ['9.3', '10.1', '10.1.10'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'

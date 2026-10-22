@@ -12,6 +12,7 @@ import {
   isTakenHost,
   isTakenOrigin,
   isVisibleField,
+  isVisibleTarget,
   isWellFormedHost,
   ORIGIN_REFUSAL,
   originOf,
@@ -662,6 +663,43 @@ test.describe('hosts and origins', () => {
     expect(hasVisibleFields(['Host', 'bead.test', 'x-other', 'café'])).toBe(false);
     expect(hasVisibleFields(['Host', 'bead.test', 'x-other', 'a\u0007b'])).toBe(false);
     expect(hasVisibleFields(['Host', 'bead.test', 'bead-after', '0 '])).toBe(false);
+  });
+
+  test('isVisibleTarget takes visible ASCII and a percent-encoded octet, NUL in a query among them, and refuses each control character, SP, DEL and 0x80 to 0xFF, in a path or a query, and NUL percent-encoded in a path', () => {
+    const visible = Array.from({ length: 0x7f - 0x21 }, (_, index) => {
+      return String.fromCodePoint(0x21 + index);
+    }).join('');
+    const others = [
+      ...Array.from({ length: 0x21 }, (_, code) => {
+        return String.fromCodePoint(code);
+      }),
+      ...Array.from({ length: 0x100 - 0x7f }, (_, index) => {
+        return String.fromCodePoint(0x7f + index);
+      }),
+    ];
+
+    // * the visible characters a URI leaves out are taken as they came, and a # opens no fragment
+    expect(isVisibleTarget(`/${visible}`)).toBe(true);
+    expect(isVisibleTarget(`/bead?${visible}`)).toBe(true);
+    expect(isVisibleTarget(undefined)).toBe(true);
+    expect(isVisibleTarget('/a%01b%7F%FF?x=%00')).toBe(true);
+    expect(isVisibleTarget('http://127.0.0.1/a%01?%00')).toBe(true);
+    expect(
+      others.filter((character) => {
+        return [`/a${character}b`, `/bead?a${character}b`, `http://127.0.0.1/a${character}b`].some(
+          (target) => {
+            return isVisibleTarget(target);
+          }
+        );
+      })
+    ).toEqual([]);
+    expect(others).toHaveLength(33 + 129);
+    // a path whose percent-decoding holds NUL, in origin-form or absolute-form, a # no end of it
+    expect(
+      ['/%00', '/be%00ad', '/a#%00?x', 'http://127.0.0.1/a%00b?x=1'].filter((target) => {
+        return isVisibleTarget(target);
+      })
+    ).toEqual([]);
   });
 
   test('tells a request’s Origin as it came, its field lines joined by a comma and a space, and none when it sends none', () => {

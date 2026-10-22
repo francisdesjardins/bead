@@ -2489,6 +2489,219 @@
       ]
     },
     {
+      "name": "a target holding an octet other than visible ASCII — a control character, HTAB, a bare CR or DEL — in its path or its query, or a path whose percent-decoding holds NUL, is answered 400 unmarked before its host, its path or its origin is judged, and no refusal is told; one percent-encoded, %00 in a query among them, is taken",
+      "clauses": [
+        "15.6",
+        "15.12"
+      ],
+      "transport": "http",
+      "options": {
+        "hosts": [
+          "bead.test"
+        ]
+      },
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead?a\u0001b HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "query"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "query"
+        },
+        {
+          "send": {
+            "head": "POST /be\u0001ad HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "path"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "path"
+        },
+        {
+          "send": {
+            "head": "POST /bead?a\tb HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "tab"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "tab"
+        },
+        {
+          "send": {
+            "head": "POST /bead?a\rb HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "return"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "return"
+        },
+        {
+          "send": {
+            "head": "POST /bead?ab HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "send": {
+            "head": "POST /bead?é HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "latin"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "latin"
+        },
+        {
+          "send": {
+            "head": "POST http://{host}/bead?a\u0001b HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "absolute"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "absolute"
+        },
+        {
+          "send": {
+            "head": "POST /bead?a\u0001b HTTP/1.1\r\nhost: elsewhere.test\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "elsewhere"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "elsewhere"
+        },
+        {
+          "send": {
+            "head": "POST /be%00ad HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "nul"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "nul"
+        },
+        {
+          "send": {
+            "head": "POST /bead?a%01b%7F%00 HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "capture": "token",
+                "shape": "token"
+              }
+            }
+          },
+          "on": "encoded"
+        }
+      ]
+    },
+    {
       "name": "an exchange from an origin the server does not take is refused 403, marked",
       "clauses": [
         "15.6.5",
@@ -7935,6 +8148,129 @@
             }
           },
           "on": "tab"
+        }
+      ]
+    },
+    {
+      "name": "a request at a WebSocket's address whose target holds an octet other than visible ASCII — a control character, HTAB or DEL — in its path or its query, or whose path's percent-decoding holds NUL, is answered 400 unmarked, and no refusal is told; one percent-encoded, %00 in a query among them, is upgraded",
+      "clauses": [
+        "15.2",
+        "15.2.1",
+        "15.12"
+      ],
+      "transport": "websocket",
+      "steps": [
+        {
+          "send": {
+            "head": "GET /?a\u0001b HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "query"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "query"
+        },
+        {
+          "send": {
+            "head": "GET / HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "delete"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "delete"
+        },
+        {
+          "send": {
+            "head": "GET /a\tb HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "tab"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "tab"
+        },
+        {
+          "send": {
+            "head": "GET /%00 HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "nul"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "cache-control": null,
+              "x-content-type-options": null,
+              "vary": null,
+              "access-control-allow-origin": null
+            },
+            "body": ""
+          },
+          "on": "nul"
+        },
+        {
+          "send": {
+            "head": "GET /?a%01%00 HTTP/1.1\r\nhost: {host}\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-key: dGhlIHNhbXBsZSBub25jZQ==\r\nsec-websocket-version: 13\r\n\r\n"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "status": 101,
+            "fields": {
+              "upgrade": "websocket",
+              "sec-websocket-accept": "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+            }
+          },
+          "on": "encoded"
+        },
+        {
+          "send": {
+            "binary": "A1 10 00 03  00 00 00 01  00 01 00 01 | 22 78 22"
+          },
+          "on": "encoded"
+        },
+        {
+          "expect": {
+            "envelope": {
+              "kind": 17,
+              "callId": 1,
+              "payload": "22 78 22"
+            }
+          },
+          "on": "encoded"
         }
       ]
     },

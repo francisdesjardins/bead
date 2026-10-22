@@ -569,6 +569,36 @@ public sealed class HostsAndOriginsTests
     }
 
     [Fact]
+    public void IsVisibleTarget_takes_visible_ASCII_and_a_percent_encoded_octet_NUL_in_a_query_among_them_and_refuses_each_control_character_SP_DEL_and_0x80_to_0xFF_in_a_path_or_a_query_and_NUL_percent_encoded_in_a_path()
+    {
+        var visible = new string([.. Enumerable.Range(0x21, 0x7F - 0x21).Select((code) =>
+        {
+            return (char)code;
+        })]);
+        var others = Enumerable.Range(0, 0x21).Concat(Enumerable.Range(0x7F, 0x100 - 0x7F)).Select((code) =>
+        {
+            return (char)code;
+        }).ToList();
+
+        // * the visible characters a URI leaves out are taken as they came, and a # opens no fragment
+        Assert.True(HostsAndOrigins.IsVisibleTarget($"/{visible}"));
+        Assert.True(HostsAndOrigins.IsVisibleTarget($"/bead?{visible}"));
+        Assert.True(HostsAndOrigins.IsVisibleTarget(null));
+        Assert.True(HostsAndOrigins.IsVisibleTarget("/a%01b%7F%FF?x=%00"));
+        Assert.True(HostsAndOrigins.IsVisibleTarget("http://127.0.0.1/a%01?%00"));
+        Assert.DoesNotContain(others, (character) =>
+        {
+            return new[] { $"/a{character}b", $"/bead?a{character}b", $"http://127.0.0.1/a{character}b" }.Any(HostsAndOrigins.IsVisibleTarget);
+        });
+        Assert.Equal(33 + 129, others.Count);
+
+        // a path whose percent-decoding holds NUL, in origin-form or absolute-form, a # no end of it
+        string[] nul = ["/%00", "/be%00ad", "/a#%00?x", "http://127.0.0.1/a%00b?x=1"];
+
+        Assert.DoesNotContain(nul, HostsAndOrigins.IsVisibleTarget);
+    }
+
+    [Fact]
     public void Tells_a_request_s_Origin_as_it_came_its_field_lines_joined_by_a_comma_and_a_space_and_none_when_it_sends_none()
     {
         Assert.Equal(
