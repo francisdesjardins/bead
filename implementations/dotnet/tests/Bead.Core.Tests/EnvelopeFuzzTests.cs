@@ -194,6 +194,6 @@ public sealed class EnvelopeFuzzTests
                     [0x01]);
             });
 
-        Assert.Contains("InvalidOperationException: boom; input 01", thrown.Message, StringComparison.Ordinal);
+        Assert.Equal("InvalidOperationException: boom; input 01", thrown.Message);
     }
 }

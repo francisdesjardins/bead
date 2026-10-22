@@ -5529,11 +5529,12 @@ test.describe('createRouterServer, the accesses it refuses', () => {
   });
 
   test('tells each credential refused by the reason spec/vectors.json’s credentialRefusals gives it', async () => {
-    for (const { code, name, reason, situation } of VECTORS.credentialRefusals) {
+    for (const { code, name, reason, scheme, situation } of VECTORS.credentialRefusals) {
+      // * the scheme the entry names, a name or a number to come, as the C# side reads it
+      const credentialScheme = typeof scheme === 'number' ? scheme : CredentialScheme[scheme];
       const clock = createTestClock(NOW);
       // the verifier's settling, or none: none makes no session, a past end one whose end came
-      const settled =
-        situation === 'end-come' ? { data: 'ada', end: NOW - 1, id: 'ada' } : undefined;
+      const settled = situation === 'end-come' ? { data: 'ada', end: NOW, id: 'ada' } : undefined;
       const { router, send, sent, told } = createRefusing({
         clock,
         ...(situation === 'no-verifier' || situation === 'no-keys' || situation === 'scheme-to-come'
@@ -5564,7 +5565,7 @@ test.describe('createRouterServer, the accesses it refuses', () => {
         'no-session': { scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN },
         'no-verifier': ELSEWHERE,
         'nothing-carried': ELSEWHERE,
-        'scheme-to-come': { bytes: new Uint8Array(0), scheme: 4 },
+        'scheme-to-come': { bytes: new Uint8Array(0), scheme: credentialScheme },
         'verifier-makes-none': ELSEWHERE,
       }[situation];
 
@@ -5587,7 +5588,7 @@ test.describe('createRouterServer, the accesses it refuses', () => {
           ...FROM,
           code,
           connectionHandle: first,
-          credentialScheme: credential.scheme,
+          credentialScheme,
           procedureId: echo.procedureId,
           reason,
           serviceId: echo.serviceId,

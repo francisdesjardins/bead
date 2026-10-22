@@ -71,8 +71,9 @@ public sealed class EnvelopeCodecTests
             EnvelopeCodec.ReadEnvelope(bytes, options);
         });
 
-        Assert.Equal(vector.GetProperty("code").GetUInt16(), failure.Code);
-        Assert.Equal(RouterSide.Server, failure.Side);
+        Assert.Equal(
+            (vector.GetProperty("code").GetUInt16(), FailureScope.Protocol, FailureOrigin.Local, RouterSide.Server),
+            (failure.Code, failure.Scope, failure.Origin, failure.Side));
 
         if (vector.TryGetProperty("detail", out var detail))
         {
@@ -161,12 +162,14 @@ public sealed class EnvelopeCodecTests
         var vector = Vectors.Of("failureRefusals", name);
         var record = Vectors.BytesOf(vector, "record");
 
+        var failure = Assert.Throws<FailureException>(() =>
+        {
+            EnvelopeCodec.ReadFailure(record, Options);
+        });
+
         Assert.Equal(
-            vector.GetProperty("code").GetUInt16(),
-            Assert.Throws<FailureException>(() =>
-            {
-                EnvelopeCodec.ReadFailure(record, Options);
-            }).Code);
+            (vector.GetProperty("code").GetUInt16(), FailureScope.Protocol, FailureOrigin.Local, RouterSide.Server),
+            (failure.Code, failure.Scope, failure.Origin, failure.Side));
     }
 
     [Fact]

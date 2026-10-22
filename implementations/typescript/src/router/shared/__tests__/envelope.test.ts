@@ -73,7 +73,13 @@ test.describe('readEnvelope and writeEnvelope', () => {
             ...(maximumEnvelopeBytes === undefined ? {} : { maximumEnvelopeBytes }),
           });
         })
-      ).toMatchObject({ code, side: 'server', ...(detail === undefined ? {} : { detail }) });
+      ).toMatchObject({
+        code,
+        origin: 'local',
+        scope: FailureScope.PROTOCOL,
+        side: 'server',
+        ...(detail === undefined ? {} : { detail }),
+      });
     });
   }
 
@@ -227,8 +233,8 @@ test.describe('readFailure', () => {
       expect(
         failureOf(() => {
           return readFailure(fromHexadecimal(record), options);
-        }).code
-      ).toBe(code);
+        })
+      ).toMatchObject({ code, origin: 'local', scope: FailureScope.PROTOCOL, side: 'server' });
     });
   }
 

@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { create, fromBinary, type MessageInitShape, toBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { checkProtoRecords } from '../../../proto/records';
+import { ProgrammerError } from '../../../transport/shared/errors';
 import { type IPayloadCodec, PAYLOAD_CODECS, payloadCodecOf } from '../payloads';
 import { type Probe, ProbeSchema } from './codecs_pb';
 
@@ -322,7 +323,13 @@ test.describe('the codecs', () => {
         if (entry.refused === undefined) {
           expect(read()).toEqual(entry.read);
         } else {
-          expect(thrownBy(read)).toBeInstanceOf(Error);
+          // ! the decode alone refuses, as the C# side holds it: a helper of the read throws none
+          const thrown = thrownBy(() => {
+            return PROBE_CODEC.decode(bytesOf(entry.bytes));
+          });
+
+          expect(thrown).toBeInstanceOf(Error);
+          expect(thrown).not.toBeInstanceOf(ProgrammerError);
         }
 
         return;

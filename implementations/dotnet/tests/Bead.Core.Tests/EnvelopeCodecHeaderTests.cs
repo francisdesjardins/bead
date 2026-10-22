@@ -114,7 +114,8 @@ public sealed class EnvelopeCodecHeaderTests
         {
             var expected = Vectors.HeaderOf(header);
 
-            Assert.Equal((expected, EnvelopeCodec.HeaderBytesOf(expected)), read);
+            // * the bytes the header took as it was read, which a writer may write fewer of
+            Assert.Equal((expected, bytes.Length), read);
         }
     }
 
