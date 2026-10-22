@@ -190,6 +190,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The DevTools panel's redraws keep what their reader did: a block scrolled stays scrolled and a
+  section opened or closed stays so, the Metrics view's exposition among them, as each second's
+  reading redraws the view, and a call's detail keeps its folded branches while that call and tab
+  stay shown.
 - beadc compiles and lints projects on another drive than its installation, using a temporary copy
   of its options under the project's `.beadc/`.
 - The TypeScript WebSocket client over `ws` offers no `permessage-deflate`, as the C# client does,
