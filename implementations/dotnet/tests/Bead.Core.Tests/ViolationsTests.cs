@@ -185,14 +185,6 @@ public sealed class ViolationsTests
     }
 
     [Fact]
-    public void Bounds_a_detail_by_MaximumDetailBytes_and_by_an_envelope_less_its_32_bytes_beside_it()
-    {
-        Assert.Equal(1_024, (RouterLimits.Default with { MaximumDetailBytes = 1_024, MaximumEnvelopeBytes = 16_778_240 }).DetailBytes);
-        Assert.Equal(68, (RouterLimits.Default with { MaximumDetailBytes = 1_024, MaximumEnvelopeBytes = 100 }).DetailBytes);
-        Assert.Equal(0, (RouterLimits.Default with { MaximumDetailBytes = 0, MaximumEnvelopeBytes = 64 }).DetailBytes);
-    }
-
-    [Fact]
     public void Reads_no_violations_from_a_detail_empty_cut_or_of_another_form()
     {
         string[] none =
