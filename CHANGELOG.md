@@ -9,6 +9,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The demo answers its sign-up over HTTP and JSON: the internal demo mounts a gateway of beadc's
+  route table on its public port, `POST /api/SignUp/signUp` and `/openapi.json`, and the page shows
+  the same sign-up as a `curl` and the gateway's answer, a refusal as RFC 9457's problem, written
+  by the runtime's own mapping where its server is a Web Worker.
 - The demo shows the same service on both sides: `examples/hello`'s resolvers, server and client,
   its TypeScript file beside its C# one, one tab a role, written from the repository's files by
   `demo/make-samples.ts` and held to them by the demo's tests.

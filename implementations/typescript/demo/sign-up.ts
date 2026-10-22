@@ -12,6 +12,7 @@ import type { IClient } from '../src/client/types';
 import { CredentialScheme, FailureError } from '../src/client/ws-client';
 import { type IReadViolations, type IViolation, violationsOf } from '../src/service/service';
 import { SignUpClient } from './gen/typescript/demo/v1/sign_up_bead';
+import { curlOf, refusedOf, welcomedOf } from './over-http';
 
 // interfaces
 
@@ -166,6 +167,24 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
     unbound.hidden = true;
   };
 
+  // * the page's own origin where its server is one, the internal demo's where it is a worker
+  const origin = document.body.dataset['beadTransport'] === 'worker' ? undefined : location.origin;
+  const httpRequest = elementOf('sign-up-http-request');
+  const httpAnswer = elementOf('sign-up-http-answer');
+
+  const requestOf = () => {
+    return {
+      email: fields.email.input.value,
+      name: fields.name.input.value,
+      phone: fields.phone.input.value,
+      seats: seatsOf(fields.seats.input.value),
+    };
+  };
+
+  const showRequest = (): void => {
+    httpRequest.textContent = curlOf(requestOf(), { origin });
+  };
+
   const fill = (filled: Filled): void => {
     clearAll();
 
@@ -174,6 +193,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
     }
 
     status.textContent = '—';
+    showRequest();
   };
 
   const itemOf = (text: string): HTMLLIElement => {
@@ -239,16 +259,19 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
     clearAll();
     status.textContent = isJudged ? 'judging, then sending…' : 'sending…';
 
+    showRequest();
+
     try {
-      const { welcome } = await requester.signUp({
-        email: fields.email.input.value,
-        name: fields.name.input.value,
-        phone: fields.phone.input.value,
-        seats: seatsOf(fields.seats.input.value),
-      })(PUBLIC);
+      const { welcome } = await requester.signUp(requestOf())(PUBLIC);
 
       status.textContent = `signed up: ${welcome}`;
+      httpAnswer.textContent = welcomedOf(welcome);
     } catch (reason) {
+      // * over HTTP the gateway's server judges it by the same rules, whichever side judged it here
+      if (reason instanceof FailureError) {
+        httpAnswer.textContent = refusedOf(reason);
+      }
+
       const read =
         reason instanceof FailureError ? violationsOf(reason) : { violations: [] as IViolation[] };
 
@@ -273,6 +296,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   for (const field of Object.values(fields)) {
     field.input.addEventListener('input', () => {
       clearField(field);
+      showRequest();
     });
   }
 
