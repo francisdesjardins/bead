@@ -166,10 +166,12 @@ being beadc's own.
 
 **What beadc makes for a run**, protoc's output and the tree `--against -` extracts, it makes under
 `.beadc/` beside the `beadc.yaml` it reads, which `init`'s `.gitignore` ignores, and takes out
-after; where it reads none, under the system's temporary folder. buf builds the roots and beadc's
-options as one module, under the folder that holds them all, so a root on another drive than
-beadc's options is refused: on Node from a clone, keep the project on the clone's drive; the image
-has one.
+after; where it reads none, under the system's temporary folder. For buf's build and lint, beadc
+copies its options into a separate temporary module under the project's `.beadc/`, before the
+project's roots. Every module sits on the project's drive, whatever drive holds beadc's install.
+Without a configuration, the copy sits in `.beadc/` beside a lone root, or under the roots' common
+folder. Each invocation takes its copy out, including when buf refuses the input. A root that
+contains the work area excludes `.beadc/` from its module.
 
 ## The image and its wrappers
 
@@ -292,7 +294,7 @@ number of protobuf's global registry
 | `(bead.procedure).failures`                               | The values of its service's failures enum it may answer, each by its name as the enum writes it                                                            |
 | `bead.Raw`, `bead.Text`, `bead.Json`                      | The payload types whose bytes are the payload itself: `raw`, `text` and `json` (spec 17); any other message is `proto`                                     |
 
-beadc compiles its own copy of the options first among the roots; a project imports it as
+beadc compiles a temporary project-local copy of its options first among the roots; a project imports it as
 `import "bead/options.proto";` and keeps no copy of its own. So it does protovalidate's,
 [`proto/buf/validate/validate.proto`](proto/buf/validate/validate.proto), vendored at
 [v1.2.2](https://github.com/bufbuild/protovalidate/blob/v1.2.2/proto/protovalidate/buf/validate/validate.proto)
