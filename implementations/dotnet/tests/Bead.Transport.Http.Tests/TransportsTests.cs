@@ -690,6 +690,15 @@ public sealed class TransportsTests
         var entry = EntryOf(("cases", name));
         var steps = entry.GetProperty("steps").EnumerateArray().ToList();
 
+        // * the keys of a case, as the schema defines them: one this harness does not know fails its case
+        Assert.Empty(entry.EnumerateObject().Where((property) =>
+        {
+            return property.Name is not ("answersPings" or "clauses" or "differs" or "limits" or "name" or "options" or "realTime" or "steps" or "transport");
+        }).Select((property) =>
+        {
+            return property.Name;
+        }));
+
         await using var served = ServedOf(entry);
 
         // dropped before the server stops: the sockets its exchanges went on
@@ -1076,7 +1085,8 @@ public sealed class TransportsTests
             {
                 foreach (var field in fields.EnumerateObject())
                 {
-                    var value = head.Fields.GetValueOrDefault(field.Name);
+                    // * a field by its name in any case, as the file states it
+                    var value = head.Fields.GetValueOrDefault(field.Name.ToLowerInvariant());
 
                     expected.Add($"{field.Name}: {ExpectedFieldOf(field.Value)}");
                     came.Add($"{field.Name}: {FieldOf((field.Value, value))}");
@@ -1588,7 +1598,15 @@ public sealed class TransportsTests
                 fields[name] = fields.TryGetValue(name, out var before) ? $"{before}, {value}" : value;
             }
 
-            return new Head(int.Parse(statusLine.Split(' ')[1], CultureInfo.InvariantCulture), fields);
+            // * a status line or none, as the TypeScript side's peer reads it
+            var status = Regex.Match(statusLine, @"^HTTP/1\.[01] ([0-9]{3})(?: |$)", RegexOptions.CultureInvariant);
+
+            if (!status.Success)
+            {
+                throw new IOException($"no status line: {statusLine}");
+            }
+
+            return new Head(int.Parse(status.Groups[1].Value, CultureInfo.InvariantCulture), fields);
         }
 
         public async Task<byte[]> ReadBody(Head head)
