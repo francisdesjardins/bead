@@ -187,6 +187,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
+- A metrics registry that refuses a name says it alike on both sides, `the metrics registry holds
+  1/1 as "echo", and is given "other": another name at its address`, as the TypeScript side wrote
+  it; and limits too small for a JWT say on both sides that `a side that takes or presents a JWT
+  holds a chunk's envelope and an envelope of 1,024 bytes at least`, as the C# side wrote it.
 - The TypeScript side's `TimeoutError` says what the C# side says at each wait: a call past its
   timeout `no answer came in 10 milliseconds`, a key set's ask at its deadline `the key set's ask
   for <issuer> was unsettled as its deadline was reached`, and a connection `timed out after 10ms`;
