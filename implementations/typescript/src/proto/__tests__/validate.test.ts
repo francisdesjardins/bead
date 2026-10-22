@@ -176,6 +176,7 @@ test.describe('validatorOf', () => {
       stopped: true,
       violations: sentOf(every).violations.slice(0, 1),
     });
+    expect(violationsDetailOf(first, { maximumBytes: 1_024 })).toMatch(/\n\{"stopped":true\}$/u);
   });
 
   test('judges a request that breaks nothing and allocates no path', async () => {
@@ -210,10 +211,12 @@ test.describe('validatorOf', () => {
     const judged = validate({ many, names: ['a'] }, { maximumBytes: 1_024 });
     const detail = violationsDetailOf(judged, { maximumBytes: 1_024 });
 
-    expect(judged.violations.length).toBeLessThan(10);
+    expect(judged.violations.length).toBeGreaterThan(0);
+    expect(judged.violations.length).toBeLessThanOrEqual(10);
     expect(judged.violations.length + judged.more).toBe(100_000);
+    expect(utf8Length(detail)).toBeGreaterThan(0);
     expect(utf8Length(detail)).toBeLessThanOrEqual(1_024);
-    expect(detail.endsWith(`{"more":${String(judged.more)}}`)).toBe(true);
+    expect(detail.endsWith(`\n{"more":${String(judged.more)}}`)).toBe(true);
     // unbounded, it holds every one
     expect(validate({ many, names: ['a'] }).violations).toHaveLength(100_000);
   });
@@ -227,7 +230,7 @@ test.describe('validatorOf', () => {
       violations: [{ fieldPath: 'title', message: 'value is required', ruleId: 'required' }],
     });
     // * its path the field's alone, never its value's
-    expect(sentOf(validate({ count: 0, title: '' })).violations).toEqual([
+    expect(sentOf(validate({ count: 0, port: 65_536, title: '' })).violations).toEqual([
       {
         bounds: { gt: 0 },
         fieldPath: 'count',
@@ -239,6 +242,12 @@ test.describe('validatorOf', () => {
         fieldPath: 'title',
         message: 'must be at least 1 characters',
         ruleId: 'string.min_len',
+      },
+      {
+        bounds: { lte: 65_535 },
+        fieldPath: 'port',
+        message: 'must be less than or equal to 65535',
+        ruleId: 'uint32.lte',
       },
     ]);
     expect(validate({ count: 1, title: 'a' }).violations).toEqual([]);

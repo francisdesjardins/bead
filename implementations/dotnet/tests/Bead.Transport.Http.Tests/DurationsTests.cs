@@ -172,6 +172,14 @@ public sealed partial class DurationsTests
         return new Observed(held, null);
     }
 
+    // ! the due of the one timer armed, never for none: two or more fail, rather than read as never
+    private static TimeSpan DueOf(IReadOnlyList<TimeSpan> dues)
+    {
+        Assert.True(dues.Count <= 1, $"one timer at most, not {dues.Count}");
+
+        return dues is [var due] ? due : Never;
+    }
+
     private static Observed Refused(ArgumentOutOfRangeException refusal)
     {
         return new Observed(null, refusal);

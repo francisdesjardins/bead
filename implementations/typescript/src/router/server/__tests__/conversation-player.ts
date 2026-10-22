@@ -6,8 +6,6 @@
 
 // dependencies
 
-import { readFileSync } from 'node:fs';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect } from '@playwright/test';
 import { interopCredentialsOf } from '../../../../interop/credentials';
 import { offerInterop } from '../../../../interop/handlers';
@@ -106,18 +104,14 @@ interface ISent {
 
 // constants
 
-/** The instant every conversation's clock starts at, and every exit's. */
-export const { wallClock: WALL_CLOCK } = JSON.parse(
-  readFileSync(new URL('../../../../../../spec/conversations.json', import.meta.url), 'utf8')
-) as { wallClock: string };
-
 // the connection a conversation that opens none plays, opened before its first step
-const ONLY_CONNECTION = 'client';
+const ONLY_CONNECTION = 'connection';
 
-// how long an until waits on the real clock for its timer, and an expect or a report for what the
-// server sends: a JWT verified by Web Crypto settles off the event loop
-const PATIENCE = 3_000;
-const POLL = 5;
+// how long an until waits on the real clock for its timer
+const PATIENCE = 10_000;
+
+// what the server asks of Web Crypto as a JWT verifies, which settles off the event loop
+const WEB_CRYPTO_CALLS = ['importKey', 'verify'] as const;
 
 // a relay's admission, by the name a conversation gives it
 const ADMISSIONS = Object.freeze({ requireCredential, requireSession, shareLegBSession });
@@ -342,8 +336,9 @@ const createMemoryConnections = (clock: TestClock) => {
   };
 
   return {
+    // unclean, as the scripted connections close
     close: async (name: string): Promise<void> => {
-      await clientOf(name).disconnect();
+      await clientOf(name).disconnect({ isClean: false });
     },
     /** Closes every connection still open. */
     closeAll: async (): Promise<void> => {
@@ -457,27 +452,53 @@ const withTokens = (send: string, tokens: ReadonlyMap<string, Uint8Array>): stri
 };
 
 /**
- * What `take` gives, once it gives anything, or `undefined` once the patience is over: what the
- * server does as a JWT verifies, off the event loop, comes in its time.
+ * Counts the calls of Web Crypto under way, as a JWT verifies off the event loop, so that a settle
+ * waits for them as the C# side's scheduler waits for its work: each of `WEB_CRYPTO_CALLS` wrapped
+ * on `crypto.subtle` until the watch is disposed.
  */
-const within = async <Value>(take: () => Value | undefined): Promise<Value | undefined> => {
-  const deadline = Date.now() + PATIENCE;
+const watchWebCrypto = () => {
+  const { subtle } = globalThis.crypto;
+  let underWay = 0;
 
-  for (let taken = take(); ; taken = take()) {
-    if (taken !== undefined || Date.now() >= deadline) {
-      return taken;
-    }
+  for (const name of WEB_CRYPTO_CALLS) {
+    // oxlint-disable-next-line bead/options-last -- Web Crypto's own, whatever its calls take
+    const call = (subtle[name] as (...args: unknown[]) => Promise<unknown>).bind(subtle);
 
-    await sleep(POLL);
+    Object.defineProperty(subtle, name, {
+      configurable: true,
+      // oxlint-disable-next-line bead/options-last -- Web Crypto's own, whatever its calls take
+      value: (...args: unknown[]): Promise<unknown> => {
+        underWay += 1;
+
+        return call(...args).finally(() => {
+          underWay -= 1;
+        });
+      },
+      writable: true,
+    });
   }
+
+  return {
+    [Symbol.dispose]: (): void => {
+      for (const name of WEB_CRYPTO_CALLS) {
+        Reflect.deleteProperty(subtle, name);
+      }
+    },
+    underWay: (): number => {
+      return underWay;
+    },
+  };
 };
 
-/** Lets what the server does settle: turns of the event loop, until three in a row add nothing. */
-const settle = async (count: () => number): Promise<void> => {
+/**
+ * Lets what the server does settle: turns of the event loop, until no call of Web Crypto is under
+ * way and three turns in a row add nothing.
+ */
+const settle = async (count: () => number, underWay: () => number): Promise<void> => {
   let quiet = 0;
   let last = count();
 
-  while (quiet < 3) {
+  while (quiet < 3 || underWay() > 0) {
     await new Promise(setImmediate);
 
     const now = count();
@@ -514,11 +535,17 @@ export const playConversation = async (
   {
     inMemory = false,
     metricsRegistry,
-  }: { inMemory?: boolean | undefined; metricsRegistry?: IMetricsRegistry | undefined }
+    wallClock,
+  }: {
+    inMemory?: boolean | undefined;
+    metricsRegistry?: IMetricsRegistry | undefined;
+    /** The instant its file starts every case at. */
+    wallClock: string;
+  }
 ): Promise<void> => {
   const { limits, pacing, relay, steps } = conversation;
   // the clock every layer runs on: only a step that moves time moves it
-  const clock = createTestClock(Date.parse(WALL_CLOCK));
+  const clock = createTestClock(Date.parse(wallClock));
 
   if (inMemory && !isPlayedInMemory(conversation)) {
     throw new Error('an in-memory pair stands for no connection of this conversation');
@@ -545,11 +572,17 @@ export const playConversation = async (
   const reports: IReport[] = [];
   // the tokens its answers announced, by the names its steps gave them
   const tokens = new Map<string, Uint8Array>();
+  using webCrypto = watchWebCrypto();
   const count = (): number => {
     return connections.count() + reports.length;
   };
-  // what the server did that its conversation did not expect: nothing, between steps
-  const expectNothingMore = (when: string): void => {
+  const settled = (): Promise<void> => {
+    return settle(count, webCrypto.underWay);
+  };
+  // what the server did that its conversation did not expect, once it settled: nothing, between
+  // steps
+  const expectNothingMore = async (when: string): Promise<void> => {
+    await settled();
     expect({ reports, sent: connections.untaken() }, when).toEqual({ reports: [], sent: {} });
   };
 
@@ -590,7 +623,7 @@ export const playConversation = async (
       ).toEqual([]);
 
       if (step.open !== undefined || step.send !== undefined || step.close === true) {
-        expectNothingMore(`before ${at}`);
+        await expectNothingMore(`before ${at}`);
       }
 
       if (step.open !== undefined) {
@@ -599,7 +632,7 @@ export const playConversation = async (
           isSecure: step.secure !== false,
           isTwoWay: step.twoWay !== false,
         });
-        await settle(count);
+        await settled();
       }
 
       if (step.send !== undefined) {
@@ -607,18 +640,20 @@ export const playConversation = async (
           ...(step.carried === undefined ? {} : { credential: step.carried }),
           data: fromHexadecimal(withTokens(step.send, tokens)),
         });
-        await settle(count);
+        await settled();
       }
 
       if (step.close === true) {
         await connections.close(on);
-        await settle(count);
+        await settled();
       }
 
+      // * what the server sends and reports is taken once it settled, at once, as the C# side takes
+      // it once its scheduler is idle
       if (step.expect !== undefined) {
-        const next = await within(() => {
-          return connections.next(on);
-        });
+        await settled();
+
+        const next = connections.next(on);
         const bytes = next?.bytes;
 
         expect(actualOf(bytes, step.expect), at).toEqual(step.expect);
@@ -637,9 +672,9 @@ export const playConversation = async (
       }
 
       if (step.report !== undefined) {
-        const report = await within(() => {
-          return reports.shift();
-        });
+        await settled();
+
+        const report = reports.shift();
 
         expect(report?.code, at).toBe(step.report);
 
@@ -661,7 +696,7 @@ export const playConversation = async (
 
       if (step.advance !== undefined) {
         await clock.tickAsync(step.advance);
-        await settle(count);
+        await settled();
       }
 
       if (step.wall !== undefined) {
@@ -669,7 +704,7 @@ export const playConversation = async (
       }
 
       if (step.counted !== undefined) {
-        await settle(count);
+        await settled();
 
         const now = seriesOf(metricsRegistry?.exposition().text ?? '');
 
@@ -686,7 +721,7 @@ export const playConversation = async (
       }
     }
 
-    expectNothingMore('at the end');
+    await expectNothingMore('at the end');
   } finally {
     await connections.closeAll();
     await server[Symbol.asyncDispose]();

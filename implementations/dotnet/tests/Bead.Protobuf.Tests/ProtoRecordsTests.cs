@@ -237,7 +237,7 @@ public sealed class ProtoRecordsTests
     }
 
     [Fact]
-    public void Builds_a_messages_shape_once_from_its_descriptor_a_message_that_holds_itself_among_them()
+    public void Builds_a_message_s_shape_once_from_its_descriptor_a_message_that_holds_itself_among_them()
     {
         var shape = ProtoRecords.ShapeOf(Probe.Descriptor);
 
@@ -258,7 +258,7 @@ public sealed class ProtoRecordsTests
 
     // spec 17.9.5
     [Fact]
-    public void Refuses_a_field_at_a_wire_type_its_type_does_not_take_in_a_maps_entry_too()
+    public void Refuses_a_field_at_a_wire_type_its_type_does_not_take_in_a_map_s_entry_too()
     {
         // text at the varint wire type, number at the length-delimited and the fixed32, child at the
         // varint, stamps at the varint, delimited at the length-delimited, child at the start group
@@ -279,7 +279,7 @@ public sealed class ProtoRecordsTests
 
     // spec 17.9.6
     [Fact]
-    public void Refuses_a_maps_entry_with_a_field_it_does_not_declare()
+    public void Refuses_a_map_s_entry_with_a_field_it_does_not_declare()
     {
         Refuses("62 0C 1A 0A 01 7A 12 06 0A 04 61 62 63 64");
         Refuses("62 05 0A 00 1A 01 7A");

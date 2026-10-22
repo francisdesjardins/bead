@@ -48,7 +48,7 @@ public sealed class MetricsRegistryTests
                 server.DeclareResolver(Echo with { ProcedureId = 3 }, false);
             }));
         Assert.Equal(
-            "a metrics registry's families name 2 procedures at most: \"slow\" at 1/3 is past the ceiling (Parameter 'procedure')",
+            "the metrics registry's server families name 2 procedures at most, and 1/3 is one more: past the ceiling (Parameter 'procedure')",
             RefusalOf(() =>
             {
                 server.DeclareResolver(Echo with { ProcedureId = 3, ProcedureName = "slow" }, false);

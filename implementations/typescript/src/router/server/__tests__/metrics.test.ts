@@ -72,9 +72,10 @@ const {
   exits: EXITS,
   expositions: EXPOSITIONS,
   mediaType: MEDIA_TYPE,
+  wallClock: WALL_CLOCK,
 } = JSON.parse(
   readFileSync(new URL('../../../../../../spec/metrics.json', import.meta.url), 'utf8')
-) as { exits: IConversation[]; expositions: IExposition[]; mediaType: string };
+) as { exits: IConversation[]; expositions: IExposition[]; mediaType: string; wallClock: string };
 
 // each reason of the file, by how the TypeScript side's refusal ends
 const REASONS: readonly string[] = [
@@ -118,7 +119,13 @@ const endingOfCount = ({
   outcome: string | undefined;
 }): number => {
   if (outcome !== 'failure') {
-    return ENDINGS[outcome ?? ''] ?? CallEnding.ERROR;
+    const ending = ENDINGS[outcome ?? ''];
+
+    if (ending === undefined) {
+      throw new Error(`a count ends with an outcome no test reads: ${String(outcome)}`);
+    }
+
+    return ending;
   }
 
   const failure = failureOf(code ?? '');
@@ -130,13 +137,22 @@ const endingOfCount = ({
       : failure.code;
 };
 
-/** The reason a declaration was refused for, read back from the TypeScript side's sentence. */
-const reasonOf = (error: unknown): string | undefined => {
-  return error instanceof ProgrammerError
-    ? REASONS.find((reason) => {
-        return error.message.endsWith(`: ${reason}`);
-      })
-    : undefined;
+/**
+ * The reason a declaration was refused for, read back from the TypeScript side's sentence; none
+ * for no refusal, and what was thrown for any other, so it never reads as taken.
+ */
+const reasonOf = (error: unknown): unknown => {
+  if (error === undefined) {
+    return undefined;
+  }
+
+  return (
+    (error instanceof ProgrammerError
+      ? REASONS.find((reason) => {
+          return error.message.endsWith(`: ${reason}`);
+        })
+      : undefined) ?? error
+  );
 };
 
 /** A count played on the routers' surfaces and their declarations. */
@@ -168,7 +184,7 @@ const countOn = (
   }
 
   if (notification === 'heard') {
-    return (own.hearing.get(at)?.heard(), undefined);
+    return ((own.hearing.get(at) as IHearingSeries).heard(), undefined);
   }
 
   if (notification !== undefined) {
@@ -179,10 +195,11 @@ const countOn = (
 
   const ending = code === undefined ? undefined : failureOf(code);
 
+  // ! a count on an address no declaration took fails, rather than count nothing
   if (dropped === 'hears') {
-    own.hearing.get(at)?.dropped(ending);
+    (own.hearing.get(at) as IHearingSeries).dropped(ending);
   } else {
-    own.notifying.get(at)?.dropped(ending);
+    (own.notifying.get(at) as INotifyingSeries).dropped(ending);
   }
 };
 
@@ -256,7 +273,10 @@ test.describe('the exits', () => {
 
   for (const exit of EXITS) {
     test(exit.name, async () => {
-      await playConversation(exit, { metricsRegistry: createMetricsRegistry() });
+      await playConversation(exit, {
+        metricsRegistry: createMetricsRegistry(),
+        wallClock: WALL_CLOCK,
+      });
     });
   }
 });

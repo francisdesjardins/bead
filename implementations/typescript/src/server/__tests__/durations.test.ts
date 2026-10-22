@@ -462,6 +462,19 @@ const reservationOf = (act: 'cancel' | 'reserve'): Way => {
       };
     }
 
+    // a cancel sends its CANCEL, once
+    if (act === 'cancel') {
+      await sleep(0);
+
+      // an envelope's byte 1, its kind
+      expect(
+        sent.map((bytes) => {
+          return bytes[1];
+        }),
+        'its cancel sent'
+      ).toEqual([EnvelopeKind.CANCEL]);
+    }
+
     return {
       held: await endedAt(clock, () => {
         return !core.isReserved(3, first);
@@ -1416,7 +1429,22 @@ const bodyGraceOfGateway: Way = (given) => {
 // a gateway's call, its body whole, its server answering never: the call's timeout, armed as it goes
 const timeoutOfGateway: Way = async (given) => {
   const clock = createTestClock();
-  const building = buildGateway({ clock, ...optionOf('timeout', given) });
+  // what its server's end of the connection took: the request, once handed on
+  let received = 0;
+  const building = buildGateway({
+    clock,
+    ...optionOf('timeout', given),
+    transport: {
+      accept: () => {
+        return Promise.resolve({
+          close: () => {},
+          receive: () => {
+            received += 1;
+          },
+        });
+      },
+    },
+  });
 
   if ('refusal' in building) {
     return { moved: [], refusal: building.refusal };
@@ -1425,9 +1453,9 @@ const timeoutOfGateway: Way = async (given) => {
   exchangeOfGateway(building.built.listener, { body: Uint8Array.of(1), length: 1 });
 
   // the connection drawn and the request handed on, each in a later turn
-  for (let turn = 0; turn < 20; turn += 1) {
-    await new Promise(setImmediate);
-  }
+  await turnsUntil(() => {
+    return received > 0;
+  });
 
   return { held: dueOf(delaysOn(clock)) };
 };
