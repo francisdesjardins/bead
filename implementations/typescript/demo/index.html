@@ -4,6 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>bead — a binary call protocol, its server in a Web Worker</title>
+    <meta
+      name="description"
+      content="Bead, a binary call protocol in TypeScript and C#, tried in the page: calls, subscriptions at the client's pace, transfers, cancellation, payload rules, and the same sign-up over HTTP and JSON with its OpenAPI document."
+    />
     <link rel="stylesheet" href="penumbra/tokens.system.css" />
     <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <style>
@@ -125,8 +129,14 @@
         margin-right: auto;
       }
 
-      .back {
+      /* the way back to the site, and the way to the code */
+      .ways {
+        display: flex;
+        gap: var(--app-space-3);
         font-size: var(--text-code);
+      }
+
+      .ways a {
         text-decoration: none;
       }
 
@@ -802,7 +812,10 @@
   <body data-bead-pathname="%BEAD_PATHNAME%">
     <header class="topbar">
       <div class="brand">
-        <a class="back" href="/" data-static>← Home</a>
+        <p class="ways">
+          <a href="/" data-static>← Home</a>
+          <a href="https://github.com/francisdesjardins/bead">Source on GitHub</a>
+        </p>
         <h1>
           Bead
           <span data-served>a client and a server, on one port</span>
