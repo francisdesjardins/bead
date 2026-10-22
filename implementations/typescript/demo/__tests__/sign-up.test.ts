@@ -153,4 +153,38 @@ test.describe('mountSignUp', () => {
     await expect(page.locator('#sign-up-unbound')).toBeFocused();
     await expect(page.locator('[aria-invalid]')).toHaveCount(0);
   });
+
+  test('shows the same sign-up over HTTP: its curl as it is filled, and the answer a gateway gives it', async ({
+    page,
+  }) => {
+    const request = page.locator('#sign-up-http-request');
+    const answer = page.locator('#sign-up-http-answer');
+
+    await page.locator('#sign-up-http > summary').click();
+
+    // * the internal demo's origin, as this page's server is a worker, the body in Bead's JSON form
+    await expect(request).toContainText('curl -X POST http://localhost:8080/api/SignUp/signUp');
+    await expect(request).toContainText(`-d '{"name":"ada","seats":2,"email":"ada@example.org"}'`);
+
+    await page.getByRole('button', { name: 'Sign up' }).click();
+    await expect(answer).toContainText('HTTP/1.1 200 OK');
+    await expect(answer).toContainText('"welcome": "welcome, ada: 2 seats held');
+
+    await page.getByRole('button', { name: 'Break several fields' }).click();
+    await expect(request).toContainText(`"name":"9 Lives!"`);
+    await page.getByRole('button', { name: 'Sign up' }).click();
+    await expect(answer).toContainText('HTTP/1.1 422 Unprocessable Content');
+    await expect(answer).toContainText('content-type: application/problem+json');
+
+    for (const pointer of ['#/name', '#/seats', '#/email', '#/phone']) {
+      await expect(answer).toContainText(`"pointer": "${pointer}"`);
+    }
+
+    await expect(answer).toContainText('"title": "PAYLOAD_INVALID"');
+
+    // its OpenAPI document, beadc's, its one path the sign-up's route
+    await page.locator('#sign-up-openapi summary').click();
+    await expect(page.locator('#sign-up-openapi-document')).toContainText('"openapi": "3.1.1"');
+    await expect(page.locator('#sign-up-openapi-document')).toContainText('"/api/SignUp/signUp"');
+  });
 });
