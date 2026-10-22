@@ -205,7 +205,7 @@ public sealed class MetricsRegistry
     // one by spec 16.6; or one procedure past a group's ceiling. Its service at another revision
     // takes the same series, which no label tells apart (8.1). Under the lock; a declaration refused
     // declares nothing
-    private void Declare(Procedure procedure, HashSet<ProcedureAddress>[] groups)
+    private void Declare(Procedure procedure, (HashSet<ProcedureAddress> Keys, string What)[] groups)
     {
         var address = procedure.Address;
         var name = procedure.ProcedureName;
@@ -227,21 +227,21 @@ public sealed class MetricsRegistry
             }
         }
 
-        foreach (var group in groups)
+        foreach (var (keys, what) in groups)
         {
-            if (!group.Contains(address) && group.Count >= _maximumProcedures)
+            if (!keys.Contains(address) && keys.Count >= _maximumProcedures)
             {
                 throw new ArgumentException(
-                    string.Create(CultureInfo.InvariantCulture, $"a metrics registry's families name {_maximumProcedures} procedures at most: \"{name}\" at {address.ServiceId}/{address.ProcedureId} is past the ceiling"),
+                    string.Create(CultureInfo.InvariantCulture, $"the metrics registry's {what} name {_maximumProcedures} procedures at most, and {address.ServiceId}/{address.ProcedureId} is one more: past the ceiling"),
                     nameof(procedure));
             }
         }
 
         _names[address] = name;
 
-        foreach (var group in groups)
+        foreach (var (keys, _) in groups)
         {
-            group.Add(address);
+            keys.Add(address);
         }
     }
 
@@ -471,7 +471,7 @@ public sealed class MetricsRegistry
 
         lock (_gate)
         {
-            Declare(procedure, notifies ? [_server, _notification] : [_server]);
+            Declare(procedure, notifies ? [(_server, "server families"), (_notification, "notification families")] : [(_server, "server families")]);
 
             var calls = CallsHeld((CallRole.Server, procedure.Address), side);
 
@@ -501,7 +501,7 @@ public sealed class MetricsRegistry
     {
         lock (_gate)
         {
-            Declare(procedure, [_client]);
+            Declare(procedure, [(_client, "client families")]);
 
             return CallsHeld((CallRole.Client, procedure.Address), side);
         }
@@ -515,7 +515,7 @@ public sealed class MetricsRegistry
     {
         lock (_gate)
         {
-            Declare(procedure, [_notification]);
+            Declare(procedure, [(_notification, "notification families")]);
 
             var address = procedure.Address;
             var dropped = DroppedOf(address);
