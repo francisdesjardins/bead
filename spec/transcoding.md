@@ -221,19 +221,20 @@ name is a field path of the request's message, each field by its JSON name or it
    message, or a field its variables or its body bind.
 
 4.4. A route's body: under `body: "*"`, the request's JSON, less the fields its variables bind,
-which a member naming one refuses; under a field's name, that field's JSON, an array for a repeated
-one. A route with no body takes no content: a gateway MUST refuse a request to it that carries any,
-400 `malformed`, as section 10.1's step 8 judges it. A `proto` body is one JSON text, read whole, so
-an empty one is refused.
+which a member naming one refuses but where it is `null`, which sets nothing (section 5.2, item 2);
+under a field's name, that field's JSON, an array for a repeated one, a `null` that field unset, so
+that a `null` body is refused only where it is the request whole. A route with no body takes no
+content: a gateway MUST refuse a request to it that carries any, 400 `malformed`, as section 10.1's
+step 8 judges it. A `proto` body is one JSON text, read whole, so an empty one is refused.
 
 4.5. Where a `patch` rule's `body` names a message field of its request, and that request has a
 field `update_mask` of `google.protobuf.FieldMask` that neither its query nor its body sets, a
-gateway MUST set it to the paths of the members its body's object holds, as
-[AIP-134](https://google.aip.dev/134) has an omitted mask stand for what was sent: each member by
-the proto name of the field it names, in the body's order; a member whose value is an object of a
-message field that is not a well-known type, by its own members' paths in turn, behind its name and
-a `.`, or by its own path where it holds none; a member of any other field, a map, a repeated
-field, a well-known type or a `null` among them, by its own path.
+gateway MUST set it to the paths of the members its body's object holds, none where its body is
+`null`, as [AIP-134](https://google.aip.dev/134) has an omitted mask stand for what was sent: each
+member by the proto name of the field it names, in the body's order; a member whose value is an
+object of a message field that is not a well-known type, by its own members' paths in turn, behind
+its name and a `.`, or by its own path where it holds none; a member of any other field, a map, a
+repeated field, a well-known type or a `null` among them, by its own path.
 
 ## 5. The JSON form
 
@@ -248,12 +249,13 @@ _Transcoding: `spec/transcoding.json`._
 | `text`   | `text/plain`: the payload's bytes as they are, which its server reads (section 17.4)                    | `text/plain;charset=utf-8`: the payload's bytes            | the text as a JSON string (17.7.3)   |
 | `raw`    | `application/octet-stream`: the payload's bytes                                                         | `application/octet-stream`: the payload's bytes            | the bytes as a JSON string in base64 |
 
-A gateway MUST refuse, 415 `type-refused`, a body whose `content-type`, its type compared
-case-insensitively, is not its route's, or carries a parameter but `charset`, or a `charset` but
-`utf-8` in any case, and a body whose `content-encoding` is not `identity`, as section 15.6 of
-`spec.md` refuses one. A `json`, `text` or `raw` request has no field: its route's body is `*`, and
-no variable or query binds it. `bead.Json`, `bead.Text` and `bead.Raw` are those encodings, never
-messages that section 5.6 writes.
+A gateway MUST refuse, 415 `type-refused`, a request to a route that takes a body, whether a body
+comes or none, whose `content-type` is absent, or whose type, compared case-insensitively, is not
+its route's, or which carries a parameter but `charset`, or a `charset` but `utf-8` in any case, or
+whose `content-encoding` is not `identity`, as section 15.6 of `spec.md` refuses a `POST` of no
+type. A `json`, `text` or `raw` request has no field: its route's body is `*`, and no variable or
+query binds it. `bead.Json`, `bead.Text` and `bead.Raw` are those encodings, never messages that
+section 5.6 writes.
 
 5.2. A gateway MUST read a `proto` request's body in this order, and refuse it, 400
 `PAYLOAD_UNDECODABLE`, at the first step that refuses:
@@ -389,17 +391,19 @@ _Transcoding: `spec/transcoding.json`._
 `application/problem+json`, its status the response's
 ([§3.1.2](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.2)), of these members:
 
-| Member    | What it holds                                                                                                                                                                            |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `type`    | its identity (section 7.3)                                                                                                                                                               |
-| `title`   | its name (section 7.3)                                                                                                                                                                   |
-| `status`  | its status                                                                                                                                                                               |
-| `detail`  | the failure's detail as the gateway's client read it (section 7.3 of `spec.md`), or the gateway's own words of a refusal of its own; absent where it is empty, and for `PAYLOAD_INVALID` |
-| `code`    | its code, as the wire carries it, 1 to 65,535; absent for a failure of the gateway's own                                                                                                 |
-| `scope`   | `protocol` or `application`, as the flag of section 7.2 of `spec.md` says; absent for a failure of the gateway's own                                                                     |
-| `errors`  | `PAYLOAD_INVALID`'s violations (section 7.4)                                                                                                                                             |
-| `more`    | the count its detail's closing line gives of the violations it left out (section 18.6 of `spec.md`), where it gives one that is not 0                                                    |
-| `stopped` | `true`, where its detail's closing line says its judging stopped at its first violation                                                                                                  |
+| Member      | What it holds                                                                                                                                                                                                                                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`      | its identity (section 7.3)                                                                                                                                                                                                                                                                                             |
+| `title`     | its name (section 7.3)                                                                                                                                                                                                                                                                                                 |
+| `status`    | its status                                                                                                                                                                                                                                                                                                             |
+| `detail`    | the failure's detail as the gateway's client read it (section 7.3 of `spec.md`), or the gateway's own words, which this document gives (sections 5, 7.6 and 7.7) and which never repeat what its request carried; absent where it is empty, for `PAYLOAD_INVALID`, and for an error of the gateway's own (section 7.6) |
+| `code`      | its code, as the wire carries it, 1 to 65,535; absent for a failure of the gateway's own                                                                                                                                                                                                                               |
+| `scope`     | `protocol` or `application`, as the flag of section 7.2 of `spec.md` says; absent for a failure of the gateway's own                                                                                                                                                                                                   |
+| `errors`    | `PAYLOAD_INVALID`'s violations (section 7.4)                                                                                                                                                                                                                                                                           |
+| `more`      | the count its detail's closing line gives of the violations it left out (section 18.6 of `spec.md`), where it gives one that is not 0                                                                                                                                                                                  |
+| `stopped`   | `true`, where its detail's closing line says its judging stopped at its first violation                                                                                                                                                                                                                                |
+| `parameter` | where a `PAYLOAD_UNDECODABLE` of the gateway's reading lies among its route's variables or in its query (section 7.4)                                                                                                                                                                                                  |
+| `pointer`   | where it lies in its body (section 7.4)                                                                                                                                                                                                                                                                                |
 
 7.2. A gateway MUST write a problem's members in the canonical form of section 17.7 of `spec.md`,
 their names sorted, so that one failure is one sequence of bytes on every side.
@@ -427,7 +431,18 @@ words section 18.8.6 gives its rule where it went without one; `ruleId`; `fieldP
    a character a fragment does not take percent-encoded from its UTF-8; a map's key as its string,
    one cut short (section 18.4) and a `oneof` pointing at what holds them; `#` for a rule of the
    message itself where the body is the request whole;
-3. neither, for a rule of the message itself where the body is not the request whole.
+3. neither, for a rule of the message itself where the body is not the request whole, and for a
+   field path that names no field of the request.
+
+A `PAYLOAD_UNDECODABLE` of the gateway's reading (section 7.6) holds, so placed, where its reading
+met what it refuses: `parameter`, a variable's field path, or a query's by JSON names, or the name of
+a parameter that names no field; `pointer`, the value of its body it met, by the JSON name of each
+field, and each member that names none, each map's key and each `Struct`'s member as its body wrote
+it, `#` the body itself; neither for its text, its query whole, or a query whose bytes are not UTF-8.
+A name or a key the request carried is cut as section 18.4 of `spec.md` cuts a key past 64 bytes of
+UTF-8, `...` after it. Its `detail` is its mapping's own words, which name no member or key of the
+request: a problem's `detail` never repeats what its request carried, and where its place helps, it
+goes in its `parameter` or its `pointer`, cut.
 
 7.5. A gateway answers each failure by where it arose, since it is a requester, and raises some
 codes of its server's answer, which its HTTP client cannot mend:
@@ -450,36 +465,57 @@ codes of its server's answer, which its HTTP client cannot mend:
 | `ENVELOPE_TOO_LARGE`, `PAYLOAD_TOO_LARGE`                                                                                     | its server, of the request, or its client before the call went |    413 |                                                                                                                                                                                                                                                      |
 | `ENVELOPE_TOO_LARGE`, `PAYLOAD_TOO_LARGE`                                                                                     | its client, of a result or a notification                      |    502 |                                                                                                                                                                                                                                                      |
 | `DESTINATION_UNKNOWN`, `CALL_UNKNOWN`, `SUBSCRIPTION_UNKNOWN`, `SUBSCRIPTION_UNSUPPORTED`, `CHUNK_INVALID`, `CREDIT_EXCEEDED` | between it and its server                                      |    500 |                                                                                                                                                                                                                                                      |
-| `DESTINATION_UNREACHABLE`                                                                                                     | its client                                                     |    503 | `retry-after: 1`, reported                                                                                                                                                                                                                           |
+| `DESTINATION_UNREACHABLE`                                                                                                     | its client                                                     |    503 | `retry-after: 1`, its code alone                                                                                                                                                                                                                     |
 | `SERVICE_UNKNOWN`, `PROCEDURE_UNKNOWN`                                                                                        | its server                                                     |    501 |                                                                                                                                                                                                                                                      |
 | `SESSION_REQUIRED`                                                                                                            | its server                                                     |    401 | `www-authenticate`, its challenge, `Bearer` by default, and `error="invalid_token"` where a credential came, after a space, or after `, ` where the challenge holds parameters ([RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)) |
 | `ACCESS_DENIED`                                                                                                               | its server                                                     |    403 |                                                                                                                                                                                                                                                      |
 | `CAPACITY_EXCEEDED`                                                                                                           | its server, or its client before the call went                 |    429 | `retry-after: 1` ([RFC 6585 §4](https://www.rfc-editor.org/rfc/rfc6585#section-4))                                                                                                                                                                   |
-| `CREDENTIAL_UNSUPPORTED`                                                                                                      | its server, of the scheme it presents                          |    500 | reported, with its detail                                                                                                                                                                                                                            |
+| `CREDENTIAL_UNSUPPORTED`                                                                                                      | its server, of the scheme it presents                          |    500 | its detail                                                                                                                                                                                                                                           |
 | `PAYLOAD_UNDECODABLE`                                                                                                         | the gateway's reading of a body, a query or a variable         |    400 |                                                                                                                                                                                                                                                      |
 | `PAYLOAD_UNDECODABLE`                                                                                                         | its server, of a `json`, `text` or `raw` request               |    400 |                                                                                                                                                                                                                                                      |
 | `PAYLOAD_UNDECODABLE`                                                                                                         | its server, of a `proto` request                               |    502 |                                                                                                                                                                                                                                                      |
-| `PAYLOAD_UNDECODABLE`                                                                                                         | its client, of a result or a notification                      |    502 | reported                                                                                                                                                                                                                                             |
+| `PAYLOAD_UNDECODABLE`                                                                                                         | its client, of a result or a notification                      |    502 |                                                                                                                                                                                                                                                      |
 | `TRANSFER_STALLED`                                                                                                            | between it and its server                                      |    504 |                                                                                                                                                                                                                                                      |
 | `PAYLOAD_INVALID`                                                                                                             | its server, or its client before the call went                 |    422 | `errors`, `more`, `stopped` (section 7.4)                                                                                                                                                                                                            |
 | `PROCEDURE_FAILED`                                                                                                            | its server                                                     |    500 |                                                                                                                                                                                                                                                      |
 | `DESTINATION_LOST`                                                                                                            | its client                                                     |    502 |                                                                                                                                                                                                                                                      |
 | a protocol code section 8.1 of `spec.md` names none of                                                                        | its server                                                     |    500 |                                                                                                                                                                                                                                                      |
 | an application failure                                                                                                        | its server                                                     |    400 |                                                                                                                                                                                                                                                      |
-| its call's timeout (section 9.2)                                                                                              | the gateway                                                    |    504 | a failure of its own                                                                                                                                                                                                                                 |
-| its exchange's connection closed before its answer                                                                            | the gateway                                                    |    502 | a failure of its own                                                                                                                                                                                                                                 |
-| a result section 5.7 refuses to write                                                                                         | the gateway                                                    |    500 | a failure of its own, reported                                                                                                                                                                                                                       |
-| a `JWT` its request's block cannot hold                                                                                       | the gateway, under `bearer-jwt`                                |    431 | a failure of its own ([RFC 6585 §5](https://www.rfc-editor.org/rfc/rfc6585#section-5))                                                                                                                                                               |
-| an `authorization` of an auth-scheme but `Bearer`                                                                             | the gateway, under `bearer-jwt`                                |    401 | a failure of its own; `www-authenticate`, its challenge and `error="invalid_request"` after it                                                                                                                                                       |
-| what no gate foresaw                                                                                                          | the gateway                                                    |    500 | a failure of its own, its detail `the gateway failed`, reported                                                                                                                                                                                      |
+| its call's timeout (section 9.2)                                                                                              | the gateway                                                    |    504 | a failure of its own, its detail `no answer within <timeout> ms`, its option in milliseconds                                                                                                                                                         |
+| its exchange's connection closed before its answer                                                                            | the gateway                                                    |    502 | a failure of its own, its detail `the connection closed`                                                                                                                                                                                             |
+| a result section 5.7 refuses to write                                                                                         | the gateway                                                    |    500 | a failure of its own, its detail the words its mapping gives what it holds no form of                                                                                                                                                                |
+| a `JWT` its request's block cannot hold                                                                                       | the gateway, under `bearer-jwt`                                |    431 | a failure of its own, its detail `a token past 1004 bytes`, 1004 the bytes of a `JWT` its block holds ([RFC 6585 §5](https://www.rfc-editor.org/rfc/rfc6585#section-5))                                                                              |
+| an `authorization` of an auth-scheme but `Bearer`                                                                             | the gateway, under `bearer-jwt`                                |    401 | a failure of its own, its detail `an auth-scheme but Bearer`; `www-authenticate`, its challenge and `error="invalid_request"` after it                                                                                                               |
+| what no gate foresaw                                                                                                          | the gateway                                                    |    500 | a failure of its own, with no detail                                                                                                                                                                                                                 |
 
-7.7. A refusal of the gateway's own — 400 `malformed`, 403 `host-refused` or `origin-refused`, 404
-`path-unknown`, 405 `method-refused`, 408 `too-slow`, 413 `too-large`, 415 `type-refused`, 503
-`busy` — is marked in `bead-refusal`, as section 15.6 of `spec.md` marks a transport's, so that a
-client tells it from a call's answer, and a gateway MUST write its body as a problem of its own,
-`about:blank`, its `detail` its own words, so that a person reading it reads why. A `PAYLOAD_UNDECODABLE` of the gateway's reading is a call's
-failure, unmarked. A preflight's 204, and what HTTP refuses of its own (section 15.12), keep their
-empty bodies.
+A gateway MUST report on its `error` (section 9.0 of `spec.md`) each failure it answers a call
+with a status of 500 or above, but `PROCEDURE_FAILED`, which its server reported as its
+application's: a code between it and its server, its server's answer it could not take, a scheme
+its server takes none of, its call's timeout, its exchange's connection closed, a result section 5.7
+refuses, what no gate foresaw. What it reports no problem's member carries, and an answer for an
+error of its own carries its code alone, as section 9.0 has one: `DESTINATION_UNREACHABLE` and what
+no gate foresaw, with no detail.
+
+7.7. A refusal of the gateway's own is marked in `bead-refusal`, as section 15.6 of `spec.md` marks a
+transport's, so that a client tells it from a call's answer, and a gateway MUST write its body as a
+problem of its own, `about:blank`, its `detail` the words this table gives it, byte for byte on every
+side, so that a person reading it reads why:
+
+| `bead-refusal`   | Status | Its words                                                                                                                                                                                                                                                                            |
+| ---------------- | -----: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `malformed`      |    400 | `content to a route that takes none`; `content to the document`; `two authorization fields`                                                                                                                                                                                          |
+| `host-refused`   |    403 | `a host it does not take`                                                                                                                                                                                                                                                            |
+| `origin-refused` |    403 | `an origin neither its own nor listed`, at section 10.1's step 4; `a request from a page of another site that shows no origin`, at its step 5                                                                                                                                        |
+| `path-unknown`   |    404 | `a path no route matches`                                                                                                                                                                                                                                                            |
+| `method-refused` |    405 | `a method no route of its path takes`; `a method the document takes none of`                                                                                                                                                                                                         |
+| `too-slow`       |    408 | `a body slower than minimumBodyBytesPerSecond`                                                                                                                                                                                                                                       |
+| `too-large`      |    413 | `a body declared past maximumBodyBytes <n>`, at step 9; `a body past maximumBodyBytes <n>`, at step 10; `<n>` its bound in decimal                                                                                                                                                   |
+| `type-refused`   |    415 | `this route's body is <type>, unencoded`, `<type>` its route's request media type (section 5.1)                                                                                                                                                                                      |
+| `busy`           |    503 | `the calls under way hold maximumExchanges`; `the calls of its address hold maximumExchangesPerAddress`; `the streams under way hold maximumConnections`; `the streams of its address hold maximumConnectionsPerAddress` (section 10.3); `the bodies under way hold bodyBytesBudget` |
+
+A `PAYLOAD_UNDECODABLE` of the gateway's reading is a call's failure, unmarked, its words its
+mapping's. A preflight's 204, and what HTTP refuses of its own (section 15.12), keep their empty
+bodies.
 
 ## 8. Notifications
 
@@ -558,7 +594,8 @@ _Transcoding: `spec/transcoding.json`._
 10.1. A gateway MUST judge a request in this order, by the gates and the options of section 15.12 of
 `spec.md`, and answer the first that applies:
 
-1. what HTTP refuses of its own, unmarked (section 15.12);
+1. what HTTP refuses of its own, unmarked (section 15.12), a body HTTP cannot frame among it,
+   whenever it comes;
 2. a host it does not take, 403 `host-refused` (`hosts`);
 3. a path no route matches, 404 `path-unknown` (section 3.10);
 4. an `origin` neither its own nor one `origins` names, 403 `origin-refused`;
@@ -575,7 +612,8 @@ _Transcoding: `spec/transcoding.json`._
    3.10's order, and its `access-control-allow-headers` and `access-control-max-age` as section
    15.12 writes them;
 7. a method no route of its path takes, 405 `method-refused` (section 3.10);
-8. a body whose type or encoding is not its route's, 415 `type-refused` (section 5.1); a body, a
+8. a request to a route that takes a body of no type, or of a type or an encoding that is not its
+   route's, whether a body comes or none, 415 `type-refused` (section 5.1); a body, a
    `content-length` past 0 or a `transfer-encoding`, to a route that takes none, 400 `malformed`
    (section 4.4);
 9. two `authorization` fields, 400 `malformed`; a `content-length` past `maximumBodyBytes`, 413

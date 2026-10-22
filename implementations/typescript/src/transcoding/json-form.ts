@@ -167,30 +167,146 @@ const NON_FINITE: Readonly<Record<string, number>> = Object.freeze({
 
 // helpers
 
-/** A reading's or a writing's refusal: its reason, and where it met it. */
-export class JsonFormError extends Error {
-  /** Why, in the words of transcoding 5. */
-  readonly reason: string;
+/**
+ * A token of a place in a JSON value: a field's JSON name, an item's index, or a member's name or a
+ * key the request carried, which a place cuts (transcoding 7.4).
+ */
+export interface IJsonToken {
+  readonly isGiven: boolean;
+  readonly text: string;
+}
 
-  constructor(reason: string, at?: string) {
-    super(at === undefined || at === '' ? reason : `${reason}, at ${at}`);
+/** Where a reading is in the value it reads: the value itself, or a token below a place. */
+export interface IJsonPlace {
+  readonly token?: IJsonToken | undefined;
+  readonly up?: IJsonPlace | undefined;
+}
+
+/** Where a request carried what its reading refuses (7.4): among its variables or in its query, or in its body. */
+export type RequestPlace = { readonly parameter: string } | { readonly pointer: string };
+
+/** The place of the value a reading reads, its root. */
+const ROOT: IJsonPlace = Object.freeze({});
+
+// the bytes of UTF-8 a key of the request is written whole within (spec 18.4)
+const KEY_BYTES = 64;
+
+/**
+ * A name or a key the request carried, cut as spec 18.4 cuts a key: whole within 64 bytes of UTF-8,
+ * else its first 64, back to the start of the character the cut fell in, and `...` after them.
+ */
+export const cutOf = (text: string): string => {
+  const encoder = new TextEncoder();
+
+  if (encoder.encode(text).length <= KEY_BYTES) {
+    return text;
+  }
+
+  let kept = '';
+  let size = 0;
+
+  for (const character of text) {
+    const { length } = encoder.encode(character);
+
+    if (size + length > KEY_BYTES) {
+      break;
+    }
+
+    kept += character;
+    size += length;
+  }
+
+  return `${kept}...`;
+};
+
+/** `text` as a URI's fragment writes it: each character it does not take percent-encoded from its UTF-8. */
+export const fragmentOf = (text: string): string => {
+  return text.replaceAll(/[^A-Za-z0-9\-._~!$&'()*+,;=:@/?]/gu, (character) => {
+    return [...new TextEncoder().encode(character)]
+      .map((byte) => {
+        return `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
+      })
+      .join('');
+  });
+};
+
+/** A JSON Pointer's reference token, `~` and `/` escaped (RFC 6901 §4). */
+export const pointerTokenOf = (text: string): string => {
+  return text.replaceAll('~', '~0').replaceAll('/', '~1');
+};
+
+/**
+ * A place's JSON Pointer, as a URI's fragment (RFC 6901 §6): `#`, then each token after a `/`, a
+ * name or a key the request carried cut (7.4, item 2).
+ */
+export const pointerOf = (tokens: readonly IJsonToken[]): string => {
+  return `#${tokens
+    .map(({ isGiven, text }) => {
+      return `/${fragmentOf(pointerTokenOf(isGiven ? cutOf(text) : text))}`;
+    })
+    .join('')}`;
+};
+
+/** A place's tokens, from the value read. */
+const tokensOf = (place: IJsonPlace): IJsonToken[] => {
+  const tokens: IJsonToken[] = [];
+
+  for (let at: IJsonPlace | undefined = place; at?.token !== undefined; at = at.up) {
+    tokens.unshift(at.token);
+  }
+
+  return tokens;
+};
+
+/**
+ * A reading's or a writing's refusal: its reason, the mapping's own words; where the reading met
+ * it, `at`, none for its text's own; and where its request carried it, `place`, which a binding
+ * gives it (transcoding 7.4).
+ */
+export class JsonFormError extends Error {
+  /** Why, in the words of transcoding 5, which name nothing the request carried. */
+  readonly reason: string;
+  /** The tokens of the place the reading met it, from the value read; none for its text's own. */
+  readonly at: readonly IJsonToken[] | undefined;
+  /** Where its request carried it, a parameter or a pointer of 7.4; none where nothing places it. */
+  readonly place: RequestPlace | undefined;
+
+  constructor(
+    reason: string,
+    { at, place }: { at?: IJsonPlace | undefined; place?: RequestPlace | undefined } = {}
+  ) {
+    super(reason);
     this.name = 'JsonFormError';
     this.reason = reason;
+    this.at = at === undefined ? undefined : tokensOf(at);
+    this.place = place;
+  }
+
+  /** Its place's pointer, the value read the body whole; none where the reading met it nowhere. */
+  get pointer(): string | undefined {
+    return this.at === undefined ? undefined : pointerOf(this.at);
   }
 }
 
-/** The article an integer type's name takes, as it is read aloud: `an int32`, `a uint32`, `a fixed32`. */
+/**
+ * The article a type's name takes, as it is read aloud: `an int32`, `an sint32`, `an Edges`, `an
+ * Empty`; `a uint32`, `a fixed32`, `a Timestamp`.
+ */
 const articleOf = (name: string): string => {
-  return /^[ais]/u.test(name) ? 'an' : 'a';
+  return /^(?:[aeio]|sint|sfixed)/iu.test(name) ? 'an' : 'a';
 };
 
-// a member's place below `at`, by its name, and an item's by its index
-const memberAt = (at: string, name: string): string => {
-  return at === '' ? name : `${at}.${name}`;
+// a field's place below `at`, by its JSON name; a member's or a key's the request carried; an item's
+const fieldAt = (at: IJsonPlace, name: string): IJsonPlace => {
+  return { token: { isGiven: false, text: name }, up: at };
 };
 
-const itemAt = (at: string, index: number | string): string => {
-  return `${at}[${typeof index === 'number' ? String(index) : JSON.stringify(index)}]`;
+const givenAt = (at: IJsonPlace, name: string): IJsonPlace => {
+  return { token: { isGiven: true, text: name }, up: at };
+};
+
+const itemAt = (at: IJsonPlace, index: number): IJsonPlace => {
+  return { token: { isGiven: false, text: String(index) }, up: at };
 };
 
 // ── The text ──────────────────────────────────────────────────────────────────
@@ -507,18 +623,18 @@ const numberJsonOf = (value: number, { isFloat }: { isFloat: boolean }): string 
  * The bytes of `text`, base64 of one alphabet, the standard's or the URL-safe one, padded correctly
  * or not at all, the bits its last character holds past its bytes whatever they are (5.3.6).
  */
-const bytesOfBase64 = (text: string, at: string): Uint8Array => {
+const bytesOfBase64 = (text: string, at: IJsonPlace): Uint8Array => {
   const padding = /=*$/u.exec(text)?.[0].length ?? 0;
   const body = text.slice(0, text.length - padding);
 
   if (/[^A-Za-z0-9+/_-]/u.test(body) || (/[+/]/u.test(body) && /[-_]/u.test(body))) {
-    throw new JsonFormError('bytes of no one alphabet of base64', at);
+    throw new JsonFormError('bytes of no one alphabet of base64', { at });
   }
 
   const rest = body.length % 4;
 
   if (rest === 1 || (padding > 0 && (padding > 2 || rest + padding !== 4))) {
-    throw new JsonFormError('bytes padded wrongly', at);
+    throw new JsonFormError('bytes padded wrongly', { at });
   }
 
   const bytes = new Uint8Array(Math.floor((body.length * 3) / 4));
@@ -740,7 +856,7 @@ const isNullItself = (field: DescField): boolean => {
 
 /** What a reading carries down a message: the messages an `Any` names, and its depth. */
 interface IReadingOptions {
-  readonly at: string;
+  readonly at: IJsonPlace;
   readonly depth: number;
   readonly registry: ITypeRegistry;
 }
@@ -748,7 +864,7 @@ interface IReadingOptions {
 /** A scalar's value of `node`, read as 5.3 pins its type's forms. */
 const readScalar = (
   scalar: ScalarType,
-  { at, longAsString, node }: { at: string; longAsString: boolean; node: JsonNode }
+  { at, longAsString, node }: { at: IJsonPlace; longAsString: boolean; node: JsonNode }
 ): unknown => {
   const integer = integerTypeOf(scalar);
 
@@ -760,11 +876,11 @@ const readScalar = (
       read = integerOfDigits(node.text);
 
       if (read === 'fraction') {
-        throw new JsonFormError(`${articleOf(name)} ${name} that is no integer`, at);
+        throw new JsonFormError(`${articleOf(name)} ${name} that is no integer`, { at });
       }
     } else if (node.kind === 'string' && is64) {
       if (!INTEGER.test(node.value)) {
-        throw new JsonFormError(`${articleOf(name)} ${name} string off -?(0|[1-9][0-9]*)`, at);
+        throw new JsonFormError(`${articleOf(name)} ${name} string off -?(0|[1-9][0-9]*)`, { at });
       }
 
       read = BigInt(node.value);
@@ -772,14 +888,14 @@ const readScalar = (
       read = integerOfDigits(node.value);
 
       if (read === 'fraction') {
-        throw new JsonFormError(`${articleOf(name)} ${name} that is no integer`, at);
+        throw new JsonFormError(`${articleOf(name)} ${name} that is no integer`, { at });
       }
     } else {
-      throw new JsonFormError(`no ${name}`, at);
+      throw new JsonFormError(`no ${name}`, { at });
     }
 
     if (read === 'past' || read < bounds.least || read > bounds.most) {
-      throw new JsonFormError(`${articleOf(name)} ${name} past its range`, at);
+      throw new JsonFormError(`${articleOf(name)} ${name} past its range`, { at });
     }
 
     if (!is64) {
@@ -799,19 +915,19 @@ const readScalar = (
       value = Number(node.value);
 
       if (!Number.isFinite(value)) {
-        throw new JsonFormError(`a ${name} past its range`, at);
+        throw new JsonFormError(`a ${name} past its range`, { at });
       }
     } else if (node.kind === 'string' && Object.hasOwn(NON_FINITE, node.value)) {
       return NON_FINITE[node.value];
     } else {
-      throw new JsonFormError(`no ${name}`, at);
+      throw new JsonFormError(`no ${name}`, { at });
     }
 
     if (scalar === ScalarType.FLOAT) {
       const float = Math.fround(value);
 
       if (!Number.isFinite(float)) {
-        throw new JsonFormError('a float past its range', at);
+        throw new JsonFormError('a float past its range', { at });
       }
 
       return float;
@@ -822,7 +938,7 @@ const readScalar = (
 
   if (scalar === ScalarType.BOOL) {
     if (node.kind !== 'boolean') {
-      throw new JsonFormError('no bool', at);
+      throw new JsonFormError('no bool', { at });
     }
 
     return node.value;
@@ -830,21 +946,21 @@ const readScalar = (
 
   if (scalar === ScalarType.STRING) {
     if (node.kind !== 'string') {
-      throw new JsonFormError('no string', at);
+      throw new JsonFormError('no string', { at });
     }
 
     return node.value;
   }
 
   if (node.kind !== 'string') {
-    throw new JsonFormError('no bytes', at);
+    throw new JsonFormError('no bytes', { at });
   }
 
   return bytesOfBase64(node.value, at);
 };
 
 /** An enum's number of `node`: one of its values' names, or a number its values or its openness take. */
-const readEnum = (descEnum: DescEnum, { at, node }: { at: string; node: JsonNode }): number => {
+const readEnum = (descEnum: DescEnum, { at, node }: { at: IJsonPlace; node: JsonNode }): number => {
   if (descEnum.typeName === NULL_VALUE && node.kind === 'null') {
     return 0;
   }
@@ -855,24 +971,24 @@ const readEnum = (descEnum: DescEnum, { at, node }: { at: string; node: JsonNode
     });
 
     if (value === undefined) {
-      throw new JsonFormError(`no value of ${descEnum.name} of that name`, at);
+      throw new JsonFormError(`no value of ${descEnum.name} of that name`, { at });
     }
 
     return value.number;
   }
 
   if (node.kind !== 'number') {
-    throw new JsonFormError(`no ${descEnum.name}`, at);
+    throw new JsonFormError(`no ${descEnum.name}`, { at });
   }
 
   const read = integerOfDigits(node.text);
 
   if (read === 'fraction') {
-    throw new JsonFormError('an enum number that is no integer', at);
+    throw new JsonFormError('an enum number that is no integer', { at });
   }
 
   if (read === 'past' || read < INT32.least || read > INT32.most) {
-    throw new JsonFormError('an enum number past its range', at);
+    throw new JsonFormError('an enum number past its range', { at });
   }
 
   const number = Number(read);
@@ -883,21 +999,21 @@ const readEnum = (descEnum: DescEnum, { at, node }: { at: string; node: JsonNode
       return value.number === number;
     })
   ) {
-    throw new JsonFormError(`no value of ${descEnum.name} of that number`, at);
+    throw new JsonFormError(`no value of ${descEnum.name} of that number`, { at });
   }
 
   return number;
 };
 
 /** A map's key of its member's name, in the key's string form, its value canonical (5.3.8). */
-const readMapKey = (scalar: ScalarType, { at, key }: { at: string; key: string }): string => {
+const readMapKey = (scalar: ScalarType, { at, key }: { at: IJsonPlace; key: string }): string => {
   if (scalar === ScalarType.STRING) {
     return key;
   }
 
   if (scalar === ScalarType.BOOL) {
     if (key !== 'true' && key !== 'false') {
-      throw new JsonFormError('a bool key that is neither true nor false', at);
+      throw new JsonFormError('a bool key that is neither true nor false', { at });
     }
 
     return key;
@@ -908,13 +1024,13 @@ const readMapKey = (scalar: ScalarType, { at, key }: { at: string; key: string }
   const article = articleOf(name);
 
   if (integer === undefined || !INTEGER.test(key)) {
-    throw new JsonFormError(`${article} ${name} key off -?(0|[1-9][0-9]*)`, at);
+    throw new JsonFormError(`${article} ${name} key off -?(0|[1-9][0-9]*)`, { at });
   }
 
   const value = BigInt(key);
 
   if (value < integer.bounds.least || value > integer.bounds.most) {
-    throw new JsonFormError(`${article} ${name} key past its range`, at);
+    throw new JsonFormError(`${article} ${name} key past its range`, { at });
   }
 
   return value.toString();
@@ -956,22 +1072,22 @@ const readValueOf = (field: DescField, node: JsonNode, reading: IReadingOptions)
 };
 
 /** Throws where a message `depth` below the one read would be built past 17.9.3's bound. */
-const assertDepth = (depth: number, at: string): void => {
+const assertDepth = (depth: number, at: IJsonPlace): void => {
   if (depth > MAXIMUM_DEPTH) {
-    throw new JsonFormError(`nested past ${String(MAXIMUM_DEPTH)}`, at);
+    throw new JsonFormError(`nested past ${String(MAXIMUM_DEPTH)}`, { at });
   }
 };
 
 /** A Timestamp's seconds and nanoseconds of its RFC 3339 form (5.4.1). */
-const readTimestamp = (node: JsonNode, at: string): { nanos: number; seconds: bigint } => {
+const readTimestamp = (node: JsonNode, at: IJsonPlace): { nanos: number; seconds: bigint } => {
   if (node.kind !== 'string') {
-    throw new JsonFormError('a Timestamp that is no string', at);
+    throw new JsonFormError('a Timestamp that is no string', { at });
   }
 
   const match = TIMESTAMP.exec(node.value);
 
   if (match === null) {
-    throw new JsonFormError('a Timestamp off RFC 3339', at);
+    throw new JsonFormError('a Timestamp off RFC 3339', { at });
   }
 
   const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = ''] = match;
@@ -990,7 +1106,7 @@ const readTimestamp = (node: JsonNode, at: string): { nanos: number; seconds: bi
     const minutes = Number(offset.slice(4, 6));
 
     if (hours > 23 || minutes > 59) {
-      throw new JsonFormError('a Timestamp of no offset', at);
+      throw new JsonFormError('a Timestamp of no offset', { at });
     }
   }
 
@@ -1003,7 +1119,7 @@ const readTimestamp = (node: JsonNode, at: string): { nanos: number; seconds: bi
     minute > 59 ||
     second > 59
   ) {
-    throw new JsonFormError('a Timestamp of no instant', at);
+    throw new JsonFormError('a Timestamp of no instant', { at });
   }
 
   const offsetSeconds =
@@ -1016,25 +1132,25 @@ const readTimestamp = (node: JsonNode, at: string): { nanos: number; seconds: bi
     BigInt(hour * 3600 + minute * 60 + second - offsetSeconds);
 
   if (seconds < EARLIEST_SECONDS || seconds > LATEST_SECONDS) {
-    throw new JsonFormError('a Timestamp past its range', at);
+    throw new JsonFormError('a Timestamp past its range', { at });
   }
 
   return { nanos: Number(fraction.padEnd(9, '0')), seconds };
 };
 
 /** A Duration's seconds and nanoseconds of its form, both of its sign (5.4.2). */
-const readDuration = (node: JsonNode, at: string): { nanos: number; seconds: bigint } => {
+const readDuration = (node: JsonNode, at: IJsonPlace): { nanos: number; seconds: bigint } => {
   const match = node.kind === 'string' ? DURATION.exec(node.value) : null;
 
   if (match === null) {
-    throw new JsonFormError('a Duration off its form', at);
+    throw new JsonFormError('a Duration off its form', { at });
   }
 
   const [, minus, whole = '0', fraction = ''] = match;
   const seconds = BigInt(whole);
 
   if (seconds > LONGEST_SECONDS) {
-    throw new JsonFormError('a Duration past its range', at);
+    throw new JsonFormError('a Duration past its range', { at });
   }
 
   const sign = minus === undefined ? 1 : -1;
@@ -1044,9 +1160,9 @@ const readDuration = (node: JsonNode, at: string): { nanos: number; seconds: big
 };
 
 /** A FieldMask's paths of its form, each read to snake case and held to reverse (5.4.3). */
-const readFieldMask = (node: JsonNode, at: string): string[] => {
+const readFieldMask = (node: JsonNode, at: IJsonPlace): string[] => {
   if (node.kind !== 'string') {
-    throw new JsonFormError('a FieldMask that is no string', at);
+    throw new JsonFormError('a FieldMask that is no string', { at });
   }
 
   if (node.value === '') {
@@ -1055,7 +1171,7 @@ const readFieldMask = (node: JsonNode, at: string): string[] => {
 
   return node.value.split(',').map((path) => {
     if (path === '') {
-      throw new JsonFormError('a FieldMask of an empty path', at);
+      throw new JsonFormError('a FieldMask of an empty path', { at });
     }
 
     const segments = path.split('.');
@@ -1065,7 +1181,7 @@ const readFieldMask = (node: JsonNode, at: string): string[] => {
         return CAMEL_SEGMENT.test(segment);
       })
     ) {
-      throw new JsonFormError('a FieldMask path off lowerCamelCase', at);
+      throw new JsonFormError('a FieldMask path off lowerCamelCase', { at });
     }
 
     const snake = path.replaceAll(/[A-Z]/gu, (letter) => {
@@ -1073,7 +1189,7 @@ const readFieldMask = (node: JsonNode, at: string): string[] => {
     });
 
     if (camelOf(snake) !== path) {
-      throw new JsonFormError('a FieldMask path off lowerCamelCase', at);
+      throw new JsonFormError('a FieldMask path off lowerCamelCase', { at });
     }
 
     return snake;
@@ -1122,7 +1238,12 @@ const readStruct = (node: JsonNode, reading: IReadingOptions) => {
   assertDepth(reading.depth, reading.at);
 
   if (node.kind !== 'object') {
-    throw new JsonFormError('a Struct that is no object', reading.at);
+    throw new JsonFormError('a Struct that is no object', { at: reading.at });
+  }
+
+  // * its members are a map's entries, messages below it, counted before any is read
+  if (node.members.length > 0) {
+    assertDepth(reading.depth + 1, reading.at);
   }
 
   const struct = create(StructSchema);
@@ -1131,7 +1252,7 @@ const readStruct = (node: JsonNode, reading: IReadingOptions) => {
     // * a member is a map's entry, a message below the Struct, and its Value one below that
     struct.fields[name] = readValueMessage(member, {
       ...reading,
-      at: memberAt(reading.at, name),
+      at: givenAt(reading.at, name),
       depth: reading.depth + 2,
     }) as (typeof struct.fields)[string];
   }
@@ -1175,7 +1296,7 @@ const readListValue = (node: JsonNode, reading: IReadingOptions) => {
   assertDepth(reading.depth, reading.at);
 
   if (node.kind !== 'array') {
-    throw new JsonFormError('a ListValue that is no array', reading.at);
+    throw new JsonFormError('a ListValue that is no array', { at: reading.at });
   }
 
   const list = create(ListValueSchema);
@@ -1198,7 +1319,7 @@ const readAny = (node: JsonNode, reading: IReadingOptions): Message => {
   const { at, registry } = reading;
 
   if (node.kind !== 'object') {
-    throw new JsonFormError('an Any that is no object', at);
+    throw new JsonFormError('an Any that is no object', { at });
   }
 
   const any = create(AnySchema);
@@ -1212,20 +1333,20 @@ const readAny = (node: JsonNode, reading: IReadingOptions): Message => {
   });
 
   if (typeMember === undefined) {
-    throw new JsonFormError('an Any without its @type', at);
+    throw new JsonFormError('an Any without its @type', { at });
   }
 
   const [, typeNode] = typeMember;
 
   if (typeNode.kind !== 'string' || !typeNode.value.includes('/')) {
-    throw new JsonFormError('an Any whose @type is no URL', at);
+    throw new JsonFormError('an Any whose @type is no URL', { at });
   }
 
   const typeName = typeNode.value.slice(typeNode.value.lastIndexOf('/') + 1);
   const schema = registry.messageOf(typeName);
 
   if (schema === undefined) {
-    throw new JsonFormError('an Any of a type its definitions do not hold', at);
+    throw new JsonFormError('an Any of a type its definitions do not hold', { at });
   }
 
   const rest = node.members.filter(([name]) => {
@@ -1238,13 +1359,12 @@ const readAny = (node: JsonNode, reading: IReadingOptions): Message => {
     const [only] = rest;
 
     if (rest.length !== 1 || only?.[0] !== 'value') {
-      throw new JsonFormError(
-        'an Any of a well-known type whose members are not its value alone',
-        at
-      );
+      throw new JsonFormError('an Any of a well-known type whose members are not its value alone', {
+        at,
+      });
     }
 
-    message = readMessageAt(schema, only[1], { ...below, at: memberAt(at, 'value') });
+    message = readMessageAt(schema, only[1], { ...below, at: fieldAt(at, 'value') });
   } else {
     message = readMessageAt(schema, { kind: 'object', members: rest }, below);
   }
@@ -1258,7 +1378,7 @@ const readAny = (node: JsonNode, reading: IReadingOptions): Message => {
 /** A wrapper of `node`: its value's form, as its scalar's (5.4.4). */
 const readWrapper = (
   schema: DescMessage,
-  { at, node }: { at: string; node: JsonNode }
+  { at, node }: { at: IJsonPlace; node: JsonNode }
 ): Message => {
   const message = create(schema) as Message & Record<string, unknown>;
   const [field] = schema.fields;
@@ -1319,7 +1439,7 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
   }
 
   if (node.kind !== 'object') {
-    throw new JsonFormError(`a ${schema.name} that is no object`, at);
+    throw new JsonFormError(`${articleOf(schema.name)} ${schema.name} that is no object`, { at });
   }
 
   const message = create(schema) as Message & Record<string, unknown>;
@@ -1331,14 +1451,15 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
 
   for (const [name, value] of node.members) {
     const field = byName.get(name);
-    const here = memberAt(at, name);
 
     if (field === undefined) {
-      throw new JsonFormError('a key no field names', here);
+      throw new JsonFormError('a key no field names', { at: givenAt(at, name) });
     }
 
+    const here = fieldAt(at, field.jsonName);
+
     if (named.has(field)) {
-      throw new JsonFormError('a field by its two names', here);
+      throw new JsonFormError('a field by its two names', { at: here });
     }
 
     named.set(field, name);
@@ -1356,14 +1477,14 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
     switch (field.fieldKind) {
       case 'list': {
         if (value.kind !== 'array') {
-          throw new JsonFormError('a repeated field that is no array', here);
+          throw new JsonFormError('a repeated field that is no array', { at: here });
         }
 
         const list = message[field.localName] as unknown[];
 
         for (const [index, item] of value.items.entries()) {
           if (item.kind === 'null' && !isNullItself(field)) {
-            throw new JsonFormError('a null item', itemAt(here, index));
+            throw new JsonFormError('a null item', { at: itemAt(here, index) });
           }
 
           list.push(readValueOf(field, item, { ...below, at: itemAt(here, index) }));
@@ -1373,7 +1494,7 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
       }
       case 'map': {
         if (value.kind !== 'object') {
-          throw new JsonFormError('a map that is no object', here);
+          throw new JsonFormError('a map that is no object', { at: here });
         }
 
         if (value.members.length > 0) {
@@ -1383,15 +1504,15 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
         const map = message[field.localName] as Record<string, unknown>;
 
         for (const [key, item] of value.members) {
-          const keyAt = itemAt(here, key);
+          const keyAt = givenAt(here, key);
           const read = readMapKey(field.mapKey, { at: keyAt, key });
 
           if (Object.hasOwn(map, read)) {
-            throw new JsonFormError('two keys of one value', keyAt);
+            throw new JsonFormError('two keys of one value', { at: keyAt });
           }
 
           if (item.kind === 'null' && !isNullItself(field)) {
-            throw new JsonFormError('a null value in a map', keyAt);
+            throw new JsonFormError('a null value in a map', { at: keyAt });
           }
 
           // * the entry is a message below this one, and its value one below the entry
@@ -1414,7 +1535,7 @@ const readMessageAt = (schema: DescMessage, node: JsonNode, reading: IReadingOpt
         }
 
         if (chosen.has(oneof.name)) {
-          throw new JsonFormError('two members of one oneof', here);
+          throw new JsonFormError('two members of one oneof', { at: here });
         }
 
         chosen.set(oneof.name, field);
@@ -1437,7 +1558,7 @@ export const readMessage = (
   schema: DescMessage,
   { node, registry }: IJsonFormOptions & { node: JsonNode }
 ): Message => {
-  return readMessageAt(schema, node, { at: '', depth: 0, registry });
+  return readMessageAt(schema, node, { at: ROOT, depth: 0, registry });
 };
 
 /** A `proto` request's body read by Bead's mapping, its text then its message (transcoding 5.2). */

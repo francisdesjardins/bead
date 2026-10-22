@@ -22,10 +22,14 @@ export type TemplateReading =
   | { readonly reason?: undefined; readonly template: ITemplate }
   | { readonly reason: string; readonly template?: undefined };
 
-/** A variable's values decoded, by their field paths, or why one does not decode. */
+/** A variable's values decoded, by their field paths, or why one does not decode, and which. */
 export type VariablesReading =
-  | { readonly reason?: undefined; readonly variables: Readonly<Record<string, string>> }
-  | { readonly reason: string; readonly variables?: undefined };
+  | {
+      readonly fieldPath?: undefined;
+      readonly reason?: undefined;
+      readonly variables: Readonly<Record<string, string>>;
+    }
+  | { readonly fieldPath: string; readonly reason: string; readonly variables?: undefined };
 
 // interfaces
 
@@ -164,10 +168,10 @@ const isDotSegment = (segment: string): boolean => {
 };
 
 /**
- * `text` percent-decoded, each `%XX` an octet but what `keeps` keeps, then read as UTF-8: a `%`
- * that two hexadecimal digits do not follow, or bytes that are no UTF-8, refused.
+ * `text` percent-decoded, each `%XX` an octet, then read as UTF-8: a `%` that two hexadecimal
+ * digits do not follow, or bytes that are no UTF-8, refused.
  */
-const decodeOf = (text: string, keeps?: RegExp): string => {
+const decodeOf = (text: string): string => {
   if (PERCENT.test(text)) {
     throw new Refusal('a % that two hexadecimal digits do not follow');
   }
@@ -178,13 +182,7 @@ const decodeOf = (text: string, keeps?: RegExp): string => {
   let at = 0;
 
   for (const match of text.matchAll(OCTET)) {
-    parts.push(...encoder.encode(text.slice(at, match.index)));
-
-    if (keeps?.test(match[0]) === true) {
-      parts.push(...encoder.encode(match[0]));
-    } else {
-      parts.push(Number.parseInt(match[1] ?? '', 16));
-    }
+    parts.push(...encoder.encode(text.slice(at, match.index)), Number.parseInt(match[1] ?? '', 16));
 
     at = match.index + match[0].length;
   }
@@ -408,8 +406,8 @@ export const routeIndexOf = (
 /**
  * The values `template`'s variables take of `path`, which it matches, by their field paths: each
  * its segments by `/`, a single-segment one percent-decoded whole, a multi-segment one but each
- * `%2F` and `%2f`, which stays as it came (3.8); or why one does not decode, which a gateway answers
- * 400 `PAYLOAD_UNDECODABLE`.
+ * `%2F` and `%2f`, which stays as it came (3.8); or why one does not decode, and its field path,
+ * which a gateway answers 400 `PAYLOAD_UNDECODABLE` at that parameter (7.4).
  */
 export const variablesOf = (template: ITemplate, path: IRawPath): VariablesReading => {
   const { segments } = template;
@@ -422,10 +420,10 @@ export const variablesOf = (template: ITemplate, path: IRawPath): VariablesReadi
   };
   const variables: Record<string, string> = {};
 
-  try {
-    for (const variable of template.variables) {
-      const value = taken(variable.start, variable.end).join('/');
+  for (const variable of template.variables) {
+    const value = taken(variable.start, variable.end).join('/');
 
+    try {
       variables[variable.fieldPath] = variable.isMultiSegment
         ? value
             .split(/(%2f)/iu)
@@ -434,13 +432,13 @@ export const variablesOf = (template: ITemplate, path: IRawPath): VariablesReadi
             })
             .join('')
         : decodeOf(value);
-    }
-  } catch (error) {
-    if (error instanceof Refusal) {
-      return { reason: error.message };
-    }
+    } catch (error) {
+      if (error instanceof Refusal) {
+        return { fieldPath: variable.fieldPath, reason: error.message };
+      }
 
-    throw error;
+      throw error;
+    }
   }
 
   return { variables };

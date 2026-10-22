@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
+import { ProgrammerError } from '../../transport/shared/errors';
 import {
   createEventStream,
   eventDataOf,
@@ -124,27 +125,62 @@ test('credits each notification once the event before it was taken', async () =>
   expect(pending.length).toBe(3);
 });
 
-test('writes one result alone, and nothing once the stream ended', () => {
+test('refuses a second result, and a result or a notification once its failure ended it, as its caller’s bug', async () => {
   const clock = createTestClock();
   const { sink, told, written } = createSink();
   const stream = createEventStream(sink, { clock, heartbeat: Number.POSITIVE_INFINITY });
 
   stream.result('{"ticks":1}');
-  stream.result('{"ticks":2}');
+  expect(() => {
+    stream.result('{"ticks":2}');
+  }).toThrow(new ProgrammerError('a stream has one result, before its end'));
   expect(told).toEqual(['open']);
   expect(written).toEqual(['event: result\nid: 1\ndata: {"ticks":1}\n\n']);
 
-  // a failure after the end, as a result, writes and tells nothing
-  stream.close();
-  stream.failure({ body: '{"status":500}', fields: {}, status: 500 });
-  expect(told).toEqual(['open']);
+  // * its failure ends it: a result or a notification after it is its caller's bug, a failure nothing
+  stream.failure({ body: '{"code":2}', fields: {}, status: 429 });
+  stream.failure({ body: '{"code":3}', fields: {}, status: 429 });
+  expect(() => {
+    stream.result('{}');
+  }).toThrow(ProgrammerError);
+  await expect(stream.notification('{}')).rejects.toThrow(
+    new ProgrammerError('a notification after the stream ended')
+  );
+  expect(told).toEqual(['open', 'end']);
+  expect(written.length).toBe(2);
 
+  // closed, its client gone: what comes after is dropped, written and told nothing
   const closed = createSink();
   const early = createEventStream(closed.sink, { clock, heartbeat: Number.POSITIVE_INFINITY });
 
   early.close();
   early.result('{}');
   early.failure({ body: '{"status":500}', fields: {}, status: 500 });
+  expect(await isSettled(early.notification('{}'))).toBe(true);
   expect(closed.told).toEqual([]);
   expect(closed.written).toEqual([]);
+});
+
+test('settles a held notification whose event its response could not take, its credit moot', async () => {
+  const clock = createTestClock();
+  let writes = 0;
+  const stream = createEventStream(
+    {
+      answer: () => {},
+      end: () => {},
+      open: () => {},
+      // * the result taken, the notification after it refused, as a socket that closed
+      write: () => {
+        writes += 1;
+
+        return writes === 1 ? Promise.resolve() : Promise.reject(new Error('the socket closed'));
+      },
+    },
+    { clock, heartbeat: Number.POSITIVE_INFINITY }
+  );
+  const held = stream.notification('{"remaining":1}');
+
+  stream.result('{}');
+  await expect(held).resolves.toBeUndefined();
+  await expect(stream.notification('{"remaining":0}')).resolves.toBeUndefined();
 });

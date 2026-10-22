@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Google.Protobuf.Reflection;
@@ -39,6 +38,9 @@ public enum OwnFailure
 
     /// <summary>An <c>authorization</c> of an auth-scheme but <c>Bearer</c>, under <c>bearer-jwt</c>, 401.</summary>
     Scheme,
+
+    /// <summary>What no gate foresaw, 500, with no detail.</summary>
+    Failed,
 }
 
 /// <summary>Where a failure is answered from, and what a gateway is given to answer it.</summary>
@@ -67,6 +69,9 @@ public sealed record ProblemContext
 
     /// <summary>The route its request came by, whose variables and body a violation's field is placed by.</summary>
     public HttpRouteTemplate? Rule { get; init; }
+
+    /// <summary>Where the gateway's reading met what it refuses, as 7.4 places one: a <c>PAYLOAD_UNDECODABLE</c> of its own.</summary>
+    public RequestPlace? Place { get; init; }
 }
 
 /// <summary>A problem, as a gateway answers a failure: its status, the fields beside it, and its body.</summary>
@@ -231,9 +236,24 @@ public static partial class HttpProblems
         {
             ErrorsOf(members, (detail, context));
         }
-        else if (detail.Length > 0)
+        else if (detail.Length > 0 && failure.Code != (ushort)ProtocolCode.DestinationUnreachable)
         {
+            // * but the gateway's own error between it and its server: its code alone (spec 9.0)
             members["detail"] = detail;
+        }
+
+        // * where the gateway's reading met what it refuses, as 7.4 places one
+        if (context.Arose == FailureArising.Gateway && context.Place is { } place)
+        {
+            if (place.Parameter is { } parameter)
+            {
+                members["parameter"] = parameter;
+            }
+
+            if (place.Pointer is { } pointer)
+            {
+                members["pointer"] = pointer;
+            }
         }
 
         if (status == 401)
@@ -249,14 +269,17 @@ public static partial class HttpProblems
         return new HttpProblem { Status = status, Fields = fields, Body = Canonical(members) };
     }
 
-    /// <summary>A failure of the gateway's own (transcoding 7.6): <c>about:blank</c>, its status's phrase, its detail its words.</summary>
+    /// <summary>
+    /// A failure of the gateway's own (transcoding 7.6): <c>about:blank</c>, its status's phrase, its
+    /// detail its words, none for what no gate foresaw.
+    /// </summary>
     public static HttpProblem Own(OwnFailure failure, (string Detail, string Challenge) told)
     {
         var status = failure switch
         {
             OwnFailure.Timeout => 504,
             OwnFailure.Closed => 502,
-            OwnFailure.Unwritable => 500,
+            OwnFailure.Unwritable or OwnFailure.Failed => 500,
             OwnFailure.Jwt => 431,
             _ => 401,
         };
@@ -366,12 +389,13 @@ public static partial class HttpProblems
 
                     error["pointer"] = Fragment(field is { FieldType: FieldType.Message } ? PointerOf(field.MessageType, elements.Skip(1).ToList()) : []);
                 }
-                else if (elements.Count > 0)
+                else if (elements.Count > 0 && PointerOf(request, elements.Select((element) =>
                 {
-                    error["parameter"] = string.Join('.', PointerOf(request, elements.Select((element) =>
-                    {
-                        return (element.Name, (string?)null);
-                    }).ToList()));
+                    return (element.Name, (string?)null);
+                }).ToList()) is { Count: > 0 } named)
+                {
+                    // * a path that names no field of the request is placed nowhere
+                    error["parameter"] = string.Join('.', named);
                 }
             }
 
@@ -465,31 +489,10 @@ public static partial class HttpProblems
     // take percent-encoded from its UTF-8
     private static string Fragment(List<string> tokens)
     {
-        var pointer = string.Concat(tokens.Select((token) =>
+        return JsonPlaces.PointerOf(tokens.Select((token) =>
         {
-            return "/" + token.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
+            return new JsonToken(token, false);
         }));
-        var fragment = new StringBuilder("#");
-        Span<byte> bytes = stackalloc byte[4];
-
-        foreach (var rune in pointer.EnumerateRunes())
-        {
-            if (rune.IsAscii && (char.IsAsciiLetterOrDigit((char)rune.Value) || "-._~!$&'()*+,;=:@/?".Contains((char)rune.Value, StringComparison.Ordinal)))
-            {
-                fragment.Append((char)rune.Value);
-
-                continue;
-            }
-
-            var count = rune.EncodeToUtf8(bytes);
-
-            for (var index = 0; index < count; index += 1)
-            {
-                fragment.Append('%').Append(bytes[index].ToString("X2", CultureInfo.InvariantCulture));
-            }
-        }
-
-        return fragment.ToString();
     }
 
     // a problem's members in the canonical form of spec 17.7 (7.2): built as JSON, then written by it

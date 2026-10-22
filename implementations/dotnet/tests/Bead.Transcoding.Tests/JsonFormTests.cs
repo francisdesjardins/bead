@@ -158,7 +158,7 @@ public sealed class JsonFormTests
             (Edges.Descriptor, "{\"any\":{\"@type\":1}}", "an Any whose @type is no URL"),
             (Edges.Descriptor, "{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Nope\"}}", "an Any of a type its definitions do not hold"),
             (Edges.Descriptor, "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Duration\",\"seconds\":1}}", "an Any of a well-known type whose members are not its value alone"),
-            (Edges.Descriptor, "{\"child\":1}", "a Edges that is no object"),
+            (Edges.Descriptor, "{\"child\":1}", "an Edges that is no object"),
             (Edges.Descriptor, "{\"at\":1}", "a Timestamp that is no string"),
             (Edges.Descriptor, "{\"at\":\"yesterday\"}", "a Timestamp off RFC 3339"),
             (Edges.Descriptor, "{\"at\":\"2026-01-01T24:00:00Z\"}", "a Timestamp of no instant"),

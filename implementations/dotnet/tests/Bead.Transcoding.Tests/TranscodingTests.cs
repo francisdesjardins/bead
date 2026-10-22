@@ -141,14 +141,20 @@ public sealed class TranscodingTests
 
             if (StringOf(entry, "refused") is { } reason)
             {
-                var refusal = RefusalOf<JsonFormException>(() =>
+                var refusal = Refused(() =>
                 {
                     Form.Read(descriptor, body);
                 });
 
-                if (refusal != reason)
+                if (refusal?.Message != reason)
                 {
-                    parted.Add($"readings: {name}: {refusal ?? "taken"}, where it is refused, {reason}");
+                    parted.Add($"readings: {name}: {refusal?.Message ?? "taken"}, where it is refused, {reason}");
+                }
+
+                // * where its reading met it, the body the request whole (7.4)
+                if (refusal?.Pointer != StringOf(entry, "pointer"))
+                {
+                    parted.Add($"readings: {name}: met at {refusal?.Pointer ?? "no place"}");
                 }
 
                 continue;
@@ -235,14 +241,20 @@ public sealed class TranscodingTests
 
             if (StringOf(entry, "refused") is { } reason)
             {
-                var refusal = RefusalOf<JsonFormException>(() =>
+                var refusal = Refused(() =>
                 {
                     binding.Bind(route, request);
                 });
 
-                if (refusal != reason)
+                if (refusal?.Message != reason)
                 {
-                    parted.Add($"bindings: {name}: {refusal ?? "bound"}, where it is refused, {reason}");
+                    parted.Add($"bindings: {name}: {refusal?.Message ?? "bound"}, where it is refused, {reason}");
+                }
+
+                // * where the request carried it (7.4)
+                if (refusal?.Place != PlaceOf(entry))
+                {
+                    parted.Add($"bindings: {name}: placed at {refusal?.Place?.ToString() ?? "no place"}");
                 }
 
                 continue;
@@ -298,6 +310,7 @@ public sealed class TranscodingTests
                     Failures = RouteOf("fail").Failures,
                     Request = procedure?.Request.Descriptor,
                     Rule = route,
+                    Place = PlaceOf(given),
                 };
 
                 problem = HttpProblems.Of(failure, context);
@@ -425,5 +438,29 @@ public sealed class TranscodingTests
         {
             return refused.Message;
         }
+    }
+
+    // the refusal `act` throws; none where it is taken
+    private static JsonFormException? Refused(Action act)
+    {
+        try
+        {
+            act();
+
+            return null;
+        }
+        catch (JsonFormException refused)
+        {
+            return refused;
+        }
+    }
+
+    // where a request carried what its reading refused, as an entry writes it (7.4)
+    private static RequestPlace? PlaceOf(JsonElement entry)
+    {
+        var parameter = StringOf(entry, "parameter");
+        var pointer = StringOf(entry, "pointer");
+
+        return parameter is null && pointer is null ? null : new RequestPlace { Parameter = parameter, Pointer = pointer };
     }
 }

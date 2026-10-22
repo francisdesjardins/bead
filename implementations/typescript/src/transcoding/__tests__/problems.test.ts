@@ -44,8 +44,9 @@ test('answers each protocol code with its status by where it arose, and its prob
     scope: 'protocol',
   });
 
+  // * the gateway's own error between it and its server: its code alone, whatever its detail
   expect(unreachable).toEqual({
-    body: `{"code":17,"detail":"the connection is gone","scope":"protocol","status":503,"title":"DESTINATION_UNREACHABLE","type":"${PROTOCOL_TYPES}DESTINATION_UNREACHABLE"}`,
+    body: `{"code":17,"scope":"protocol","status":503,"title":"DESTINATION_UNREACHABLE","type":"${PROTOCOL_TYPES}DESTINATION_UNREACHABLE"}`,
     fields: { 'retry-after': '1' },
     status: 503,
   });

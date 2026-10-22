@@ -29,6 +29,7 @@ import {
   problemOfOwn,
   rawPathOf,
   readProtoJson,
+  type RequestPlace,
   routeIndexOf,
   templateOf,
   typeRegistryOf,
@@ -64,6 +65,7 @@ interface IReadingEntry extends IEntry {
   bodyBytes?: string;
   message: string;
   payload?: string;
+  pointer?: string;
   refused?: string;
 }
 
@@ -76,7 +78,9 @@ interface IWritingEntry extends IEntry {
 
 interface IBindingEntry extends IEntry {
   body?: string;
+  parameter?: string;
   payload?: string;
+  pointer?: string;
   procedure: string;
   refused?: string;
   route: { body?: string; method: string; template: string };
@@ -92,6 +96,8 @@ interface IFailureEntry extends IEntry {
     detail?: string;
     encoding?: Encoding;
     own?: OwnFailure;
+    parameter?: string;
+    pointer?: string;
     scope?: 'application' | 'protocol';
   };
   fields: Record<string, string>;
@@ -218,15 +224,29 @@ const messageOf = (name: string): DescMessage => {
   return schema;
 };
 
-/** The reason `act` is refused for, in the words of transcoding 5. */
-const reasonOf = (act: () => unknown): string | undefined => {
+/** The refusal `act` throws, a {@link JsonFormError}; none where it throws none. */
+const refusalOf = (act: () => unknown): JsonFormError | undefined => {
   try {
     act();
   } catch (error) {
-    return error instanceof JsonFormError ? error.reason : undefined;
+    return error instanceof JsonFormError ? error : undefined;
   }
 
   return undefined;
+};
+
+/** The reason `act` is refused for, in the words of transcoding 5. */
+const reasonOf = (act: () => unknown): string | undefined => {
+  return refusalOf(act)?.reason;
+};
+
+/** Where a request carried what its reading refused, as an entry writes it (7.4). */
+const placeOf = (entry: { parameter?: string; pointer?: string }): RequestPlace | undefined => {
+  if (entry.parameter !== undefined) {
+    return { parameter: entry.parameter };
+  }
+
+  return entry.pointer === undefined ? undefined : { pointer: entry.pointer };
 };
 
 /** A socket of an exchange, and what came on it so far. */
@@ -385,15 +405,6 @@ const readOn = async (peer: IPeer, { stream }: { stream?: string | undefined }):
   }
 };
 
-/** `expected` as a pattern of a body, each `{words}` one JSON string, the side's own words. */
-const wordsPatternOf = (expected: string): RegExp => {
-  const parts = expected.split('{words}').map((part) => {
-    return part.replaceAll(/[.*+?^${}()|[\]\\/-]/gu, '\\$&');
-  });
-
-  return new RegExp(`^${parts.join('"(?:[^"\\\\]|\\\\.)*"')}$`, 'u');
-};
-
 /** A gateway's options of the file's defaults and an exchange's own, by the gateway's names. */
 const gatewayOptionsOf = (entry: IExchangeEntry): Record<string, unknown> => {
   const { document, problemTypes, ...rest } = { ...FILE.defaults, ...entry.options };
@@ -468,6 +479,7 @@ test.describe('plays transcoding.json', () => {
       if (entry.payload === undefined) {
         expect(read).toThrow(JsonFormError);
         expect(reasonOf(read)).toBe(entry.refused);
+        expect(refusalOf(read)?.pointer).toBe(entry.pointer);
 
         return;
       }
@@ -504,6 +516,7 @@ test.describe('plays transcoding.json', () => {
       if (entry.payload === undefined) {
         expect(bind).toThrow(JsonFormError);
         expect(reasonOf(bind)).toBe(entry.refused);
+        expect(refusalOf(bind)?.place).toEqual(placeOf(entry));
 
         return;
       }
@@ -538,6 +551,7 @@ test.describe('plays transcoding.json', () => {
                 credential: failure.credential,
                 detail: failure.detail,
                 encoding: failure.encoding,
+                place: placeOf(failure),
                 scope: failure.scope ?? 'protocol',
               },
               {
@@ -649,8 +663,6 @@ test.describe('plays transcoding.json', () => {
               expect([...read.body]).toEqual([...fromHexadecimal(step.expect.bodyBytes)]);
             } else if (step.expect.stream !== undefined) {
               expect(read.body.toString('utf8').startsWith(step.expect.stream)).toBe(true);
-            } else if (step.expect.body?.includes('{words}') === true) {
-              expect(read.body.toString('utf8')).toMatch(wordsPatternOf(step.expect.body));
             } else {
               expect(read.body.toString('utf8')).toBe(
                 (step.expect.body ?? '').replaceAll('{document}', OPENAPI_DOCUMENT)

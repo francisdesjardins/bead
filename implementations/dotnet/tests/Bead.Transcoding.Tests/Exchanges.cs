@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
 using static Bead.Transcoding.Tests.TranscodingFile;
@@ -249,9 +248,9 @@ internal static partial class Exchanges
 
         var text = Encoding.UTF8.GetString(body);
         var expected = expect.GetProperty("body").GetString()!.Replace("{document}", Encoding.UTF8.GetString(Document), StringComparison.Ordinal);
-        var pattern = "^" + Regex.Escape(expected).Replace(Regex.Escape("{words}"), "\"(?:[^\"\\\\]|\\\\.)+\"", StringComparison.Ordinal) + "$";
 
-        if (!Regex.IsMatch(text, pattern, RegexOptions.CultureInvariant))
+        // * every refusal's words the companion's, byte for byte (7.7)
+        if (text != expected)
         {
             parts.Add($"body {text}");
         }

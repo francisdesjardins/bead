@@ -7,6 +7,7 @@
 // dependencies
 
 import type { IClock, TimeoutId } from '../transport/shared/clock';
+import { ProgrammerError } from '../transport/shared/errors';
 
 export { HEARTBEAT } from '../transport/shared/heartbeat';
 import { base64Of } from './json-form';
@@ -26,7 +27,11 @@ export interface IEventSink {
   readonly write: (text: string) => Promise<void>;
 }
 
-/** What a stream's call is given, in order, and writes as its events. */
+/**
+ * What a stream's call is given, in order, and writes as its events. A second result, or a result or
+ * a notification once its failure ended it, is its caller's bug, a {@link ProgrammerError}; once it
+ * is closed, its client gone, what comes is dropped.
+ */
 export interface IEventStream {
   /** Whether it ended: by its failure, before its result or after, or closed. */
   readonly isEnded: boolean;
@@ -37,7 +42,8 @@ export interface IEventStream {
   failure: (problem: IProblem) => void;
   /**
    * A notification's data, one JSON text: held until its result, and written after it; settles once
-   * the response took its event, which credits the next (8.8). One after its end is dropped.
+   * the response took its event, which credits the next (8.8), or once the stream could not take it,
+   * its credit moot: dropped by the failure that ends it, or closed.
    */
   notification: (data: string) => Promise<void>;
   /** Its call's result, one JSON text: the stream opens, its first event. */
@@ -103,6 +109,8 @@ export const createEventStream = (
   let count = 0;
   let isOpen = false;
   let isEnded = false;
+  // whether its client went: what comes after is dropped, no bug of its caller's
+  let isClosed = false;
   let timer: TimeoutId | undefined;
 
   const stopBeating = (): void => {
@@ -156,6 +164,7 @@ export const createEventStream = (
 
     close: () => {
       isEnded = true;
+      isClosed = true;
       stopBeating();
       drop();
     },
@@ -181,8 +190,13 @@ export const createEventStream = (
     },
 
     notification: (data) => {
-      if (isEnded) {
+      if (isClosed) {
         return Promise.resolve();
+      }
+
+      // ! a notification once the failure that ended the stream went is its caller's bug
+      if (isEnded) {
+        return Promise.reject(new ProgrammerError('a notification after the stream ended'));
       }
 
       if (!isOpen) {
@@ -191,12 +205,18 @@ export const createEventStream = (
         });
       }
 
-      return writeEvent(data);
+      // * its credit moot once the stream could not take its event: settled either way
+      return writeEvent(data).catch(() => {});
     },
 
     result: (data) => {
-      if (isEnded || isOpen) {
+      if (isClosed) {
         return;
+      }
+
+      // ! a stream has one result, before its end: another is its caller's bug
+      if (isEnded || isOpen) {
+        throw new ProgrammerError('a stream has one result, before its end');
       }
 
       isOpen = true;
@@ -204,7 +224,15 @@ export const createEventStream = (
       void writeEvent(data, 'result');
 
       for (const { data: notification, settle } of held.splice(0)) {
-        writeEvent(notification).then(settle, settle);
+        // * settled once taken, or once the stream could not take it, its credit moot
+        void writeEvent(notification).then(
+          () => {
+            settle();
+          },
+          () => {
+            settle();
+          }
+        );
       }
     },
   };

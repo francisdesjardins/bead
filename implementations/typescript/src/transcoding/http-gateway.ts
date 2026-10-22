@@ -34,7 +34,13 @@ import {
 } from '../transport/shared/clock';
 import { REFUSAL_HEADER } from '../transport/shared/constants';
 import { createEmitter } from '../transport/shared/emitter';
-import { CancelError, ProgrammerError, TimeoutError, toError } from '../transport/shared/errors';
+import {
+  CancelError,
+  ConnectError,
+  ProgrammerError,
+  TimeoutError,
+  toError,
+} from '../transport/shared/errors';
 import { HEARTBEAT } from '../transport/shared/heartbeat';
 import type { EmitterListener, IMemoryTransportServerLike } from '../transport/shared/types';
 import {
@@ -172,9 +178,11 @@ export interface IHTTPGatewayStartOptions {
 /** The events a gateway emits, named by the table that types them. */
 export type HTTPGatewayEventMap = {
   /**
-   * What went wrong that no caller can mend, reported, its words never in a problem (spec 9.0): a
-   * result Bead's proto JSON form holds none of, a scheme its server takes none of (transcoding
-   * 7.6), an answer its stock library refuses, a connection it could not draw, what no gate foresaw.
+   * What went wrong that no caller can mend, reported, its words never in a problem (spec 9.0):
+   * each failure it answers a call with 500 or above but `PROCEDURE_FAILED`, its server's report of
+   * its application's (transcoding 7.6) — a code between it and its server, an answer its stock
+   * library refuses, a scheme its server takes none of, its timeout, its connection closed or never
+   * drawn, a result Bead's proto JSON form holds none of, what no gate foresaw.
    */
   error: [error: Error];
 };
@@ -822,6 +830,13 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     const payload = isNotification ? init.notification : init.result;
     const codec = isNotification ? init.procedure.notification : init.procedure.result;
 
+    // * a text one read as spec 17.4 reads it, on a call as on a stream: what refuses it is the answer's
+    if (payload === 'text') {
+      decodedOf(() => {
+        return PAYLOAD_CODECS.text.decode(bytes);
+      });
+    }
+
     if (payload === undefined || codec === undefined || typeof payload === 'string') {
       return { bytes };
     }
@@ -860,10 +875,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       const arose: Arose = reason.origin === 'local' ? (isHanded ? 'answer' : 'client') : 'server';
       const request = chosen.init.request;
 
-      if (
+      const isScheme =
         reason.code === ProtocolCode.CREDENTIAL_UNSUPPORTED &&
-        reason.scope === FailureScope.PROTOCOL
-      ) {
+        reason.scope === FailureScope.PROTOCOL;
+
+      if (isScheme) {
         report(
           new Error(`the server takes none of the scheme this gateway presents: ${reason.detail}`, {
             cause: reason,
@@ -871,7 +887,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         );
       }
 
-      return problemOfFailure(
+      const problem = problemOfFailure(
         {
           arose,
           code: reason.code,
@@ -889,9 +905,23 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             : {}),
         }
       );
+
+      // * every failure it answers 500 or above is reported but PROCEDURE_FAILED, its server's
+      // report of its application's (7.6)
+      if (
+        problem.status >= 500 &&
+        !isScheme &&
+        !(reason.code === ProtocolCode.PROCEDURE_FAILED && reason.scope === FailureScope.PROTOCOL)
+      ) {
+        report(reason);
+      }
+
+      return problem;
     }
 
     if (reason instanceof TimeoutError) {
+      report(reason);
+
       return problemOfOwn('timeout', { detail: `no answer within ${String(timeout)} ms` });
     }
 
@@ -907,6 +937,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     }
 
     if (reason instanceof DisconnectError) {
+      report(reason);
+
       return problemOfOwn('closed', { detail: 'the connection closed' });
     }
 
@@ -924,7 +956,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     // ! what no gate foresaw: its words are reported, never the gateway's
     report(reason);
 
-    return problemOfOwn('unwritable', { detail: 'the gateway failed' });
+    return problemOfOwn('failed', { detail: '' });
   };
 
   /** Serves an exchange its routes take, past the gates of 10.1's steps 8 to 11. */
@@ -1052,7 +1084,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     try {
       if (decoded.variables === undefined) {
-        throw new JsonFormError(decoded.reason);
+        throw new JsonFormError(decoded.reason, { place: { parameter: decoded.fieldPath } });
       }
 
       if (typeof init.request === 'object') {
@@ -1076,7 +1108,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         throw error;
       }
 
-      // * the mapping's own words of the client's own request, fixed in transcoding.json
+      // * the mapping's own words of the client's own request, fixed in transcoding.json, and
+      // where the request carried what it refuses, cut, never in its words (7.4)
       return (
         answerProblem(exchange, {
           problem: problemOfFailure(
@@ -1084,6 +1117,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
               arose: 'gateway',
               code: ProtocolCode.PAYLOAD_UNDECODABLE,
               detail: error.message,
+              place: error.place,
               scope: 'protocol',
             },
             { challenge }
@@ -1128,17 +1162,21 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       // ! the in-memory transport's words tell of the gateway's inside, never its client's request
       report(error);
 
+      // * a connection its server would not draw, in time or at all, is 503; anything else, what no
+      // gate foresaw
       return (
         answerProblem(exchange, {
-          problem: problemOfFailure(
-            {
-              arose: 'client',
-              code: ProtocolCode.DESTINATION_UNREACHABLE,
-              detail: 'the connection is gone',
-              scope: 'protocol',
-            },
-            { challenge }
-          ),
+          problem:
+            error instanceof ConnectError || error instanceof TimeoutError
+              ? problemOfFailure(
+                  {
+                    arose: 'client',
+                    code: ProtocolCode.DESTINATION_UNREACHABLE,
+                    scope: 'protocol',
+                  },
+                  { challenge }
+                )
+              : problemOfOwn('failed', { detail: '' }),
         }),
         undefined
       );
@@ -1148,6 +1186,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     let stream: IEventStream | undefined;
     const procedure = init.procedure.procedure;
     let notification: INotificationLike | undefined;
+    // * a stream's call settled, its result handed to its stream or its failure answered: its end follows
+    let settle = (): void => {};
 
     if (isStream) {
       const sendPace = createSendPace(
@@ -1211,10 +1251,31 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         opened.close();
       });
       stream = opened;
+
+      // ! the end its router tells, or a notification's failure, waits on its call's settling: a
+      // drop comes right behind the result, before this exchange has written that result; the first
+      // of two ends is the one written
+      let isSettled = false;
+      let ending: IProblem | undefined;
+      const end = (problem: IProblem): void => {
+        if (isSettled) {
+          opened.failure(problem);
+        } else {
+          ending ??= problem;
+        }
+      };
+
+      settle = () => {
+        isSettled = true;
+
+        if (ending !== undefined) {
+          opened.failure(ending);
+        }
+      };
       notification = {
         ...procedure,
         drop: (failure?: IReceivedFailure) => {
-          opened.failure(
+          end(
             failure === undefined
               ? problemOfOwn('closed', { detail: 'the connection closed' })
               : problemOfFailure(
@@ -1229,6 +1290,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           );
         },
         trigger: async (bytes: Uint8Array) => {
+          // * a stream its failure or its client ended, or whose end is held, writes nothing more
+          if (opened.isEnded || ending !== undefined) {
+            return [];
+          }
+
           let data: string;
 
           try {
@@ -1236,7 +1302,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
             data = 'body' in read ? read.body : dataOfNative(init.notification, read.bytes);
           } catch (error) {
-            opened.failure(
+            end(
               problemOfCall(error, {
                 chosen,
                 credential: credential !== undefined,
@@ -1290,6 +1356,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         }
       }
 
+      settle();
+
       return (close(), undefined);
     }
 
@@ -1318,11 +1386,20 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         stream.failure(problem);
       }
 
+      settle();
+
       return (close(), undefined);
     }
 
+    // * a stream its client ended takes no result; the end held, after it
     if (stream !== undefined) {
-      return (stream.result(data), undefined);
+      if (!stream.isEnded) {
+        stream.result(data);
+      }
+
+      settle();
+
+      return undefined;
     }
 
     const resultEncoding = encodingOf(init.result);
@@ -1525,7 +1602,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       // ! what no gate foresaw: its exchange ends, never the gateway, and its words are reported
       report(error);
       answerProblem(exchange, {
-        problem: problemOfOwn('unwritable', { detail: 'the gateway failed' }),
+        problem: problemOfOwn('failed', { detail: '' }),
       });
     });
 

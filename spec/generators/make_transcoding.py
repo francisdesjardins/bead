@@ -244,6 +244,10 @@ EDGES = message('Edges', 'The edges of the mapping two stock libraries part on.'
     Field('stamps', 26, wkt('Timestamp'), label='repeated'),
     Field('null_member', 27, f'enum:{WKT}.NullValue', oneof='nullable'),
     Field('text_member', 28, 'string', oneof='nullable'),
+    Field('an_sint32', 29, 'sint32'),
+    Field('an_sfixed32', 30, 'sfixed32'),
+    Field('a_fixed32', 31, 'fixed32'),
+    Field('an_sfixed64', 32, 'sfixed64'),
 ], oneofs=['nullable'])
 
 BOOK = message('Book', "A book of http.proto's own examples.", [
@@ -655,12 +659,56 @@ def hexadecimal(data):
 
 
 class Refused(Exception):
-    """A refusal, its reason and the step of 5.2 that refuses: derived, and held by the regeneration
-    alone, since a refusal answers PAYLOAD_UNDECODABLE whatever its reason."""
+    """A refusal, its reason and the step of 5.2 that refuses, which is derived and held by the
+    regeneration alone, since a refusal answers PAYLOAD_UNDECODABLE whatever its reason; where the
+    reading met it, at, the tokens of its value's place from the value read, each a field's JSON name,
+    an item's index, or a name or a key the request carried, given, none for the text's own; and where
+    the request carried it, place, a parameter or a pointer of 7.4, which a binding gives it."""
 
-    def __init__(self, reason, step=None):
+    def __init__(self, reason, step=None, at=None, place=None):
         super().__init__(reason)
-        self.reason, self.step = reason, step
+        self.reason, self.step, self.at, self.place = reason, step, at, place
+
+
+def field_at(at, field):
+    """The place of a field's value below `at`, by its JSON name."""
+    return (*at, (field.json_name, False))
+
+
+def given_at(at, name):
+    """The place of a member, a key or an item named by what the request carried below `at`."""
+    return (*at, (name, True))
+
+
+def index_at(at, index):
+    return (*at, (str(index), False))
+
+
+def located(at, read, *arguments):
+    """What `read` gives of the value at `at`, a refusal of it placed there."""
+    try:
+        return read(*arguments)
+    except Refused as refusal:
+        if refusal.at is None:
+            refusal.at = at
+
+        raise
+
+
+def cut(text):
+    """A name or a key the request carried, cut as spec 18.4 cuts a key past 64 bytes of UTF-8: its
+    first 64 bytes, back to the start of the character the cut fell in, then ..."""
+    data = text.encode('utf-8')
+
+    if len(data) <= 64:
+        return text
+
+    return data[:64].decode('utf-8', errors='ignore') + '...'
+
+
+def pointer_text(at):
+    """A place's pointer (7.4, item 2): each token, a name or a key the request carried cut."""
+    return fragment([cut(token) if given else token for token, given in at])
 
 
 class Num:
@@ -771,8 +819,13 @@ def f32(value):
     return struct.unpack('<f', struct.pack('<f', value))[0]
 
 
-def article(kind):
-    return 'an' if kind[0] in 'ais' else 'a'
+ARTICLE_AN = re.compile(r'[aeioAEIO]|sint|sfixed')
+
+
+def article(name):
+    """The article a type's name takes, as it is read aloud: an int32, an sint32 (es-int), an Edges,
+    an Empty; a uint32, a fixed32, a Timestamp."""
+    return 'an' if ARTICLE_AN.match(name) else 'a'
 
 
 def read_integer(kind, value):
@@ -883,7 +936,7 @@ def read_enum(each, value):
             raise Refused('an enum number that is no integer', 3)
 
         if not -2 ** 31 <= exact < 2 ** 31:
-            raise Refused('an enum number past the 32-bit range', 3)
+            raise Refused('an enum number past its range', 3)
 
         return int(exact)
 
@@ -1029,16 +1082,16 @@ def read_field_mask(value):
     return {'paths': paths}
 
 
-def read_message(each, value, depth):
-    """A message nested `depth` below the request (steps 2 to 4)."""
+def read_message(each, value, depth, at=()):
+    """A message nested `depth` below the request (steps 2 to 4), its value at `at`."""
     if depth > LIMIT:
-        raise Refused('nested past 100', 1)
+        raise Refused('nested past 100', 1, at)
 
     if each.full_name.startswith(WKT + '.'):
-        return read_form(each, value, depth)
+        return read_form(each, value, depth, at)
 
     if not isinstance(value, Pairs):
-        raise Refused(f'a {each.name} that is no object', 2)
+        raise Refused(f'{article(each.name)} {each.name} that is no object', 2, at)
 
     out, named, oneofs = {}, set(), set()
 
@@ -1046,10 +1099,12 @@ def read_message(each, value, depth):
         field = each.field_named(key)
 
         if field is None:
-            raise Refused('a key no field names', 2)
+            raise Refused('a key no field names', 2, given_at(at, key))
+
+        here = field_at(at, field)
 
         if field.name in named:
-            raise Refused('a field by its two names', 2)
+            raise Refused('a field by its two names', 2, here)
 
         named.add(field.name)
 
@@ -1058,95 +1113,104 @@ def read_message(each, value, depth):
 
         if field.oneof is not None:
             if field.oneof in oneofs:
-                raise Refused('two members of one oneof', 2)
+                raise Refused('two members of one oneof', 2, here)
             oneofs.add(field.oneof)
 
-        out[field.name] = read_field(field, member, depth)
+        out[field.name] = read_field(field, member, depth, here)
 
     return out
 
 
-def read_field(field, member, depth):
+def read_field(field, member, depth, at):
     if field.label == 'repeated':
         if not isinstance(member, list) or isinstance(member, Pairs):
-            raise Refused('a repeated field that is no array', 3)
+            raise Refused('a repeated field that is no array', 3, at)
 
-        if any(item is None for item in member) and field.kind != wkt('Value'):
-            raise Refused('a null item', 2)
+        items = []
 
-        return [read_single(field.kind, item, depth) for item in member]
+        for index, item in enumerate(member):
+            if item is None and field.kind != wkt('Value'):
+                raise Refused('a null item', 2, index_at(at, index))
+
+            items.append(read_single(field.kind, item, depth, index_at(at, index)))
+
+        return items
 
     if field.label == 'map':
         if not isinstance(member, Pairs):
-            raise Refused('a map that is no object', 3)
+            raise Refused('a map that is no object', 3, at)
+
+        # * each entry is a message below the one that holds the map (17.9.3), counted before any is read
+        if member and depth + 1 > LIMIT:
+            raise Refused('nested past 100', 1, at)
 
         entries, keys = [], set()
 
         for key, item in member:
-            read = read_key(field.key, key)
+            here = given_at(at, key)
+            read = located(here, read_key, field.key, key)
 
             if read in keys:
-                raise Refused('two keys of one value', 3)
+                raise Refused('two keys of one value', 3, here)
 
             keys.add(read)
 
             if item is None and field.kind != wkt('Value'):
-                raise Refused('a null value in a map', 2)
+                raise Refused('a null value in a map', 2, here)
 
-            if depth + 1 > LIMIT:
-                raise Refused('nested past 100', 1)
-
-            entries.append((read, read_single(field.kind, item, depth + 1)))
+            entries.append((read, read_single(field.kind, item, depth + 1, here)))
 
         return entries
 
-    return read_single(field.kind, member, depth)
+    return read_single(field.kind, member, depth, at)
 
 
-def read_single(kind, value, depth):
+def read_single(kind, value, depth, at):
     if kind.startswith('message:'):
-        return read_message(TYPES[kind.split(':', 1)[1]], value, depth + 1)
+        return read_message(TYPES[kind.split(':', 1)[1]], value, depth + 1, at)
 
     if kind.startswith('enum:'):
-        return read_enum(TYPES[kind.split(':', 1)[1]], value)
+        return located(at, read_enum, TYPES[kind.split(':', 1)[1]], value)
 
-    return read_scalar(kind, value)
+    return located(at, read_scalar, kind, value)
 
 
-def read_form(each, value, depth):
-    """A well-known type's form (5.4), the message itself nested `depth` below the request."""
+def read_form(each, value, depth, at):
+    """A well-known type's form (5.4), the message itself nested `depth` below the request, at `at`."""
     name = each.name
 
     if name == 'Timestamp':
-        return read_timestamp(value)
+        return located(at, read_timestamp, value)
 
     if name == 'Duration':
-        return read_duration(value)
+        return located(at, read_duration, value)
 
     if name == 'FieldMask':
-        return read_field_mask(value)
+        return located(at, read_field_mask, value)
 
     if name in WRAPPED:
-        return {'value': read_scalar(WRAPPED[name], value)}
+        return {'value': located(at, read_scalar, WRAPPED[name], value)}
 
     if name == 'Empty':
         if not isinstance(value, Pairs):
-            raise Refused('an Empty that is no object', 4)
+            raise Refused('an Empty that is no object', 4, at)
         if value:
-            raise Refused('a key no field names', 4)
+            raise Refused('a key no field names', 4, given_at(at, value[0][0]))
         return {}
 
     if name == 'Struct':
         if not isinstance(value, Pairs):
-            raise Refused('a Struct that is no object', 4)
+            raise Refused('a Struct that is no object', 4, at)
         if value and depth + 1 > LIMIT:
-            raise Refused('nested past 100', 1)
-        return {'fields': [(key, read_message(TYPES[f'{WKT}.Value'], member, depth + 2)) for key, member in value]}
+            raise Refused('nested past 100', 1, at)
+        return {'fields': [(key, read_message(TYPES[f'{WKT}.Value'], member, depth + 2, given_at(at, key)))
+                           for key, member in value]}
 
     if name == 'ListValue':
         if not isinstance(value, list) or isinstance(value, Pairs):
-            raise Refused('a ListValue that is no array', 4)
-        return {'values': [read_message(TYPES[f'{WKT}.Value'], item, depth + 1) for item in value]}
+            raise Refused('a ListValue that is no array', 4, at)
+        return {'values': [read_message(TYPES[f'{WKT}.Value'], item, depth + 1, index_at(at, index))
+                           for index, item in enumerate(value)]}
 
     if name == 'Value':
         if value is None:
@@ -1158,12 +1222,12 @@ def read_form(each, value, depth):
         if isinstance(value, str):
             return {'string_value': value}
         if isinstance(value, Pairs):
-            return {'struct_value': read_message(TYPES[f'{WKT}.Struct'], value, depth + 1)}
-        return {'list_value': read_message(TYPES[f'{WKT}.ListValue'], value, depth + 1)}
+            return {'struct_value': read_message(TYPES[f'{WKT}.Struct'], value, depth + 1, at)}
+        return {'list_value': read_message(TYPES[f'{WKT}.ListValue'], value, depth + 1, at)}
 
     # an Any (5.4, item 6)
     if not isinstance(value, Pairs):
-        raise Refused('an Any that is no object', 4)
+        raise Refused('an Any that is no object', 4, at)
 
     if not value:
         return {}
@@ -1172,24 +1236,24 @@ def read_form(each, value, depth):
     others = Pairs((key, member) for key, member in value if key != '@type')
 
     if not types:
-        raise Refused('an Any without its @type', 4)
+        raise Refused('an Any without its @type', 4, at)
 
     url = types[0]
 
     if not isinstance(url, str) or '/' not in url:
-        raise Refused('an Any whose @type is no URL', 4)
+        raise Refused('an Any whose @type is no URL', 4, at)
 
     held = TYPES.get(url.rsplit('/', 1)[1])
 
     if not isinstance(held, Message):
-        raise Refused('an Any of a type its definitions do not hold', 4)
+        raise Refused('an Any of a type its definitions do not hold', 4, at)
 
     if held.full_name in OWN_FORMS:
         if [key for key, _ in others] != ['value']:
-            raise Refused('an Any of a well-known type whose members are not its value alone', 4)
-        inner = read_message(held, others[0][1], depth + 1)
+            raise Refused('an Any of a well-known type whose members are not its value alone', 4, at)
+        inner = read_message(held, others[0][1], depth + 1, (*at, ('value', False)))
     else:
-        inner = read_message(held, others, depth + 1)
+        inner = read_message(held, others, depth + 1, at)
 
     return {'type_url': url, 'message': inner}
 
@@ -1726,7 +1790,11 @@ def variables_of(template, segments):
     for path, start, end in template.variables:
         multi = end - start > 1 or any(template.segments[index] == ('**',) for index in range(start, end))
         raw = '/'.join(segment for index in range(start, end) for segment in consumed[index])
-        values[path] = percent_decoded(raw, keep_slash=multi)
+        try:
+            values[path] = percent_decoded(raw, keep_slash=multi)
+        except Refused as refusal:
+            refusal.place = ('parameter', path)
+            raise
 
     return values
 
@@ -1823,9 +1891,10 @@ def member_named(members, field):
     return next((index for index, (key, _) in enumerate(members) if key in (field.name, field.json_name)), None)
 
 
-def set_along(root, fields, value):
+def set_along(root, fields, value, parameter):
     """Sets a field path's leaf in a JSON object, its messages made where none is; a leaf the object
-    sets already is a field set twice (4.1)."""
+    sets already, but to null, which is no value, is a field set twice (4.1), refused at the parameter
+    that sets it."""
     members = root
 
     for field in fields[:-1]:
@@ -1843,12 +1912,12 @@ def set_along(root, fields, value):
         elif isinstance(members[at][1], Pairs):
             members = members[at][1]
         else:
-            raise Refused('a field that two of the request set')
+            raise Refused('a field that two of the request set', place=('parameter', parameter))
 
     at = member_named(members, fields[-1])
 
     if at is not None and members[at][1] is not None:
-        raise Refused('a field that two of the request set')
+        raise Refused('a field that two of the request set', place=('parameter', parameter))
 
     if at is not None:
         del members[at]
@@ -1877,8 +1946,13 @@ def mask_of(members, each, prefix=''):
     return paths
 
 
+def json_path(fields):
+    return tuple(field.json_name for field in fields)
+
+
 def bind(procedure, rule, target, body):
-    """The request a route binds from its variables, its query and its body (section 4): its value."""
+    """The request a route binds from its variables, its query and its body (section 4): its value. A
+    refusal tells where the request carried what it refuses, as 7.4 places it."""
     each = TYPES[procedure.request]
     path, _, query = target.partition('?')
     template = Template(rule.template)
@@ -1891,24 +1965,35 @@ def bind(procedure, rule, target, body):
 
     if rule.body == '*':
         root = read_text(body)
+
+        # * not an object: the reading refuses it as the message's, with nothing bound beside it
+        if not isinstance(root, Pairs):
+            try:
+                return read_message(each, root, 0)
+            except Refused as refusal:
+                refusal.place = ('pointer', pointer_text(refusal.at))
+                raise
     elif rule.body:
-        inner = read_text(body)
-
-        if inner is None:
-            raise Refused('a body that is null')
-
-        root = Pairs([(rule.body, inner)])
+        # * a body null under a field is that field's JSON, null, which leaves it unset (5.2, item 2)
+        root = Pairs([(rule.body, read_text(body))])
     else:
         root = Pairs()
 
-    # ! the mask is of the members the body holds as its caller sent them, before a variable joins it
-    sent = list(root[0][1]) if rule.body not in (None, '*') and isinstance(root[0][1], Pairs) else None
-    bound = set()
+    # ! the mask is of the members the body holds as its caller sent them, before a variable joins it:
+    # none for a body that is no object
+    sent = None
+
+    if rule.body not in (None, '*') and isinstance(root[0][1], Pairs):
+        sent = list(root[0][1])
+    elif rule.body not in (None, '*') and root[0][1] is None:
+        sent = []
+    bound, by_variable, by_query = set(), {}, set()
 
     for field_path, text in variables.items():
         fields = fields_along(each, field_path, by_json=False)
-        set_along(root, fields, text_json(fields[-1].kind, text))
+        set_along(root, fields, text_json(fields[-1].kind, text), field_path)
         bound.add(tuple(field.name for field in fields))
+        by_variable[json_path(fields)] = field_path
 
     pairs = query_pairs(query) if query else []
 
@@ -1921,25 +2006,28 @@ def bind(procedure, rule, target, body):
         fields = fields_along(each, name, by_json=True)
 
         if fields is None:
-            raise Refused('a parameter no field path names')
+            raise Refused('a parameter no field path names', place=('parameter', cut(name)))
 
         leaf, key = fields[-1], tuple(field.name for field in fields)
+        parameter = '.'.join(json_path(fields))
 
         if key in bound or (rule.body and key[0] == rule.body):
-            raise Refused('a parameter of a field the route binds otherwise')
+            raise Refused('a parameter of a field the route binds otherwise', place=('parameter', parameter))
 
         if leaf.label == 'map' or (leaf.label == 'repeated' and leaf.is_message):
-            raise Refused('a parameter of a map or a repeated message')
+            raise Refused('a parameter of a map or a repeated message', place=('parameter', parameter))
 
         if leaf.is_message and leaf.type_name not in STRING_FORMS:
-            raise Refused('a parameter of a message')
+            raise Refused('a parameter of a message', place=('parameter', parameter))
+
+        by_query.add(json_path(fields))
 
         if leaf.label == 'repeated':
             items.setdefault(key, (fields, []))[1].append(text_json(leaf.kind, text))
             continue
 
         if key in named:
-            raise Refused('a field the query names twice')
+            raise Refused('a field the query names twice', place=('parameter', parameter))
 
         named.add(key)
 
@@ -1949,12 +2037,17 @@ def bind(procedure, rule, target, body):
         else:
             value = text_json(leaf.kind, text)
 
-        set_along(root, fields, value)
+        set_along(root, fields, value, parameter)
 
     for fields, values in items.values():
-        set_along(root, fields, values)
+        set_along(root, fields, values, '.'.join(json_path(fields)))
 
-    value = read_message(each, root, 0)
+    try:
+        value = read_message(each, root, 0)
+    except Refused as refusal:
+        refusal.place = place_of(refusal.at, rule=rule, sources=(by_variable, by_query))
+        raise
+
     mask = each.by_name.get('update_mask')
 
     if (rule.method == 'patch' and rule.body not in (None, '*') and mask is not None and mask.kind == wkt('FieldMask')
@@ -1965,6 +2058,27 @@ def bind(procedure, rule, target, body):
             value['update_mask'] = {'paths': mask_of(sent, TYPES[body_field.type_name])}
 
     return value
+
+
+def place_of(at, *, rule, sources):
+    """Where the request carried the value a reading refused at `at` (7.4): a variable's field path as
+    its template writes it, or a query's by JSON names, an item's index left out; or a pointer into the
+    body, the field a body names its root."""
+    by_variable, by_query = sources
+    tokens = tuple(token for token, _ in at)
+
+    for path, field_path in by_variable.items():
+        if tokens[:len(path)] == path:
+            return 'parameter', field_path
+
+    for path in by_query:
+        if tokens[:len(path)] == path:
+            return 'parameter', '.'.join(path)
+
+    if rule.body == '*':
+        return 'pointer', pointer_text(at)
+
+    return 'pointer', pointer_text(at[1:])
 
 
 # ── Problems, transcoding 7 ─────────────────────────────────────────────────────────────────────
@@ -2013,7 +2127,7 @@ ROWS = [
 # the rows past the protocol's codes: a code no name names, an application failure, then the gateway's own
 UNNAMED_ROW, APPLICATION_ROW = len(ROWS) + 1, len(ROWS) + 2
 OWN_ROWS = {'timeout': (len(ROWS) + 3, 504), 'closed': (len(ROWS) + 4, 502), 'unwritable': (len(ROWS) + 5, 500),
-            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401)}
+            'jwt': (len(ROWS) + 6, 431), 'scheme': (len(ROWS) + 7, 401), 'failed': (len(ROWS) + 8, 500)}
 
 
 def row_of(code, arose, encoding):
@@ -2118,7 +2232,8 @@ def errors_of(detail, procedure, rule):
         elif rule.body and names and names[0] == rule.body:
             field = each.by_name[rule.body]
             error['pointer'] = fragment(pointer_of(TYPES[field.type_name], elements[1:]) if field.is_message else [])
-        elif names:
+        elif names and pointer_of(each, [(name, None) for name in names]):
+            # * a path that names no field of the request is placed nowhere
             error['parameter'] = '.'.join(pointer_of(each, [(name, None) for name in names]))
 
         errors.append(error)
@@ -2170,6 +2285,14 @@ def failure_problem(failure, *, procedure=None, rule=None, problem_types=PROBLEM
         errors, extra = errors_of(detail, procedure, rule)
         extra = {'errors': errors, **extra}
         detail = ''
+
+    # * the gateway's own error between it and its server: its code alone (spec 9.0)
+    if name == 'DESTINATION_UNREACHABLE':
+        detail = ''
+
+    # * where the gateway's reading met what it refuses, as 7.4 places one
+    if failure['arose'] == 'gateway':
+        extra = {member: failure[member] for member in ('parameter', 'pointer') if member in failure}
 
     if status == 401:
         challenge = failure.get('challenge', 'Bearer')
@@ -2346,6 +2469,10 @@ def reading(name, clauses, body, *, message=EDGES, parts=None):
     except Refused as refusal:
         entry['refused'] = refusal.reason
 
+        # * where the reading met it, the body the request whole (7.4); none for the text's own
+        if refusal.at is not None:
+            entry['pointer'] = pointer_text(refusal.at)
+
     if parts:
         UPB_READS[name] = parts
         entry['upb'] = parts
@@ -2433,6 +2560,21 @@ READINGS = [
             '{"anInt64":9223372036854775807}'),
     reading('an int64 written 1.0', SCALAR + ['5.3', '5.3.2'], '{"anInt64":1.0}'),
     reading('an int64 written 1e2', SCALAR + ['5.3', '5.3.2'], '{"anInt64":1e2}'),
+    reading('an sint32 at its least', SCALAR + ['5.3', '5.3.1'], '{"anSint32":-2147483648}'),
+    reading('an sint32 past its range', SCALAR + ['5.3', '5.3.1'], '{"anSint32":2147483648}'),
+    reading('an sint32 as a string', SCALAR + ['5.3', '5.3.1'], '{"anSint32":"-5"}'),
+    reading('an sfixed32 at its least, as a string', SCALAR + ['5.3', '5.3.1'], '{"anSfixed32":"-2147483648"}'),
+    reading('an sfixed32 past its range', SCALAR + ['5.3', '5.3.1'], '{"anSfixed32":-2147483649}'),
+    reading('a fixed32 at its largest', SCALAR + ['5.3', '5.3.1'], '{"aFixed32":4294967295}'),
+    reading('a fixed32 of -1', SCALAR + ['5.3', '5.3.1'], '{"aFixed32":-1}'),
+    reading('a fixed32 as a string of an exponent', SCALAR + ['5.3', '5.3.1'], '{"aFixed32":"1e3"}'),
+    reading('an sfixed64 at its least, as a string', SCALAR + ['5.3', '5.3.2'], '{"anSfixed64":"-9223372036854775808"}'),
+    reading('an sfixed64 past its range, as a string', SCALAR + ['5.3', '5.3.2'],
+            '{"anSfixed64":"9223372036854775808"}'),
+    reading('an sfixed64 past 2^53 as a number, read exactly', SCALAR + ['5.3', '5.3.2'],
+            '{"anSfixed64":-9007199254740993}'),
+    reading('an sfixed64 as a string of an exponent', SCALAR + ['5.3', '5.3.2', '5.5'], '{"anSfixed64":"1e3"}',
+            parts='D8: it reads a 64-bit string of an exponent'),
     reading("an Int64Value as a string of an exponent", SCALAR + ['5.3', '5.3.2', '5.4', '5.4.4'],
             '{"wrappedInt64":"1e3"}', parts='D8: it reads a 64-bit string of an exponent'),
     reading('a UInt64Value at its largest as a number, read exactly', SCALAR + ['5.3', '5.3.2', '5.4', '5.4.4'],
@@ -2678,6 +2820,9 @@ WRITINGS = [
     writing('a Duration past its longest', REFUSED, {'took': {'seconds': LONGEST + 1}}),
     writing('a Duration of nanoseconds past a second', REFUSED, {'took': {'nanos': 1_000_000_000}}),
     writing('64-bit integers as strings', FORM_6, {'wrapped_uint64': {'value': 2 ** 64 - 1}, 'an_int64': -5}),
+    writing('an sint32, an sfixed32 and a fixed32 as numbers, an sfixed64 as a string', ['5.6', '5.6.1', '5.6.6'],
+            {'an_sint32': -2 ** 31, 'an_sfixed32': -5, 'a_fixed32': 2 ** 32 - 1, 'an_sfixed64': -2 ** 63}),
+    writing('an sfixed64 at its largest, as a string', FORM_6, {'an_sfixed64': 2 ** 63 - 1}),
     writing('bytes in standard base64, padded', FORM_6, {'some_bytes': b'\xfb'}),
     writing("a string's escapes", ['5.6', '5.6.1'],
             {'a_string': chr(0x2028) + '<>&' + chr(0x7F) + chr(0x1F) + chr(9) + '"' + B + chr(0x1F600)}, message=EVERYTHING),
@@ -2712,6 +2857,10 @@ def binding(name, clauses, procedure, rule, target, body=None):
                                               bind(procedure, rule, target, body.encode('utf-8') if body is not None else b'')))
     except Refused as refusal:
         entry['refused'] = refusal.reason
+
+        # * where the request carried it (7.4): a parameter or a pointer; none for its text or its query whole
+        if refusal.place is not None:
+            entry[refusal.place[0]] = refusal.place[1]
 
     return entry
 
@@ -2803,6 +2952,20 @@ BINDINGS = [
     binding("a PATCH's body that sets the field its variable binds", ['4.1', '4.5'], UPDATE, UPDATE.rules[0],
             '/v1/shelves/1/books/2', '{"name":"other"}'),
     binding("a PATCH's empty body", ['4.5'], UPDATE, UPDATE.rules[0], '/v1/shelves/1/books/2', '{}'),
+    binding("a body null under a field, which sets nothing beside its variable, its update_mask of no path",
+            ['4.4', '4.5', '5.2.2'], UPDATE, UPDATE.rules[0], '/v1/shelves/1/books/2', 'null'),
+    binding("a member null for the field a variable binds, which sets nothing", ['4.1', '4.4', '5.2.2'], ARCHIVE,
+            ARCHIVE.rules[0], '/v1/shelves/1/books/2:archive', '{"name":null}'),
+    binding("a body that is no object under a body of the request whole, at its root", ['4.4', '7.4', '7.4.2'],
+            ARCHIVE, ARCHIVE.rules[0], '/v1/shelves/1/books/2:archive', '[]'),
+    binding("a refusal in a body that names a field, its pointer from that field", ['4.4', '7.4', '7.4.2'], UPDATE,
+            UPDATE.rules[0], '/v1/shelves/1/books/2', '{"pages":"x"}'),
+    binding("a refusal of a member of the request whole, its pointer by JSON names", ['4.4', '7.4', '7.4.2'], ARCHIVE,
+            ARCHIVE.rules[0], '/v1/shelves/1/books/2:archive', '{"sub":{"count":"x"}}'),
+    binding("a refusal of a parameter within a message, its parameter by JSON names", ['4.3', '7.4', '7.4.1'],
+            GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?sub.count=x'),
+    binding("a key the body holds no field of, cut as spec 18.4 cuts a key", ['5.2.2', '7.4', '7.4.2'], ECHO, ECHO_POST,
+            '/api/Transcoding/echo', '{"' + 'k' * 63 + chr(0xE9) + chr(0xE9) + '":1}'),
 ]
 
 
@@ -2964,7 +3127,8 @@ def cross_check():
 
 # the rows of 7.1's table, by the member each states
 MEMBER_ROWS = {member: f'7.1.{number}' for number, member in
-               enumerate(('type', 'title', 'status', 'detail', 'code', 'scope', 'errors', 'more', 'stopped'), 1)}
+               enumerate(('type', 'title', 'status', 'detail', 'code', 'scope', 'errors', 'more', 'stopped',
+                          'parameter', 'pointer'), 1)}
 
 
 def member_rows(text):
@@ -3025,8 +3189,13 @@ FAILURES = [
     failure('its client at its capacity before the call went', ['7.5', '7.5.1'], {'code': 35, 'arose': 'client'}),
     failure("a scheme the gateway presents that its server takes none of", ['7.5', '7.5.3'],
             {'code': 36, 'arose': 'server', 'detail': 'OPAQUE, JWT'}),
-    failure("a body the gateway's reading refuses", ['7.5', '7.5.1'],
-            {'code': 50, 'arose': 'gateway', 'detail': 'a key no field names, at nope'}),
+    failure("a body the gateway's reading refuses, its pointer", ['7.4', '7.5', '7.5.1'],
+            {'code': 50, 'arose': 'gateway', 'detail': 'a key no field names', 'pointer': '#/nope'}),
+    failure("a query the gateway's reading refuses, its parameter", ['7.4', '7.5', '7.5.1'],
+            {'code': 50, 'arose': 'gateway', 'detail': 'an int64 string off -?(0|[1-9][0-9]*)',
+             'parameter': 'revision'}),
+    failure("a text the gateway's reading refuses, placed nowhere", ['7.4', '7.5', '7.5.1'],
+            {'code': 50, 'arose': 'gateway', 'detail': 'not JSON'}),
     failure("a json request its server's codec refuses", ['7.5', '7.5.1'],
             {'code': 50, 'arose': 'server', 'encoding': 'json'}),
     failure("a proto request its server does not read", ['7.5', '7.5.4'], {'code': 50, 'arose': 'server', 'encoding': 'proto'}),
@@ -3066,6 +3235,10 @@ FAILURES = [
             {'code': 52, 'arose': 'server', 'detail': violations(
                 {'ruleId': 'message.oneof', 'message': 'one of a or b'})},
             procedure=UPDATE, rule=UPDATE.rules[0]),
+    failure("a violation of a field the request does not hold, placed nowhere", INVALID + ['7.4.3'],
+            {'code': 52, 'arose': 'server', 'detail': violations(
+                {'fieldPath': 'a_string.inner', 'ruleId': 'string.min_len', 'message': 'short'})},
+            procedure=UPDATE, rule=UPDATE.rules[0]),
     failure("a detail that left violations out", INVALID,
             {'code': 52, 'arose': 'server', 'detail': violations(FROM_LINE, {'more': 3})}, procedure=JUDGE, rule=JUDGE.rules[0]),
     failure("a detail that stopped at its first", INVALID,
@@ -3084,6 +3257,7 @@ FAILURES = [
     own('a result Bead\'s proto JSON form holds none of', ['5.7'], 'unwritable', 'a Value whose number is not finite'),
     own('a JWT its block cannot hold', ['2.4', '2.4.2'], 'jwt', 'a token past 1004 bytes'),
     own('an authorization of another scheme under bearer-jwt', ['2.4', '2.4.2'], 'scheme', 'an auth-scheme but Bearer'),
+    own('what no gate foresaw, with no detail', [], 'failed', ''),
 ]
 
 # ── The entries: events ─────────────────────────────────────────────────────────────────────────
@@ -3133,8 +3307,7 @@ EVENTS = [
 
 # ── The entries: exchanges ──────────────────────────────────────────────────────────────────────
 
-# what a side's own words stand in for in a body the file expects, and the document its builder wrote
-WORDS = '{words}'
+# what the document its builder wrote stands in for in a body the file expects
 DOCUMENT = '{document}'
 ORIGIN = 'https://app.example'
 CALL_FIELDS = {'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'vary': 'Origin'}
@@ -3175,30 +3348,39 @@ def answered(text, *, content='application/json', status=200, fields=None, on='a
     return {'expect': expected, 'on': on}
 
 
-def words_problem(status):
-    """A problem of the gateway's own, its detail its own words."""
-    return problem(status, detail=chr(0)).replace('"' + B + 'u0000"', WORDS)
+# the rows of 7.7's table, by the refusal each words
+REFUSAL_ROWS = {reason: f'7.7.{number}' for number, reason in enumerate(
+    ('malformed', 'host-refused', 'origin-refused', 'path-unknown', 'method-refused', 'too-slow', 'too-large',
+     'type-refused', 'busy'), 1)}
 
 
-def refused_own(status, reason, *, fields=None, on='a'):
-    """A refusal of the gateway's own (7.7): marked, its body a problem, about:blank."""
-    body = words_problem(status)
+def refused_own(status, reason, words, *, fields=None, on='a'):
+    """A refusal of the gateway's own (7.7): marked, its body a problem, about:blank, its detail the
+    words 7.7's table gives it."""
     return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
-                                                    'bead-refusal': reason, **(fields or {})}, 'body': body}, 'on': on}
+                                                    'bead-refusal': reason, **(fields or {})},
+                       'body': problem(status, detail=words)}, 'on': on}
 
 
-def call_failed(given, *, on='a', procedure=None, rule=None, words=False):
+def own_failed(status, words, *, fields=None, on='a'):
+    """A failure of the gateway's own (7.6): unmarked, about:blank, its detail its words."""
+    return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
+                                                    'bead-refusal': None, **(fields or {})},
+                       'body': problem(status, detail=words)}, 'on': on}
+
+
+def call_failed(given, *, on='a', procedure=None, rule=None):
     _, status, fields, text = failure_problem(given, procedure=procedure, rule=rule)
-
-    if words:
-        text = text.replace(string_json(given['detail']), WORDS)
 
     return {'expect': {'status': status, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
                                                     'bead-refusal': None, **fields}, 'body': text}, 'on': on}
 
 
 def exchange(name, clauses, steps, *, options=None, real_time=False):
-    entry = {'name': name, 'clauses': clauses}
+    """An exchange, which cites the row of 7.7's table of each refusal it meets."""
+    refusals = [REFUSAL_ROWS[step['expect']['fields']['bead-refusal']] for step in steps
+                if step.get('expect', {}).get('fields', {}).get('bead-refusal')]
+    entry = {'name': name, 'clauses': [*clauses, *(['7.7'] if refusals else []), *refusals]}
 
     if options:
         entry['options'] = options
@@ -3235,6 +3417,9 @@ def counted(start):
 
 
 EVENT_STREAM = 'accept: text/event-stream'
+ORIGINLESS = 'a request from a page of another site that shows no origin'
+METHOD_WORDS = 'a method no route of its path takes'
+TYPE_WORDS = "this route's body is application/json, unencoded"
 BOOK_2 = {'name': 'shelves/1/books/2', 'title': 'A tale', 'pages': 3}
 
 EXCHANGES = [
@@ -3260,9 +3445,11 @@ EXCHANGES = [
               answered(result('Operation', {'name': 'operations/x', 'done': True}))]),
     exchange("a procedure marked NO_SIDE_EFFECTS whose request the query cannot carry answers no GET at its default route",
              ['3.2', '3.10'],
-             [send('GET', '/api/Transcoding/getBook?name=x'), refused_own(405, 'method-refused', fields={'allow': 'POST'})]),
+             [send('GET', '/api/Transcoding/getBook?name=x'),
+              refused_own(405, 'method-refused', METHOD_WORDS, fields={'allow': 'POST'})]),
     exchange('a procedure not so marked answers no GET at its default route', ['3.2', '3.10', '10.1', '10.1.7'],
-             [send('GET', '/api/Transcoding/echo'), refused_own(405, 'method-refused', fields={'allow': 'POST'})]),
+             [send('GET', '/api/Transcoding/echo'),
+              refused_own(405, 'method-refused', METHOD_WORDS, fields={'allow': 'POST'})]),
     exchange("a response_body is its field's JSON", ['5.8'],
              [send('GET', '/v1/shelves/s/books'),
               answered('[' + ','.join(result('Book', {'name': f'shelves/s/books/{name}', 'title': name.upper()})
@@ -3284,23 +3471,39 @@ EXCHANGES = [
                   FROM_LINE, {**TITLE_LINE, 'message': 'must be at most 3 characters'}, {'more': 0})},
                   procedure=JUDGE, rule=JUDGE.rules[0])]),
     exchange('a body of another type, 415', ['5.1', '7.7', '10.1', '10.1.8'],
-             [send('POST', '/api/Transcoding/echo', ['content-type: text/plain'], '{}'), refused_own(415, 'type-refused')]),
+             [send('POST', '/api/Transcoding/echo', ['content-type: text/plain'], '{}'),
+              refused_own(415, 'type-refused', TYPE_WORDS)]),
     exchange('a charset but utf-8, 415', ['5.1', '10.1.8'],
              [send('POST', '/api/Transcoding/echo', ['content-type: application/json; charset=latin1'], '{}'),
-              refused_own(415, 'type-refused')]),
+              refused_own(415, 'type-refused', TYPE_WORDS)]),
     exchange('a charset of utf-8 in any case is taken', ['5.1'],
              [send('POST', '/api/Transcoding/echo', ['content-type: Application/JSON; charset=UTF-8'], '{}'), answered('{}')]),
+    exchange('a body of no content-type, 415', ['5.1', '10.1.8'],
+             [send('POST', '/api/Transcoding/echo', [], '{}'),
+              refused_own(415, 'type-refused', TYPE_WORDS)]),
+    exchange('no body and no content-type to a route that takes a body, 415', ['5.1', '10.1.8'],
+             [send('POST', '/api/Transcoding/echo'),
+              refused_own(415, 'type-refused', TYPE_WORDS)]),
     exchange('an encoded body, 415', ['5.1', '10.1.8'],
              [send('POST', '/api/Transcoding/echo', ['content-type: application/json', 'content-encoding: gzip'], '{}'),
-              refused_own(415, 'type-refused')]),
+              refused_own(415, 'type-refused', TYPE_WORDS)]),
     exchange('a body the mapping refuses, 400 PAYLOAD_UNDECODABLE, unmarked', ['5.2', '5.2.2', '7.6.12', '7.7'],
              [json_post('/api/Transcoding/echo', '{"nope":1}'),
-              call_failed({'code': 50, 'arose': 'gateway', 'detail': 'x'}, words=True)]),
-    exchange('a query beside a body of the whole request', ['4.3'],
+              call_failed({'code': 50, 'arose': 'gateway', 'detail': 'a key no field names', 'pointer': '#/nope'})]),
+    exchange('a query beside a body of the whole request', ['4.3', '7.4'],
              [json_post('/api/Transcoding/echo?anInt32=1', '{}'),
-              call_failed({'code': 50, 'arose': 'gateway', 'detail': 'x'}, words=True)]),
+              call_failed({'code': 50, 'arose': 'gateway', 'detail': 'a query beside a body of the whole request'})]),
+    exchange("a variable that does not decode, 400 PAYLOAD_UNDECODABLE, its parameter", ['3.8', '7.4', '7.6.12'],
+             [send('GET', '/v1/books/%FF'),
+              call_failed({'code': 50, 'arose': 'gateway', 'detail': 'a value whose bytes are not UTF-8',
+                           'parameter': 'name'})]),
+    exchange("a parameter that names no field, its name cut as spec 18.4 cuts a key", ['4.3', '4.3.3', '7.4'],
+             [send('GET', '/v1/books/2?' + 'k' * 70 + '=1'),
+              call_failed({'code': 50, 'arose': 'gateway', 'detail': 'a parameter no field path names',
+                           'parameter': 'k' * 64 + '...'})]),
     exchange('a body to a route that takes none, 400 malformed', ['4.4', '10.1.8'],
-             [send('GET', '/v1/books/2', ['content-type: application/json'], '{}'), refused_own(400, 'malformed')]),
+             [send('GET', '/v1/books/2', ['content-type: application/json'], '{}'),
+              refused_own(400, 'malformed', 'content to a route that takes none')]),
     exchange('a raw request and its result, as their bytes', ['5.1', '5.1.4', '6.1'],
              [send('POST', '/api/Transcoding/raw', ['content-type: application/octet-stream'], b'\x00\xff'),
               answered(b'\x00\xff', content='application/octet-stream')]),
@@ -3330,17 +3533,19 @@ EXCHANGES = [
               {'expect': {'status': 401, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
                                                     'bead-refusal': None,
                                                     'www-authenticate': 'Bearer error="invalid_request"'},
-                          'body': words_problem(401)}, 'on': 'a'}],
+                          'body': problem(401, detail='an auth-scheme but Bearer')}, 'on': 'a'}],
              options={'authorization': 'bearer-jwt'}),
     exchange("two authorization fields, 400 malformed", ['2.4', '10.1.9'],
              [json_post('/api/Transcoding/whoAmI', '{}', ['authorization: Bearer good', 'authorization: Bearer good']),
-              refused_own(400, 'malformed')]),
+              refused_own(400, 'malformed', 'two authorization fields')]),
     exchange("a command to an exchange's connection is answered SERVICE_UNKNOWN", ['2.6', 'spec:9.2.5'],
              [json_post('/api/Transcoding/ask', '{}'), answered(result('AskResponse', {'code': 18}))]),
     exchange("the gateway's call timeout, 504, its call cancelled", ['9.2', '7.6.22'],
              [json_post('/api/Transcoding/hang', '{}'),
               {'expect': {'status': 504, 'fields': {**CALL_FIELDS, 'content-type': 'application/problem+json',
-                                                    'bead-refusal': None}, 'body': words_problem(504)}, 'on': 'a'},
+                                                    'bead-refusal': None},
+                          'body': problem(504, detail='no answer within 200 ms')},
+               'on': 'a'},
               send('GET', '/api/Transcoding/cancels?atLeast=1', on='b'),
               answered(result('CancelsResponse', {'count': 1}), on='b')],
              options={'timeout': 200}, real_time=True),
@@ -3366,9 +3571,11 @@ EXCHANGES = [
     exchange("an EventSource's GET of a procedure marked NO_SIDE_EFFECTS", ['3.2', '8.1'],
              [send('GET', '/api/Transcoding/ticks?from=1', [EVENT_STREAM]), stream_answer(counted(1))]),
     exchange("a host it does not take, 403", ['10.1', '10.1.2', '7.7'],
-             [send('GET', '/v1/books/2', ['host: evil.example']), refused_own(403, 'host-refused')]),
+             [send('GET', '/v1/books/2', ['host: evil.example']),
+              refused_own(403, 'host-refused', 'a host it does not take')]),
     exchange("an origin neither its own nor listed, 403", ['10.1', '10.1.4'],
-             [send('GET', '/v1/books/2', ['origin: https://other.example']), refused_own(403, 'origin-refused')]),
+             [send('GET', '/v1/books/2', ['origin: https://other.example']),
+              refused_own(403, 'origin-refused', 'an origin neither its own nor listed')]),
     exchange("an origin listed is answered CORS", ['6.2', '10.1.4'],
              [json_post('/api/Transcoding/echo', '{}', [f'origin: {ORIGIN}']),
               answered('{}', fields={'access-control-allow-origin': ORIGIN, 'access-control-expose-headers': '*'})]),
@@ -3388,10 +3595,10 @@ EXCHANGES = [
     exchange("a subresource from another site with no origin is refused", ['10.1.5'],
              [send('GET', '/api/Transcoding/getOperation?name=operations/a',
                    ['sec-fetch-site: cross-site', 'sec-fetch-mode: no-cors']),
-              refused_own(403, 'origin-refused')]),
+              refused_own(403, 'origin-refused', ORIGINLESS)]),
     exchange("a navigation from another site to a get rule on an unmarked method is refused", ['3.4', '10.1.5'],
              [send('GET', '/v1/shelves/s/books', ['sec-fetch-site: same-site', 'sec-fetch-mode: navigate']),
-              refused_own(403, 'origin-refused')]),
+              refused_own(403, 'origin-refused', ORIGINLESS)]),
     exchange("a navigation from another site to the document is taken", ['10.1.5', '11.1'],
              [send('GET', '/openapi.json', ['sec-fetch-site: cross-site', 'sec-fetch-mode: navigate']),
               {'expect': {'status': 200, 'fields': {'content-type': 'application/json', 'cache-control': 'no-cache',
@@ -3405,9 +3612,16 @@ EXCHANGES = [
              [send('GET', '/v1/books/2', ['sec-fetch-site: same-origin', 'sec-fetch-mode: no-cors']),
               answered(result('Book', {'name': '2', 'title': 'A tale'}))]),
     exchange("a path no route matches, 404", ['3.10', '10.1.3'],
-             [send('GET', '/nope'), refused_own(404, 'path-unknown')]),
+             [send('GET', '/nope'), refused_own(404, 'path-unknown', 'a path no route matches')]),
     exchange("a command has no route", ['3.1', '3.10'],
-             [json_post('/api/Transcoding/answer', '{}'), refused_own(404, 'path-unknown')]),
+             [json_post('/api/Transcoding/answer', '{}'), refused_own(404, 'path-unknown', 'a path no route matches')]),
+    exchange("a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty", ['10.1', '10.1.1'],
+             [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
+                        + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
+                        + chr(13) + chr(10) + 'connection: close' + chr(13) + chr(10) + chr(13) + chr(10),
+                        'body': hexadecimal(b'zz\r\n{}\r\n0\r\n\r\n')}, 'on': 'a'},
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'a'}]),
     exchange("what HTTP refuses of its own, unmarked, its body empty", ['7.7', '10.1', '10.1.1'],
              [send('GET', '/v1/books/2', ['host: {host}', 'host: {host}']),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
@@ -3417,16 +3631,17 @@ EXCHANGES = [
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
                         + chr(13) + chr(10) + 'connection: close' + chr(13) + chr(10) + chr(13) + chr(10),
                         'body': hexadecimal(b'18\r\n{"aString":"0123456789"}\r\n0\r\n\r\n')}, 'on': 'a'},
-              refused_own(413, 'too-large')],
+              refused_own(413, 'too-large', 'a body past maximumBodyBytes 16')],
              options={'maximumBodyBytes': 16}),
     exchange("a dot segment matches nothing", ['3.6', '3.10'],
              [send('POST', '/api/Transcoding/../Transcoding/echo', ['content-type: application/json'], '{}'),
-              refused_own(404, 'path-unknown')]),
+              refused_own(404, 'path-unknown', 'a path no route matches')]),
     exchange("a method no route of its path takes, 405, allow naming those that do", ['3.10', '10.1.7'],
              [send('PUT', '/v1/shelves/1/books/2', ['content-type: application/json'], '{}'),
-              refused_own(405, 'method-refused', fields={'allow': 'GET, HEAD, PATCH'})]),
+              refused_own(405, 'method-refused', METHOD_WORDS, fields={'allow': 'GET, HEAD, PATCH'})]),
     exchange("a body declared past maximumBodyBytes, 413", ['9.3', '10.1.9'],
-             [json_post('/api/Transcoding/echo', '{"aString":"0123456789"}'), refused_own(413, 'too-large')],
+             [json_post('/api/Transcoding/echo', '{"aString":"0123456789"}'),
+              refused_own(413, 'too-large', 'a body declared past maximumBodyBytes 16')],
              options={'maximumBodyBytes': 16}),
     exchange("the document, as its builder wrote it, and a 304 to its etag", ['11.1'],
              [send('GET', '/openapi.json', on='a'),
@@ -3441,14 +3656,16 @@ EXCHANGES = [
     exchange("calls held per address, apart from streams", ['10.3'],
              [json_post('/api/Transcoding/hang', '{}', on='a'), {'until': {'hanging': 1}},
               json_post('/api/Transcoding/echo', '{}', on='b'),
-              refused_own(503, 'busy', fields={'retry-after': '1'}, on='b')],
+              refused_own(503, 'busy', 'the calls of its address hold maximumExchangesPerAddress',
+                          fields={'retry-after': '1'}, on='b')],
              options={'maximumExchangesPerAddress': 1}, real_time=True),
     exchange("streams held per address, apart from calls", ['10.3'],
              [json_post('/api/Transcoding/watch', '{}', [EVENT_STREAM], on='a'),
               {'expect': {'status': 200, 'fields': {**CALL_FIELDS, 'content-type': 'text/event-stream'},
                           'stream': event_text('result', 1, '{}')}, 'on': 'a'},
               json_post('/api/Transcoding/watch', '{}', [EVENT_STREAM], on='b'),
-              refused_own(503, 'busy', fields={'retry-after': '1'}, on='b'),
+              refused_own(503, 'busy', 'the streams of its address hold maximumConnectionsPerAddress',
+                          fields={'retry-after': '1'}, on='b'),
               json_post('/api/Transcoding/echo', '{}', on='c'), answered('{}', on='c')],
              options={'maximumConnectionsPerAddress': 1}, real_time=True),
 ]
@@ -3505,13 +3722,13 @@ DOCUMENT_JSON = {
         "Bead's HTTP/JSON transcoding: what a gateway answers over HTTP of a service's procedures (spec/transcoding.md, decision 0037), which every implementation that offers a gateway plays through its own modules and its gateway: templates and bindings through its routes, readings and writings through its mapping of protobuf's JSON, failures through its problems, events through its streams, and exchanges through its gateway over a real socket.",
         "Every message is spec/transcoding.proto's, by its full name, and its service TranscodingService, named Transcoding, each procedure by its name; each side's tests take their code of it from beadc, an output with http: true, whose route table and document they read, which tools/check-transcoding.mjs holds to what beadc writes.",
         "templates are templates and raw paths: route, the index of the template that answers a path by 3.5's precedence, null where none matches; variables, each variable's value by its field path, decoded as 3.8 decodes one; verb, the path's, where it has one; refused, where a variable's value does not decode, which a gateway answers 400 PAYLOAD_UNDECODABLE. An entry of one template and refused is a template refused as it is parsed; one of two templates and tie says whether they tie (3.9).",
-        "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for.",
+        "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for, the mapping's own words, and pointer, where it met it as 7.4 places it, the body the request whole, none for the text's own.",
         "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its stock library; then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
         "upb, on a reading or a writing, is how protobuf's own Python library, which the generator runs beside its own reading and writing, parts from it, D and its number where a row of decision 0037's table says the stock libraries part there too: informative, read by no harness.",
-        "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE.",
-        "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt or scheme — with its detail, its words. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
+        "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
+        "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {words} stands for one JSON string, the side's own words, and {document} for the document beadc wrote of spec/transcoding.proto, byte for byte. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
         "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],

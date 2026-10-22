@@ -9,12 +9,16 @@
 import { type DescField, type DescMessage, type Message, ScalarType } from '@bufbuild/protobuf';
 import { ProgrammerError } from '../transport/shared/errors';
 import {
+  cutOf,
   fieldNamed,
+  type IJsonToken,
   type ITypeRegistry,
   type JsonNode,
   JsonFormError,
+  pointerOf,
   readJsonText,
   readMessage,
+  type RequestPlace,
 } from './json-form';
 import { queryDecodeOf } from './templates';
 
@@ -155,9 +159,13 @@ const draftOf = (node: JsonNode): IDraft | undefined => {
 
 /**
  * Sets `value` at `path` of `draft`, each object on the way made a draft of its own; a field set
- * already, or a message the body gave no object for, refused: one field, one value (4.1).
+ * already, but to `null`, which sets nothing (5.2.2), or a message the body gave no object for,
+ * refused at the parameter that sets it: one field, one value (4.1).
  */
-const setAt = (draft: IDraft, { path, value }: { path: readonly DescField[]; value: JsonNode }) => {
+const setAt = (
+  draft: IDraft,
+  { parameter, path, value }: { parameter: string; path: readonly DescField[]; value: JsonNode }
+) => {
   const [field, ...rest] = path;
 
   if (field === undefined) {
@@ -165,10 +173,15 @@ const setAt = (draft: IDraft, { path, value }: { path: readonly DescField[]; val
   }
 
   const held = memberOf(draft, field);
+  const isSet = held !== undefined && held[1].kind !== 'null';
 
   if (rest.length === 0) {
+    if (isSet) {
+      throw new JsonFormError('a field that two of the request set', { place: { parameter } });
+    }
+
     if (held !== undefined) {
-      throw new JsonFormError('a field that two of the request set', field.name);
+      draft.members.splice(draft.members.indexOf(held), 1);
     }
 
     draft.members.push([field.name, value]);
@@ -176,11 +189,16 @@ const setAt = (draft: IDraft, { path, value }: { path: readonly DescField[]; val
     return;
   }
 
-  if (held === undefined) {
+  if (!isSet) {
     const below: IDraft = { kind: 'object', members: [] };
 
-    draft.members.push([field.name, below]);
-    setAt(below, { path: rest, value });
+    if (held === undefined) {
+      draft.members.push([field.name, below]);
+    } else {
+      held[1] = below;
+    }
+
+    setAt(below, { parameter, path: rest, value });
 
     return;
   }
@@ -188,11 +206,11 @@ const setAt = (draft: IDraft, { path, value }: { path: readonly DescField[]; val
   const below = draftOf(held[1]);
 
   if (below === undefined) {
-    throw new JsonFormError('a field that two of the request set', field.name);
+    throw new JsonFormError('a field that two of the request set', { place: { parameter } });
   }
 
   held[1] = below;
-  setAt(below, { path: rest, value });
+  setAt(below, { parameter, path: rest, value });
 };
 
 /** The query's parameters, in order, as the form decoding reads them (4.3). */
@@ -227,7 +245,9 @@ const parameterPathOf = (schema: DescMessage, name: string): DescField[] => {
       message === undefined ? undefined : fieldNamed(message, segment);
 
     if (field === undefined) {
-      throw new JsonFormError('a parameter no field path names', name);
+      throw new JsonFormError('a parameter no field path names', {
+        place: { parameter: cutOf(name) },
+      });
     }
 
     fields.push(field);
@@ -245,6 +265,73 @@ const namesOf = (path: readonly DescField[]): string => {
       return field.name;
     })
     .join('.');
+};
+
+/** The JSON names of a path of fields, by `.`, as a query's parameter is placed (7.4, item 1). */
+const jsonNamesOf = (path: readonly DescField[]): string => {
+  return path
+    .map((field) => {
+      return field.jsonName;
+    })
+    .join('.');
+};
+
+/** Whether a place's tokens begin with a path of fields, by their JSON names. */
+const isWithin = (tokens: readonly IJsonToken[], path: readonly DescField[]): boolean => {
+  return path.every((field, index) => {
+    const token = tokens[index];
+
+    return token?.isGiven === false && token.text === field.jsonName;
+  });
+};
+
+/**
+ * Where the request carried the value its reading refused at `at` (7.4): a variable's field path as
+ * its template writes it, or a query's by JSON names, an item's index left out; or a pointer into
+ * its body, the field a `body` names its root.
+ */
+const placeOfReading = (
+  at: readonly IJsonToken[],
+  {
+    queried,
+    routeBody,
+    variables,
+  }: {
+    queried: readonly (readonly DescField[])[];
+    routeBody: string | undefined;
+    variables: readonly { fieldPath: string; path: readonly DescField[] }[];
+  }
+): RequestPlace => {
+  const variable = variables.find(({ path }) => {
+    return isWithin(at, path);
+  });
+
+  if (variable !== undefined) {
+    return { parameter: variable.fieldPath };
+  }
+
+  const parameter = queried.find((path) => {
+    return isWithin(at, path);
+  });
+
+  if (parameter !== undefined) {
+    return { parameter: jsonNamesOf(parameter) };
+  }
+
+  return { pointer: pointerOf(routeBody === '*' ? at : at.slice(1)) };
+};
+
+/** What `read` gives of a request, a refusal of its reading placed where the request carried it. */
+const placed = <T>(read: () => T, place: (at: readonly IJsonToken[]) => RequestPlace): T => {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof JsonFormError && error.at !== undefined) {
+      throw new JsonFormError(error.reason, { place: place(error.at) });
+    }
+
+    throw error;
+  }
 };
 
 /**
@@ -316,7 +403,14 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
 
     // * not an object: the reading refuses it as the message's, with nothing bound beside it
     if (whole === undefined) {
-      return readMessage(schema, { node: bodyNode, registry });
+      return placed(
+        () => {
+          return readMessage(schema, { node: bodyNode, registry });
+        },
+        (at) => {
+          return { pointer: pointerOf(at) };
+        }
+      );
     }
 
     draft = whole;
@@ -327,15 +421,23 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
   }
 
   const variablePaths = Object.keys(variables).map((fieldPath) => {
-    return variablePathOf(schema, fieldPath);
+    return { fieldPath, path: variablePathOf(schema, fieldPath) };
   });
-  const bound = new Set(variablePaths.map(namesOf));
+  const bound = new Set(
+    variablePaths.map(({ path }) => {
+      return namesOf(path);
+    })
+  );
 
-  for (const path of variablePaths) {
+  for (const { fieldPath, path } of variablePaths) {
     const last = path.at(-1);
 
     if (last !== undefined) {
-      setAt(draft, { path, value: valueNodeOf(variables[namesOf(path)] ?? '', last) });
+      setAt(draft, {
+        parameter: fieldPath,
+        path,
+        value: valueNodeOf(variables[fieldPath] ?? '', last),
+      });
     }
   }
 
@@ -348,6 +450,8 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
   // each repeated scalar's items, in their order, set once the query is read
   const repeated = new Map<DescField, { items: JsonNode[]; path: DescField[] }>();
   const named = new Set<DescField>();
+  // the paths the query binds, where a refusal of their reading is placed
+  const queried: DescField[][] = [];
   let isMaskGiven = false;
 
   for (const [name, value] of parameters) {
@@ -358,11 +462,14 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
       continue;
     }
 
+    const parameter = jsonNamesOf(path);
     const isRepeatedScalar =
       field.fieldKind === 'list' && (field.listKind === 'scalar' || field.listKind === 'enum');
 
     if (field.fieldKind === 'map' || (field.fieldKind === 'list' && !isRepeatedScalar)) {
-      throw new JsonFormError('a parameter of a map or a repeated message', name);
+      throw new JsonFormError('a parameter of a map or a repeated message', {
+        place: { parameter },
+      });
     }
 
     if (
@@ -370,20 +477,23 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
       !STRING_FORMS.has(field.message.typeName) &&
       !isWrapper(field.message)
     ) {
-      throw new JsonFormError('a parameter of a message', name);
+      throw new JsonFormError('a parameter of a message', { place: { parameter } });
     }
 
     const names = namesOf(path);
 
     if (bound.has(names) || (bodyField !== undefined && path[0] === bodyField)) {
-      throw new JsonFormError('a parameter of a field the route binds otherwise', name);
+      throw new JsonFormError('a parameter of a field the route binds otherwise', {
+        place: { parameter },
+      });
     }
 
     if (named.has(field) && !isRepeatedScalar) {
-      throw new JsonFormError('a field the query names twice', name);
+      throw new JsonFormError('a field the query names twice', { place: { parameter } });
     }
 
     named.add(field);
+    queried.push(path);
     isMaskGiven ||= path.length === 1 && field.name === UPDATE_MASK;
 
     if (isRepeatedScalar) {
@@ -392,12 +502,12 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
       held.items.push(valueNodeOf(value, field));
       repeated.set(field, held);
     } else {
-      setAt(draft, { path, value: valueNodeOf(value, field) });
+      setAt(draft, { parameter, path, value: valueNodeOf(value, field) });
     }
   }
 
   for (const { items, path } of repeated.values()) {
-    setAt(draft, { path, value: { items, kind: 'array' } });
+    setAt(draft, { parameter: jsonNamesOf(path), path, value: { items, kind: 'array' } });
   }
 
   // * a PATCH's update_mask, unset by its query and its body, the keys its body holds (4.5)
@@ -415,8 +525,19 @@ export const bindRequest = (schema: DescMessage, options: IBindingOptions): Mess
   ) {
     const paths = maskPathsOf(bodyField.message, { node: bodyNode, prefix: '' });
 
-    setAt(draft, { path: [mask], value: { kind: 'string', value: paths.map(camelOf).join(',') } });
+    setAt(draft, {
+      parameter: UPDATE_MASK,
+      path: [mask],
+      value: { kind: 'string', value: paths.map(camelOf).join(',') },
+    });
   }
 
-  return readMessage(schema, { node: draft, registry });
+  return placed(
+    () => {
+      return readMessage(schema, { node: draft, registry });
+    },
+    (at) => {
+      return placeOfReading(at, { queried, routeBody, variables: variablePaths });
+    }
+  );
 };

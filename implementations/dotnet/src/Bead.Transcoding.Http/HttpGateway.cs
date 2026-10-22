@@ -83,6 +83,11 @@ public sealed class HttpGateway : IAsyncDisposable
         Timeout = Clocks.AssertHeld((nameof(HttpGatewayOptions.Timeout), nameof(HttpGatewayOptions.Timeout)), options.Timeout);
         _heartbeat = Clocks.AssertHeld((nameof(HttpGatewayOptions.Heartbeat), nameof(HttpGatewayOptions.Heartbeat)), options.Heartbeat);
 
+        if (!Enum.IsDefined(options.Authorization))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "a gateway's authorization is elsewhere or bearer-jwt");
+        }
+
         ServerBounds.AssertCount((nameof(HttpGatewayOptions.Window), options.Window));
         ServerBounds.AssertCount((nameof(HttpGatewayOptions.MaximumExchanges), options.MaximumExchanges));
         ServerBounds.AssertCount((nameof(HttpGatewayOptions.MaximumExchangesPerAddress), options.MaximumExchangesPerAddress));
@@ -204,7 +209,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
             if (!context.Response.HasStarted)
             {
-                await Answer(context, HttpProblems.Own(OwnFailure.Unwritable, ("the gateway failed", _options.Challenge)));
+                await Answer(context, HttpProblems.Own(OwnFailure.Failed, ("", _options.Challenge)));
             }
         }
     }
@@ -329,8 +334,9 @@ public sealed class HttpGateway : IAsyncDisposable
                 return;
             }
         }
-        else if ((HasBody(request) || request.Headers.ContentType.Count > 0) && !IsTypeTaken(request, served.Route.Request.Encoding))
+        else if (!IsTypeTaken(request, served.Route.Request.Encoding))
         {
+            // * of no type, or of another, whether a body comes or none, as spec 15.6 refuses a POST of no type
             await Refuse(context, (StatusCodes.Status415UnsupportedMediaType, "type-refused", $"this route's body is {MediaTypeOf(served.Route.Request.Encoding)}, unencoded"));
 
             return;
@@ -372,6 +378,14 @@ public sealed class HttpGateway : IAsyncDisposable
 
             // 10. its body as it comes
             var (body, refused) = await BodyOf(context);
+
+            if (refused is { IsHttp: true } framing)
+            {
+                // * a body HTTP cannot frame is refused as HTTP refuses it, unmarked (10.1, step 1)
+                await RefuseAsHttp(context, framing.Status);
+
+                return;
+            }
 
             if (refused is { } end)
             {
@@ -689,7 +703,7 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (Microsoft.AspNetCore.Http.BadHttpRequestException reason)
         {
-            return (null, new Refused(reason.StatusCode, "malformed", "a body HTTP could not read"));
+            return (null, new Refused(reason.StatusCode, "", "") { IsHttp = true });
         }
         finally
         {
@@ -775,8 +789,9 @@ public sealed class HttpGateway : IAsyncDisposable
         }
         catch (JsonFormException refused)
         {
-            // * the mapping's own words of the client's own request, fixed in transcoding.json
-            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, refused.Message), problems));
+            // * the mapping's own words of the client's own request, fixed in transcoding.json, and
+            // where the request carried what it refuses, cut, never in its words (7.4)
+            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, refused.Message), problems with { Place = refused.Place }));
 
             return;
         }
@@ -790,11 +805,13 @@ public sealed class HttpGateway : IAsyncDisposable
                 new MemoryConnectOptions { Server = _options.Transport, Address = address, Port = context.Connection.RemotePort },
                 context.RequestAborted);
         }
-        catch (Exception reason) when (reason is ConnectException or TimeoutException or InvalidOperationException)
+        catch (Exception reason) when (reason is ConnectException or TimeoutException)
         {
-            // ! the in-memory transport's words tell of the gateway's inside, never its client's request
+            // ! a connection its server would not draw, in time or at all, its code alone; any other
+            // failure is what no gate foresaw. The in-memory transport's words tell of the gateway's
+            // inside, never its client's request
             Report(reason);
-            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.DestinationUnreachable, "the connection is gone"), problems with { Arose = FailureArising.Client }));
+            await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.DestinationUnreachable), problems with { Arose = FailureArising.Client }));
 
             return;
         }
@@ -871,20 +888,34 @@ public sealed class HttpGateway : IAsyncDisposable
         switch (reason)
         {
             case TimeoutException:
+                Report(reason);
+
                 return HttpProblems.Own(OwnFailure.Timeout, (string.Create(CultureInfo.InvariantCulture, $"no answer within {(long)Timeout.TotalMilliseconds} ms"), _options.Challenge));
             case FailureException failure:
                 var arose = failure.Origin != FailureOrigin.Local
                     ? FailureArising.Server
                     : failure.Header is ResultHeader or NotificationHeader ? FailureArising.Answer : FailureArising.Client;
+                var isScheme = failure.Code == (ushort)ProtocolCode.CredentialUnsupported && failure.Scope == FailureScope.Protocol;
 
-                if (failure.Code == (ushort)ProtocolCode.CredentialUnsupported && failure.Scope == FailureScope.Protocol)
+                if (isScheme)
                 {
                     Report(new InvalidOperationException($"the server takes none of the scheme this gateway presents: {failure.Detail}", failure));
                 }
 
-                return HttpProblems.Of(failure.Failure, problems with { Arose = arose });
+                var problem = HttpProblems.Of(failure.Failure, problems with { Arose = arose });
+
+                // * every failure it answers 500 or above is reported but PROCEDURE_FAILED, its
+                // server's report of its application's (7.6)
+                if (problem.Status >= 500 && !isScheme && !(failure.Code == (ushort)ProtocolCode.ProcedureFailed && failure.Scope == FailureScope.Protocol))
+                {
+                    Report(failure);
+                }
+
+                return problem;
             case DisconnectException:
             case ConnectException:
+                Report(reason);
+
                 return HttpProblems.Own(OwnFailure.Closed, ("the connection closed", _options.Challenge));
             default:
                 return null;
@@ -901,6 +932,21 @@ public sealed class HttpGateway : IAsyncDisposable
         if (result.Descriptor is not { } descriptor)
         {
             var type = result.Encoding == HttpEncoding.Text ? "text/plain;charset=utf-8" : MediaTypeOf(result.Encoding);
+
+            // * a text one read as spec 17.4 reads it, on a call as on a stream: what refuses it is the answer's
+            if (result.Encoding == HttpEncoding.Text)
+            {
+                try
+                {
+                    Payloads.ReadText(payload);
+                }
+                catch (FormatException reason)
+                {
+                    await Answer(context, AnswerRefused(new UndecodedAnswerException(reason), problems));
+
+                    return;
+                }
+            }
 
             await WriteWhole(context, (StatusCodes.Status200OK, type, payload));
 
@@ -1490,8 +1536,12 @@ public sealed class HttpGateway : IAsyncDisposable
 
     private sealed record Served(HttpRoute Route, HttpRouteTemplate Rule, HttpTemplate Template);
 
-    // a refusal of the gateway's own: its status, its mark and its words
-    private sealed record Refused(int Status, string Reason, string Words);
+    // a refusal of the gateway's own: its status, its mark and its words; or what HTTP refuses of its
+    // own, its status alone
+    private sealed record Refused(int Status, string Reason, string Words)
+    {
+        public bool IsHttp { get; init; }
+    }
 
     // the server's answer its stock library refused, that refusal inside it
     private sealed class UndecodedAnswerException(Exception refusal) : Exception("the server's answer does not decode", refusal);

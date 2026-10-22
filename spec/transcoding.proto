@@ -306,6 +306,10 @@ message Edges {
     google.protobuf.NullValue null_member = 27;
     string text_member = 28;
   }
+  sint32 an_sint32 = 29;
+  sfixed32 an_sfixed32 = 30;
+  fixed32 a_fixed32 = 31;
+  sfixed64 an_sfixed64 = 32;
 }
 
 // A book of http.proto's own examples.

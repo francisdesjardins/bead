@@ -49,10 +49,7 @@ public sealed class EventsTests
         var dropped = unanswered.Notification(Bytes("{}"));
 
         Assert.False(unanswered.Failure(Bytes("{}"), out _));
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-        {
-            return dropped;
-        });
+        await dropped;
     }
 
     [Fact]
@@ -93,7 +90,7 @@ public sealed class EventsTests
     }
 
     [Fact]
-    public async Task Writes_one_result_alone_and_nothing_once_the_stream_ended()
+    public async Task Refuses_a_second_result_and_a_result_or_a_notification_once_its_failure_ended_it_as_its_caller_s_bug()
     {
         var written = new StringBuilder();
         var events = new HttpEvents((bytes) =>
@@ -108,6 +105,12 @@ public sealed class EventsTests
         Assert.Equal((false, false, ""), (events.IsAnswered, events.IsEnded, written.ToString()));
 
         await events.Result(Bytes("{}"));
+        Assert.Equal("a stream has one result, before its end", Assert.Throws<InvalidOperationException>(() =>
+        {
+            _ = events.Result(Bytes("{}"));
+        }).Message);
+
+        // * its failure ends it: a result or a notification after it is its caller's bug, a failure nothing
         Assert.True(events.Failure(Bytes("{\"code\":2}"), out var ending));
         await ending;
         Assert.Equal((true, true), (events.IsAnswered, events.IsEnded));
@@ -137,7 +140,7 @@ public sealed class EventsTests
     }
 
     [Fact]
-    public async Task Faults_a_held_notification_whose_event_its_response_could_not_take()
+    public async Task Settles_a_held_notification_whose_event_its_response_could_not_take_its_credit_moot()
     {
         var writes = 0;
         var events = new HttpEvents((_) =>
@@ -148,11 +151,9 @@ public sealed class EventsTests
         var held = events.Notification(Bytes("{\"remaining\":1}"));
 
         await events.Result(Bytes("{}"));
-
-        Assert.Equal("the socket closed", (await Assert.ThrowsAsync<IOException>(() =>
-        {
-            return held;
-        })).Message);
+        await held;
+        await events.Notification(Bytes("{\"remaining\":0}"));
+        Assert.True(held.IsCompletedSuccessfully);
     }
 
     [Fact]

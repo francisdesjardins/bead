@@ -4,13 +4,13 @@
     "Bead's HTTP/JSON transcoding: what a gateway answers over HTTP of a service's procedures (spec/transcoding.md, decision 0037), which every implementation that offers a gateway plays through its own modules and its gateway: templates and bindings through its routes, readings and writings through its mapping of protobuf's JSON, failures through its problems, events through its streams, and exchanges through its gateway over a real socket.",
     "Every message is spec/transcoding.proto's, by its full name, and its service TranscodingService, named Transcoding, each procedure by its name; each side's tests take their code of it from beadc, an output with http: true, whose route table and document they read, which tools/check-transcoding.mjs holds to what beadc writes.",
     "templates are templates and raw paths: route, the index of the template that answers a path by 3.5's precedence, null where none matches; variables, each variable's value by its field path, decoded as 3.8 decodes one; verb, the path's, where it has one; refused, where a variable's value does not decode, which a gateway answers 400 PAYLOAD_UNDECODABLE. An entry of one template and refused is a template refused as it is parsed; one of two templates and tie says whether they tie (3.9).",
-    "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for.",
+    "readings are bodies read as 5.2 reads a proto request's: body, its text, or bodyBytes, its bytes in hexadecimal where they are no UTF-8; then payload, the message read, as its binary payload in hexadecimal, which a harness reads through its stock library and compares with the message its mapping read, as messages, since protobuf fixes no message's bytes whole; or refused, the reason it is refused for, the mapping's own words, and pointer, where it met it as 7.4 places it, the body the request whole, none for the text's own.",
     "writings are results written as 5.6 writes one: payload, the result's bytes, which a harness reads through its stock library; then body, the text Bead's proto JSON form writes of it, byte for byte, or refused, the reason 5.7 refuses it for, which a gateway answers 500 (7.6).",
     "upb, on a reading or a writing, is how protobuf's own Python library, which the generator runs beside its own reading and writing, parts from it, D and its number where a row of decision 0037's table says the stock libraries part there too: informative, read by no harness.",
-    "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE.",
-    "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt or scheme — with its detail, its words. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
+    "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
+    "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
     "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {words} stands for one JSON string, the side's own words, and {document} for the document beadc wrote of spec/transcoding.proto, byte for byte. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
@@ -668,7 +668,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"value\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
-      "refused": "nested past 100"
+      "refused": "nested past 100",
+      "pointer": "#/value/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0"
     },
     {
       "name": "a message nested 70 deep is taken, past the 64 of a json payload",
@@ -699,7 +700,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
-      "refused": "nested past 100"
+      "refused": "nested past 100",
+      "pointer": "#/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child"
     },
     {
       "name": "a map's entry 100 deep counts as a message",
@@ -719,7 +721,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"labels\":{\"a\":1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
-      "refused": "nested past 100"
+      "refused": "nested past 100",
+      "pointer": "#/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/labels"
     },
     {
       "name": "a repeated message's arrays count nothing",
@@ -751,6 +754,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"extra\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"n\":{\"value\":1}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
       "refused": "nested past 100",
+      "pointer": "#/extra/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n",
       "upb": "its bound, 100, counts a text's nesting, not its messages"
     },
     {
@@ -761,7 +765,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"child\":{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Edges\",\"child\":{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}",
-      "refused": "nested past 100"
+      "refused": "nested past 100",
+      "pointer": "#/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/child/any/child"
     },
     {
       "name": "a body that is null",
@@ -771,7 +776,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "null",
-      "refused": "a Edges that is no object"
+      "refused": "an Edges that is no object",
+      "pointer": "#"
     },
     {
       "name": "a body that is an array",
@@ -781,7 +787,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "[]",
-      "refused": "a Edges that is no object",
+      "refused": "an Edges that is no object",
+      "pointer": "#",
       "upb": "it reads an array as an empty message"
     },
     {
@@ -803,6 +810,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt32\":1,\"an_int32\":2}",
       "refused": "a field by its two names",
+      "pointer": "#/anInt32",
       "upb": "D6: it takes the last of a field given by its two names"
     },
     {
@@ -813,7 +821,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aBool\":true}",
-      "refused": "a key no field names"
+      "refused": "a key no field names",
+      "pointer": "#/aBool"
     },
     {
       "name": "a field of a JSON name of its own, by it",
@@ -843,7 +852,8 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"customNamed\":\"x\"}",
-      "refused": "a key no field names"
+      "refused": "a key no field names",
+      "pointer": "#/customNamed"
     },
     {
       "name": "null leaves each field unset",
@@ -913,7 +923,8 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"choiceText\":\"a\",\"choiceInner\":{}}",
-      "refused": "two members of one oneof"
+      "refused": "two members of one oneof",
+      "pointer": "#/choiceInner"
     },
     {
       "name": "a NullValue's null and its oneof's other member",
@@ -924,6 +935,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"nullMember\":null,\"textMember\":\"a\"}",
       "refused": "two members of one oneof",
+      "pointer": "#/textMember",
       "upb": "it reads a NullValue's null beside its oneof's other member as no member"
     },
     {
@@ -934,7 +946,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"ints\":[1,null]}",
-      "refused": "a null item"
+      "refused": "a null item",
+      "pointer": "#/ints/1"
     },
     {
       "name": "a null Timestamp item",
@@ -944,7 +957,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"stamps\":[null]}",
-      "refused": "a null item"
+      "refused": "a null item",
+      "pointer": "#/stamps/0"
     },
     {
       "name": "a null value in a map",
@@ -954,7 +968,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"labels\":{\"a\":null}}",
-      "refused": "a null value in a map"
+      "refused": "a null value in a map",
+      "pointer": "#/labels/a"
     },
     {
       "name": "a null member of a Struct is a Value's",
@@ -984,7 +999,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"ints\":1}",
-      "refused": "a repeated field that is no array"
+      "refused": "a repeated field that is no array",
+      "pointer": "#/ints"
     },
     {
       "name": "an int32 written 1e2",
@@ -1045,7 +1061,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt32\":0.5}",
-      "refused": "an int32 that is no integer"
+      "refused": "an int32 that is no integer",
+      "pointer": "#/anInt32"
     },
     {
       "name": "an int32 as a string with a space",
@@ -1057,7 +1074,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt32\":\" 5\"}",
-      "refused": "no int32"
+      "refused": "no int32",
+      "pointer": "#/anInt32"
     },
     {
       "name": "an int32 past its range",
@@ -1069,7 +1087,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt32\":2147483648}",
-      "refused": "an int32 past its range"
+      "refused": "an int32 past its range",
+      "pointer": "#/anInt32"
     },
     {
       "name": "an int32 of -0",
@@ -1093,7 +1112,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aUint32\":-1}",
-      "refused": "a uint32 past its range"
+      "refused": "a uint32 past its range",
+      "pointer": "#/aUint32"
     },
     {
       "name": "an int32 in hexadecimal",
@@ -1105,7 +1125,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt32\":\"0x10\"}",
-      "refused": "no int32"
+      "refused": "no int32",
+      "pointer": "#/anInt32"
     },
     {
       "name": "an int64 at its largest, as a string",
@@ -1131,6 +1152,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt64\":\"1e3\"}",
       "refused": "an int64 string off -?(0|[1-9][0-9]*)",
+      "pointer": "#/anInt64",
       "upb": "D8: it reads a 64-bit string of an exponent"
     },
     {
@@ -1144,6 +1166,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt64\":\"01\"}",
       "refused": "an int64 string off -?(0|[1-9][0-9]*)",
+      "pointer": "#/anInt64",
       "upb": "it reads a 64-bit string of a leading zero"
     },
     {
@@ -1156,7 +1179,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"anInt64\":\"9223372036854775808\"}",
-      "refused": "an int64 past its range"
+      "refused": "an int64 past its range",
+      "pointer": "#/anInt64"
     },
     {
       "name": "an int64 past 2^53 as a number, read exactly",
@@ -1207,6 +1231,157 @@
       "payload": "C8 01 64"
     },
     {
+      "name": "an sint32 at its least",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSint32\":-2147483648}",
+      "payload": "E8 01 FF FF FF FF 0F"
+    },
+    {
+      "name": "an sint32 past its range",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSint32\":2147483648}",
+      "refused": "an sint32 past its range",
+      "pointer": "#/anSint32"
+    },
+    {
+      "name": "an sint32 as a string",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSint32\":\"-5\"}",
+      "payload": "E8 01 09"
+    },
+    {
+      "name": "an sfixed32 at its least, as a string",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSfixed32\":\"-2147483648\"}",
+      "payload": "F5 01 00 00 00 80"
+    },
+    {
+      "name": "an sfixed32 past its range",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSfixed32\":-2147483649}",
+      "refused": "an sfixed32 past its range",
+      "pointer": "#/anSfixed32"
+    },
+    {
+      "name": "a fixed32 at its largest",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"aFixed32\":4294967295}",
+      "payload": "FD 01 FF FF FF FF"
+    },
+    {
+      "name": "a fixed32 of -1",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"aFixed32\":-1}",
+      "refused": "a fixed32 past its range",
+      "pointer": "#/aFixed32"
+    },
+    {
+      "name": "a fixed32 as a string of an exponent",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"aFixed32\":\"1e3\"}",
+      "payload": "FD 01 E8 03 00 00"
+    },
+    {
+      "name": "an sfixed64 at its least, as a string",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.2"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSfixed64\":\"-9223372036854775808\"}",
+      "payload": "81 02 00 00 00 00 00 00 00 80"
+    },
+    {
+      "name": "an sfixed64 past its range, as a string",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.2"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSfixed64\":\"9223372036854775808\"}",
+      "refused": "an sfixed64 past its range",
+      "pointer": "#/anSfixed64"
+    },
+    {
+      "name": "an sfixed64 past 2^53 as a number, read exactly",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.2"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSfixed64\":-9007199254740993}",
+      "payload": "81 02 FF FF FF FF FF FF DF FF"
+    },
+    {
+      "name": "an sfixed64 as a string of an exponent",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.3",
+        "5.3.2",
+        "5.5"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"anSfixed64\":\"1e3\"}",
+      "refused": "an sfixed64 string off -?(0|[1-9][0-9]*)",
+      "pointer": "#/anSfixed64",
+      "upb": "D8: it reads a 64-bit string of an exponent"
+    },
+    {
       "name": "an Int64Value as a string of an exponent",
       "clauses": [
         "5.2",
@@ -1219,6 +1394,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"wrappedInt64\":\"1e3\"}",
       "refused": "an int64 string off -?(0|[1-9][0-9]*)",
+      "pointer": "#/wrappedInt64",
       "upb": "D8: it reads a 64-bit string of an exponent"
     },
     {
@@ -1245,7 +1421,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aFloat\":3.4028236e38}",
-      "refused": "a float past its range"
+      "refused": "a float past its range",
+      "pointer": "#/aFloat"
     },
     {
       "name": "a float that rounds to its largest",
@@ -1319,6 +1496,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aDouble\":\"inf\"}",
       "refused": "no double",
+      "pointer": "#/aDouble",
       "upb": "it reads a double's string as Python's float() reads one"
     },
     {
@@ -1344,6 +1522,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aDouble\":\" 1\"}",
       "refused": "no double",
+      "pointer": "#/aDouble",
       "upb": "it reads a double's string as Python's float() reads one"
     },
     {
@@ -1356,7 +1535,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aDouble\":\"\"}",
-      "refused": "no double"
+      "refused": "no double",
+      "pointer": "#/aDouble"
     },
     {
       "name": "a bool as a string",
@@ -1368,7 +1548,8 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"aBool\":\"true\"}",
-      "refused": "no bool"
+      "refused": "no bool",
+      "pointer": "#/aBool"
     },
     {
       "name": "a bool as 1",
@@ -1380,7 +1561,8 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"aBool\":1}",
-      "refused": "no bool"
+      "refused": "no bool",
+      "pointer": "#/aBool"
     },
     {
       "name": "a string as a number",
@@ -1392,7 +1574,8 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"aString\":12345}",
-      "refused": "no string"
+      "refused": "no string",
+      "pointer": "#/aString"
     },
     {
       "name": "bytes in standard base64",
@@ -1441,6 +1624,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"someBytes\":\"AQ=\"}",
       "refused": "bytes padded wrongly",
+      "pointer": "#/someBytes",
       "upb": "D19: it takes base64 padded wrongly"
     },
     {
@@ -1454,6 +1638,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"someBytes\":\"AQ===\"}",
       "refused": "bytes padded wrongly",
+      "pointer": "#/someBytes",
       "upb": "D19: it takes base64 padded wrongly"
     },
     {
@@ -1467,6 +1652,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"someBytes\":\"+_8=\"}",
       "refused": "bytes of no one alphabet of base64",
+      "pointer": "#/someBytes",
       "upb": "D19: it takes base64 of two alphabets"
     },
     {
@@ -1481,6 +1667,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"someBytes\":\"A Q==\"}",
       "refused": "bytes of no one alphabet of base64",
+      "pointer": "#/someBytes",
       "upb": "it takes base64 with white space in it"
     },
     {
@@ -1495,6 +1682,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"someBytes\":\"AQ==\\n\"}",
       "refused": "bytes of no one alphabet of base64",
+      "pointer": "#/someBytes",
       "upb": "it takes base64 with white space in it"
     },
     {
@@ -1519,7 +1707,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aliased\":\"aliased_first\"}",
-      "refused": "no value of Aliased of that name"
+      "refused": "no value of Aliased of that name",
+      "pointer": "#/aliased"
     },
     {
       "name": "an open enum by a number no value numbers",
@@ -1543,7 +1732,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aliased\":\"UNKNOWN\"}",
-      "refused": "no value of Aliased of that name"
+      "refused": "no value of Aliased of that name",
+      "pointer": "#/aliased"
     },
     {
       "name": "an enum by a fraction",
@@ -1556,6 +1746,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"aliased\":1.5}",
       "refused": "an enum number that is no integer",
+      "pointer": "#/aliased",
       "upb": "it reads an enum's number with a fraction, the fraction dropped"
     },
     {
@@ -1569,6 +1760,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byInt32\":{\"01\":\"a\"}}",
       "refused": "an int32 key off -?(0|[1-9][0-9]*)",
+      "pointer": "#/byInt32/01",
       "upb": "D18: it reads an integer key as Python's int() reads one"
     },
     {
@@ -1582,6 +1774,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byInt32\":{\"+1\":\"a\"}}",
       "refused": "an int32 key off -?(0|[1-9][0-9]*)",
+      "pointer": "#/byInt32/+1",
       "upb": "D18: it reads an integer key as Python's int() reads one"
     },
     {
@@ -1608,6 +1801,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byInt32\":{\"1.0\":\"a\"}}",
       "refused": "an int32 key off -?(0|[1-9][0-9]*)",
+      "pointer": "#/byInt32/1.0",
       "upb": "it reads an integer key of a fraction of zero"
     },
     {
@@ -1620,7 +1814,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byInt32\":{\" 1\":\"a\"}}",
-      "refused": "an int32 key off -?(0|[1-9][0-9]*)"
+      "refused": "an int32 key off -?(0|[1-9][0-9]*)",
+      "pointer": "#/byInt32/%201"
     },
     {
       "name": "a uint32 key of -1",
@@ -1632,7 +1827,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byUint32\":{\"-1\":\"a\"}}",
-      "refused": "a uint32 key past its range"
+      "refused": "a uint32 key past its range",
+      "pointer": "#/byUint32/-1"
     },
     {
       "name": "an int64 key of an exponent",
@@ -1645,6 +1841,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byInt64\":{\"1e3\":\"a\"}}",
       "refused": "an int64 key off -?(0|[1-9][0-9]*)",
+      "pointer": "#/byInt64/1e3",
       "upb": "D8: it reads a 64-bit key of an exponent"
     },
     {
@@ -1659,6 +1856,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"byInt32\":{\"0\":\"a\",\"-0\":\"b\"}}",
       "refused": "two keys of one value",
+      "pointer": "#/byInt32/-0",
       "upb": "it takes the last of two keys of one value"
     },
     {
@@ -1683,7 +1881,8 @@
       ],
       "message": "bead.transcoding.v1.Everything",
       "body": "{\"flags\":{\"True\":\"y\"}}",
-      "refused": "a bool key that is neither true nor false"
+      "refused": "a bool key that is neither true nor false",
+      "pointer": "#/flags/True"
     },
     {
       "name": "a Timestamp at its earliest",
@@ -1719,7 +1918,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"0000-12-31T23:59:59Z\"}",
-      "refused": "a Timestamp past its range"
+      "refused": "a Timestamp past its range",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of 10 fraction digits",
@@ -1731,7 +1931,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21T12:00:00.1234567891Z\"}",
-      "refused": "a Timestamp off RFC 3339"
+      "refused": "a Timestamp off RFC 3339",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of an empty fraction",
@@ -1744,6 +1945,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21T12:00:00.Z\"}",
       "refused": "a Timestamp off RFC 3339",
+      "pointer": "#/at",
       "upb": "it takes a Timestamp of an empty fraction"
     },
     {
@@ -1756,7 +1958,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2016-12-31T23:59:60Z\"}",
-      "refused": "a Timestamp of no instant"
+      "refused": "a Timestamp of no instant",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of a lower-case t",
@@ -1768,7 +1971,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21t12:00:00Z\"}",
-      "refused": "a Timestamp off RFC 3339"
+      "refused": "a Timestamp off RFC 3339",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of a lower-case z",
@@ -1780,7 +1984,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21T12:00:00z\"}",
-      "refused": "a Timestamp off RFC 3339"
+      "refused": "a Timestamp off RFC 3339",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of a space for its T",
@@ -1792,7 +1997,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21 12:00:00Z\"}",
-      "refused": "a Timestamp off RFC 3339"
+      "refused": "a Timestamp off RFC 3339",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of the offset -00:00",
@@ -1829,6 +2035,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21T12:00:00+24:00\"}",
       "refused": "a Timestamp of no offset",
+      "pointer": "#/at",
       "upb": "it takes an offset of 24 hours"
     },
     {
@@ -1841,7 +2048,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"1970-01-01T08:00:01+0800\"}",
-      "refused": "a Timestamp off RFC 3339"
+      "refused": "a Timestamp off RFC 3339",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of an offset, read in UTC",
@@ -1865,7 +2073,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-02-30T00:00:00Z\"}",
-      "refused": "a Timestamp of no instant"
+      "refused": "a Timestamp of no instant",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of February 29 in a leap year",
@@ -1889,7 +2098,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2025-02-29T00:00:00Z\"}",
-      "refused": "a Timestamp of no instant"
+      "refused": "a Timestamp of no instant",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp of the hour 24",
@@ -1901,7 +2111,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"2026-10-21T24:00:00Z\"}",
-      "refused": "a Timestamp of no instant"
+      "refused": "a Timestamp of no instant",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp its offset takes past its latest",
@@ -1913,7 +2124,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"9999-12-31T23:59:59-01:00\"}",
-      "refused": "a Timestamp past its range"
+      "refused": "a Timestamp past its range",
+      "pointer": "#/at"
     },
     {
       "name": "a Timestamp its offset takes before its earliest",
@@ -1925,7 +2137,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"at\":\"0001-01-01T00:00:00+01:00\"}",
-      "refused": "a Timestamp past its range"
+      "refused": "a Timestamp past its range",
+      "pointer": "#/at"
     },
     {
       "name": "a Duration of 10 fraction digits",
@@ -1938,6 +2151,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"1.0000000001s\"}",
       "refused": "a Duration off its form",
+      "pointer": "#/took",
       "upb": "D14: it takes a Duration of more than 9 fraction digits"
     },
     {
@@ -1951,6 +2165,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"+1s\"}",
       "refused": "a Duration off its form",
+      "pointer": "#/took",
       "upb": "it reads a Duration as Python's float() reads its number"
     },
     {
@@ -1963,7 +2178,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\".5s\"}",
-      "refused": "a Duration off its form"
+      "refused": "a Duration off its form",
+      "pointer": "#/took"
     },
     {
       "name": "a Duration of a trailing point",
@@ -1976,6 +2192,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"1.s\"}",
       "refused": "a Duration off its form",
+      "pointer": "#/took",
       "upb": "it reads a Duration as Python's float() reads its number"
     },
     {
@@ -2002,6 +2219,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"01s\"}",
       "refused": "a Duration off its form",
+      "pointer": "#/took",
       "upb": "D13: it takes a Duration of a leading zero"
     },
     {
@@ -2014,7 +2232,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"1e3s\"}",
-      "refused": "a Duration off its form"
+      "refused": "a Duration off its form",
+      "pointer": "#/took"
     },
     {
       "name": "a Duration at its longest",
@@ -2038,7 +2257,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"315576000001s\"}",
-      "refused": "a Duration past its range"
+      "refused": "a Duration past its range",
+      "pointer": "#/took"
     },
     {
       "name": "a Duration of a capital S",
@@ -2050,7 +2270,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"1S\"}",
-      "refused": "a Duration off its form"
+      "refused": "a Duration off its form",
+      "pointer": "#/took"
     },
     {
       "name": "a Duration of no s",
@@ -2062,7 +2283,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":\"1\"}",
-      "refused": "a Duration off its form"
+      "refused": "a Duration off its form",
+      "pointer": "#/took"
     },
     {
       "name": "a Duration of a negative fraction",
@@ -2086,7 +2308,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"took\":{\"seconds\":\"1\"}}",
-      "refused": "a Duration off its form"
+      "refused": "a Duration off its form",
+      "pointer": "#/took"
     },
     {
       "name": "a FieldMask of two paths",
@@ -2110,7 +2333,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"mask\":\"foo_bar\"}",
-      "refused": "a FieldMask path off lowerCamelCase"
+      "refused": "a FieldMask path off lowerCamelCase",
+      "pointer": "#/mask"
     },
     {
       "name": "a FieldMask path that opens upper-case",
@@ -2124,6 +2348,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"mask\":\"FooBar\"}",
       "refused": "a FieldMask path off lowerCamelCase",
+      "pointer": "#/mask",
       "upb": "D15: it takes a path that opens upper-case"
     },
     {
@@ -2150,6 +2375,7 @@
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"mask\":\"a,,b\"}",
       "refused": "a FieldMask of an empty path",
+      "pointer": "#/mask",
       "upb": "D16: it takes an empty path"
     },
     {
@@ -2199,7 +2425,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"mask\":{\"paths\":[\"a\"]}}",
-      "refused": "a FieldMask that is no string"
+      "refused": "a FieldMask that is no string",
+      "pointer": "#/mask"
     },
     {
       "name": "a FloatValue",
@@ -2223,7 +2450,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"wrappedInt64\":{\"value\":\"1\"}}",
-      "refused": "no int64"
+      "refused": "no int64",
+      "pointer": "#/wrappedInt64"
     },
     {
       "name": "a Value of every kind",
@@ -2307,7 +2535,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Empty\",\"value\":{}}}",
-      "refused": "a key no field names"
+      "refused": "a key no field names",
+      "pointer": "#/any/value"
     },
     {
       "name": "an Any of a Struct",
@@ -2344,7 +2573,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"any\":{\"x\":1}}",
-      "refused": "an Any without its @type"
+      "refused": "an Any without its @type",
+      "pointer": "#/any"
     },
     {
       "name": "an Any of a type its definitions do not hold",
@@ -2356,7 +2586,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"any\":{\"@type\":\"type.googleapis.com/nope.Nope\",\"x\":1}}",
-      "refused": "an Any of a type its definitions do not hold"
+      "refused": "an Any of a type its definitions do not hold",
+      "pointer": "#/any"
     },
     {
       "name": "an Any whose @type is no URL",
@@ -2368,7 +2599,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"any\":{\"@type\":\"not_a_url\",\"value\":\"\"}}",
-      "refused": "an Any whose @type is no URL"
+      "refused": "an Any whose @type is no URL",
+      "pointer": "#/any"
     },
     {
       "name": "an Any whose @type is empty",
@@ -2380,7 +2612,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"any\":{\"@type\":\"\",\"value\":\"\"}}",
-      "refused": "an Any whose @type is no URL"
+      "refused": "an Any whose @type is no URL",
+      "pointer": "#/any"
     },
     {
       "name": "an Any of a Duration with no value",
@@ -2393,7 +2626,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Duration\"}}",
-      "refused": "an Any of a well-known type whose members are not its value alone"
+      "refused": "an Any of a well-known type whose members are not its value alone",
+      "pointer": "#/any"
     },
     {
       "name": "an Empty",
@@ -2417,7 +2651,8 @@
       ],
       "message": "bead.transcoding.v1.Edges",
       "body": "{\"nothing\":{\"x\":1}}",
-      "refused": "a key no field names"
+      "refused": "a key no field names",
+      "pointer": "#/nothing/x"
     },
     {
       "name": "a body of every kind of field",
@@ -3033,6 +3268,27 @@
       "body": "{\"wrappedUint64\":\"18446744073709551615\",\"anInt64\":\"-5\"}"
     },
     {
+      "name": "an sint32, an sfixed32 and a fixed32 as numbers, an sfixed64 as a string",
+      "clauses": [
+        "5.6",
+        "5.6.1",
+        "5.6.6"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "payload": "E8 01 FF FF FF FF 0F F5 01 FB FF FF FF FD 01 FF FF FF FF 81 02 00 00 00 00 00 00 00 80",
+      "body": "{\"anSint32\":-2147483648,\"anSfixed32\":-5,\"aFixed32\":4294967295,\"anSfixed64\":\"-9223372036854775808\"}"
+    },
+    {
+      "name": "an sfixed64 at its largest, as a string",
+      "clauses": [
+        "5.6",
+        "5.6.6"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "payload": "81 02 FF FF FF FF FF FF FF 7F",
+      "body": "{\"anSfixed64\":\"9223372036854775807\"}"
+    },
+    {
       "name": "bytes in standard base64, padded",
       "clauses": [
         "5.6",
@@ -3226,7 +3482,8 @@
         "template": "/v1/every/{a_bool}"
       },
       "target": "/v1/every/yes",
-      "refused": "no bool"
+      "refused": "no bool",
+      "parameter": "a_bool"
     },
     {
       "name": "a parameter by its proto name",
@@ -3269,7 +3526,8 @@
         "template": "/v1/{parent=shelves/*}/books"
       },
       "target": "/v1/shelves/s/books?pageSize=5&page_size=6",
-      "refused": "a field the query names twice"
+      "refused": "a field the query names twice",
+      "parameter": "pageSize"
     },
     {
       "name": "a field named twice",
@@ -3284,7 +3542,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?revision=1&revision=2",
-      "refused": "a field the query names twice"
+      "refused": "a field the query names twice",
+      "parameter": "revision"
     },
     {
       "name": "a repeated field repeats",
@@ -3314,7 +3573,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?nope=1",
-      "refused": "a parameter no field path names"
+      "refused": "a parameter no field path names",
+      "parameter": "nope"
     },
     {
       "name": "a parameter of a message",
@@ -3329,7 +3589,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?sub=x",
-      "refused": "a parameter of a message"
+      "refused": "a parameter of a message",
+      "parameter": "sub"
     },
     {
       "name": "a parameter through a repeated field",
@@ -3344,7 +3605,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?inners.name=x",
-      "refused": "a parameter no field path names"
+      "refused": "a parameter no field path names",
+      "parameter": "inners.name"
     },
     {
       "name": "a parameter of a map",
@@ -3359,7 +3621,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?labels=x",
-      "refused": "a parameter of a map or a repeated message"
+      "refused": "a parameter of a map or a repeated message",
+      "parameter": "labels"
     },
     {
       "name": "a parameter of the field a variable binds",
@@ -3374,7 +3637,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?name=x",
-      "refused": "a parameter of a field the route binds otherwise"
+      "refused": "a parameter of a field the route binds otherwise",
+      "parameter": "name"
     },
     {
       "name": "an int32 parameter of an exponent",
@@ -3406,7 +3670,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?revision=1e3",
-      "refused": "an int64 string off -?(0|[1-9][0-9]*)"
+      "refused": "an int64 string off -?(0|[1-9][0-9]*)",
+      "parameter": "revision"
     },
     {
       "name": "an enum parameter by its name",
@@ -3466,7 +3731,8 @@
         "template": "/v1/{name=shelves/*/books/*}"
       },
       "target": "/v1/shelves/1/books/2?flag=1",
-      "refused": "no bool"
+      "refused": "no bool",
+      "parameter": "flag"
     },
     {
       "name": "a Timestamp parameter",
@@ -3645,7 +3911,8 @@
       },
       "target": "/v1/shelves/1/books/2:archive",
       "body": "{\"name\":\"x\"}",
-      "refused": "a field that two of the request set"
+      "refused": "a field that two of the request set",
+      "parameter": "name"
     },
     {
       "name": "a variable of a field its rules judge",
@@ -3770,7 +4037,8 @@
       },
       "target": "/v1/shelves/1/books/2",
       "body": "{\"name\":\"other\"}",
-      "refused": "a field that two of the request set"
+      "refused": "a field that two of the request set",
+      "parameter": "book.name"
     },
     {
       "name": "a PATCH's empty body",
@@ -3786,6 +4054,128 @@
       "target": "/v1/shelves/1/books/2",
       "body": "{}",
       "payload": "0A 13 0A 11 73 68 65 6C 76 65 73 2F 31 2F 62 6F 6F 6B 73 2F 32 12 00"
+    },
+    {
+      "name": "a body null under a field, which sets nothing beside its variable, its update_mask of no path",
+      "clauses": [
+        "4.4",
+        "4.5",
+        "5.2.2"
+      ],
+      "procedure": "updateBook",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/{book.name=shelves/*/books/*}",
+        "body": "book"
+      },
+      "target": "/v1/shelves/1/books/2",
+      "body": "null",
+      "payload": "0A 13 0A 11 73 68 65 6C 76 65 73 2F 31 2F 62 6F 6F 6B 73 2F 32 12 00"
+    },
+    {
+      "name": "a member null for the field a variable binds, which sets nothing",
+      "clauses": [
+        "4.1",
+        "4.4",
+        "5.2.2"
+      ],
+      "procedure": "archiveBook",
+      "route": {
+        "method": "POST",
+        "template": "/v1/{name=shelves/*/books/*}:archive",
+        "body": "*"
+      },
+      "target": "/v1/shelves/1/books/2:archive",
+      "body": "{\"name\":null}",
+      "payload": "0A 11 73 68 65 6C 76 65 73 2F 31 2F 62 6F 6F 6B 73 2F 32"
+    },
+    {
+      "name": "a body that is no object under a body of the request whole, at its root",
+      "clauses": [
+        "4.4",
+        "7.4",
+        "7.4.2"
+      ],
+      "procedure": "archiveBook",
+      "route": {
+        "method": "POST",
+        "template": "/v1/{name=shelves/*/books/*}:archive",
+        "body": "*"
+      },
+      "target": "/v1/shelves/1/books/2:archive",
+      "body": "[]",
+      "refused": "a GetBookRequest that is no object",
+      "pointer": "#"
+    },
+    {
+      "name": "a refusal in a body that names a field, its pointer from that field",
+      "clauses": [
+        "4.4",
+        "7.4",
+        "7.4.2"
+      ],
+      "procedure": "updateBook",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/{book.name=shelves/*/books/*}",
+        "body": "book"
+      },
+      "target": "/v1/shelves/1/books/2",
+      "body": "{\"pages\":\"x\"}",
+      "refused": "an int64 string off -?(0|[1-9][0-9]*)",
+      "pointer": "#/pages"
+    },
+    {
+      "name": "a refusal of a member of the request whole, its pointer by JSON names",
+      "clauses": [
+        "4.4",
+        "7.4",
+        "7.4.2"
+      ],
+      "procedure": "archiveBook",
+      "route": {
+        "method": "POST",
+        "template": "/v1/{name=shelves/*/books/*}:archive",
+        "body": "*"
+      },
+      "target": "/v1/shelves/1/books/2:archive",
+      "body": "{\"sub\":{\"count\":\"x\"}}",
+      "refused": "no int32",
+      "pointer": "#/sub/count"
+    },
+    {
+      "name": "a refusal of a parameter within a message, its parameter by JSON names",
+      "clauses": [
+        "4.3",
+        "7.4",
+        "7.4.1"
+      ],
+      "procedure": "getBook",
+      "route": {
+        "method": "GET",
+        "template": "/v1/{name=shelves/*/books/*}"
+      },
+      "target": "/v1/shelves/1/books/2?sub.count=x",
+      "refused": "no int32",
+      "parameter": "sub.count"
+    },
+    {
+      "name": "a key the body holds no field of, cut as spec 18.4 cuts a key",
+      "clauses": [
+        "5.2.2",
+        "7.4",
+        "7.4.2"
+      ],
+      "procedure": "echo",
+      "route": {
+        "method": "POST",
+        "template": "/api/Transcoding/echo",
+        "body": "*"
+      },
+      "target": "/api/Transcoding/echo",
+      "body": "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkéé\":1}",
+      "refused": "a key no field names",
+      "pointer": "#/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk..."
     }
   ],
   "failures": [
@@ -3984,7 +4374,6 @@
         "7.1.1",
         "7.1.2",
         "7.1.3",
-        "7.1.4",
         "7.1.5",
         "7.1.6",
         "7.2",
@@ -4003,7 +4392,7 @@
       "fields": {
         "retry-after": "1"
       },
-      "problem": "{\"code\":17,\"detail\":\"the connection is gone\",\"scope\":\"protocol\",\"status\":503,\"title\":\"DESTINATION_UNREACHABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE\"}"
+      "problem": "{\"code\":17,\"scope\":\"protocol\",\"status\":503,\"title\":\"DESTINATION_UNREACHABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE\"}"
     },
     {
       "name": "a service its server does not offer",
@@ -4229,7 +4618,65 @@
       "problem": "{\"code\":36,\"detail\":\"OPAQUE, JWT\",\"scope\":\"protocol\",\"status\":500,\"title\":\"CREDENTIAL_UNSUPPORTED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/CREDENTIAL_UNSUPPORTED\"}"
     },
     {
-      "name": "a body the gateway's reading refuses",
+      "name": "a body the gateway's reading refuses, its pointer",
+      "clauses": [
+        "7.1",
+        "7.1.1",
+        "7.1.2",
+        "7.1.3",
+        "7.1.4",
+        "7.1.5",
+        "7.1.6",
+        "7.1.11",
+        "7.2",
+        "7.3",
+        "7.4",
+        "7.5",
+        "7.5.1",
+        "7.6",
+        "7.6.12"
+      ],
+      "failure": {
+        "code": 50,
+        "arose": "gateway",
+        "detail": "a key no field names",
+        "pointer": "#/nope"
+      },
+      "status": 400,
+      "fields": {},
+      "problem": "{\"code\":50,\"detail\":\"a key no field names\",\"pointer\":\"#/nope\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+    },
+    {
+      "name": "a query the gateway's reading refuses, its parameter",
+      "clauses": [
+        "7.1",
+        "7.1.1",
+        "7.1.2",
+        "7.1.3",
+        "7.1.4",
+        "7.1.5",
+        "7.1.6",
+        "7.1.10",
+        "7.2",
+        "7.3",
+        "7.4",
+        "7.5",
+        "7.5.1",
+        "7.6",
+        "7.6.12"
+      ],
+      "failure": {
+        "code": 50,
+        "arose": "gateway",
+        "detail": "an int64 string off -?(0|[1-9][0-9]*)",
+        "parameter": "revision"
+      },
+      "status": 400,
+      "fields": {},
+      "problem": "{\"code\":50,\"detail\":\"an int64 string off -?(0|[1-9][0-9]*)\",\"parameter\":\"revision\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+    },
+    {
+      "name": "a text the gateway's reading refuses, placed nowhere",
       "clauses": [
         "7.1",
         "7.1.1",
@@ -4240,6 +4687,7 @@
         "7.1.6",
         "7.2",
         "7.3",
+        "7.4",
         "7.5",
         "7.5.1",
         "7.6",
@@ -4248,11 +4696,11 @@
       "failure": {
         "code": 50,
         "arose": "gateway",
-        "detail": "a key no field names, at nope"
+        "detail": "not JSON"
       },
       "status": 400,
       "fields": {},
-      "problem": "{\"code\":50,\"detail\":\"a key no field names, at nope\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+      "problem": "{\"code\":50,\"detail\":\"not JSON\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
     },
     {
       "name": "a json request its server's codec refuses",
@@ -4546,6 +4994,39 @@
       "status": 422,
       "fields": {},
       "problem": "{\"code\":52,\"errors\":[{\"detail\":\"one of a or b\",\"ruleId\":\"message.oneof\"}],\"scope\":\"protocol\",\"status\":422,\"title\":\"PAYLOAD_INVALID\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_INVALID\"}"
+    },
+    {
+      "name": "a violation of a field the request does not hold, placed nowhere",
+      "clauses": [
+        "5.1",
+        "7.1",
+        "7.1.1",
+        "7.1.2",
+        "7.1.3",
+        "7.1.5",
+        "7.1.6",
+        "7.1.7",
+        "7.2",
+        "7.3",
+        "7.4",
+        "7.4.3",
+        "7.6",
+        "7.6.17"
+      ],
+      "failure": {
+        "code": 52,
+        "arose": "server",
+        "detail": "{\"fieldPath\":\"a_string.inner\",\"message\":\"short\",\"ruleId\":\"string.min_len\"}"
+      },
+      "procedure": "updateBook",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/{book.name=shelves/*/books/*}",
+        "body": "book"
+      },
+      "status": 422,
+      "fields": {},
+      "problem": "{\"code\":52,\"errors\":[{\"detail\":\"short\",\"fieldPath\":\"a_string.inner\",\"ruleId\":\"string.min_len\"}],\"scope\":\"protocol\",\"status\":422,\"title\":\"PAYLOAD_INVALID\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_INVALID\"}"
     },
     {
       "name": "a detail that left violations out",
@@ -4865,6 +5346,26 @@
         "www-authenticate": "Bearer error=\"invalid_request\""
       },
       "problem": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+    },
+    {
+      "name": "what no gate foresaw, with no detail",
+      "clauses": [
+        "7.1",
+        "7.1.1",
+        "7.1.2",
+        "7.1.3",
+        "7.2",
+        "7.3",
+        "7.6",
+        "7.6.27"
+      ],
+      "failure": {
+        "own": "failed",
+        "detail": ""
+      },
+      "status": 500,
+      "fields": {},
+      "problem": "{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}"
     }
   ],
   "events": [
@@ -5280,7 +5781,9 @@
       "name": "a procedure marked NO_SIDE_EFFECTS whose request the query cannot carry answers no GET at its default route",
       "clauses": [
         "3.2",
-        "3.10"
+        "3.10",
+        "7.7",
+        "7.7.5"
       ],
       "steps": [
         {
@@ -5300,7 +5803,7 @@
               "bead-refusal": "method-refused",
               "allow": "POST"
             },
-            "body": "{\"detail\":{words},\"status\":405,\"title\":\"Method Not Allowed\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a method no route of its path takes\",\"status\":405,\"title\":\"Method Not Allowed\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -5311,6 +5814,8 @@
       "clauses": [
         "3.2",
         "3.10",
+        "7.7",
+        "7.7.5",
         "10.1",
         "10.1.7"
       ],
@@ -5332,7 +5837,7 @@
               "bead-refusal": "method-refused",
               "allow": "POST"
             },
-            "body": "{\"detail\":{words},\"status\":405,\"title\":\"Method Not Allowed\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a method no route of its path takes\",\"status\":405,\"title\":\"Method Not Allowed\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -5516,6 +6021,7 @@
       "clauses": [
         "5.1",
         "7.7",
+        "7.7.8",
         "10.1",
         "10.1.8"
       ],
@@ -5537,7 +6043,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "type-refused"
             },
-            "body": "{\"detail\":{words},\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -5547,6 +6053,8 @@
       "name": "a charset but utf-8, 415",
       "clauses": [
         "5.1",
+        "7.7",
+        "7.7.8",
         "10.1.8"
       ],
       "steps": [
@@ -5567,7 +6075,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "type-refused"
             },
-            "body": "{\"detail\":{words},\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -5604,9 +6112,74 @@
       ]
     },
     {
+      "name": "a body of no content-type, 415",
+      "clauses": [
+        "5.1",
+        "7.7",
+        "7.7.8",
+        "10.1.8"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "type-refused"
+            },
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "no body and no content-type to a route that takes a body, 415",
+      "clauses": [
+        "5.1",
+        "7.7",
+        "7.7.8",
+        "10.1.8"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "type-refused"
+            },
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
       "name": "an encoded body, 415",
       "clauses": [
         "5.1",
+        "7.7",
+        "7.7.8",
         "10.1.8"
       ],
       "steps": [
@@ -5627,7 +6200,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "type-refused"
             },
-            "body": "{\"detail\":{words},\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -5659,7 +6232,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": null
             },
-            "body": "{\"code\":50,\"detail\":{words},\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+            "body": "{\"code\":50,\"detail\":\"a key no field names\",\"pointer\":\"#/nope\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
           },
           "on": "a"
         }
@@ -5668,7 +6241,8 @@
     {
       "name": "a query beside a body of the whole request",
       "clauses": [
-        "4.3"
+        "4.3",
+        "7.4"
       ],
       "steps": [
         {
@@ -5688,7 +6262,67 @@
               "content-type": "application/problem+json",
               "bead-refusal": null
             },
-            "body": "{\"code\":50,\"detail\":{words},\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+            "body": "{\"code\":50,\"detail\":\"a query beside a body of the whole request\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a variable that does not decode, 400 PAYLOAD_UNDECODABLE, its parameter",
+      "clauses": [
+        "3.8",
+        "7.4",
+        "7.6.12"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /v1/books/%FF HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null
+            },
+            "body": "{\"code\":50,\"detail\":\"a value whose bytes are not UTF-8\",\"parameter\":\"name\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a parameter that names no field, its name cut as spec 18.4 cuts a key",
+      "clauses": [
+        "4.3",
+        "4.3.3",
+        "7.4"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /v1/books/2?kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk=1 HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": null
+            },
+            "body": "{\"code\":50,\"detail\":\"a parameter no field path names\",\"parameter\":\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk...\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}"
           },
           "on": "a"
         }
@@ -5698,6 +6332,8 @@
       "name": "a body to a route that takes none, 400 malformed",
       "clauses": [
         "4.4",
+        "7.7",
+        "7.7.1",
         "10.1.8"
       ],
       "steps": [
@@ -5718,7 +6354,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "malformed"
             },
-            "body": "{\"detail\":{words},\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"content to a route that takes none\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6007,7 +6643,7 @@
               "bead-refusal": null,
               "www-authenticate": "Bearer error=\"invalid_request\""
             },
-            "body": "{\"detail\":{words},\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"an auth-scheme but Bearer\",\"status\":401,\"title\":\"Unauthorized\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6017,6 +6653,8 @@
       "name": "two authorization fields, 400 malformed",
       "clauses": [
         "2.4",
+        "7.7",
+        "7.7.1",
         "10.1.9"
       ],
       "steps": [
@@ -6037,7 +6675,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "malformed"
             },
-            "body": "{\"detail\":{words},\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"two authorization fields\",\"status\":400,\"title\":\"Bad Request\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6102,7 +6740,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": null
             },
-            "body": "{\"detail\":{words},\"status\":504,\"title\":\"Gateway Timeout\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"no answer within 200 ms\",\"status\":504,\"title\":\"Gateway Timeout\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         },
@@ -6362,6 +7000,7 @@
       "name": "a host it does not take, 403",
       "clauses": [
         "7.7",
+        "7.7.2",
         "10.1",
         "10.1.2"
       ],
@@ -6382,7 +7021,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "host-refused"
             },
-            "body": "{\"detail\":{words},\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a host it does not take\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6391,6 +7030,8 @@
     {
       "name": "an origin neither its own nor listed, 403",
       "clauses": [
+        "7.7",
+        "7.7.3",
         "10.1",
         "10.1.4"
       ],
@@ -6411,7 +7052,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "origin-refused"
             },
-            "body": "{\"detail\":{words},\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"an origin neither its own nor listed\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6515,6 +7156,8 @@
     {
       "name": "a subresource from another site with no origin is refused",
       "clauses": [
+        "7.7",
+        "7.7.3",
         "10.1.5"
       ],
       "steps": [
@@ -6534,7 +7177,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "origin-refused"
             },
-            "body": "{\"detail\":{words},\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6544,6 +7187,8 @@
       "name": "a navigation from another site to a get rule on an unmarked method is refused",
       "clauses": [
         "3.4",
+        "7.7",
+        "7.7.3",
         "10.1.5"
       ],
       "steps": [
@@ -6563,7 +7208,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "origin-refused"
             },
-            "body": "{\"detail\":{words},\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a request from a page of another site that shows no origin\",\"status\":403,\"title\":\"Forbidden\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6662,6 +7307,8 @@
       "name": "a path no route matches, 404",
       "clauses": [
         "3.10",
+        "7.7",
+        "7.7.4",
         "10.1.3"
       ],
       "steps": [
@@ -6681,7 +7328,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "path-unknown"
             },
-            "body": "{\"detail\":{words},\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a path no route matches\",\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6691,7 +7338,9 @@
       "name": "a command has no route",
       "clauses": [
         "3.1",
-        "3.10"
+        "3.10",
+        "7.7",
+        "7.7.4"
       ],
       "steps": [
         {
@@ -6711,7 +7360,34 @@
               "content-type": "application/problem+json",
               "bead-refusal": "path-unknown"
             },
-            "body": "{\"detail\":{words},\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a path no route matches\",\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a body HTTP cannot frame, refused as HTTP refuses it, unmarked, its body empty",
+      "clauses": [
+        "10.1",
+        "10.1.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            "body": "7A 7A 0D 0A 7B 7D 0D 0A 30 0D 0A 0D 0A"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
           },
           "on": "a"
         }
@@ -6747,6 +7423,8 @@
     {
       "name": "a body past maximumBodyBytes as it comes, 413",
       "clauses": [
+        "7.7",
+        "7.7.7",
         "9.3",
         "10.1",
         "10.1.10"
@@ -6772,7 +7450,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "too-large"
             },
-            "body": "{\"detail\":{words},\"status\":413,\"title\":\"Content Too Large\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a body past maximumBodyBytes 16\",\"status\":413,\"title\":\"Content Too Large\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6782,7 +7460,9 @@
       "name": "a dot segment matches nothing",
       "clauses": [
         "3.6",
-        "3.10"
+        "3.10",
+        "7.7",
+        "7.7.4"
       ],
       "steps": [
         {
@@ -6802,7 +7482,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "path-unknown"
             },
-            "body": "{\"detail\":{words},\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a path no route matches\",\"status\":404,\"title\":\"Not Found\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6812,6 +7492,8 @@
       "name": "a method no route of its path takes, 405, allow naming those that do",
       "clauses": [
         "3.10",
+        "7.7",
+        "7.7.5",
         "10.1.7"
       ],
       "steps": [
@@ -6833,7 +7515,7 @@
               "bead-refusal": "method-refused",
               "allow": "GET, HEAD, PATCH"
             },
-            "body": "{\"detail\":{words},\"status\":405,\"title\":\"Method Not Allowed\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a method no route of its path takes\",\"status\":405,\"title\":\"Method Not Allowed\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6842,6 +7524,8 @@
     {
       "name": "a body declared past maximumBodyBytes, 413",
       "clauses": [
+        "7.7",
+        "7.7.7",
         "9.3",
         "10.1.9"
       ],
@@ -6866,7 +7550,7 @@
               "content-type": "application/problem+json",
               "bead-refusal": "too-large"
             },
-            "body": "{\"detail\":{words},\"status\":413,\"title\":\"Content Too Large\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"a body declared past maximumBodyBytes 16\",\"status\":413,\"title\":\"Content Too Large\",\"type\":\"about:blank\"}"
           },
           "on": "a"
         }
@@ -6927,6 +7611,8 @@
     {
       "name": "calls held per address, apart from streams",
       "clauses": [
+        "7.7",
+        "7.7.9",
         "10.3"
       ],
       "options": {
@@ -6964,7 +7650,7 @@
               "bead-refusal": "busy",
               "retry-after": "1"
             },
-            "body": "{\"detail\":{words},\"status\":503,\"title\":\"Service Unavailable\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"the calls of its address hold maximumExchangesPerAddress\",\"status\":503,\"title\":\"Service Unavailable\",\"type\":\"about:blank\"}"
           },
           "on": "b"
         }
@@ -6973,6 +7659,8 @@
     {
       "name": "streams held per address, apart from calls",
       "clauses": [
+        "7.7",
+        "7.7.9",
         "10.3"
       ],
       "options": {
@@ -7018,7 +7706,7 @@
               "bead-refusal": "busy",
               "retry-after": "1"
             },
-            "body": "{\"detail\":{words},\"status\":503,\"title\":\"Service Unavailable\",\"type\":\"about:blank\"}"
+            "body": "{\"detail\":\"the streams of its address hold maximumConnectionsPerAddress\",\"status\":503,\"title\":\"Service Unavailable\",\"type\":\"about:blank\"}"
           },
           "on": "b"
         },

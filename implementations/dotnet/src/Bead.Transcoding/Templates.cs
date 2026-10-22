@@ -213,7 +213,8 @@ public sealed class HttpTemplate
     /// Each variable's value of <paramref name="path"/>, which it matches, by its field path (3.8):
     /// the segments it takes, by <c>/</c>, a single-segment one's percent-decoded whole, a
     /// multi-segment one's but each <c>%2F</c> and <c>%2f</c>. A <c>%</c> that two hexadecimal
-    /// digits do not follow, and bytes that are not UTF-8, are a <see cref="JsonFormException"/>.
+    /// digits do not follow, and bytes that are not UTF-8, are a <see cref="JsonFormException"/>
+    /// placed at its variable's field path (7.4).
     /// </summary>
     public IReadOnlyDictionary<string, string> ValuesOf(HttpPath path)
     {
@@ -240,7 +241,18 @@ public sealed class HttpTemplate
                 return consumed[index];
             }));
 
-            values[variable.FieldPath] = PercentDecoded(raw, isMulti);
+            try
+            {
+                values[variable.FieldPath] = PercentDecoded(raw, isMulti);
+            }
+            catch (JsonFormException refused)
+            {
+                throw new JsonFormException(refused.Message, new JsonFormExceptionOptions
+                {
+                    Place = new RequestPlace { Parameter = variable.FieldPath },
+                    InnerException = refused.InnerException,
+                });
+            }
         }
 
         return values;

@@ -33,7 +33,8 @@ public sealed record BindingRequest
 /// value of its message, then read by Bead's mapping, so that one reader judges every field wherever
 /// it came from (transcoding 4, <c>http.proto</c>'s rules); a <c>PATCH</c>'s <c>update_mask</c>
 /// filled with the members its body holds (4.5). A refusal is a <see cref="JsonFormException"/>,
-/// which a gateway answers 400 <c>PAYLOAD_UNDECODABLE</c>.
+/// which a gateway answers 400 <c>PAYLOAD_UNDECODABLE</c>, placed where the request carried what
+/// it refuses (7.4).
 /// </summary>
 public sealed class HttpBinding
 {
@@ -91,22 +92,26 @@ public sealed class HttpBinding
             // * not an object: the reading refuses it as the message's, with nothing bound beside it
             if (root.Kind != JsonNodeKind.Object)
             {
-                return _form.ReadNode(route.Request, root);
+                try
+                {
+                    return _form.ReadNode(route.Request, root);
+                }
+                catch (JsonFormException refused) when (refused.At is { } at)
+                {
+                    throw Placed(refused, new RequestPlace { Pointer = JsonPlaces.PointerOf(at) });
+                }
             }
         }
         else if (body is not null)
         {
+            // * a body null under a field is that field's JSON, null, which leaves it unset (5.2, item 2)
             var inner = JsonText.Read(request.Body.Span);
 
-            if (inner.Kind == JsonNodeKind.Null)
+            // ! the mask is of the members the body holds as its caller sent them, before a variable
+            // joins it: none for a null
+            if (inner.Kind is JsonNodeKind.Object or JsonNodeKind.Null)
             {
-                throw new JsonFormException("a body that is null");
-            }
-
-            // ! the mask is of the members the body holds as its caller sent them, before a variable joins it
-            if (inner.Kind == JsonNodeKind.Object)
-            {
-                sent = [.. inner.Members];
+                sent = [.. inner.Kind == JsonNodeKind.Object ? inner.Members : []];
             }
 
             root = JsonNode.ObjectOf([new KeyValuePair<string, JsonNode>(body, inner)]);
@@ -118,13 +123,18 @@ public sealed class HttpBinding
 
         var bound = new HashSet<string>(StringComparer.Ordinal);
 
+        // the paths a variable or the query binds, by JSON names, where a refusal of their reading is placed
+        var byVariable = new List<(List<FieldDescriptor> Fields, string Parameter)>();
+        var byQuery = new List<List<FieldDescriptor>>();
+
         foreach (var (fieldPath, text) in variables)
         {
             var fields = FieldsAlong(route.Request, (fieldPath, false))
                 ?? throw new ArgumentException($"{route.Rule.Template} binds {fieldPath}, which names no field", nameof(route));
 
-            SetAlong(root, (fields, TextJson(fields[^1].FieldType, text)));
+            SetAlong(root, (fields, TextJson(fields[^1].FieldType, text), fieldPath));
             bound.Add(KeyOf(fields));
+            byVariable.Add((fields, fieldPath));
         }
 
         var pairs = query.Length == 0 ? [] : QueryPairs(query);
@@ -140,24 +150,28 @@ public sealed class HttpBinding
 
         foreach (var (name, text) in pairs)
         {
-            var fields = FieldsAlong(route.Request, (name, true)) ?? throw new JsonFormException("a parameter no field path names");
+            var fields = FieldsAlong(route.Request, (name, true))
+                ?? throw Refused("a parameter no field path names", JsonPlaces.CutOf(name));
             var leaf = fields[^1];
             var key = KeyOf(fields);
+            var parameter = JsonNamesOf(fields);
 
             if (bound.Contains(key) || (body is not null && fields[0].Name == body))
             {
-                throw new JsonFormException("a parameter of a field the route binds otherwise");
+                throw Refused("a parameter of a field the route binds otherwise", parameter);
             }
 
             if (leaf.IsMap || (leaf.IsRepeated && leaf.FieldType == FieldType.Message))
             {
-                throw new JsonFormException("a parameter of a map or a repeated message");
+                throw Refused("a parameter of a map or a repeated message", parameter);
             }
 
             if (leaf.FieldType == FieldType.Message && !leaf.MessageType.IsWrapper() && !StringForms.Contains(leaf.MessageType.FullName))
             {
-                throw new JsonFormException("a parameter of a message");
+                throw Refused("a parameter of a message", parameter);
             }
+
+            byQuery.Add(fields);
 
             if (leaf.IsRepeated)
             {
@@ -175,22 +189,31 @@ public sealed class HttpBinding
 
             if (!named.Add(key))
             {
-                throw new JsonFormException("a field the query names twice");
+                throw Refused("a field the query names twice", parameter);
             }
 
             var value = leaf.FieldType != FieldType.Message
                 ? TextJson(leaf.FieldType, text)
                 : leaf.MessageType.IsWrapper() ? TextJson(leaf.MessageType.FindFieldByNumber(1).FieldType, text) : JsonNode.StringOf(text);
 
-            SetAlong(root, (fields, value));
+            SetAlong(root, (fields, value, parameter));
         }
 
         foreach (var key in order)
         {
-            SetAlong(root, (items[key].Fields, JsonNode.ArrayOf(items[key].Values)));
+            SetAlong(root, (items[key].Fields, JsonNode.ArrayOf(items[key].Values), JsonNamesOf(items[key].Fields)));
         }
 
-        var message = _form.ReadNode(route.Request, root);
+        IMessage message;
+
+        try
+        {
+            message = _form.ReadNode(route.Request, root);
+        }
+        catch (JsonFormException refused) when (refused.At is { } at)
+        {
+            throw Placed(refused, PlaceOf(at, (byVariable, byQuery, body)));
+        }
 
         // * a PATCH whose caller left its update_mask unset: the members its body's object holds (AIP-134)
         if (string.Equals(route.Rule.Method, "PATCH", StringComparison.Ordinal)
@@ -252,6 +275,65 @@ public sealed class HttpBinding
         }));
     }
 
+    // a path of fields by their JSON names, as a query's parameter is placed (7.4, item 1)
+    private static string JsonNamesOf(List<FieldDescriptor> fields)
+    {
+        return string.Join('.', fields.Select((field) =>
+        {
+            return field.JsonName;
+        }));
+    }
+
+    // a refusal of the binding's own, placed at the parameter that brings it
+    private static JsonFormException Refused(string reason, string parameter)
+    {
+        return new JsonFormException(reason, new JsonFormExceptionOptions { Place = new RequestPlace { Parameter = parameter } });
+    }
+
+    // a refusal of the reading, placed where the request carried it
+    private static JsonFormException Placed(JsonFormException refused, RequestPlace place)
+    {
+        return new JsonFormException(refused.Message, new JsonFormExceptionOptions { Place = place, InnerException = refused.InnerException });
+    }
+
+    // whether a place's tokens begin with a path of fields, by their JSON names
+    private static bool IsWithin(IReadOnlyList<JsonToken> tokens, List<FieldDescriptor> fields)
+    {
+        return fields.Count <= tokens.Count && fields.Select((field, index) =>
+        {
+            return !tokens[index].IsGiven && tokens[index].Text == field.JsonName;
+        }).All((isSame) =>
+        {
+            return isSame;
+        });
+    }
+
+    // where the request carried the value its reading refused at `at` (7.4): a variable's field path
+    // as its template writes it, or a query's by JSON names, an item's index left out; or a pointer
+    // into its body, the field a body names its root
+    private static RequestPlace PlaceOf(IReadOnlyList<JsonToken> at, (List<(List<FieldDescriptor> Fields, string Parameter)> ByVariable, List<List<FieldDescriptor>> ByQuery, string? Body) sources)
+    {
+        var (byVariable, byQuery, body) = sources;
+
+        foreach (var (fields, parameter) in byVariable)
+        {
+            if (IsWithin(at, fields))
+            {
+                return new RequestPlace { Parameter = parameter };
+            }
+        }
+
+        foreach (var fields in byQuery)
+        {
+            if (IsWithin(at, fields))
+            {
+                return new RequestPlace { Parameter = JsonNamesOf(fields) };
+            }
+        }
+
+        return new RequestPlace { Pointer = JsonPlaces.PointerOf(body == Whole ? at : at.Skip(1)) };
+    }
+
     // a variable's or a parameter's value made the field's JSON (4.2)
     private static JsonNode TextJson(FieldType type, string text)
     {
@@ -288,10 +370,11 @@ public sealed class HttpBinding
     }
 
     // sets a field path's leaf in a JSON object, its messages made where none is; a leaf the object
-    // sets already is a field set twice (4.1)
-    private static void SetAlong(JsonNode root, (List<FieldDescriptor> Fields, JsonNode Value) set)
+    // sets already, but to null, which sets nothing, is a field set twice (4.1), refused at the
+    // parameter that sets it
+    private static void SetAlong(JsonNode root, (List<FieldDescriptor> Fields, JsonNode Value, string Parameter) set)
     {
-        var (fields, value) = set;
+        var (fields, value, parameter) = set;
         var members = root.Members;
 
         foreach (var field in fields.Take(fields.Count - 1))
@@ -320,7 +403,7 @@ public sealed class HttpBinding
             }
             else
             {
-                throw new JsonFormException("a field that two of the request set");
+                throw Refused("a field that two of the request set", parameter);
             }
         }
 
@@ -328,7 +411,7 @@ public sealed class HttpBinding
 
         if (leaf >= 0 && members[leaf].Value.Kind != JsonNodeKind.Null)
         {
-            throw new JsonFormException("a field that two of the request set");
+            throw Refused("a field that two of the request set", parameter);
         }
 
         if (leaf >= 0)

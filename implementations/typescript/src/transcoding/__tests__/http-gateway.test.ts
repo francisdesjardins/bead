@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
+import {
+  createServer as createNodeServer,
+  request as httpRequest,
+  type IncomingHttpHeaders,
+} from 'node:http';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
@@ -11,14 +15,14 @@ import { createHTTPGateway, type IHTTPGateway } from '../http-gateway';
 import type { IHttpRouteInit } from '../routes';
 import { HTTP_ROUTES, OPENAPI_DOCUMENT } from './generated/bead_http';
 import { TranscodingProcedures } from './generated/transcoding_bead';
-import { EdgesSchema } from './generated/transcoding_pb';
+import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { GOOD_CREDENTIAL, SESSION, startTranscoding } from './transcoding-service';
 
 // interfaces
 
 /** A request the test sends: its method, its target, its fields, its body's text, and its abort. */
 interface ISent {
-  body?: string;
+  body?: string | Uint8Array;
   headers?: Record<string, string | string[]>;
   method?: string;
   path: string;
@@ -591,7 +595,7 @@ test('answers 503 DESTINATION_UNREACHABLE when its connection cannot be drawn, r
   const answered = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
 
   expect(answered).toMatchObject({
-    body: '{"code":17,"detail":"the connection is gone","scope":"protocol","status":503,"title":"DESTINATION_UNREACHABLE","type":"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE"}',
+    body: '{"code":17,"scope":"protocol","status":503,"title":"DESTINATION_UNREACHABLE","type":"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE"}',
     headers: { 'retry-after': '1' },
     status: 503,
   });
@@ -623,10 +627,103 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
   const answered = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
 
   expect(answered).toMatchObject({
-    body: '{"detail":"the gateway failed","status":500,"title":"Internal Server Error","type":"about:blank"}',
+    body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
     status: 500,
   });
   expect(reported).toEqual(['the clock broke']);
+});
+
+test('answers 500 a connection its server failed to draw but by refusing it, reported, with no detail', async () => {
+  // * a transport whose accept throws what no refusal of a connect is
+  await using gateway = createHTTPGateway({
+    createServer: (listener) => {
+      return createNodeServer(listener);
+    },
+    routes: HTTP_ROUTES,
+    transport: {
+      accept: () => {
+        return Promise.reject(new ProgrammerError('the transport broke'));
+      },
+    },
+  });
+  const reported = reportedBy(gateway);
+  const { port } = await gateway.start();
+  const answered = await send(port, { body: '{}', path: '/api/Transcoding/echo' });
+
+  expect(answered).toMatchObject({
+    body: '{"status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(reported).toEqual(['the transport broke']);
+});
+
+test('reports each failure it answers a call with 500 or above, and none below', async () => {
+  // * a route of a procedure its server does not offer, 501; a call past its timeout, 504
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.raw
+        ? {
+            ...init,
+            procedure: {
+              ...init.procedure,
+              procedure: { ...init.procedure.procedure, procedureId: 99 },
+            },
+          }
+        : init;
+    }),
+    timeout: 50,
+  });
+  const reported = reportedBy(fixture.gateway);
+  const unknown = await send(fixture.port, {
+    body: 'x',
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(unknown.status).toBe(501);
+  expect(reported).toHaveLength(1);
+
+  const hung = await send(fixture.port, { body: '{}', path: '/api/Transcoding/hang' });
+
+  expect(hung.status).toBe(504);
+  expect(reported).toHaveLength(2);
+
+  // an application failure is the caller's, 400, and no session one, 401: reported none
+  const failed = await send(fixture.port, {
+    body: '{"detail":"no"}',
+    path: '/api/Transcoding/fail',
+  });
+  const unknownSession = await send(fixture.port, { body: '{}', path: '/api/Transcoding/whoAmI' });
+
+  expect([failed.status, unknownSession.status]).toEqual([400, 401]);
+  expect(reported).toHaveLength(2);
+});
+
+test('answers 502 a text result that is no UTF-8, reported, none of its words in the problem', async () => {
+  // * raw's route told its result is a text: the bytes its server echoes, FF, no UTF-8
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.raw
+        ? {
+            ...init,
+            procedure: { ...init.procedure, result: TranscodingProcedures.text.result },
+            result: 'text' as const,
+          }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answered = await send(fixture.port, {
+    body: Uint8Array.of(0xff),
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(answered).toMatchObject({
+    body: '{"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}',
+    status: 502,
+  });
+  expect(reported).toHaveLength(1);
 });
 
 test('words each refusal of its gates exactly, none of them what its request carried', async () => {
@@ -765,6 +862,7 @@ test('words each refusal of its gates exactly, none of them what its request car
   expect(parted).toEqual([]);
 });
 
+// transcoding 7.7.6
 test('words each refusal of its bounds exactly', async () => {
   const echo: Pick<IOwnCase, 'body' | 'lines'> = {
     body: '{}',
@@ -894,6 +992,70 @@ test('listens on none of its own when built with no createServer, and reports to
   expect([reported.length, off]).toEqual([1, []]);
 });
 
+test('writes a text or a raw stream’s data as a JSON string and a result it cannot read as a call’s failure', async () => {
+  // * ticks served thrice more, its result and its notifications told they are raw, text, or an Edges
+  const ticks = HTTP_ROUTES.find((init) => {
+    return init.procedure === TranscodingProcedures.ticks;
+  });
+
+  if (ticks === undefined) {
+    throw new Error('no ticks in the route table');
+  }
+
+  const streamed = (
+    template: string,
+    told: Pick<IHttpRouteInit, 'notification' | 'procedure' | 'result'>
+  ): IHttpRouteInit => {
+    return { ...ticks, ...told, routes: [{ body: '*', method: 'POST', template }] };
+  };
+  await using fixture = await startTranscoding({
+    routes: [
+      ...HTTP_ROUTES,
+      streamed('/raw-ticks', { notification: 'raw', procedure: ticks.procedure, result: 'raw' }),
+      streamed('/text-ticks', { notification: 'text', procedure: ticks.procedure, result: 'text' }),
+      streamed('/edges-ticks', {
+        notification: TickSchema,
+        procedure: { ...ticks.procedure, result: TranscodingProcedures.echoEdges.result },
+        result: EdgesSchema,
+      }),
+    ],
+  });
+  const reported = reportedBy(fixture.gateway);
+
+  // a listener that throws: the exchange answers on
+  fixture.gateway.on('error', () => {
+    throw new Error('a listener broke');
+  });
+
+  const ticked = (path: string, from: number): Promise<IAnswered> => {
+    return send(fixture.port, {
+      body: `{"from":${String(from)}}`,
+      headers: { accept: 'text/event-stream' },
+      path,
+    });
+  };
+
+  // * its result, each notification and the failure that ends them, in their order, none overtaken
+  expect((await ticked('/raw-ticks', 2)).body).toMatch(
+    /^event: result\nid: 1\ndata: "CAI="\n\nid: 2\ndata: "CAE="\n\nid: 3\ndata: ""\n\nevent: failure\nid: 4\n/u
+  );
+  expect((await ticked('/text-ticks', 2)).body).toMatch(
+    /^event: result\nid: 1\ndata: "\\b\\u0002"\n\nid: 2\ndata: "\\b\\u0001"\n\nid: 3\ndata: ""\n\nevent: failure\nid: 4\n/u
+  );
+  expect((await ticked('/text-ticks', 0)).body).toMatch(
+    /^event: result\nid: 1\ndata: ""\n\nevent: failure\nid: 2\n/u
+  );
+  expect(reported).toEqual([]);
+
+  // a result its stock library refuses, or a text one not UTF-8: 502, nothing of the stream written, reported
+  const undecodable =
+    '{"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}';
+
+  expect(await ticked('/edges-ticks', 2)).toMatchObject({ body: undecodable, status: 502 });
+  expect(await ticked('/text-ticks', -1)).toMatchObject({ body: undecodable, status: 502 });
+  expect(reported).toHaveLength(2);
+});
+
 test('answers 500 a result its mapping holds no form of, reported, in the mapping’s words', async () => {
   // * an Edges whose mask holds `foo_`, a path whose lowerCamelCase does not read back
   await using fixture = await startTranscoding({ routes: rawAsEdges() });
@@ -920,8 +1082,8 @@ test('refuses a query beside a body of a json, text or raw route, and a variable
   });
   const undecoded = await send(fixture.port, { method: 'GET', path: '/v1/shelves/%FF/books/2' });
 
-  const undecodable = (detail: string): string => {
-    return `{"code":50,"detail":"${detail}","scope":"protocol","status":400,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}`;
+  const undecodable = (detail: string, place = ''): string => {
+    return `{"code":50,"detail":"${detail}",${place}"scope":"protocol","status":400,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}`;
   };
 
   expect(raw).toMatchObject({
@@ -929,7 +1091,7 @@ test('refuses a query beside a body of a json, text or raw route, and a variable
     status: 400,
   });
   expect(undecoded).toMatchObject({
-    body: undecodable('a value whose bytes are not UTF-8'),
+    body: undecodable('a value whose bytes are not UTF-8', '"parameter":"name",'),
     status: 400,
   });
 });

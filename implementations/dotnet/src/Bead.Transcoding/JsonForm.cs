@@ -107,7 +107,7 @@ public sealed partial class JsonForm
     {
         ArgumentNullException.ThrowIfNull(descriptor);
 
-        return ReadMessage(descriptor, (JsonText.Read(body), 0));
+        return ReadMessage(descriptor, (JsonText.Read(body), 0, JsonPlace.Root));
     }
 
     /// <summary>
@@ -154,7 +154,7 @@ public sealed partial class JsonForm
     /// <summary>The JSON a request's message is read from, built by its binding: its node read as 5.2's steps 2 to 4.</summary>
     internal IMessage ReadNode(MessageDescriptor descriptor, JsonNode node)
     {
-        return ReadMessage(descriptor, (node, 0));
+        return ReadMessage(descriptor, (node, 0, JsonPlace.Root));
     }
 
     /// <summary>A field of <paramref name="descriptor"/> by its JSON name or its proto name; none where none is named so.</summary>
@@ -190,14 +190,14 @@ public sealed partial class JsonForm
 
     // ── Reading, transcoding 5.2 to 5.4 ───────────────────────────────────────────────────────────
 
-    // a message nested `depth` below the request (5.2, steps 2 to 4)
-    private IMessage ReadMessage(MessageDescriptor descriptor, (JsonNode Value, int Depth) at)
+    // a message nested `depth` below the request (5.2, steps 2 to 4), its value at its place
+    private IMessage ReadMessage(MessageDescriptor descriptor, (JsonNode Value, int Depth, JsonPlace At) at)
     {
-        var (value, depth) = at;
+        var (value, depth, place) = at;
 
         if (depth > Depth)
         {
-            throw new JsonFormException("nested past 100");
+            throw Refused("nested past 100", place);
         }
 
         if (IsWellKnown(descriptor))
@@ -207,7 +207,7 @@ public sealed partial class JsonForm
 
         if (value.Kind != JsonNodeKind.Object)
         {
-            throw new JsonFormException($"a {descriptor.Name} that is no object");
+            throw Refused($"{ArticleOf(descriptor.Name)} {descriptor.Name} that is no object", place);
         }
 
         var message = descriptor.Parser.ParseFrom(ByteString.Empty);
@@ -216,11 +216,12 @@ public sealed partial class JsonForm
 
         foreach (var (key, member) in value.Members)
         {
-            var field = FieldNamed(descriptor, key) ?? throw new JsonFormException("a key no field names");
+            var field = FieldNamed(descriptor, key) ?? throw Refused("a key no field names", place.Given(key));
+            var here = place.Field(field.JsonName);
 
             if (!named.Add(field.FieldNumber))
             {
-                throw new JsonFormException("a field by its two names");
+                throw Refused("a field by its two names", here);
             }
 
             // * null is its field's default, but where it is a value of its own: a Value's, a NullValue's
@@ -231,13 +232,19 @@ public sealed partial class JsonForm
 
             if (field.RealContainingOneof is { } oneof && !oneofs.Add(oneof.Name))
             {
-                throw new JsonFormException("two members of one oneof");
+                throw Refused("two members of one oneof", here);
             }
 
-            ReadField(message, (field, member, depth));
+            ReadField(message, (field, member, depth, here));
         }
 
         return message;
+    }
+
+    // a refusal of the value at a place
+    private static JsonFormException Refused(string reason, JsonPlace at)
+    {
+        return new JsonFormException(reason, new JsonFormExceptionOptions { At = at.Tokens() });
     }
 
     // whether an enum is closed, a proto2 file's, which takes no number its values do not number
@@ -260,9 +267,9 @@ public sealed partial class JsonForm
 
     private const string NullValueName = "google.protobuf.NullValue";
 
-    private void ReadField(IMessage message, (FieldDescriptor Field, JsonNode Member, int Depth) read)
+    private void ReadField(IMessage message, (FieldDescriptor Field, JsonNode Member, int Depth, JsonPlace At) read)
     {
-        var (field, member, depth) = read;
+        var (field, member, depth, at) = read;
 
         if (field.IsMap)
         {
@@ -275,34 +282,42 @@ public sealed partial class JsonForm
         {
             if (member.Kind != JsonNodeKind.Array)
             {
-                throw new JsonFormException("a repeated field that is no array");
+                throw Refused("a repeated field that is no array", at);
             }
 
             var list = (IList)field.Accessor.GetValue(message);
 
-            foreach (var item in member.Items)
+            for (var index = 0; index < member.Items.Count; index += 1)
             {
+                var item = member.Items[index];
+
                 if (item.Kind == JsonNodeKind.Null && !IsNullable(field))
                 {
-                    throw new JsonFormException("a null item");
+                    throw Refused("a null item", at.Item(index));
                 }
 
-                list.Add(ReadSingle(field, (item, depth)));
+                list.Add(ReadSingle(field, (item, depth, at.Item(index))));
             }
 
             return;
         }
 
-        field.Accessor.SetValue(message, ReadSingle(field, (member, depth)));
+        field.Accessor.SetValue(message, ReadSingle(field, (member, depth, at)));
     }
 
-    private void ReadMap(IMessage message, (FieldDescriptor Field, JsonNode Member, int Depth) read)
+    private void ReadMap(IMessage message, (FieldDescriptor Field, JsonNode Member, int Depth, JsonPlace At) read)
     {
-        var (field, member, depth) = read;
+        var (field, member, depth, at) = read;
 
         if (member.Kind != JsonNodeKind.Object)
         {
-            throw new JsonFormException("a map that is no object");
+            throw Refused("a map that is no object", at);
+        }
+
+        // * each entry is a message below the one that holds the map (17.9.3), counted before any is read
+        if (member.Members.Count > 0 && depth + 1 > Depth)
+        {
+            throw Refused("nested past 100", at);
         }
 
         var keyField = field.MessageType.FindFieldByNumber(1);
@@ -311,45 +326,53 @@ public sealed partial class JsonForm
 
         foreach (var (key, item) in member.Members)
         {
-            var readKey = KeyOf(keyField, key);
+            var here = at.Given(key);
+            object readKey;
+
+            try
+            {
+                readKey = KeyOf(keyField, key);
+            }
+            catch (JsonFormException refused) when (refused.At is null)
+            {
+                throw refused.Placed(here);
+            }
 
             if (map.Contains(readKey))
             {
-                throw new JsonFormException("two keys of one value");
+                throw Refused("two keys of one value", here);
             }
 
             if (item.Kind == JsonNodeKind.Null && !IsNullable(valueField))
             {
-                throw new JsonFormException("a null value in a map");
+                throw Refused("a null value in a map", here);
             }
 
-            // * a map's entry is a message (17.9.3)
-            if (depth + 1 > Depth)
-            {
-                throw new JsonFormException("nested past 100");
-            }
-
-            map[readKey] = ReadSingle(valueField, (item, depth + 1));
+            map[readKey] = ReadSingle(valueField, (item, depth + 1, here));
         }
     }
 
     // one value of a field, as its type reads it: a wrapper's its value, as a field of one holds it
-    private object ReadSingle(FieldDescriptor field, (JsonNode Value, int Depth) at)
+    private object ReadSingle(FieldDescriptor field, (JsonNode Value, int Depth, JsonPlace At) at)
     {
-        var (value, depth) = at;
+        var (value, depth, place) = at;
 
-        switch (field.FieldType)
+        if (field.FieldType == FieldType.Message)
         {
-            case FieldType.Message:
-                var message = ReadMessage(field.MessageType, (value, depth + 1));
+            var message = ReadMessage(field.MessageType, (value, depth + 1, place));
 
-                // ! a field of a wrapper holds its value, never the wrapper, in Google.Protobuf's
-                // generated code
-                return field.MessageType.IsWrapper() ? message.Descriptor.FindFieldByNumber(1).Accessor.GetValue(message) : message;
-            case FieldType.Enum:
-                return ReadEnum(field.EnumType, value);
-            default:
-                return ReadScalar(field.FieldType, value);
+            // ! a field of a wrapper holds its value, never the wrapper, in Google.Protobuf's
+            // generated code
+            return field.MessageType.IsWrapper() ? message.Descriptor.FindFieldByNumber(1).Accessor.GetValue(message) : message;
+        }
+
+        try
+        {
+            return field.FieldType == FieldType.Enum ? ReadEnum(field.EnumType, value) : ReadScalar(field.FieldType, value);
+        }
+        catch (JsonFormException refused) when (refused.At is null)
+        {
+            throw refused.Placed(place);
         }
     }
 
@@ -445,10 +468,13 @@ public sealed partial class JsonForm
         return type is FieldType.Int64 or FieldType.SInt64 or FieldType.SFixed64 or FieldType.UInt64 or FieldType.Fixed64;
     }
 
-    // the article an integer type's name takes, as it is read aloud: an int32, a uint32, a fixed32
+    // the article a type's name takes, as it is read aloud: an int32, an sint32 (es-int), an Edges,
+    // an Empty; a uint32, a fixed32, a Timestamp
     private static string ArticleOf(string name)
     {
-        return name[0] is 'a' or 'i' or 's' ? "an" : "a";
+        return char.ToLowerInvariant(name[0]) is 'a' or 'e' or 'i' or 'o'
+            || name.StartsWith("sint", StringComparison.Ordinal)
+            || name.StartsWith("sfixed", StringComparison.Ordinal) ? "an" : "a";
     }
 
     private static string NameOf(FieldType type)
@@ -714,11 +740,72 @@ public sealed partial class JsonForm
         return (true, isNegative ? -whole : whole);
     }
 
-    // a well-known type's form (5.4), the message itself nested `depth` below the request
-    private IMessage ReadForm(MessageDescriptor descriptor, (JsonNode Value, int Depth) at)
+    // a well-known type's form (5.4), the message itself nested `depth` below the request, at its place
+    private IMessage ReadForm(MessageDescriptor descriptor, (JsonNode Value, int Depth, JsonPlace At) at)
     {
-        var (value, depth) = at;
+        var (value, depth, place) = at;
 
+        switch (descriptor.FullName)
+        {
+            case "google.protobuf.Empty":
+                if (value.Kind != JsonNodeKind.Object)
+                {
+                    throw Refused("an Empty that is no object", place);
+                }
+
+                return value.Members.Count == 0 ? new Empty() : throw Refused("a key no field names", place.Given(value.Members[0].Key));
+            case "google.protobuf.Struct":
+                if (value.Kind != JsonNodeKind.Object)
+                {
+                    throw Refused("a Struct that is no object", place);
+                }
+
+                if (value.Members.Count > 0 && depth + 1 > Depth)
+                {
+                    throw Refused("nested past 100", place);
+                }
+
+                var fields = new Struct();
+
+                foreach (var (key, member) in value.Members)
+                {
+                    fields.Fields[key] = (Value)ReadMessage(Value.Descriptor, (member, depth + 2, place.Given(key)));
+                }
+
+                return fields;
+            case "google.protobuf.ListValue":
+                if (value.Kind != JsonNodeKind.Array)
+                {
+                    throw Refused("a ListValue that is no array", place);
+                }
+
+                var list = new ListValue();
+
+                for (var index = 0; index < value.Items.Count; index += 1)
+                {
+                    list.Values.Add((Value)ReadMessage(Value.Descriptor, (value.Items[index], depth + 1, place.Item(index))));
+                }
+
+                return list;
+            case "google.protobuf.Value":
+                return ReadValue(at);
+            case "google.protobuf.Any":
+                return ReadAny(at);
+            default:
+                try
+                {
+                    return ReadStringForm(descriptor, value);
+                }
+                catch (JsonFormException refused) when (refused.At is null)
+                {
+                    throw refused.Placed(place);
+                }
+        }
+    }
+
+    // a Timestamp, a Duration, a FieldMask or a wrapper, each its value's form
+    private static IMessage ReadStringForm(MessageDescriptor descriptor, JsonNode value)
+    {
         switch (descriptor.FullName)
         {
             case "google.protobuf.Timestamp":
@@ -727,50 +814,6 @@ public sealed partial class JsonForm
                 return ReadDuration(value);
             case "google.protobuf.FieldMask":
                 return ReadFieldMask(value);
-            case "google.protobuf.Empty":
-                if (value.Kind != JsonNodeKind.Object)
-                {
-                    throw new JsonFormException("an Empty that is no object");
-                }
-
-                return value.Members.Count == 0 ? new Empty() : throw new JsonFormException("a key no field names");
-            case "google.protobuf.Struct":
-                if (value.Kind != JsonNodeKind.Object)
-                {
-                    throw new JsonFormException("a Struct that is no object");
-                }
-
-                if (value.Members.Count > 0 && depth + 1 > Depth)
-                {
-                    throw new JsonFormException("nested past 100");
-                }
-
-                var fields = new Struct();
-
-                foreach (var (key, member) in value.Members)
-                {
-                    fields.Fields[key] = (Value)ReadMessage(Value.Descriptor, (member, depth + 2));
-                }
-
-                return fields;
-            case "google.protobuf.ListValue":
-                if (value.Kind != JsonNodeKind.Array)
-                {
-                    throw new JsonFormException("a ListValue that is no array");
-                }
-
-                var list = new ListValue();
-
-                foreach (var item in value.Items)
-                {
-                    list.Values.Add((Value)ReadMessage(Value.Descriptor, (item, depth + 1)));
-                }
-
-                return list;
-            case "google.protobuf.Value":
-                return ReadValue(value, depth);
-            case "google.protobuf.Any":
-                return ReadAny(value, depth);
             default:
                 // a wrapper: its value's form
                 var wrapper = descriptor.Parser.ParseFrom(ByteString.Empty);
@@ -782,8 +825,10 @@ public sealed partial class JsonForm
         }
     }
 
-    private Value ReadValue(JsonNode value, int depth)
+    private Value ReadValue((JsonNode Value, int Depth, JsonPlace At) at)
     {
+        var (value, depth, place) = at;
+
         return value.Kind switch
         {
             JsonNodeKind.Null => Value.ForNull(),
@@ -791,18 +836,20 @@ public sealed partial class JsonForm
             JsonNodeKind.False => Value.ForBool(false),
             JsonNodeKind.Number => Value.ForNumber(double.Parse(value.Text, NumberStyles.Float, CultureInfo.InvariantCulture)),
             JsonNodeKind.String => Value.ForString(value.Text),
-            JsonNodeKind.Object => new Value { StructValue = (Struct)ReadMessage(Struct.Descriptor, (value, depth + 1)) },
-            _ => new Value { ListValue = (ListValue)ReadMessage(ListValue.Descriptor, (value, depth + 1)) },
+            JsonNodeKind.Object => new Value { StructValue = (Struct)ReadMessage(Struct.Descriptor, (value, depth + 1, place)) },
+            _ => new Value { ListValue = (ListValue)ReadMessage(ListValue.Descriptor, (value, depth + 1, place)) },
         };
     }
 
     // an Any (5.4, item 6): its @type anywhere among its members, then its message's members, or a
     // well-known type's form under value alone; {} alone the empty Any
-    private Any ReadAny(JsonNode value, int depth)
+    private Any ReadAny((JsonNode Value, int Depth, JsonPlace At) at)
     {
+        var (value, depth, place) = at;
+
         if (value.Kind != JsonNodeKind.Object)
         {
-            throw new JsonFormException("an Any that is no object");
+            throw Refused("an Any that is no object", place);
         }
 
         if (value.Members.Count == 0)
@@ -817,16 +864,16 @@ public sealed partial class JsonForm
 
         if (type.Key is null)
         {
-            throw new JsonFormException("an Any without its @type");
+            throw Refused("an Any without its @type", place);
         }
 
         if (type.Value.Kind != JsonNodeKind.String || !type.Value.Text.Contains('/', StringComparison.Ordinal))
         {
-            throw new JsonFormException("an Any whose @type is no URL");
+            throw Refused("an Any whose @type is no URL", place);
         }
 
         var url = type.Value.Text;
-        var held = _registry.Find(url[(url.LastIndexOf('/') + 1)..]) ?? throw new JsonFormException("an Any of a type its definitions do not hold");
+        var held = _registry.Find(url[(url.LastIndexOf('/') + 1)..]) ?? throw Refused("an Any of a type its definitions do not hold", place);
         var others = value.Members.Where((member) =>
         {
             return member.Key != "@type";
@@ -837,14 +884,14 @@ public sealed partial class JsonForm
         {
             if (others.Count != 1 || others[0].Key != "value")
             {
-                throw new JsonFormException("an Any of a well-known type whose members are not its value alone");
+                throw Refused("an Any of a well-known type whose members are not its value alone", place);
             }
 
-            inner = ReadMessage(held, (others[0].Value, depth + 1));
+            inner = ReadMessage(held, (others[0].Value, depth + 1, place.Field("value")));
         }
         else
         {
-            inner = ReadMessage(held, (JsonNode.ObjectOf(others), depth + 1));
+            inner = ReadMessage(held, (JsonNode.ObjectOf(others), depth + 1, place));
         }
 
         return new Any { TypeUrl = url, Value = inner.ToByteString() };

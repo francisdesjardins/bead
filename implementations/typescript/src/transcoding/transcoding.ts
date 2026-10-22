@@ -14,7 +14,14 @@ export {
   templateOf,
   variablesOf,
 } from './templates';
-export type { IRawPath, ITemplate, IVariable, Segment, TemplateReading } from './templates';
+export type {
+  IRawPath,
+  ITemplate,
+  IVariable,
+  Segment,
+  TemplateReading,
+  VariablesReading,
+} from './templates';
 export { bindRequest } from './binding';
 export type { IBindingOptions } from './binding';
 export {
@@ -27,7 +34,14 @@ export {
   writeFieldJson,
   writeProtoJson,
 } from './json-form';
-export type { IJsonFormOptions, ITypeRegistry, JsonNode } from './json-form';
+export type {
+  IJsonFormOptions,
+  IJsonPlace,
+  IJsonToken,
+  ITypeRegistry,
+  JsonNode,
+  RequestPlace,
+} from './json-form';
 export {
   DEFAULT_CHALLENGE,
   PROBLEM_MEDIA_TYPE,

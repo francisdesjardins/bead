@@ -20,8 +20,8 @@ import { execFileSync } from 'node:child_process';
 // request its client sent, answered to that client PAYLOAD_UNDECODABLE, and of a result it holds
 // no form of, `unwritable` and reported, each the mapping's own refusal, `JsonFormError` and
 // `JsonFormException`, which nothing else throws; transcoding.json's readings and writings fix
-// those words, its failures "a body the gateway's reading refuses" and "a result Bead's proto JSON
-// form holds none of" their problems
+// those words, its failures "a body the gateway's reading refuses, its pointer" and "a result
+// Bead's proto JSON form holds none of" their problems
 export const ALLOWED = Object.freeze({
   'implementations/typescript/src/router/shared/notification.ts': 1,
   'implementations/typescript/src/router/shared/router-core.ts': 2,

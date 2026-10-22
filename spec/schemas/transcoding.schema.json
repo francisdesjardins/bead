@@ -122,7 +122,17 @@
       "minLength": 1
     },
     "reason": {
-      "description": "Why an entry is refused: derived, and held by the regeneration alone.",
+      "description": "Why an entry is refused, the mapping's own words, which a gateway's problem carries as its detail.",
+      "type": "string",
+      "minLength": 1
+    },
+    "pointer": {
+      "description": "Where in a body a refusal or a violation lies, a JSON Pointer's URI fragment of RFC 6901 (transcoding 7.4, item 2).",
+      "type": "string",
+      "pattern": "^#"
+    },
+    "parameter": {
+      "description": "Where in a route's variables or its query a refusal or a violation lies (transcoding 7.4, item 1).",
       "type": "string",
       "minLength": 1
     },
@@ -209,8 +219,10 @@
         "bodyBytes": { "$ref": "common.schema.json#/$defs/bytes" },
         "payload": { "$ref": "common.schema.json#/$defs/bytes" },
         "refused": { "$ref": "#/$defs/reason" },
+        "pointer": { "$ref": "#/$defs/pointer" },
         "upb": { "$ref": "#/$defs/upb" }
-      }
+      },
+      "dependentRequired": { "pointer": ["refused"] }
     },
     "writing": {
       "description": "A result's payload, and the body written of it, or the reason it is refused for.",
@@ -234,6 +246,8 @@
       "required": ["name", "clauses", "procedure", "route", "target"],
       "additionalProperties": false,
       "oneOf": [{ "required": ["payload"] }, { "required": ["refused"] }],
+      "not": { "required": ["pointer", "parameter"] },
+      "dependentRequired": { "pointer": ["refused"], "parameter": ["refused"] },
       "properties": {
         "name": { "$ref": "common.schema.json#/$defs/name" },
         "clauses": { "$ref": "#/$defs/clauses" },
@@ -242,7 +256,9 @@
         "target": { "type": "string", "pattern": "^/" },
         "body": { "type": "string" },
         "payload": { "$ref": "common.schema.json#/$defs/bytes" },
-        "refused": { "$ref": "#/$defs/reason" }
+        "refused": { "$ref": "#/$defs/reason" },
+        "pointer": { "$ref": "#/$defs/pointer" },
+        "parameter": { "$ref": "#/$defs/parameter" }
       }
     },
     "failure": {
@@ -266,8 +282,11 @@
             "encoding": { "enum": ["proto", "json", "text", "raw"] },
             "credential": { "const": true },
             "challenge": { "type": "string", "minLength": 1 },
-            "own": { "enum": ["timeout", "closed", "unwritable", "jwt", "scheme"] }
-          }
+            "pointer": { "$ref": "#/$defs/pointer" },
+            "parameter": { "$ref": "#/$defs/parameter" },
+            "own": { "enum": ["timeout", "closed", "unwritable", "jwt", "scheme", "failed"] }
+          },
+          "not": { "required": ["pointer", "parameter"] }
         },
         "procedure": { "$ref": "#/$defs/procedure" },
         "route": { "$ref": "#/$defs/route" },

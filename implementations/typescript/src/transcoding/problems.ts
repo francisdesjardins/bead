@@ -10,7 +10,7 @@ import type { DescField, DescMessage } from '@bufbuild/protobuf';
 import { FailureScope, ProtocolCode } from '../router/shared/constants';
 import { PAYLOAD_CODECS } from '../router/shared/payloads';
 import { type IViolation, violationsOf } from '../router/shared/violations';
-import { fieldNamed } from './json-form';
+import { fieldNamed, fragmentOf, pointerTokenOf, type RequestPlace } from './json-form';
 
 // types
 
@@ -21,8 +21,8 @@ import { fieldNamed } from './json-form';
  */
 export type Arose = 'answer' | 'client' | 'gateway' | 'server';
 
-/** A failure of the gateway's own (7.6), each its status. */
-export type OwnFailure = 'closed' | 'jwt' | 'scheme' | 'timeout' | 'unwritable';
+/** A failure of the gateway's own (7.6), each its status: `failed`, what no gate foresaw. */
+export type OwnFailure = 'closed' | 'failed' | 'jwt' | 'scheme' | 'timeout' | 'unwritable';
 
 /** A payload's encoding, as a binding names it. */
 export type Encoding = 'json' | 'proto' | 'raw' | 'text';
@@ -38,6 +38,8 @@ export interface ICallFailure {
   readonly detail?: string | undefined;
   /** The encoding of the request its server could not read; `proto` where none is given. */
   readonly encoding?: Encoding | undefined;
+  /** Where the gateway's reading met what it refuses, as 7.4 places one. */
+  readonly place?: RequestPlace | undefined;
   readonly scope: 'application' | 'protocol';
 }
 
@@ -111,6 +113,7 @@ const CODE_NAMES: ReadonlyMap<number, string> = new Map(
 
 const OWN_STATUSES: Readonly<Record<OwnFailure, number>> = Object.freeze({
   closed: 502,
+  failed: 500,
   jwt: 431,
   scheme: 401,
   timeout: 504,
@@ -179,22 +182,6 @@ const protocolStatusOf = (
   }
 };
 
-/** `text` as a URI's fragment writes it: each character it does not take percent-encoded from its UTF-8. */
-const fragmentOf = (text: string): string => {
-  return text.replaceAll(/[^A-Za-z0-9\-._~!$&'()*+,;=:@/?]/gu, (character) => {
-    return [...new TextEncoder().encode(character)]
-      .map((byte) => {
-        return `%${byte.toString(16).toUpperCase().padStart(2, '0')}`;
-      })
-      .join('');
-  });
-};
-
-/** A JSON Pointer's reference token, `~` and `/` escaped (RFC 6901 §4). */
-const tokenOf = (text: string): string => {
-  return text.replaceAll('~', '~0').replaceAll('/', '~1');
-};
-
 /** An element of 18.4's field path: its name, and its subscript read, a cut key told apart. */
 interface IElement {
   readonly name: string;
@@ -256,12 +243,10 @@ const messageOf = (field: DescField): DescMessage | undefined => {
 
 /**
  * Where a violation's field lies (7.4): `parameter`, of a variable or the query; `pointer`, into
- * the body; or neither, for a rule of the message itself where the body is not the request whole.
+ * the body; or neither, for a rule of the message itself where the body is not the request whole,
+ * and for a field path that names no field of the request.
  */
-const placeOf = (
-  violation: IViolation,
-  route: IProblemRoute
-): { parameter: string } | { pointer: string } | undefined => {
+const placeOf = (violation: IViolation, route: IProblemRoute): RequestPlace | undefined => {
   const { fieldPath } = violation;
   const isWhole = route.body === '*';
 
@@ -304,7 +289,7 @@ const placeOf = (
 
     // the body a `body` field makes has that field as its root
     if (!(index === 0 && !isWhole)) {
-      tokens.push(tokenOf(field.jsonName));
+      tokens.push(pointerTokenOf(field.jsonName));
     }
 
     const { subscript } = element;
@@ -314,14 +299,14 @@ const placeOf = (
     }
 
     if (subscript !== undefined) {
-      tokens.push(tokenOf(subscript.text));
+      tokens.push(pointerTokenOf(subscript.text));
     }
 
     message = messageOf(field);
   }
 
   if (!inBody) {
-    return { parameter: jsonNames.join('.') };
+    return jsonNames.length === 0 ? undefined : { parameter: jsonNames.join('.') };
   }
 
   return {
@@ -406,12 +391,15 @@ export const problemOfFailure = (
   const { fields, status } = protocolStatusOf(failure, challenge);
   const identity = CODE_NAMES.get(code) ?? String(code);
   const isInvalid = code === ProtocolCode.PAYLOAD_INVALID;
+  // * the gateway's own error between it and its server: its code alone (spec 9.0)
+  const isCodeAlone = isInvalid || code === ProtocolCode.DESTINATION_UNREACHABLE;
 
   return {
     body: textOf({
       code,
-      ...(detail === '' || isInvalid ? {} : { detail }),
+      ...(detail === '' || isCodeAlone ? {} : { detail }),
       ...(isInvalid ? invalidMembersOf(failure, route) : {}),
+      ...(failure.arose === 'gateway' ? failure.place : {}),
       scope,
       status,
       title: identity,
@@ -425,7 +413,8 @@ export const problemOfFailure = (
 /**
  * The problem of a failure of the gateway's own (7.6) — its call's timeout, 504; its connection
  * closed, 502; a result it cannot write, 500; a `JWT` its block cannot hold, 431; an auth-scheme
- * but `Bearer` under `bearer-jwt`, 401 — `about:blank`, its detail its words.
+ * but `Bearer` under `bearer-jwt`, 401; what no gate foresaw, 500 — `about:blank`, its detail its
+ * words, none for what no gate foresaw.
  */
 export const problemOfOwn = (
   own: OwnFailure,

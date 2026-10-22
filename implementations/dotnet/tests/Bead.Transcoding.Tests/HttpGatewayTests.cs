@@ -491,7 +491,7 @@ public sealed class HttpGatewayTests
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, answered.StatusCode);
             Assert.Equal("1", answered.Headers.RetryAfter?.ToString());
-            Assert.Equal("{\"code\":17,\"detail\":\"the connection is gone\",\"scope\":\"protocol\",\"status\":503,\"title\":\"DESTINATION_UNREACHABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal("{\"code\":17,\"scope\":\"protocol\",\"status\":503,\"title\":\"DESTINATION_UNREACHABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/DESTINATION_UNREACHABLE\"}", await answered.Content.ReadAsStringAsync(Cancelled));
             Assert.EndsWith(", not open", Assert.Single(reported), StringComparison.Ordinal);
         }
         finally
@@ -516,13 +516,138 @@ public sealed class HttpGatewayTests
             using var answered = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
 
             Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
-            Assert.Equal("{\"detail\":\"the gateway failed\",\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
             Assert.Equal(["the clock broke"], reported);
         }
         finally
         {
             await Stopped(started);
         }
+    }
+
+    [Fact]
+    public async Task Answers_500_a_connection_its_server_failed_to_draw_but_by_refusing_it_reported_with_no_detail()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var reported = ReportedBy(gateway);
+
+        // * an exchange handed on with a port no connect takes: refused before its server sees it
+        var context = new DefaultHttpContext();
+        var body = new MemoryStream();
+
+        context.Request.Method = "GET";
+        context.Request.Protocol = "HTTP/1.1";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Connection.RemotePort = 70_000;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+        context.Response.Body = body;
+
+        await gateway.Answer(context);
+
+        Assert.Equal(StatusCodes.Status500InternalServerError, context.Response.StatusCode);
+        Assert.Equal("{\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", Encoding.UTF8.GetString(body.ToArray()));
+        Assert.StartsWith("a port is from 0 to 65535, not 70000", Assert.Single(reported), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reports_each_failure_it_answers_a_call_with_500_or_above_and_none_below()
+    {
+        // * a route of a procedure its server does not offer, 501; a call past its timeout, 504
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Timeout = TimeSpan.FromMilliseconds(50),
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.Raw.Procedure ? route with { Procedure = route.Procedure with { ProcedureId = 99 } } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            var raw = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/raw") { Content = new ByteArrayContent("x"u8.ToArray()) };
+
+            raw.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            using var unknown = await started.Client.SendAsync(raw, Cancelled);
+
+            Assert.Equal(HttpStatusCode.NotImplemented, unknown.StatusCode);
+            Assert.Single(reported);
+
+            using var hung = await started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+
+            Assert.Equal(HttpStatusCode.GatewayTimeout, hung.StatusCode);
+            Assert.Equal(2, reported.Count);
+
+            // an application failure is the caller's, 400, and no session one, 401: reported none
+            using var failed = await started.Client.SendAsync(Json("/api/Transcoding/fail", "{\"detail\":\"no\"}"), Cancelled);
+            using var unknownSession = await started.Client.SendAsync(Json("/api/Transcoding/whoAmI", "{}"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized), (failed.StatusCode, unknownSession.StatusCode));
+            Assert.Equal(2, reported.Count);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_502_a_text_result_that_is_no_UTF_8_reported_none_of_its_words_in_the_problem()
+    {
+        // * raw's route told its result is a text: the bytes its server echoes, FF, no UTF-8
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.Raw.Procedure ? route with { Result = HttpPayload.Text } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            var raw = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/raw") { Content = new ByteArrayContent([0xFF]) };
+
+            raw.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            using var answered = await started.Client.SendAsync(raw, Cancelled);
+
+            Assert.Equal(HttpStatusCode.BadGateway, answered.StatusCode);
+            Assert.Equal("{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Single(reported);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_an_authorization_but_elsewhere_or_bearer_jwt_and_a_bound_that_is_no_whole_number_above_0()
+    {
+        await using var service = await TranscodingService.Start();
+        var options = Exchanges.OptionsOf(service.Memory, null);
+
+        Assert.StartsWith("a gateway's authorization is elsewhere or bearer-jwt", Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            _ = new HttpGateway(options with { Authorization = (GatewayAuthorization)7 });
+        }).Message, StringComparison.Ordinal);
+        Assert.StartsWith("MaximumBodyBytes is a whole number above 0, not 0", Assert.ThrowsAny<ArgumentException>(() =>
+        {
+            _ = new HttpGateway(options with { MaximumBodyBytes = 0 });
+        }).Message, StringComparison.Ordinal);
+        Assert.StartsWith("Window is a whole number above 0, not 0", Assert.ThrowsAny<ArgumentException>(() =>
+        {
+            _ = new HttpGateway(options with { Window = 0 });
+        }).Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -580,6 +705,7 @@ public sealed class HttpGatewayTests
         }
     }
 
+    // transcoding 7.7.6
     [Fact]
     public async Task Words_each_refusal_of_its_bounds_exactly()
     {
@@ -1028,6 +1154,9 @@ public sealed class HttpGatewayTests
             // a TicksResponse and each Tick, 08 02, 08 01 and none, as raw and as text
             Assert.StartsWith("event: result\nid: 1\ndata: \"CAI=\"\n\nid: 2\ndata: \"CAE=\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n", (await Ticks("/raw-ticks", 2)).Body, StringComparison.Ordinal);
             Assert.StartsWith("event: result\nid: 1\ndata: \"\\b\\u0002\"\n\nid: 2\ndata: \"\\b\\u0001\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n", (await Ticks("/text-ticks", 2)).Body, StringComparison.Ordinal);
+
+            // * a subscription its server drops right behind its result: the result first, then the failure
+            Assert.StartsWith("event: result\nid: 1\ndata: \"\"\n\nevent: failure\nid: 2\n", (await Ticks("/text-ticks", 0)).Body, StringComparison.Ordinal);
             Assert.Empty(reported);
 
             // a result its stock library refuses, or a text one not UTF-8: 502, nothing of the stream written, reported
@@ -1109,7 +1238,7 @@ public sealed class HttpGatewayTests
 
             var undecoded = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase(["GET /v1/shelves/%FF/books/2 HTTP/1.1"], 400, "")));
 
-            Assert.Equal((400, Undecodable("a value whose bytes are not UTF-8")), (undecoded.Status, undecoded.Body));
+            Assert.Equal((400, Undecodable("a value whose bytes are not UTF-8").Replace("\"scope\"", "\"parameter\":\"name\",\"scope\"", StringComparison.Ordinal)), (undecoded.Status, undecoded.Body));
         }
         finally
         {

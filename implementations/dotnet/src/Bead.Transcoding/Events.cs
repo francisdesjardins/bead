@@ -11,7 +11,9 @@ namespace Bead.Transcoding;
 /// <c>message</c>; then the failure that ends it, <c>event: failure</c>. Each event has an
 /// <c>id</c>, its count in the stream from 1. Each write is handed to its sink in order, one at a
 /// time, and a notification's task settles once its event was taken, which its subscription's
-/// credit waits on (8.8).
+/// credit waits on (8.8), or once the stream could not take it, its credit moot. A second result,
+/// or a result or a notification once its failure ended it, is its caller's bug, an
+/// <see cref="InvalidOperationException"/>.
 /// </summary>
 public sealed class HttpEvents
 {
@@ -123,7 +125,8 @@ public sealed class HttpEvents
 
     /// <summary>
     /// A notification: held before its result, written after it otherwise; the task settles once its
-    /// event was taken, and faults where the stream could not write it, or ended before it.
+    /// event was taken, or once the stream could not take it, its credit moot: dropped by the failure
+    /// that ends it, or refused by its sink. One once its failure ended it faults: its caller's bug.
     /// </summary>
     public Task Notification(ReadOnlyMemory<byte> data)
     {
@@ -143,7 +146,11 @@ public sealed class HttpEvents
                 return taken.Task;
             }
 
-            return Enqueue(EventOf(null, (++_count, data)));
+            var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            Settle(Enqueue(EventOf(null, (++_count, data))), settled);
+
+            return settled.Task;
         }
     }
 
@@ -166,9 +173,10 @@ public sealed class HttpEvents
 
             if (!_isAnswered)
             {
+                // * their credit moot: settled, never faulted
                 foreach (var (_, taken) in _held)
                 {
-                    taken.TrySetException(new InvalidOperationException("the stream ended before its result"));
+                    taken.TrySetResult();
                 }
 
                 _held.Clear();
@@ -197,19 +205,13 @@ public sealed class HttpEvents
         }
     }
 
+    // a notification's task settled once its event was taken, or once the stream could not take it
     private static void Settle(Task written, TaskCompletionSource taken)
     {
         written.ContinueWith(
-            (settled) =>
+            (_) =>
             {
-                if (settled.IsCompletedSuccessfully)
-                {
-                    taken.TrySetResult();
-                }
-                else
-                {
-                    taken.TrySetException(settled.Exception?.InnerException ?? new TaskCanceledException(settled));
-                }
+                taken.TrySetResult();
             },
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
