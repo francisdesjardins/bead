@@ -101,7 +101,7 @@ const workspaceOf = (
   // * without a configuration, keep the copy beside a lone root, or under the roots' ancestor.
   const base =
     options.folder ?? (project.length === 1 ? dirname(project[0] ?? '.') : ancestorOf(project));
-  const folder = temporaryFolderOf('buf-', { folder: base });
+  const folder = temporaryFolderOf('buf-', { folder: resolve(base) });
 
   try {
     const include = join(folder, 'include');
@@ -177,7 +177,7 @@ export const compile = (
         '-',
         ...paths,
       ],
-      { maxBuffer: LARGEST_SET, stdio: ['ignore', 'pipe', 'pipe'] }
+      { cwd: ancestor, maxBuffer: LARGEST_SET, stdio: ['ignore', 'pipe', 'pipe'] }
     );
   } catch (error) {
     const stderr = (error as { stderr?: Buffer }).stderr?.toString('utf8').trim() ?? '';
@@ -218,7 +218,7 @@ export const lintRules = (
         'json',
         ...paths,
       ],
-      { maxBuffer: LARGEST_FINDINGS, encoding: 'utf8' }
+      { cwd: ancestor, maxBuffer: LARGEST_FINDINGS, encoding: 'utf8' }
     );
 
     if (run.status !== 0 && run.status !== BUF_FINDINGS) {

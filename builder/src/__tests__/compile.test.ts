@@ -8,7 +8,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fromBinary } from '@bufbuild/protobuf';
@@ -39,6 +39,9 @@ test('compiles a project with its options on the project’s drive and removes t
     for (const image of [false, true]) {
       expect(compile([root], { folder, image })).toEqual(compile([FIXTURES], { image }));
     }
+    expect(compile([FIXTURES], { folder: relative(process.cwd(), FIXTURES) })).toEqual(
+      compile([FIXTURES])
+    );
 
     // * a root at the project folder also contains the temporary module and an editor's copy.
     cpSync(OPTIONS_ROOT, join(root, '.beadc/include'), { recursive: true });
