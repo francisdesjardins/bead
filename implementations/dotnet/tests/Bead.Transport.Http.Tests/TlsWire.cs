@@ -158,6 +158,21 @@ internal sealed class TlsWire : IAsyncDisposable
         await _tls.WriteAsync(Preface, Cancelled);
         await _tls.WriteAsync(FrameOf((Settings, 0, 0), []), Cancelled);
 
+        // ! the server's SETTINGS acknowledged before the request goes, so nothing is written once a
+        // session may end: a write that meets a session Kestrel ended draws a reset, which takes its
+        // GOAWAY, unread, with it
+        while (true)
+        {
+            var (type, flags, _, _) = await ReadFrame();
+
+            if (type == Settings && (flags & Acknowledged) == 0)
+            {
+                await _tls.WriteAsync(FrameOf((Settings, Acknowledged, 0), []), Cancelled);
+
+                break;
+            }
+        }
+
         return await AskNext(fields);
     }
 
