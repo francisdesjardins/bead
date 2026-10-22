@@ -47,6 +47,13 @@ public static class InteropHandlers
         InteropProcedures.Checked.Procedure,
         InteropProcedures.Checked.Bindings with { Validate = CheckedRules });
 
+    // the interop service's procedures: the generated ones, checked made again with its rules, so
+    // one service server answers them all, as the TypeScript side's does
+    private static readonly IReadOnlyList<IServiceProcedure<InteropProcedures>> Procedures = [.. InteropProcedures.All.Select((procedure) =>
+    {
+        return ReferenceEquals(procedure, InteropProcedures.Checked) ? Checked : procedure;
+    })];
+
     // helpers
 
     private static JsonElement Null
@@ -218,8 +225,9 @@ public static class InteropHandlers
     // definition
 
     /// <summary>
-    /// The interop service, served on <paramref name="server"/>, its resolvers registered and
-    /// offered there. The calls to <c>slow</c> each connection cancelled are counted per
+    /// The interop service, served whole on <paramref name="server"/> by one service server,
+    /// <c>checked</c> with its rules among its procedures, its resolvers registered and offered
+    /// there. The calls to <c>slow</c> each connection cancelled are counted per
     /// connection, for <c>cancellations</c> to answer; a session holds the name its <c>login</c>
     /// gave, which <c>whoami</c> answers from its call's session, as it answers a credential's
     /// <c>sub</c>; the ticks of <c>ticks</c> and <c>tick</c> are held per connection and per
@@ -232,13 +240,15 @@ public static class InteropHandlers
     /// <c>endSessionsOf</c>, every credential's session of an issuer alike. One service a server:
     /// the counts are its connections'.
     /// </summary>
-    public static InteropServer<string> Offer(IBeadServer<string> server)
+    public static ServiceServer<InteropProcedures, string> Offer(IBeadServer<string> server)
     {
         ArgumentNullException.ThrowIfNull(server);
 
         var sessionManager = server.Sessions;
         var router = server.Router;
-        var interop = new InteropServer<string>(new ServiceServerOptions<InteropProcedures>
+
+        // * the generated server's own body, over its procedures and checked with its rules
+        var interop = new ServiceServer<InteropProcedures, string>(Procedures, new ServiceServerOptions<InteropProcedures>
         {
             Admissions = new InteropAdmissions
             {
@@ -252,6 +262,10 @@ public static class InteropHandlers
                 },
             },
         });
+
+        // its command and its notifier, made as the generated server makes them
+        var clock = interop.CommandOf(InteropProcedures.Clock);
+        var ticks = interop.NotifierOf(InteropProcedures.Ticks);
         var cancellations = new ConcurrentDictionary<string, int>();
 
         // by connection and session, its call's — none for its connection's — the ticks held
@@ -320,7 +334,7 @@ public static class InteropHandlers
         // the server asks its client back, by a command, before it answers
         interop.On(InteropProcedures.Ask, async (request, response) =>
         {
-            var time = await interop.Command.Clock(JsonSerializer.SerializeToElement(Question))(new RequestOptions
+            var time = await clock(JsonSerializer.SerializeToElement(Question))(new RequestOptions
             {
                 ConnectionHandle = request.ConnectionHandle,
                 Timeout = ClockTimeout,
@@ -389,7 +403,7 @@ public static class InteropHandlers
             var key = request.Payload.TryGetProperty("key", out var given) ? given.GetString() : null;
             var due = new List<Hold>();
 
-            await interop.Notify.Ticks(
+            await ticks(
                 request.Payload.GetProperty("value"),
                 new NotifyOptions
                 {
@@ -548,17 +562,13 @@ public static class InteropHandlers
             await response.Answer(Null);
         });
 
-        // * checked is served with its rules by a server side of its own, since the generated one
-        // holds the descriptors its blueprint gave; its resolver counts the names its rules took
-        var judging = new ServiceServer<InteropProcedures, string>([Checked]);
-
-        judging.On(Checked, (request, response) =>
+        // checked's resolver counts the names its rules took
+        interop.On(Checked, (request, response) =>
         {
             return response.Answer(JsonSerializer.SerializeToElement(NamesOf(request.Payload)!.Count));
         });
 
         interop.Offer(server);
-        judging.Offer(server);
 
         return interop;
     }

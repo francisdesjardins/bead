@@ -268,6 +268,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A TypeScript transport client's reconnection its signal ends rejects with a `CancelError`
   worded `the reconnection was cancelled`, as the C# side words it, the signal's reason its
   `cause`, where it said nothing.
+- The C# interop service is offered whole by one service server, `checked` with its rules among
+  its procedures, as the TypeScript side offers it, where a second one answered `checked`.
 
 ## [0.6.0] - 2026-10-20
 
