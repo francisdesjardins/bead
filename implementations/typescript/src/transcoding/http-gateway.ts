@@ -45,6 +45,7 @@ import { HEARTBEAT } from '../transport/shared/heartbeat';
 import type { EmitterListener, IMemoryTransportServerLike } from '../transport/shared/types';
 import {
   assertHosts,
+  assertListeningAddress,
   assertOrigins,
   credentialOf,
   hasVisibleFields,
@@ -78,6 +79,11 @@ import {
   MINIMUM_SEND_BYTES_PER_SECOND,
   SEND_GRACE_PERIOD,
 } from '../transport/server/server-bounds';
+import {
+  type ITransportServerBound,
+  listenOn,
+  LOCALHOST,
+} from '../transport/server/transport-server';
 import { clientAddressOf, trustedProxiesOf } from '../transport/server/trusted-proxies';
 import type {
   HTTPRequestListener,
@@ -112,9 +118,9 @@ import {
 import type { HttpMethod, HttpPayload, IHttpRouteInit, IHttpRouteTemplate } from './routes';
 import {
   type ITemplate,
+  parseTemplate,
   rawPathOf,
   routeIndexOf,
-  templateOf,
   variablesOf,
   type IRawPath,
 } from './templates';
@@ -169,7 +175,10 @@ export interface IHTTPGatewayOptions extends IHTTPPolicyInit, IHTTPPolicyOption 
 
 /** Where a gateway's own listener listens. */
 export interface IHTTPGatewayStartOptions {
-  /** An IP literal or a name, `127.0.0.1` by default. */
+  /**
+   * An IP address, bare, or `localhost`, both loopbacks, by default, as a transport's (spec 15.12):
+   * any other is a {@link ProgrammerError}.
+   */
   readonly address?: string | undefined;
   /** Its port; 0, any free one. */
   readonly port?: number | undefined;
@@ -205,8 +214,11 @@ export interface IHTTPGateway extends AsyncDisposable {
     event: K,
     listener: EmitterListener<HTTPGatewayEventMap[K]>
   ) => void;
-  /** Listens on its own listener, built by `createServer`, and gives its port. */
-  start: (options?: IHTTPGatewayStartOptions) => Promise<{ port: number }>;
+  /**
+   * Listens on its own listener, built by `createServer`, once until it stops, and gives where: its
+   * address, `localhost` where both loopbacks took it, and its port.
+   */
+  start: (options?: IHTTPGatewayStartOptions) => Promise<{ address: string; port: number }>;
   /** Closes its listener, and ends every exchange under way, each connection closed. */
   stop: () => Promise<void>;
 }
@@ -286,6 +298,9 @@ const RESULT_MEDIA_TYPES: Readonly<Record<Encoding, string>> = Object.freeze({
 
 const BEARER = /^bearer[ \t]+([^ \t].*)$/iu;
 
+// a weight as RFC 9110 §12.4.2's qvalue writes it
+const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/u;
+
 const ENCODER = new TextEncoder();
 const DECODER = new TextDecoder();
 
@@ -313,13 +328,20 @@ const weightOf = (
       continue;
     }
 
-    const q = parameters.find((parameter) => {
-      return parameter.startsWith('q=');
-    });
-    const weight = q === undefined ? 1 : Number(q.slice(2));
+    // * a weight off the qvalue grammar is as none given, 1; of two it reads, the last stands
+    let weight = 1;
+
+    for (const parameter of parameters) {
+      const at = parameter.indexOf('=');
+      const value = parameter.slice(at + 1).trim();
+
+      if (at > 0 && parameter.slice(0, at).trim() === 'q' && QVALUE.test(value)) {
+        weight = Number(value);
+      }
+    }
 
     if (best === undefined || rank > best.rank) {
-      best = { rank, weight: Number.isFinite(weight) ? weight : 0 };
+      best = { rank, weight };
     }
   }
 
@@ -338,8 +360,9 @@ const asksStream = (request: IHTTPRequestLike): boolean => {
 };
 
 /**
- * Whether a body's `content-type` is its route's (5.1): its type, compared case-insensitively, and
- * no parameter but `charset=utf-8`, in any case; its `content-encoding` none or `identity`.
+ * Whether a body's `content-type` is its route's (5.1): one field, its type compared
+ * case-insensitively, and no parameter but `charset=utf-8`, in any case; its `content-encoding`
+ * none or `identity`.
  */
 const isTakenType = (request: IHTTPRequestLike, encoding: Encoding): boolean => {
   const encoded = headerOf(request, 'content-encoding')?.trim().toLowerCase();
@@ -348,18 +371,32 @@ const isTakenType = (request: IHTTPRequestLike, encoding: Encoding): boolean => 
     return false;
   }
 
-  const [type = '', ...parameters] = (headerOf(request, 'content-type') ?? '').split(';');
+  // ! `headers` keeps the first of two content-type fields: each line is counted where it stands
+  const types = linesOf(request, 'content-type');
+
+  if (types.length !== 1) {
+    return false;
+  }
+
+  const [type = '', ...parameters] = (types[0] ?? '').split(';');
 
   if (type.trim().toLowerCase() !== MEDIA_TYPES[encoding]) {
     return false;
   }
 
   return parameters.every((parameter) => {
-    const [name = '', value = ''] = parameter.split('=').map((part) => {
-      return part.trim().toLowerCase();
-    });
+    const at = parameter.indexOf('=');
+    const value = parameter
+      .slice(at + 1)
+      .trim()
+      .toLowerCase();
 
-    return name === 'charset' && value.replaceAll('"', '') === 'utf-8';
+    // a value as a token or a quoted string (RFC 9110 §5.6.6)
+    return (
+      at > 0 &&
+      parameter.slice(0, at).trim().toLowerCase() === 'charset' &&
+      (value === 'utf-8' || value === '"utf-8"')
+    );
   });
 };
 
@@ -371,17 +408,16 @@ const carriesContent = (request: IHTTPRequestLike): boolean => {
   );
 };
 
-/** Each `entity-tag` an `if-none-match` holds, weakly compared, or whether it is `*` (RFC 9110 §13.1.2). */
+/** Whether an `if-none-match` holds `etag`, weakly compared, or `*`, alone or among others (RFC 9110 §13.1.2). */
 const matchesTag = (request: IHTTPRequestLike, etag: string): boolean => {
-  const given = linesOf(request, 'if-none-match').join(',');
+  return linesOf(request, 'if-none-match')
+    .join(',')
+    .split(',')
+    .some((tag) => {
+      const trimmed = tag.trim();
 
-  if (given.trim() === '*') {
-    return true;
-  }
-
-  return given.split(',').some((tag) => {
-    return tag.trim().replace(/^W\//u, '') === etag;
-  });
+      return trimmed === '*' || trimmed.replace(/^W\//u, '') === etag;
+    });
 };
 
 /** A protocol failure's scope, as a problem names it. */
@@ -510,14 +546,23 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   // ── The table ──────────────────────────────────────────────────────────────
 
+  // ! a template off http.proto's grammar is refused as the gateway is built, naming its route
   const served: IServedRoute[] = routes.flatMap((init) => {
     return init.routes.map((route) => {
+      const { reason, template } = parseTemplate(route.template);
+
+      if (template === undefined) {
+        throw new ProgrammerError(
+          `${init.procedure.procedure.procedureName}'s route ${route.method} ${route.template}: ${reason}`
+        );
+      }
+
       return {
         init,
         isNavigable: route.method === 'GET' && init.noSideEffects === true,
         method: route.method,
         route,
-        template: templateOf(route.template),
+        template,
       };
     });
   });
@@ -1098,7 +1143,12 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         });
 
         payload = toBinary(init.request, message);
-      } else if (query !== '') {
+      } else if (
+        // * a query of empty sequences alone, `?&`, carries no parameter, as a message's binds none
+        query.split('&').some((sequence) => {
+          return sequence !== '';
+        })
+      ) {
         throw new JsonFormError('a query beside a body of the whole request');
       } else {
         payload = body ?? new Uint8Array();
@@ -1212,11 +1262,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             close();
           },
           open: () => {
+            // * its head goes with its first write, so that a drop past its bound writes nothing
             response.writeHead(200, {
               ...RESPONSE_HEADERS,
               'content-type': EVENT_STREAM_MEDIA_TYPE,
             });
-            response.flushHeaders?.();
           },
           write: (text) => {
             if (isGone) {
@@ -1224,16 +1274,18 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             }
 
             const chunk = ENCODER.encode(text);
-            const isTaken = response.write(chunk) !== false;
 
-            sendPace.hand(chunk.length);
-
-            // ! a reader past what it may hold unsent is dropped, as a WebSocket's is (10.2)
-            if ((response.writableLength ?? 0) > maximumUnsentBytes) {
+            // ! a reader past what it may hold unsent is dropped, as a WebSocket's is, before
+            // the write that would pass it goes (10.2)
+            if ((response.writableLength ?? 0) + chunk.length > maximumUnsentBytes) {
               response.destroy();
 
               return Promise.resolve();
             }
+
+            const isTaken = response.write(chunk) !== false;
+
+            sendPace.hand(chunk.length);
 
             return isTaken
               ? Promise.resolve()
@@ -1653,6 +1705,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   // ── Its own listener ───────────────────────────────────────────────────────
 
   const listening = new Set<IHTTPServerLike>();
+  // whether a start holds its listeners, until a stop lets them go
+  let isListening = false;
 
   return {
     listener,
@@ -1665,34 +1719,70 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       emitter.on(event, handler);
     },
 
-    start: ({ address = '127.0.0.1', port = 0 } = {}) => {
+    start: async ({ address = LOCALHOST, port = 0 } = {}) => {
       if (createServer === undefined) {
-        return Promise.reject(
-          new ProgrammerError('a gateway built with no createServer listens on none of its own')
+        throw new ProgrammerError(
+          'a gateway built with no createServer listens on none of its own'
         );
       }
 
-      const instance = createServer(
-        (request, response) => {
-          listener(request, response);
-        },
-        { address }
-      );
+      assertListeningAddress(address);
 
-      boundHeadOf(instance, headersTimeout);
-      listening.add(instance);
+      if (isListening) {
+        throw new ProgrammerError('a gateway listens once');
+      }
 
-      return new Promise((resolve, reject) => {
-        instance.on('error', reject);
-        instance.listen(port, address, () => {
-          const bound = instance.address();
+      isListening = true;
 
-          resolve({ port: typeof bound === 'object' && bound !== null ? bound.port : port });
+      // one listener on each address it binds: on localhost, one on each loopback
+      const bind = (host: string, given: number): Promise<ITransportServerBound> => {
+        const instance = createServer(
+          (request, response) => {
+            listener(request, response);
+          },
+          { address: host }
+        );
+        let isBound = false;
+        const release = (): void => {
+          listening.delete(instance);
+          instance.close();
+        };
+
+        boundHeadOf(instance, headersTimeout);
+        listening.add(instance);
+
+        return new Promise((resolve, reject) => {
+          instance.on('error', (error) => {
+            if (!isBound) {
+              release();
+              reject(error);
+            }
+          });
+          instance.listen(given, host, () => {
+            const bound = instance.address();
+
+            isBound = true;
+            resolve({
+              close: release,
+              port: typeof bound === 'object' && bound !== null ? bound.port : given,
+            });
+          });
         });
-      });
+      };
+
+      try {
+        return await listenOn(bind, { address, findOpenPort: false, port });
+      } catch (reason) {
+        // * a listen that failed listens on none, and may be tried again
+        isListening = false;
+
+        throw reason;
+      }
     },
 
     stop: async () => {
+      isListening = false;
+
       for (const end of live) {
         end();
       }

@@ -250,10 +250,10 @@ _Transcoding: `spec/transcoding.json`._
 | `raw`    | `application/octet-stream`: the payload's bytes                                                         | `application/octet-stream`: the payload's bytes            | the bytes as a JSON string in base64 |
 
 A gateway MUST refuse, 415 `type-refused`, a request to a route that takes a body, whether a body
-comes or none, whose `content-type` is absent, or whose type, compared case-insensitively, is not
-its route's, or which carries a parameter but `charset`, or a `charset` but `utf-8` in any case, or
-whose `content-encoding` is not `identity`, as section 15.6 of `spec.md` refuses a `POST` of no
-type. A `json`, `text` or `raw` request has no field: its route's body is `*`, and no variable or
+comes or none, whose `content-type` is absent or in two fields, or whose type, compared
+case-insensitively, is not its route's, or which carries a parameter but `charset`, or a `charset`
+but `utf-8` in any case, a token or a quoted string, or whose `content-encoding` is not `identity`,
+as section 15.6 of `spec.md` refuses a `POST` of no type. A `json`, `text` or `raw` request has no field: its route's body is `*`, and no variable or
 query binds it. `bead.Json`, `bead.Text` and `bead.Raw` are those encodings, never messages that
 section 5.6 writes.
 
@@ -532,8 +532,9 @@ Notifications go as Server-Sent Events, [WHATWG HTML §9.2](https://html.spec.wh
 8.1. A request to a procedure that notifies, on any of its routes, opens a subscription (section
 11.1 of `spec.md`) where its `accept` names `text/event-stream` itself, of a weight above 0 and at
 least the weight it gives `application/json`
-([RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1)): never through `*/*` or
-`text/*`, which a `fetch` sends by default. Any other request to it is a call as any other, which
+([RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1)), each by the first range
+that names it most specifically, a weight off RFC 9110's `qvalue` grammar (§12.4.2) as none given, 1:
+never through `*/*` or `text/*`, which a `fetch` sends by default. Any other request to it is a call as any other, which
 subscribes nothing (section 11.2), its result 200 and of section 5's form.
 
 8.2. A gateway MUST write nothing of a stream before its call is answered: a failure is a problem

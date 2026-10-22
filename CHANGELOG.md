@@ -51,7 +51,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it answers 500 or above but `PROCEDURE_FAILED` reported on the gateway's `error`, an error of its
   own answered with its code alone, and none of an exception's words in a problem (spec 9.0);
   notifications as Server-Sent Events at the reader's pace, each event an id, a reconnection
-  answered 204 (`spec/transcoding.md` 0.1.0, decision 0037).
+  answered 204 (`spec/transcoding.md` 0.1.0, decision 0037). A gateway counts an `accept` weight it
+  cannot read as 1, refuses two `content-type` fields 415, answers 304 an `if-none-match` that holds
+  `*` among other tags, takes a raw or text route's query of empty sequences, and drops a stream
+  past `maximumUnsentBytes` before any byte of it goes. It refuses, as it is built, a route whose
+  method is none of `http.proto`'s, that has no template or whose template is off its grammar,
+  naming the route, and a notification where its procedure does not notify, or none where it does.
+  The TypeScript gateway's own listener listens on `localhost`, both loopbacks, by default, once
+  until it stops, and gives its address.
 - beadc reads `google.api.http` and `idempotency_level` into the blueprint's routes and messages'
   shapes, under no feature, and writes one OpenAPI 3.1.1 document a blueprint, embedded byte for byte
   with a route table in each output with `http: true`; its rules `HTTP_*`; `beadc breaking`'s
@@ -164,7 +171,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not clean (spec 15.1, decision 0036).
 - The TypeScript side's transport client and server refuse a start or a connect in the C# side's
   words: `the transport client is already open`, `the transport server is already connecting`,
-  `the transport server is starting`.
+  `the transport server is starting`; a reconnect and a dispose as it connects too:
+  `the transport client is already reconnecting`, `the transport client was never connected`,
+  `the transport client cannot reconnect while <state>` and `the transport client was disposed as
+  it connected`. Its service client and server refuse a second resolver as `<name> is already a
+  registered resolver`, a window for what does not notify as `a window is given for <name>, which is
+  no procedure of this service that notifies`, and a command a hook admits as `<name> is admitted by
+  the hook <hook>, which a client side is given none of`. A send or a disconnect unless open is a
+  `ReadyStateError` in those words too, `the transport client is uninitialized, not open`, its `got`
+  and `expected` kept.
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
@@ -225,6 +240,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   registration, unreachable at once, and never forwarded to (spec 14.4).
 - A Web Worker client whose worker errs before the connection opens, its script failing to load,
   fails its connect with a `ConnectError` at once, rather than after its timeout.
+- The C# in-memory server settles a connect in the turn after its listeners heard the connection,
+  as the TypeScript side does, so a close of theirs fails the connect, where the client opened on a
+  connection already closed.
+- An in-memory connect given up on, by a dispose, its token or its clock, draws no connection: the
+  TypeScript client hands its server an aborted signal, `accept(peer, { signal })`, which the
+  TypeScript server honours. A cancel or a timeout met as its server draws the connection holds on
+  both sides until the connect settles, what was drawn closed unclean and no close told, where the
+  C# client opened it and a reconnection then closed it clean, and the TypeScript client left it
+  open.
 
 ## [0.6.0] - 2026-10-20
 

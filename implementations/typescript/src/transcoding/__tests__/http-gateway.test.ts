@@ -6,9 +6,12 @@ import {
 } from 'node:http';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { create, toBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
+import { httpPolicyOf } from '../../transport/server/http-policy';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
+import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import type { IClock } from '../../transport/shared/clock';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { createHTTPGateway, type IHTTPGateway } from '../http-gateway';
@@ -150,6 +153,49 @@ const exchanged = (port: number, octets: string): Promise<IAnswered> => {
         headers,
         status: Number(statusLine.split(' ')[1]),
       });
+    });
+  });
+};
+
+/** Reads `socket` until what came holds `end`, and gives what came; fails as it closes before. */
+const readUntil = (socket: Socket, end: string): Promise<string> => {
+  const chunks: Buffer[] = [];
+
+  return new Promise((resolve, reject) => {
+    const onClose = (): void => {
+      reject(
+        new Error(`the socket ended before ${end}: ${Buffer.concat(chunks).toString('utf8')}`)
+      );
+    };
+    const onData = (chunk: Buffer): void => {
+      chunks.push(chunk);
+
+      const text = Buffer.concat(chunks).toString('utf8');
+
+      if (text.includes(end)) {
+        socket.off('data', onData);
+        socket.off('close', onClose);
+        resolve(text);
+      }
+    };
+
+    socket.on('data', onData);
+    socket.on('close', onClose);
+  });
+};
+
+/** Writes `octets` on a socket of its own, and counts every byte that came back to its close. */
+const receivedOn = (port: number, octets: string): Promise<number> => {
+  const socket = opened(port, octets);
+  let count = 0;
+
+  socket.on('data', (chunk: Buffer) => {
+    count += chunk.length;
+  });
+
+  return new Promise((resolve) => {
+    socket.on('close', () => {
+      resolve(count);
     });
   });
 };
@@ -310,6 +356,7 @@ test('refuses a request with no Origin from a page of another site, and a naviga
   for (const [headers, path] of [
     [subresource, '/v1/books/2'],
     [navigation, '/v1/shelves/s/books'],
+    [{ ...navigation, 'sec-fetch-site': 'same-site' }, '/v1/shelves/s/books'],
     [{ ...navigation, 'sec-fetch-site': 'same-site' }, '/v1/operations'],
   ] as const) {
     const refused = await send(fixture.port, { headers, method: 'GET', path });
@@ -396,6 +443,9 @@ test('answers a preflight with the methods its URL’s routes take', async () =>
   expect((await preflight('/v1/shelves/1/books/2:archive')).headers).toMatchObject({
     'access-control-allow-methods': 'POST',
   });
+  expect((await preflight('/api/Transcoding/echo')).headers).toMatchObject({
+    'access-control-allow-methods': 'POST',
+  });
   expect((await preflight('/api/Transcoding/getOperation')).headers).toMatchObject({
     'access-control-allow-methods': 'GET, HEAD, POST',
   });
@@ -466,40 +516,15 @@ test('serves the document beadc wrote, byte for byte', async () => {
   expect(
     (
       await send(fixture.port, {
-        headers: { 'if-none-match': `W/${etag}` },
+        headers: { 'if-none-match': served.headers.etag ?? '' },
         method: 'GET',
         path: '/openapi.json',
       })
     ).status
   ).toBe(304);
-  expect(await send(fixture.port, { method: 'HEAD', path: '/openapi.json' })).toMatchObject({
-    body: '',
-    headers: { 'content-length': String(Buffer.byteLength(OPENAPI_DOCUMENT)) },
-    status: 200,
-  });
   expect((await send(fixture.port, { body: '{}', path: '/openapi.json' })).headers).toMatchObject({
     allow: 'GET, HEAD',
   });
-
-  // one given none serves none, and a handler mounted elsewhere leaves that server its other paths
-  const silent = createHTTPGateway({
-    routes: HTTP_ROUTES,
-    transport: createMemoryTransportServer(),
-  });
-
-  const request: IHTTPRequestLike = {
-    destroy: () => {},
-    headers: {},
-    httpVersion: '1.1',
-    httpVersionMajor: 1,
-    method: 'GET',
-    on: () => {},
-    rawHeaders: [],
-    socket: {},
-    url: '/openapi.json',
-  };
-
-  expect(silent.listener(request, {} as IHTTPResponseLike)).toBe(false);
 });
 
 test('holds each caller’s calls and streams to bounds of their own', async () => {
@@ -507,6 +532,27 @@ test('holds each caller’s calls and streams to bounds of their own', async () 
     maximumConnectionsPerAddress: 1,
     maximumExchangesPerAddress: 1,
   });
+  const watch = {
+    body: '{}',
+    lines: [
+      'POST /api/Transcoding/watch HTTP/1.1',
+      'content-type: application/json',
+      'accept: text/event-stream',
+    ],
+  };
+
+  // * a stream holds one of its address's streams, and none of its calls
+  const stream = opened(fixture.port, octetsOf(fixture.port, watch));
+
+  await readUntil(stream, 'data: {}\n\n');
+
+  const second = await exchanged(fixture.port, octetsOf(fixture.port, watch));
+  const call = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+  expect([second.status, call.status]).toEqual([503, 200]);
+  expect(second.headers).toMatchObject({ 'bead-refusal': 'busy', 'retry-after': '1' });
+
+  // a call that hangs holds its address's one call, and a stream still opens beside none
   const abort = new AbortController();
   const hanging = send(fixture.port, {
     body: '{}',
@@ -525,28 +571,8 @@ test('holds each caller’s calls and streams to bounds of their own', async () 
     headers: { 'bead-refusal': 'busy', 'retry-after': '1' },
     status: 503,
   });
-
-  // * a stream holds one of its address's streams, not of its calls: past its call's bound, it opens
-  const stream = new AbortController();
-  const watching = send(fixture.port, {
-    body: '{}',
-    headers: { accept: 'text/event-stream' },
-    path: '/api/Transcoding/watch',
-    signal: stream.signal,
-  });
-
-  watching.catch(() => {});
-  await sleep(100);
-
-  const second = await send(fixture.port, {
-    body: '{}',
-    headers: { accept: 'text/event-stream' },
-    path: '/api/Transcoding/watch',
-  });
-
-  expect(second.status).toBe(503);
   abort.abort();
-  stream.abort();
+  stream.destroy();
   await until(() => {
     return fixture.counts.cancelled === 1;
   });
@@ -634,7 +660,8 @@ test('answers what no gate foresaw 500, reported, none of its words in the probl
 });
 
 test('answers 500 a connection its server failed to draw but by refusing it, reported, with no detail', async () => {
-  // * a transport whose accept throws what no refusal of a connect is
+  // * a transport whose accept throws what no refusal of a connect is; C#'s, a concrete class,
+  // takes no stand-in, and refuses an exchange's port past 65535, which no socket of Node's shows
   await using gateway = createHTTPGateway({
     createServer: (listener) => {
       return createNodeServer(listener);
@@ -747,6 +774,12 @@ test('words each refusal of its gates exactly, none of them what its request car
         status: 431,
         words: 'a token past 1004 bytes',
       },
+      {
+        lines: ['POST /api/Transcoding/whoAmI HTTP/1.1', json, 'authorization: Bearer'],
+        body: '{}',
+        status: 401,
+        words: 'an auth-scheme but Bearer',
+      },
     ],
     plain: [
       {
@@ -823,6 +856,37 @@ test('words each refusal of its gates exactly, none of them what its request car
         reason: 'malformed',
         status: 400,
         words: 'two authorization fields',
+      },
+      ...[
+        [json, json],
+        ['content-type: application/json; boundary=x'],
+        ['content-type: application/json; charset'],
+      ].map((fields) => {
+        return {
+          lines: ['POST /api/Transcoding/echo HTTP/1.1', ...fields],
+          body: '{}',
+          reason: 'type-refused',
+          status: 415,
+          words: "this route's body is application/json, unencoded",
+        };
+      }),
+      {
+        lines: ['POST /api/Transcoding/echo HTTP/1.1', 'content-type: text/plain'],
+        reason: 'type-refused',
+        status: 415,
+        words: "this route's body is application/json, unencoded",
+      },
+      {
+        lines: [
+          'POST /api/Transcoding/echo HTTP/1.1',
+          json,
+          'sec-fetch-site: cross-site',
+          'sec-fetch-mode: navigate',
+        ],
+        body: '{}',
+        reason: 'origin-refused',
+        status: 403,
+        words: 'a request from a page of another site that shows no origin',
       },
     ],
     small: [
@@ -959,22 +1023,15 @@ test('refuses an authorization but elsewhere or bearer-jwt, and a bound that is 
     return createHTTPGateway({ maximumBodyBytes: 0, routes: HTTP_ROUTES, transport });
   }).toThrow(new ProgrammerError('maximumBodyBytes is a whole number above 0, not 0'));
   expect(() => {
+    return createHTTPGateway({ routes: HTTP_ROUTES, transport, window: 0 });
+  }).toThrow(new ProgrammerError('window is a whole number above 0, not 0'));
+  // a C# Window is an int, which holds no 1.5
+  expect(() => {
     return createHTTPGateway({ routes: HTTP_ROUTES, transport, window: 1.5 });
   }).toThrow(new ProgrammerError('window is a whole number above 0, not 1.5'));
 });
 
-test('listens on none of its own when built with no createServer, and reports to a handler until it is off', async () => {
-  {
-    await using silent = createHTTPGateway({
-      routes: HTTP_ROUTES,
-      transport: createMemoryTransportServer(),
-    });
-
-    await expect(silent.start()).rejects.toThrow(
-      new ProgrammerError('a gateway built with no createServer listens on none of its own')
-    );
-  }
-
+test('reports to a handler until it is off', async () => {
   await using fixture = await startTranscoding();
   const reported = reportedBy(fixture.gateway);
   const off: unknown[] = [];
@@ -1057,39 +1114,66 @@ test('writes a text or a raw stream’s data as a JSON string and a result it ca
 });
 
 test('answers 500 a result its mapping holds no form of, reported, in the mapping’s words', async () => {
-  // * an Edges whose mask holds `foo_`, a path whose lowerCamelCase does not read back
+  // * raw's route told its result is an Edges: the bytes its server echoes, a Value of NaN, a mask of foo_
   await using fixture = await startTranscoding({ routes: rawAsEdges() });
   const reported = reportedBy(fixture.gateway);
+  const nan = toBinary(
+    EdgesSchema,
+    create(EdgesSchema, { value: { kind: { case: 'numberValue', value: Number.NaN } } })
+  );
   const answered = await send(fixture.port, {
-    body: '\u001a\u0006\u000a\u0004foo_',
+    body: nan,
     headers: { 'content-type': 'application/octet-stream' },
     path: '/api/Transcoding/raw',
   });
 
   expect(answered).toMatchObject({
+    body: '{"detail":"a Value whose number is not finite","status":500,"title":"Internal Server Error","type":"about:blank"}',
+    status: 500,
+  });
+  expect(reported).toEqual(['a Value whose number is not finite']);
+
+  const unwritable = await send(fixture.port, {
+    body: toBinary(EdgesSchema, create(EdgesSchema, { mask: { paths: ['foo_'] } })),
+    headers: { 'content-type': 'application/octet-stream' },
+    path: '/api/Transcoding/raw',
+  });
+
+  expect(unwritable).toMatchObject({
     body: '{"detail":"a FieldMask path whose lowerCamelCase does not read back","status":500,"title":"Internal Server Error","type":"about:blank"}',
     status: 500,
   });
-  expect(reported).toEqual(['a FieldMask path whose lowerCamelCase does not read back']);
+  expect(reported).toEqual([
+    'a Value whose number is not finite',
+    'a FieldMask path whose lowerCamelCase does not read back',
+  ]);
 });
 
 test('refuses a query beside a body of a json, text or raw route, and a variable that does not decode, 400', async () => {
   await using fixture = await startTranscoding();
-  const raw = await send(fixture.port, {
-    body: 'x',
-    headers: { 'content-type': 'application/octet-stream' },
-    path: '/api/Transcoding/raw?a=1',
-  });
-  const undecoded = await send(fixture.port, { method: 'GET', path: '/v1/shelves/%FF/books/2' });
-
   const undecodable = (detail: string, place = ''): string => {
     return `{"code":50,"detail":"${detail}",${place}"scope":"protocol","status":400,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}`;
   };
 
-  expect(raw).toMatchObject({
-    body: undecodable('a query beside a body of the whole request'),
-    status: 400,
-  });
+  for (const [path, type, body] of [
+    ['raw', 'application/octet-stream', 'x'],
+    ['text', 'text/plain', 'x'],
+    ['json', 'application/json', '1'],
+  ] as const) {
+    const queried = await send(fixture.port, {
+      body,
+      headers: { 'content-type': type },
+      path: `/api/Transcoding/${path}?a=1`,
+    });
+
+    expect(queried, path).toMatchObject({
+      body: undecodable('a query beside a body of the whole request'),
+      status: 400,
+    });
+  }
+
+  const undecoded = await send(fixture.port, { method: 'GET', path: '/v1/shelves/%FF/books/2' });
+
   expect(undecoded).toMatchObject({
     body: undecodable('a value whose bytes are not UTF-8', '"parameter":"name",'),
     status: 400,
@@ -1098,14 +1182,351 @@ test('refuses a query beside a body of a json, text or raw route, and a variable
 
 test('answers 304 a request for the document under an if-none-match of any entity tag', async () => {
   await using fixture = await startTranscoding();
+  const { etag } = (await send(fixture.port, { method: 'GET', path: '/openapi.json' })).headers;
 
-  expect(
-    (
-      await send(fixture.port, {
-        headers: { 'if-none-match': ' * ' },
-        method: 'GET',
-        path: '/openapi.json',
+  // * any tag, among others or alone, and a weak tag of its own compared as its strong one
+  for (const asked of [' * ', '"other", *', `W/${etag ?? ''}`]) {
+    const held = await send(fixture.port, {
+      headers: { 'if-none-match': asked },
+      method: 'GET',
+      path: '/openapi.json',
+    });
+
+    expect(held.status, asked).toBe(304);
+  }
+});
+
+test('takes its hosts and proxies from its policy or beside it, and refuses one given in both', async () => {
+  const members = { hosts: ['api.example'], trustedProxies: ['127.0.0.1'], unnamedProxies: 0 };
+  const policy = httpPolicyOf(members);
+  await using fromPolicy = await startTranscoding({ policy });
+  await using beside = await startTranscoding(members);
+
+  for (const fixture of [fromPolicy, beside]) {
+    const drawn: string[] = [];
+
+    fixture.server.transport.on('connection', (...[, , connectionHandle]) => {
+      drawn.push(connectionHandle);
+    });
+
+    // * a host it takes, and its caller's address as the proxy it trusts forwards it
+    const taken = await send(fixture.port, {
+      headers: { host: 'api.example', 'x-forwarded-for': '203.0.113.9' },
+      method: 'GET',
+      path: '/v1/books/2',
+    });
+    const refused = await send(fixture.port, {
+      headers: { host: 'evil.example' },
+      method: 'GET',
+      path: '/v1/books/2',
+    });
+
+    expect([taken.status, refused.status]).toEqual([200, 403]);
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0]).toMatch(/^type=MEMORY;ip=203\.0\.113\.9;/u);
+  }
+
+  // a member given in its policy and beside it, whatever its value
+  const transport = createMemoryTransportServer();
+
+  expect(() => {
+    return createHTTPGateway({ hosts: ['api.example'], policy, routes: HTTP_ROUTES, transport });
+  }).toThrow(new ProgrammerError('hosts is given in the policy and beside it: give it once'));
+  expect(() => {
+    return createHTTPGateway({
+      policy: httpPolicyOf({ unnamedProxies: 1 }),
+      routes: HTTP_ROUTES,
+      transport,
+      unnamedProxies: 0,
+    });
+  }).toThrow(
+    new ProgrammerError('unnamedProxies is given in the policy and beside it: give it once')
+  );
+});
+
+test('refuses a route off its template’s grammar, and listens once', async () => {
+  await using fixture = await startTranscoding();
+  const echo = HTTP_ROUTES.find((init) => {
+    return init.procedure === TranscodingProcedures.echo;
+  });
+
+  if (echo === undefined) {
+    throw new Error('no echo in the route table');
+  }
+
+  const crooked: IHttpRouteInit = { ...echo, routes: [{ method: 'GET', template: '/v1/{name' }] };
+  const ownOf = (): IHTTPGateway => {
+    return createHTTPGateway({
+      createServer: (listener) => {
+        return createNodeServer(listener);
+      },
+      routes: HTTP_ROUTES,
+      transport: fixture.memory,
+    });
+  };
+
+  // * a template off http.proto's grammar is refused as the gateway is built, naming its route
+  expect(() => {
+    return createHTTPGateway({ routes: [crooked], transport: fixture.memory });
+  }).toThrow(new ProgrammerError("echo's route GET /v1/{name: a variable that does not close"));
+
+  // one that listens on localhost, its loopbacks, listens once; one that listens on none stops at once
+  await using gateway = ownOf();
+  const listening = await gateway.start();
+
+  await expect(gateway.start()).rejects.toThrow(new ProgrammerError('a gateway listens once'));
+  expect(listening.address).toBe('localhost');
+  expect((await send(listening.port, { method: 'GET', path: '/v1/books/2' })).status).toBe(200);
+
+  // a port another listener holds: its listen fails, and it listens on none
+  await using held = ownOf();
+  const { port } = await held.start({ address: '127.0.0.1' });
+  await using second = ownOf();
+
+  await expect(second.start({ address: '127.0.0.1', port })).rejects.toMatchObject({
+    code: 'EADDRINUSE',
+  });
+  await second.stop();
+
+  await using never = ownOf();
+
+  await never.stop();
+});
+
+test('answers as the endpoint an application maps, and a caller of no address as local', async () => {
+  await using fixture = await startTranscoding();
+  const drawn: string[] = [];
+
+  fixture.server.transport.on('connection', (...[, , connectionHandle]) => {
+    drawn.push(connectionHandle);
+  });
+
+  // * built with no createServer, it listens on none of its own: an application's server mounts it
+  await using mounted = createHTTPGateway({ routes: HTTP_ROUTES, transport: fixture.memory });
+
+  await expect(mounted.start()).rejects.toThrow(
+    new ProgrammerError('a gateway built with no createServer listens on none of its own')
+  );
+
+  const application = createNodeServer((request, response) => {
+    if (request.url === '/own') {
+      response.end('its own');
+
+      return;
+    }
+
+    // an exchange handed on with no remote address, as a test host's: its caller is local
+    const handed: IHTTPRequestLike =
+      request.headers['x-handed'] === 'local'
+        ? (Object.create(request, { socket: { value: {} } }) as IHTTPRequestLike)
+        : request;
+
+    // ! where C#'s endpoint, its application's fallback, answers 404 path-unknown, a handler
+    // gives back to its server each path it serves none of
+    if (!mounted.listener(handed, response)) {
+      response.writeHead(404);
+      response.end("the application's own");
+    }
+  });
+
+  await new Promise<void>((resolve) => {
+    application.listen(0, '127.0.0.1', resolve);
+  });
+
+  try {
+    const address = application.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const book = '{"name":"2","title":"A tale"}';
+
+    expect((await send(port, { method: 'GET', path: '/own' })).body).toBe('its own');
+    expect((await send(port, { method: 'GET', path: '/v1/books/2' })).body).toBe(book);
+    expect(await send(port, { method: 'GET', path: '/nope' })).toMatchObject({
+      body: "the application's own",
+      status: 404,
+    });
+    expect(
+      await send(port, { headers: { 'x-handed': 'local' }, method: 'GET', path: '/v1/books/2' })
+    ).toMatchObject({ body: book, status: 200 });
+    expect(drawn.at(-1)).toMatch(/^type=MEMORY;ip=local;/u);
+  } finally {
+    application.closeAllConnections();
+    await new Promise((resolve) => {
+      application.close(resolve);
+    });
+  }
+
+  // one given no document serves none: its path goes back to the server it is mounted on
+  const request: IHTTPRequestLike = {
+    destroy: () => {},
+    headers: {},
+    httpVersion: '1.1',
+    httpVersionMajor: 1,
+    method: 'GET',
+    on: () => {},
+    rawHeaders: [],
+    socket: {},
+    url: '/openapi.json',
+  };
+
+  expect(mounted.listener(request, {} as IHTTPResponseLike)).toBe(false);
+});
+
+test('answers each request at the edges of its gates', async () => {
+  await using fixture = await startTranscoding();
+  const { port } = fixture;
+
+  // * a field of a control character: what HTTP refuses of its own, unmarked, its body empty
+  const bell = await exchanged(
+    port,
+    octetsOf(port, { lines: ['GET /v1/books/2 HTTP/1.1', 'x-other: a\u0007b'] })
+  );
+
+  expect([bell.status, bell.headers['bead-refusal'], bell.body]).toEqual([400, undefined, '']);
+
+  // an absolute-form target: its path and query, its authority aside
+  const absolute = await exchanged(
+    port,
+    octetsOf(port, {
+      lines: [`GET http://127.0.0.1:${String(port)}/v1/books/2?revision=3 HTTP/1.1`],
+    })
+  );
+
+  expect(absolute).toMatchObject({
+    body: '{"name":"2","title":"A tale","pages":"3"}',
+    status: 200,
+  });
+
+  // a range of application/* weighed below text/event-stream: a stream; a weight it cannot read is 1
+  for (const accept of [
+    'application/*;q=0.5, text/event-stream',
+    'text/event-stream;q=x;level, application/json',
+  ]) {
+    const stream = opened(
+      port,
+      octetsOf(port, {
+        body: '{}',
+        lines: [
+          'POST /api/Transcoding/watch HTTP/1.1',
+          'content-type: application/json',
+          `accept: ${accept}`,
+        ],
       })
-    ).status
-  ).toBe(304);
+    );
+
+    expect(await readUntil(stream, 'data: {}\n\n'), accept).toContain(
+      'event: result\nid: 1\ndata: {}\n\n'
+    );
+    stream.destroy();
+  }
+
+  // a raw route's query of empty parameters alone binds nothing, a charset quoted and an identity encoding are taken
+  for (const lines of [
+    ['POST /api/Transcoding/raw?& HTTP/1.1', 'content-type: application/octet-stream'],
+    [
+      'POST /api/Transcoding/raw HTTP/1.1',
+      'content-type: application/octet-stream; charset="UTF-8"',
+      'content-encoding: identity',
+    ],
+  ]) {
+    expect(await exchanged(port, octetsOf(port, { body: 'hi', lines }))).toMatchObject({
+      body: 'hi',
+      status: 200,
+    });
+  }
+
+  // a call that hangs and one beside it of the same address: each held, then each let go
+  const abort = new AbortController();
+  const hanging = send(port, { body: '{}', path: '/api/Transcoding/hang', signal: abort.signal });
+
+  hanging.catch(() => {});
+  await until(() => {
+    return fixture.counts.hanging === 1;
+  });
+  expect((await send(port, { body: '{"anInt32":2}', path: '/api/Transcoding/echo' })).body).toBe(
+    '{"anInt32":2}'
+  );
+  abort.abort();
+});
+
+test('serves its document to a HEAD and to a preflight that asks for no field', async () => {
+  await using fixture = await startTranscoding({ origins: [ORIGIN] });
+
+  expect(await send(fixture.port, { method: 'HEAD', path: '/openapi.json' })).toMatchObject({
+    body: '',
+    headers: { 'content-length': String(Buffer.byteLength(OPENAPI_DOCUMENT)) },
+    status: 200,
+  });
+
+  // a preflight from an origin it lists that asks for no field: GET and HEAD, authorization and any other
+  expect(
+    await send(fixture.port, {
+      headers: { 'access-control-request-method': 'GET', origin: ORIGIN },
+      method: 'OPTIONS',
+      path: '/openapi.json',
+    })
+  ).toMatchObject({
+    headers: {
+      'access-control-allow-headers': 'authorization, *',
+      'access-control-allow-methods': 'GET, HEAD',
+    },
+    status: 204,
+  });
+});
+
+test('ends a stream whose notification its stock library refuses with 502 as its last event', async () => {
+  // * ticks' notification told it is an Edges: a Tick's remaining, field 1 a varint, where an Edges' at is a message
+  await using fixture = await startTranscoding({
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.ticks
+        ? {
+            ...init,
+            notification: EdgesSchema,
+            procedure: { ...init.procedure, notification: TranscodingProcedures.echoEdges.result },
+          }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  const ticks = await send(fixture.port, {
+    body: '{"from":2}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/ticks',
+  });
+  const begun =
+    'event: result\nid: 1\ndata: {"ticks":2}\n\nevent: failure\nid: 2\ndata: {"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}\n\n';
+
+  expect(ticks.status).toBe(200);
+  expect(ticks.body.slice(0, begun.length)).toBe(begun);
+  expect(reported).toHaveLength(1);
+});
+
+test('writes a comment on a quiet stream each heartbeat on its clock, and drops one past maximumUnsentBytes', async () => {
+  const watch = {
+    body: '{}',
+    lines: [
+      'POST /api/Transcoding/watch HTTP/1.1',
+      'content-type: application/json',
+      'accept: text/event-stream',
+    ],
+  };
+
+  {
+    const clock = createTestClock();
+    await using fixture = await startTranscoding({ clock, heartbeat: 1_000 });
+    const stream = opened(fixture.port, octetsOf(fixture.port, watch));
+
+    await readUntil(stream, 'data: {}\n\n');
+
+    // * nothing written for a heartbeat: a comment, which no EventSource dispatches
+    const comment = readUntil(stream, ':\n\r\n');
+
+    await clock.tickAsync(1_000);
+    expect((await comment).endsWith(':\n\r\n')).toBe(true);
+    stream.destroy();
+  }
+
+  // a stream's write past what its response may hold unsent: dropped, its socket aborted, nothing written
+  await using bounded = await startTranscoding({ maximumUnsentBytes: 1 });
+
+  expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
 });

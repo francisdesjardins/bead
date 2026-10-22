@@ -40,6 +40,18 @@ internal sealed class TranscodingService : IAsyncDisposable
         }
     }
 
+    /// <summary>The calls of hang that ended cancelled.</summary>
+    public int Cancelled
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _cancelled;
+            }
+        }
+    }
+
     /// <summary>The detail of each command of ask that failed, in their order.</summary>
     public IReadOnlyList<string> Refused
     {

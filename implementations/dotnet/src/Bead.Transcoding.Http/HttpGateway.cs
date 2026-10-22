@@ -43,6 +43,9 @@ public sealed class HttpGateway : IAsyncDisposable
     // the methods in the order an allow names them (transcoding 3.10)
     private static readonly string[] MethodOrder = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 
+    // the methods a rule of http.proto's names, in upper case
+    private static readonly HashSet<string> RuleMethods = new(["GET", "PUT", "POST", "DELETE", "PATCH"], StringComparer.Ordinal);
+
     private readonly HttpGatewayOptions _options;
     private readonly Resolved _policy;
     private readonly ProxyTrust _proxyTrust;
@@ -66,9 +69,10 @@ public sealed class HttpGateway : IAsyncDisposable
 
     /// <summary>
     /// A gateway, not yet listening, its options held: an entry of its hosts, origins or proxies none
-    /// takes, a member that parts from its policy, or a route of a template off <c>http.proto</c>'s
-    /// grammar is an <see cref="ArgumentException"/>; a bound not above 0, or a duration off its
-    /// range, an <see cref="ArgumentOutOfRangeException"/>.
+    /// takes, a member that parts from its policy, a route of a method none of <c>http.proto</c>'s or
+    /// of a template off its grammar, or a notification where its procedure does not notify, or none
+    /// where it does, is an <see cref="ArgumentException"/>; a bound not above 0, or a duration off
+    /// its range, an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
     public HttpGateway(HttpGatewayOptions options)
     {
@@ -95,9 +99,23 @@ public sealed class HttpGateway : IAsyncDisposable
 
         foreach (var route in options.Routes)
         {
+            var name = route.Procedure.ProcedureName;
+
+            // a notification exactly where its procedure notifies, by the kind its descriptor sets
+            if ((route.Notification is null) == (route.Procedure.ProcedureKind == ProcedureKind.Notifies))
+            {
+                throw new ArgumentException($"{name}'s notification is its route's exactly where it notifies", nameof(options));
+            }
+
             for (var index = 0; index < route.Routes.Count; index += 1)
             {
                 var rule = route.Routes[index];
+
+                if (!RuleMethods.Contains(rule.Method) || rule.Template is null)
+                {
+                    throw new ArgumentException($"{name}'s route is a method of http.proto's and a template", nameof(options));
+                }
+
                 HttpTemplate template;
 
                 try
@@ -106,7 +124,7 @@ public sealed class HttpGateway : IAsyncDisposable
                 }
                 catch (FormatException reason)
                 {
-                    throw new ArgumentException($"{route.Procedure.ProcedureName}'s route {rule.Method} {rule.Template}: {reason.Message}", nameof(options), reason);
+                    throw new ArgumentException($"{name}'s route {rule.Method} {rule.Template}: {reason.Message}", nameof(options), reason);
                 }
 
                 _served.Add(new Served(route, rule, template));
@@ -482,16 +500,17 @@ public sealed class HttpGateway : IAsyncDisposable
                 {
                     var pair = parameter.Split('=', 2);
 
-                    if (pair.Length == 2 && pair[0].Trim().Equals("q", StringComparison.OrdinalIgnoreCase)
-                        && double.TryParse(pair[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var given))
+                    // * a weight off the qvalue grammar is as none given, 1; of two it reads, the last stands
+                    if (pair.Length == 2 && pair[0].Trim().Equals("q", StringComparison.OrdinalIgnoreCase) && IsQValue(pair[1].Trim()))
                     {
-                        weight = given;
+                        weight = double.Parse(pair[1].Trim(), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture);
                     }
                 }
 
+                // the first range of the type itself stands, as the first of a specificity does
                 if (type == EventStreamType)
                 {
-                    stream = weight;
+                    stream ??= weight;
                 }
 
                 var specificity = type switch
@@ -510,6 +529,36 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         return stream is > 0 and var weighed && weighed >= json.Weight;
+    }
+
+    // whether a weight is as RFC 9110 §12.4.2's qvalue writes it: 0 or 1, then up to three decimals,
+    // only zeros after a 1
+    private static bool IsQValue(string text)
+    {
+        if (text.Length is 0 or > 5 || (text[0] != '0' && text[0] != '1'))
+        {
+            return false;
+        }
+
+        if (text.Length == 1)
+        {
+            return true;
+        }
+
+        if (text[1] != '.')
+        {
+            return false;
+        }
+
+        for (var index = 2; index < text.Length; index += 1)
+        {
+            if (text[0] == '0' ? !char.IsAsciiDigit(text[index]) : text[index] != '0')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // whether a body's type is its route's, its type compared case-insensitively, no parameter but a
@@ -539,9 +588,10 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             var pair = parameter.Split('=', 2);
 
+            // a value as a token or a quoted string (RFC 9110 §5.6.6)
             return pair.Length == 2
                 && pair[0].Trim().Equals("charset", StringComparison.OrdinalIgnoreCase)
-                && pair[1].Trim().Trim('"').Equals("utf-8", StringComparison.OrdinalIgnoreCase);
+                && (pair[1].Trim().Equals("utf-8", StringComparison.OrdinalIgnoreCase) || pair[1].Trim().Equals("\"utf-8\"", StringComparison.OrdinalIgnoreCase));
         });
     }
 

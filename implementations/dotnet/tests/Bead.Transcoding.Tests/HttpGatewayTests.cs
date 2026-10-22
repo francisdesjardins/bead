@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Bead.Transcoding.Http;
@@ -120,29 +121,37 @@ public sealed class HttpGatewayTests
 
         try
         {
-            for (var call = 0; call < 3; call += 1)
+            var bodies = await Task.WhenAll(Enumerable.Range(1, 2).Select(async (value) =>
             {
-                using var answered = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{\"anInt32\":1}"), Cancelled);
+                using var answered = await started.Client.SendAsync(Json("/api/Transcoding/echo", $"{{\"anInt32\":{value}}}"), Cancelled);
 
-                Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
-                Assert.Equal("{\"anInt32\":1}", await answered.Content.ReadAsStringAsync(Cancelled));
-            }
+                return await answered.Content.ReadAsStringAsync(Cancelled);
+            }));
 
+            Assert.Equal(["{\"anInt32\":1}", "{\"anInt32\":2}"], bodies.Order(StringComparer.Ordinal));
             await Until(() =>
             {
                 lock (closed)
                 {
-                    return closed.Count == 3;
+                    return closed.Count == 2;
                 }
             });
 
-            // * three exchanges, three connections, each of its caller's address, each closed
-            Assert.Equal(3, drawn.Distinct().Count());
+            // * two exchanges, two connections, each of its caller's address, each closed
+            Assert.Equal(2, drawn.Count);
+            Assert.Equal(2, drawn.Distinct().Count());
             Assert.All(drawn, (handle) =>
             {
                 Assert.StartsWith("type=MEMORY;ip=127.0.0.1;", handle, StringComparison.Ordinal);
             });
             Assert.Equal(drawn.Order(StringComparer.Ordinal), closed.Order(StringComparer.Ordinal));
+
+            // a refusal of its own, or a body its reading refuses, draws none
+            using var unread = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{\"nope\":1}"), Cancelled);
+            using var unknown = await started.Client.GetAsync(new Uri("/nope", UriKind.Relative), Cancelled);
+
+            Assert.Equal((HttpStatusCode.BadRequest, HttpStatusCode.NotFound), (unread.StatusCode, unknown.StatusCode));
+            Assert.Equal(2, drawn.Count);
         }
         finally
         {
@@ -159,36 +168,53 @@ public sealed class HttpGatewayTests
             return options with { Authorization = GatewayAuthorization.BearerJwt };
         });
 
+        static HttpRequestMessage WhoAmI(string? authorization)
+        {
+            var request = Json("/api/Transcoding/whoAmI", "{}");
+
+            if (authorization is not null)
+            {
+                request.Headers.TryAddWithoutValidation("authorization", authorization);
+            }
+
+            return request;
+        }
+
         try
         {
-            var asked = Json("/api/Transcoding/whoAmI", "{}");
+            using var who = await elsewhere.Client.SendAsync(WhoAmI(" Bearer good "), Cancelled);
 
-            asked.Headers.TryAddWithoutValidation("authorization", "Bearer good");
+            Assert.Equal((HttpStatusCode.OK, "{\"session\":\"ada\"}"), (who.StatusCode, await who.Content.ReadAsStringAsync(Cancelled)));
 
-            using var who = await elsewhere.Client.SendAsync(asked, Cancelled);
+            using var none = await elsewhere.Client.SendAsync(WhoAmI(null), Cancelled);
+            using var bad = await elsewhere.Client.SendAsync(WhoAmI("Bearer bad"), Cancelled);
 
-            Assert.Equal("{\"session\":\"ada\"}", await who.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal((HttpStatusCode.Unauthorized, "Bearer"), (none.StatusCode, none.Headers.WwwAuthenticate.ToString()));
+            Assert.Equal((HttpStatusCode.Unauthorized, "Bearer error=\"invalid_token\""), (bad.StatusCode, bad.Headers.WwwAuthenticate.ToString()));
 
             // under bearer-jwt, a token presented as a JWT, which a server with no JWT verifier refuses
             var reported = ReportedBy(jwt.Gateway);
-            var token = Json("/api/Transcoding/whoAmI", "{}");
-
-            token.Headers.TryAddWithoutValidation("authorization", "bearer a.b.c");
-
-            using var unsupported = await jwt.Client.SendAsync(token, Cancelled);
+            using var unsupported = await jwt.Client.SendAsync(WhoAmI("bearer a.b.c"), Cancelled);
 
             Assert.Equal(HttpStatusCode.InternalServerError, unsupported.StatusCode);
-            Assert.Contains("\"code\":36", await unsupported.Content.ReadAsStringAsync(Cancelled), StringComparison.Ordinal);
+
+            using (var problem = JsonDocument.Parse(await unsupported.Content.ReadAsStringAsync(Cancelled)))
+            {
+                Assert.Equal((36, "CREDENTIAL_UNSUPPORTED"), (problem.RootElement.GetProperty("code").GetInt32(), problem.RootElement.GetProperty("title").GetString()));
+            }
+
             Assert.StartsWith("the server takes none of the scheme this gateway presents: ", Assert.Single(reported), StringComparison.Ordinal);
 
-            var basic = Json("/api/Transcoding/whoAmI", "{}");
-
-            basic.Headers.TryAddWithoutValidation("authorization", "Basic YTpi");
-
-            using var scheme = await jwt.Client.SendAsync(basic, Cancelled);
+            using var scheme = await jwt.Client.SendAsync(WhoAmI("Basic YTpi"), Cancelled);
 
             Assert.Equal(HttpStatusCode.Unauthorized, scheme.StatusCode);
             Assert.Equal("Bearer error=\"invalid_request\"", scheme.Headers.WwwAuthenticate.ToString());
+
+            // a token its request's block holds, 1,004 bytes, and one past it
+            using var held = await jwt.Client.SendAsync(WhoAmI($"Bearer {new string('a', 1_004)}"), Cancelled);
+            using var past = await jwt.Client.SendAsync(WhoAmI($"Bearer {new string('a', 1_005)}"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.InternalServerError, HttpStatusCode.RequestHeaderFieldsTooLarge), (held.StatusCode, past.StatusCode));
         }
         finally
         {
@@ -202,34 +228,50 @@ public sealed class HttpGatewayTests
     {
         var started = await Started();
 
-        static HttpRequestMessage Fetched(string path, (string Site, string Mode) metadata)
+        static HttpRequestMessage Fetched(string path, (string? Site, string? Mode, string? Origin) metadata)
         {
             var request = new HttpRequestMessage(HttpMethod.Get, path);
 
-            request.Headers.TryAddWithoutValidation("sec-fetch-site", metadata.Site);
-            request.Headers.TryAddWithoutValidation("sec-fetch-mode", metadata.Mode);
+            foreach (var (name, value) in new[] { ("sec-fetch-site", metadata.Site), ("sec-fetch-mode", metadata.Mode), ("origin", metadata.Origin) })
+            {
+                if (value is not null)
+                {
+                    request.Headers.TryAddWithoutValidation(name, value);
+                }
+            }
 
             return request;
         }
 
         try
         {
-            // * an <img> of another site: no Origin, refused
-            using var subresource = await started.Client.SendAsync(Fetched("/v1/books/2", ("cross-site", "no-cors")), Cancelled);
+            // a navigation to what reads alone: the document, and a GET on a method marked NO_SIDE_EFFECTS
+            using var document = await started.Client.SendAsync(Fetched("/openapi.json", ("cross-site", "navigate", null)), Cancelled);
+            using var marked = await started.Client.SendAsync(Fetched("/v1/books/2", ("cross-site", "navigate", null)), Cancelled);
 
-            Assert.Equal(HttpStatusCode.Forbidden, subresource.StatusCode);
-            Assert.Equal("origin-refused", subresource.Headers.GetValues("bead-refusal").Single());
+            Assert.Equal((HttpStatusCode.OK, HttpStatusCode.OK), (document.StatusCode, marked.StatusCode));
 
-            // a navigation to a get rule of a method not marked NO_SIDE_EFFECTS: refused
-            using var unmarked = await started.Client.SendAsync(Fetched("/v1/shelves/s/books", ("same-site", "navigate")), Cancelled);
+            // * an <img> of another site: no Origin, refused; a navigation to a get rule of a method
+            // not marked NO_SIDE_EFFECTS: refused
+            foreach (var (path, site, mode) in new[]
+            {
+                ("/v1/books/2", "cross-site", "no-cors"),
+                ("/v1/shelves/s/books", "cross-site", "navigate"),
+                ("/v1/shelves/s/books", "same-site", "navigate"),
+                ("/v1/operations", "same-site", "navigate"),
+            })
+            {
+                using var refused = await started.Client.SendAsync(Fetched(path, (site, mode, null)), Cancelled);
 
-            Assert.Equal(HttpStatusCode.Forbidden, unmarked.StatusCode);
+                Assert.Equal((HttpStatusCode.Forbidden, "origin-refused"), (refused.StatusCode, refused.Headers.GetValues("bead-refusal").Single()));
+            }
 
-            // a navigation to a get rule of a marked one, and a request of its own origin: taken
-            using var marked = await started.Client.SendAsync(Fetched("/v1/books/2", ("cross-site", "navigate")), Cancelled);
-            using var own = await started.Client.SendAsync(Fetched("/v1/shelves/s/books", ("same-origin", "no-cors")), Cancelled);
+            // its own origin's, and one from no browser, taken; an origin shown is judged by its own gate
+            using var own = await started.Client.SendAsync(Fetched("/v1/shelves/s/books", ("same-origin", "no-cors", null)), Cancelled);
+            using var browserless = await started.Client.SendAsync(Fetched("/v1/shelves/s/books", (null, null, null)), Cancelled);
+            using var shown = await started.Client.SendAsync(Fetched("/v1/shelves/s/books", ("cross-site", "no-cors", Origin)), Cancelled);
 
-            Assert.Equal((HttpStatusCode.OK, HttpStatusCode.OK), (marked.StatusCode, own.StatusCode));
+            Assert.Equal((HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.OK), (own.StatusCode, browserless.StatusCode, shown.StatusCode));
         }
         finally
         {
@@ -258,6 +300,8 @@ public sealed class HttpGatewayTests
             using var answered = await started.Client.SendAsync(reconnection, Cancelled);
 
             Assert.Equal(HttpStatusCode.NoContent, answered.StatusCode);
+            Assert.Empty(await answered.Content.ReadAsByteArrayAsync(Cancelled));
+            Assert.Null(answered.Content.Headers.ContentType);
             Assert.Equal(0, Volatile.Read(ref drawn));
 
             // the same request, no stream asked: a call, which subscribes nothing
@@ -300,7 +344,30 @@ public sealed class HttpGatewayTests
             Assert.Equal("GET, HEAD, PATCH", book.Headers.GetValues("access-control-allow-methods").Single());
             Assert.Equal("authorization, content-type, *", book.Headers.GetValues("access-control-allow-headers").Single());
             Assert.Equal(Origin, book.Headers.GetValues("access-control-allow-origin").Single());
+            Assert.Equal("7200", book.Headers.GetValues("access-control-max-age").Single());
             Assert.Equal("POST", echo.Headers.GetValues("access-control-allow-methods").Single());
+
+            foreach (var (path, methods) in new[]
+            {
+                ("/v1/shelves/1/books/2:archive", "POST"),
+                ("/api/Transcoding/getOperation", "GET, HEAD, POST"),
+                ("/openapi.json", "GET, HEAD"),
+            })
+            {
+                using var answered = await started.Client.SendAsync(Preflight(path), Cancelled);
+
+                Assert.Equal(methods, answered.Headers.GetValues("access-control-allow-methods").Single());
+            }
+
+            // from an origin it does not name, refused before any preflight
+            var other = new HttpRequestMessage(HttpMethod.Options, "/api/Transcoding/echo");
+
+            other.Headers.TryAddWithoutValidation("origin", "https://other.example");
+            other.Headers.TryAddWithoutValidation("access-control-request-method", "POST");
+
+            using var refused = await started.Client.SendAsync(other, Cancelled);
+
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
         }
         finally
         {
@@ -337,6 +404,27 @@ public sealed class HttpGatewayTests
         {
             await Stopped(started);
         }
+
+        // and a call past its timeout ends cancelled too, answered 504
+        var timed = await Started((options) =>
+        {
+            return options with { Timeout = TimeSpan.FromMilliseconds(50) };
+        });
+
+        try
+        {
+            using var answered = await timed.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+
+            Assert.Equal(HttpStatusCode.GatewayTimeout, answered.StatusCode);
+            await Until(() =>
+            {
+                return timed.Service.Cancelled == 1;
+            });
+        }
+        finally
+        {
+            await Stopped(timed);
+        }
     }
 
     [Fact]
@@ -367,10 +455,13 @@ public sealed class HttpGatewayTests
             using var served = await started.Client.GetAsync(new Uri("/openapi.json", UriKind.Relative), Cancelled);
             var bytes = await served.Content.ReadAsByteArrayAsync(Cancelled);
 
-            // * the file beadc wrote, which its route table embeds as it is
+            // * the file beadc wrote, which its route table embeds as it is; the TypeScript output
+            // writes no file of it apart
             Assert.Equal(Document, bytes);
             Assert.Equal(HttpRoutes.OpenApiDocument.ToArray(), bytes);
             Assert.Equal("no-cache", served.Headers.CacheControl?.ToString());
+            Assert.Equal("application/json", served.Content.Headers.ContentType?.ToString());
+            Assert.Equal($"\"{Convert.ToHexStringLower(SHA256.HashData(Document))}\"", served.Headers.ETag?.ToString());
 
             var again = new HttpRequestMessage(HttpMethod.Get, "/openapi.json");
 
@@ -379,6 +470,10 @@ public sealed class HttpGatewayTests
             using var held = await started.Client.SendAsync(again, Cancelled);
 
             Assert.Equal(HttpStatusCode.NotModified, held.StatusCode);
+
+            using var posted = await started.Client.SendAsync(Json("/openapi.json", "{}"), Cancelled);
+
+            Assert.Equal("GET, HEAD", string.Join(", ", posted.Content.Headers.Allow));
         }
         finally
         {
@@ -411,10 +506,11 @@ public sealed class HttpGatewayTests
             using var call = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
 
             Assert.Equal((HttpStatusCode.OK, HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK), (stream.StatusCode, second.StatusCode, call.StatusCode));
-            Assert.Equal("1", second.Headers.RetryAfter?.ToString());
+            Assert.Equal(("busy", "1"), (second.Headers.GetValues("bead-refusal").Single(), second.Headers.RetryAfter?.ToString()));
 
             // a call that hangs holds its address's one call, and a stream still opens beside none
-            var hanging = started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+            using var aborting = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            var hanging = started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), aborting.Token);
 
             await Until(() =>
             {
@@ -424,7 +520,30 @@ public sealed class HttpGatewayTests
             using var refused = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
-            _ = hanging;
+            Assert.Equal(("busy", "1"), (refused.Headers.GetValues("bead-refusal").Single(), refused.Headers.RetryAfter?.ToString()));
+
+            // both freed as their exchanges end
+            await aborting.CancelAsync();
+            stream.Dispose();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return hanging;
+            });
+            await Until(() =>
+            {
+                return started.Service.Cancelled == 1;
+            });
+
+            var freed = HttpStatusCode.ServiceUnavailable;
+
+            for (var since = TimeProvider.System.GetTimestamp(); freed != HttpStatusCode.OK && TimeProvider.System.GetElapsedTime(since) < Patience;)
+            {
+                using var echoed = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
+
+                freed = echoed.StatusCode;
+            }
+
+            Assert.Equal(HttpStatusCode.OK, freed);
         }
         finally
         {
@@ -532,7 +651,8 @@ public sealed class HttpGatewayTests
         await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
         var reported = ReportedBy(gateway);
 
-        // * an exchange handed on with a port no connect takes: refused before its server sees it
+        // * an exchange handed on with a port no connect takes: refused before its server sees it; the
+        // TypeScript side's transport takes a stand-in that fails, which a sealed class takes none of
         var context = new DefaultHttpContext();
         var body = new MemoryStream();
 
@@ -648,6 +768,39 @@ public sealed class HttpGatewayTests
         {
             _ = new HttpGateway(options with { Window = 0 });
         }).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Reports_to_a_handler_until_it_is_off()
+    {
+        var started = await Started();
+        var reported = ReportedBy(started.Gateway);
+        var off = new List<Exception>();
+
+        void Handler(Exception reason)
+        {
+            lock (off)
+            {
+                off.Add(reason);
+            }
+        }
+
+        started.Gateway.Error += Handler;
+        started.Gateway.Error -= Handler;
+
+        try
+        {
+            await started.Service.Memory.Stop();
+
+            using var answered = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{}"), Cancelled);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, answered.StatusCode);
+            Assert.Equal((1, 0), (reported.Count, off.Count));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
     }
 
     [Fact]
@@ -929,6 +1082,31 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Refuses_a_payload_of_no_schema_nor_encoding_a_notification_only_one_side_has_and_a_route_of_no_method_or_no_template()
+    {
+        await using var service = await TranscodingService.Start();
+        var options = Exchanges.OptionsOf(service.Memory, null);
+        var getBook = RouteOf("getBook");
+        var ticks = RouteOf("ticks");
+
+        string RefusalOf(HttpRoute route)
+        {
+            return Assert.Throws<ArgumentException>(() =>
+            {
+                _ = new HttpGateway(options with { Routes = [route] });
+            }).Message;
+        }
+
+        // a payload of no schema nor encoding is the TypeScript side's alone: an HttpPayload is closed
+        Assert.StartsWith("getBook's notification is its route's exactly where it notifies", RefusalOf(getBook with { Notification = HttpPayload.Of(Tick.Descriptor) }), StringComparison.Ordinal);
+        Assert.StartsWith("ticks's notification is its route's exactly where it notifies", RefusalOf(ticks with { Notification = null }), StringComparison.Ordinal);
+        Assert.StartsWith("getBook's route is a method of http.proto's and a template", RefusalOf(getBook with { Routes = [new HttpRouteTemplate { Method = "CUSTOM", Template = "/v1/books" }] }), StringComparison.Ordinal);
+        Assert.StartsWith("getBook's route is a method of http.proto's and a template", RefusalOf(getBook with { Routes = [new HttpRouteTemplate { Method = "GET", Template = null! }] }), StringComparison.Ordinal);
+
+        await using var taken = new HttpGateway(options with { Routes = [ticks] });
+    }
+
+    [Fact]
     public async Task Answers_as_the_endpoint_an_application_maps_and_a_caller_of_no_address_as_local()
     {
         await using var service = await TranscodingService.Start();
@@ -943,7 +1121,8 @@ public sealed class HttpGatewayTests
             }
         };
 
-        // * mapped as the application's fallback: what no other endpoint answers
+        // * mapped as the application's fallback: what no other endpoint answers; a C# gateway may
+        // listen on its own too, where the TypeScript side's built with no createServer listens on none
         var builder = WebApplication.CreateSlimBuilder();
 
         builder.Logging.ClearProviders();
@@ -991,6 +1170,20 @@ public sealed class HttpGatewayTests
         Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
         Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(body.ToArray()));
         Assert.StartsWith("type=MEMORY;ip=local;", drawn[^1], StringComparison.Ordinal);
+
+        // one given no document serves none: its path is one no route matches
+        await using var silent = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with { Document = null });
+        var asked = new DefaultHttpContext();
+
+        asked.Request.Method = "GET";
+        asked.Request.Protocol = "HTTP/1.1";
+        asked.Request.Host = new HostString("127.0.0.1");
+        asked.Features.Get<IHttpRequestFeature>()!.RawTarget = "/openapi.json";
+        asked.Response.Body = new MemoryStream();
+
+        await silent.Answer(asked);
+
+        Assert.Equal((StatusCodes.Status404NotFound, "path-unknown"), (asked.Response.StatusCode, asked.Response.Headers["bead-refusal"].ToString()));
     }
 
     [Fact]

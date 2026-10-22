@@ -6196,6 +6196,68 @@
       ]
     },
     {
+      "name": "a charset quoted, beside an identity content-encoding, is taken",
+      "clauses": [
+        "5.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json; charset=\"UTF-8\"\r\ncontent-encoding: identity\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "body": "{}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a content-type in two fields, 415",
+      "clauses": [
+        "5.1",
+        "7.7",
+        "7.7.8",
+        "10.1.8"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/echo HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "7B 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 415,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/problem+json",
+              "bead-refusal": "type-refused"
+            },
+            "body": "{\"detail\":\"this route's body is application/json, unencoded\",\"status\":415,\"title\":\"Unsupported Media Type\",\"type\":\"about:blank\"}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
       "name": "a body of no content-type, 415",
       "clauses": [
         "5.1",
@@ -6455,6 +6517,37 @@
         {
           "send": {
             "head": "POST /api/Transcoding/raw HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/octet-stream\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
+            "body": "00 FF"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/octet-stream",
+              "content-length": "2",
+              "bead-refusal": null
+            },
+            "bodyBytes": "00 FF"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a raw route's query of empty sequences alone carries no parameter",
+      "clauses": [
+        "4.3",
+        "5.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/raw?& HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/octet-stream\r\ncontent-length: 2\r\nconnection: close\r\n\r\n",
             "body": "00 FF"
           },
           "on": "a"
@@ -7001,6 +7094,153 @@
         {
           "send": {
             "head": "POST /api/Transcoding/ticks HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\naccept: text/event-stream;q=0.5, application/json\r\ncontent-length: 10\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 66 72 6F 6D 22 3A 32 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "11",
+              "bead-refusal": null
+            },
+            "body": "{\"ticks\":2}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "an event stream's weight off the qvalue grammar is as none given, a stream",
+      "clauses": [
+        "8.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/ticks HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\naccept: text/event-stream;q=x;level, application/json\r\ncontent-length: 10\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 66 72 6F 6D 22 3A 32 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "bead-refusal": null
+            },
+            "body": "event: result\nid: 1\ndata: {\"ticks\":2}\n\nid: 2\ndata: {\"remaining\":1}\n\nid: 3\ndata: {}\n\nevent: failure\nid: 4\ndata: {\"code\":2,\"scope\":\"application\",\"status\":400,\"title\":\"COUNTED\",\"type\":\"https://example.com/problems/COUNTED\"}\n\n"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "an event stream's Q in any case, a weight it cannot read beside it left aside",
+      "clauses": [
+        "8.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/ticks HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\naccept: text/event-stream;Q=0.5;q=NaN, application/json;q=0.4\r\ncontent-length: 10\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 66 72 6F 6D 22 3A 32 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "bead-refusal": null
+            },
+            "body": "event: result\nid: 1\ndata: {\"ticks\":2}\n\nid: 2\ndata: {\"remaining\":1}\n\nid: 3\ndata: {}\n\nevent: failure\nid: 4\ndata: {\"code\":2,\"scope\":\"application\",\"status\":400,\"title\":\"COUNTED\",\"type\":\"https://example.com/problems/COUNTED\"}\n\n"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "an event stream at q=1, past a weight of 1.5 left aside, weighs application/json's 1.000",
+      "clauses": [
+        "8.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/ticks HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\naccept: text/event-stream;q=1.5;q=1, application/json;q=1.000\r\ncontent-length: 10\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 66 72 6F 6D 22 3A 32 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "text/event-stream",
+              "bead-refusal": null
+            },
+            "body": "event: result\nid: 1\ndata: {\"ticks\":2}\n\nid: 2\ndata: {\"remaining\":1}\n\nid: 3\ndata: {}\n\nevent: failure\nid: 4\ndata: {\"code\":2,\"scope\":\"application\",\"status\":400,\"title\":\"COUNTED\",\"type\":\"https://example.com/problems/COUNTED\"}\n\n"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "application/json at a weight of 1x, as none given, outweighs an event stream at 0.5",
+      "clauses": [
+        "8.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/ticks HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\naccept: text/event-stream;q=0.5, application/json;q=1x\r\ncontent-length: 10\r\nconnection: close\r\n\r\n",
+            "body": "7B 22 66 72 6F 6D 22 3A 32 7D"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 200,
+            "fields": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin",
+              "content-type": "application/json",
+              "content-length": "11",
+              "bead-refusal": null
+            },
+            "body": "{\"ticks\":2}"
+          },
+          "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "of two ranges of the event stream, the first stands",
+      "clauses": [
+        "8.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "POST /api/Transcoding/ticks HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\naccept: text/event-stream;q=0, text/event-stream, application/json\r\ncontent-length: 10\r\nconnection: close\r\n\r\n",
             "body": "7B 22 66 72 6F 6D 22 3A 32 7D"
           },
           "on": "a"
@@ -7689,6 +7929,35 @@
             "body": ""
           },
           "on": "b"
+        }
+      ]
+    },
+    {
+      "name": "an if-none-match that holds * among other tags, 304",
+      "clauses": [
+        "11.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /openapi.json HTTP/1.1\r\nhost: {host}\r\nif-none-match: \"other\", *\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 304,
+            "fields": {
+              "etag": {
+                "shape": "etag"
+              },
+              "cache-control": "no-cache",
+              "x-content-type-options": "nosniff",
+              "vary": "Origin"
+            },
+            "body": ""
+          },
+          "on": "a"
         }
       ]
     },
