@@ -149,8 +149,9 @@ internal sealed class TlsWire : IAsyncDisposable
 
     /// <summary>
     /// One request over HTTP/2, of the fields given after <c>:method</c>, <c>:scheme</c> and
-    /// <c>:path</c>, its stream ended with its head: what its stream was answered, its status and
-    /// its mark, or the code its stream was reset with, or its session ended with before any answer.
+    /// <c>:path</c>, each but one the fields given name, its stream ended with its head: what its
+    /// stream was answered, its status and its mark, or the code its stream was reset with, or its
+    /// session ended with before any answer.
     /// </summary>
     public async Task<TlsAnswer> Ask(IReadOnlyList<(string Name, string Value)> fields)
     {
@@ -163,7 +164,16 @@ internal sealed class TlsWire : IAsyncDisposable
     /// <summary>A POST on the next client stream of the same HTTP/2 session.</summary>
     public async Task<TlsAnswer> AskNext(IReadOnlyList<(string Name, string Value)> fields)
     {
-        (string, string)[] request = [(":method", "POST"), (":scheme", "https"), (":path", "/bead"), .. fields];
+        // ! a pseudo-header the fields given name takes the place of its default, every one before
+        // any regular field (RFC 9113 §8.3)
+        (string Name, string Value)[] defaults = [(":method", "POST"), (":scheme", "https"), (":path", "/bead")];
+        (string, string)[] request = [.. defaults.Where((field) =>
+        {
+            return !fields.Any((given) =>
+            {
+                return given.Name == field.Name;
+            });
+        }), .. fields];
         var streamId = _nextStream;
 
         _nextStream += 2;

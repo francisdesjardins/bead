@@ -98,6 +98,14 @@ public sealed partial class HttpTransportServer
             return !isHttp1 || HostsAndOrigins.IsTakenTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
         }
 
+        // whether a request's target is visible ASCII and its path's percent-decoding holds no NUL, as
+        // HostsAndOrigins.IsVisibleTarget says, over every protocol: Kestrel takes a control character
+        // in an HTTP/1.1 target, and its :path over HTTP/2, which it gives as its RawTarget
+        internal static bool IsVisibleTarget(HttpContext context)
+        {
+            return HostsAndOrigins.IsVisibleTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
+        }
+
         // the authority an HTTP/1 request's target names in absolute-form; none for another form, and
         // over HTTP/2, whose :authority Kestrel has put in the Host
         internal static string? TargetAuthorityOf(HttpContext context)

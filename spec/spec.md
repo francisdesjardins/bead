@@ -1230,8 +1230,9 @@ a cookie, which a page's browser sends on its own, or from a subprotocol. A clie
 judges a request at its WebSocket's address in this order, and answers the first that applies:
 
 1. What HTTP refuses of its own, a `Host` missing or repeated, a target in absolute-form it does not
-   read, an authority that is no host, or a field that holds a control character or an octet past
-   US-ASCII (section 15.12), its HTTP server answers, unmarked.
+   read, an authority that is no host, a target that holds an octet other than visible ASCII or a
+   path whose percent-decoding holds NUL, or a field that holds a control character or an octet
+   past US-ASCII (section 15.12), its HTTP server answers, unmarked.
 2. A server takes an upgrade from the hosts an HTTP exchange is taken from (section 15.12): a
    request whose authority names a host it does not take, or none, is refused 403, its
    `bead-refusal` `host-refused`, whatever else it holds, since a page that rebinds its name to the
@@ -1558,8 +1559,23 @@ so is every field Bead reads. A field value that starts or ends with a space or 
 too ([RFC 9113 §8.2.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.2.1)): over HTTP/2 its
 stream is reset `PROTOCOL_ERROR`, judged with the rest of this rule, before anything else of the
 request; over HTTP/1.1 and at a WebSocket's address, the parser strips that whitespace first, no
-part of the value ([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)). An empty
-`Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may name
+part of the value ([RFC 9110 §5.5](https://www.rfc-editor.org/rfc/rfc9110#section-5.5)). A target
+that holds an octet other than visible ASCII — a control character, HTAB among them, a space, DEL,
+or an octet past US-ASCII — in its path or its query, in origin-form or absolute-form, is answered
+alike, 400 unmarked over HTTP/1.1, with none of the fields every response on the path carries, and
+its stream reset `PROTOCOL_ERROR` over HTTP/2, before anything else of the request is judged: a
+target holds a URI's characters ([RFC 9112 §3.2](https://www.rfc-editor.org/rfc/rfc9112#section-3.2),
+[RFC 9113 §8.3.1](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)), which are visible ASCII
+([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)), and a request-line that holds
+another is invalid, answered 400 rather than read on
+([RFC 9112 §3](https://www.rfc-editor.org/rfc/rfc9112#section-3)), a bare CR in it among them
+([RFC 9112 §2.2](https://www.rfc-editor.org/rfc/rfc9112#section-2.2)). So is a path whose
+percent-decoding holds NUL, `%00`. What a target percent-encodes is otherwise no octet of it, and
+is taken, `%01` and `%7F` among them, and `%00` in a query. The visible characters a URI leaves out,
+`"`, `#`, `<`, `>`, `\`, `^`, `` ` ``, `{`, `|` and `}`, are taken as they came, as a page's browser
+sends some of them unencoded in a query
+([URL Standard](https://url.spec.whatwg.org/#query-percent-encode-set)); a `#` opens no fragment.
+An empty `Host` is a host, and so is a name of invalid punycode. It takes the hosts a request may name
 besides those every server takes, `hosts`, and the origins an exchange may come from besides its
 own, `origins`, none when not given. Its own is its request's authority under `http` or `https`,
 when its host is one the server takes by name — one every server takes, or one `hosts` lists —

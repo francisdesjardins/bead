@@ -241,6 +241,32 @@ internal static class HostsAndOrigins
         return target is null || !NamesScheme(target);
     }
 
+    /// <summary>
+    /// Whether a request's target, as it came, is one a server reads (spec 15.12): visible ASCII
+    /// alone, a URI's characters (RFC 3986 §2), in its path and its query, in origin-form or
+    /// absolute-form, and a path whose percent-decoding holds no NUL. A control character, HTAB and
+    /// a bare CR among them, a space, DEL and a character past ASCII are none; any other
+    /// percent-encoded octet is taken, <c>%00</c> in a query among them, and so are the visible
+    /// characters a URI leaves out, a <c>#</c> among them, which opens no fragment. A request that
+    /// holds another is answered 400 unmarked, or over HTTP/2 its stream reset, before anything else
+    /// of it is judged.
+    /// </summary>
+    public static bool IsVisibleTarget(string? target)
+    {
+        if (target is null)
+        {
+            return true;
+        }
+
+        var question = target.IndexOf('?', StringComparison.Ordinal);
+        var path = question < 0 ? target : target[..question];
+
+        return !path.Contains("%00", StringComparison.Ordinal) && target.All((character) =>
+        {
+            return character is > ' ' and <= '~';
+        });
+    }
+
     // whether a target opens with a scheme and its "//" (RFC 3986 §3.1): a letter, then letters,
     // digits, "+", "-" or "."
     private static bool NamesScheme(string target)

@@ -4,6 +4,11 @@ import {
   request as httpRequest,
   type IncomingHttpHeaders,
 } from 'node:http';
+import {
+  connect as connectHTTP2,
+  constants as http2Constants,
+  createServer as createHTTP2Server,
+} from 'node:http2';
 import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { create, toBinary } from '@bufbuild/protobuf';
@@ -1242,6 +1247,66 @@ test('takes its hosts and proxies from its policy or beside it, and refuses one 
   }).toThrow(
     new ProgrammerError('unnamedProxies is given in the policy and beside it: give it once')
   );
+});
+
+test('resets over HTTP/2 the stream of a request whose target or a field holds an octet past visible ASCII, PROTOCOL_ERROR, nothing written', async () => {
+  await using fixture = await startTranscoding();
+  await using gateway = createHTTPGateway({
+    createServer: (listener) => {
+      return createHTTP2Server((request, response) => {
+        listener(request, response);
+      });
+    },
+    routes: HTTP_ROUTES,
+    transport: fixture.memory,
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const session = connectHTTP2(`http://127.0.0.1:${String(port)}`);
+
+  session.on('error', () => {});
+
+  // its status, or the code its stream was reset with when none came
+  const answerOf = (headers: Record<string, string>) => {
+    return new Promise<number | undefined>((resolve) => {
+      const stream = session.request({ ':method': 'GET', ...headers });
+      let status: number | undefined;
+
+      stream.once('response', (response) => {
+        status = response[':status'];
+      });
+      stream.on('data', () => {});
+      stream.on('error', () => {});
+      stream.once('close', () => {
+        resolve(status ?? stream.rstCode);
+      });
+      stream.end();
+    });
+  };
+
+  try {
+    // ! nghttp2 resets a control character in :path before the gateway reads the request; é, the one
+    // octet of its Latin-1 code, a NUL percent-encoded in its path, a path no route matches among
+    // them, and a field past ASCII the gateway resets, before its path is matched
+    expect(
+      await Promise.all(
+        [
+          { ':path': '/v1/books/a\u0001b' },
+          { ':path': '/v1/books/é' },
+          { ':path': '/v1/books/a%00b' },
+          { ':path': '/nowhere%00' },
+          { ':path': '/v1/books/2', 'x-other': 'café' },
+        ].map(answerOf)
+      )
+    ).toEqual(
+      Array.from({ length: 5 }, () => {
+        return http2Constants.NGHTTP2_PROTOCOL_ERROR;
+      })
+    );
+    // what its target percent-encodes is no octet of it
+    expect(await answerOf({ ':path': '/v1/books/a%01b' })).toBe(200);
+  } finally {
+    session.close();
+  }
 });
 
 test('refuses a route off its template’s grammar, and listens once', async () => {

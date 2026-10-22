@@ -366,6 +366,11 @@ A field value that holds a control character other than HTAB, or a character pas
 answered 400 unmarked before anything else of the request is judged, at both transports, as HTTP
 answers a malformed field (spec 15.12): Kestrel refuses an octet that is no UTF-8 and takes a
 control character, which the transport refuses; over HTTP/2, its stream reset, `PROTOCOL_ERROR`.
+So is a request whose target holds an octet other than visible ASCII, in its path or its query, or
+whose path's percent-decoding holds NUL, `%00`: Kestrel takes a control character, HTAB, a bare CR
+and DEL in a target, which the transports and the gateway refuse over every protocol through
+`HostsAndOrigins.IsVisibleTarget`, and refuses `%00` in a path itself; `%00` in a query, and every
+other octet percent-encoded, are taken.
 So is one whose value starts or ends with a space or a tab, which RFC 9113 §8.2.1 calls malformed
 over HTTP/2, where Kestrel hands it on and the transport resets its stream; over HTTP/1.1 the parser
 strips it first (RFC 9110 §5.5).
