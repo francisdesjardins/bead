@@ -3342,7 +3342,11 @@ test.describe('createRouterCore', () => {
 
       clock.tick(250);
 
-      await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout: 250 });
+      await expect(asking).rejects.toMatchObject({
+        message: 'no answer came in 250 milliseconds',
+        name: 'TimeoutError',
+        timeout: 250,
+      });
       // late, and dropped in silence
       core.receive(chunkOf(1, { offset: 40, payload: new Uint8Array(48), total: 200 }), 'a');
       core.receive(chunkOf(2, { offset: 32, payload: new Uint8Array(48), total: 200 }), 'a');
@@ -3399,7 +3403,11 @@ test.describe('createRouterCore', () => {
       });
       requesting.receive(resultOpeningOf(1, { payload: payload.subarray(0, 32), total: 300 }), 'a');
       clientClock.tick(2_000);
-      await expect(requested).rejects.toMatchObject({ name: 'TimeoutError', timeout: 2_000 });
+      await expect(requested).rejects.toMatchObject({
+        message: 'no answer came in 2000 milliseconds',
+        name: 'TimeoutError',
+        timeout: 2_000,
+      });
       await sleep(0);
       expect(answersOf(client.sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 1],
@@ -3860,7 +3868,11 @@ test.describe('createRouterCore', () => {
 
       clock.tick(250);
 
-      await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout: 250 });
+      await expect(asking).rejects.toMatchObject({
+        message: 'no answer came in 250 milliseconds',
+        name: 'TimeoutError',
+        timeout: 250,
+      });
       await expect(responding).rejects.toMatchObject({ code: ProtocolCode.TRANSFER_STALLED });
       await sleep(0);
       // its call forgotten, a request on its call id is dispatched
@@ -3884,7 +3896,11 @@ test.describe('createRouterCore', () => {
         procedure: echo,
       });
       clientClock.tick(2_000);
-      await expect(request).rejects.toMatchObject({ name: 'TimeoutError', timeout: 2_000 });
+      await expect(request).rejects.toMatchObject({
+        message: 'no answer came in 2000 milliseconds',
+        name: 'TimeoutError',
+        timeout: 2_000,
+      });
       await sleep(0);
       expect(answersOf(client.sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 1],

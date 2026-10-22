@@ -907,7 +907,11 @@ test.describe('createRouterCore', () => {
             ['a', EnvelopeKind.REQUEST, firstId + 2],
           ]);
           clock.tick(timeout);
-          await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout });
+          await expect(asking).rejects.toMatchObject({
+            message: `no answer came in ${String(timeout)} milliseconds`,
+            name: 'TimeoutError',
+            timeout,
+          });
           expect(answersOf(sent)).toEqual([
             ['a', EnvelopeKind.REQUEST, firstId],
             ['a', EnvelopeKind.CANCEL, firstId],
@@ -1808,7 +1812,11 @@ test.describe('createRouterCore', () => {
       await sleep(0);
       expect(isEnded).toBe(false);
       clock.tick(1);
-      await expect(waiting).rejects.toMatchObject({ name: 'TimeoutError', timeout: 250 });
+      await expect(waiting).rejects.toMatchObject({
+        message: 'no answer came in 250 milliseconds',
+        name: 'TimeoutError',
+        timeout: 250,
+      });
       expect(answersOf(sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 2]);
       expect(reported).toEqual([]);
 
@@ -1842,7 +1850,11 @@ test.describe('createRouterCore', () => {
       await sleep(0);
       expect(isSettled).toBe(false);
       advanced.tick(500);
-      await expect(asked).rejects.toMatchObject({ name: 'TimeoutError', timeout: 2_000 });
+      await expect(asked).rejects.toMatchObject({
+        message: 'no answer came in 2000 milliseconds',
+        name: 'TimeoutError',
+        timeout: 2_000,
+      });
       expect(answersOf(timed.sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 1]);
       expect(timed.reported).toEqual([]);
     });
@@ -1996,7 +2008,11 @@ test.describe('createRouterCore', () => {
       await sleep(0);
       expect(isEnded).toBe(false);
       clock.tick(500);
-      await expect(asking).rejects.toMatchObject({ name: 'TimeoutError', timeout: 2_000 });
+      await expect(asking).rejects.toMatchObject({
+        message: 'no answer came in 2000 milliseconds',
+        name: 'TimeoutError',
+        timeout: 2_000,
+      });
       expect(answersOf(sent).at(-1)).toEqual(['a', EnvelopeKind.CANCEL, 1]);
     });
 

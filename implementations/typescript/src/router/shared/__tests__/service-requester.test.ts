@@ -352,7 +352,7 @@ test.describe('createServiceManager', () => {
       const unable = createServiceManager(router as IRouterLike<TransportServerConnectionHandle>, {
         defaults: { closeOnTimeout: true },
       });
-      const late = new TimeoutError(10);
+      const late = new TimeoutError(10, 'no answer came in 10 milliseconds');
       const refused = new FailureError({ ...CLIENT_FAILURES.procedureFailed, origin: 'peer' });
       let failure: Error = late;
 

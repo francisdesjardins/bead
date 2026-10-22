@@ -99,8 +99,8 @@ interface IIssuerKeys {
   timer: TimeoutId | undefined;
 }
 
-/** What an ask settled to: its keys, or why it failed. */
-type AskOutcome = { failure: unknown } | { keys: readonly IJwtKey[] };
+/** What an ask settled to: its keys, or why it failed, which fails each call on it. */
+type AskOutcome = { failure: Error } | { keys: readonly IJwtKey[] };
 
 // constants
 
@@ -369,11 +369,7 @@ export const createCredentialResolver = (
       waiter.among = undefined;
 
       if ('failure' in outcome) {
-        waiter.released.reject(
-          new Error(`the key set's ask for ${JSON.stringify(entry.issuer)} failed`, {
-            cause: outcome.failure,
-          })
-        );
+        waiter.released.reject(outcome.failure);
       } else if (waiter.isAfter || !needs(issuerKeysOf(entry), waiter)) {
         waiter.released.resolve();
       } else {
@@ -405,7 +401,11 @@ export const createCredentialResolver = (
 
       outcome = { keys: heldOf(answered, entry.issuer) };
     } catch (reason) {
-      outcome = { failure: reason ?? new Error('the key set failed') };
+      outcome = {
+        failure: new Error(`the key set's ask for ${entry.issuer} failed`, {
+          cause: reason ?? new Error('the key set failed'),
+        }),
+      };
     }
 
     // ! an answer at its deadline or past it is dropped: its ask failed there, its keys never held
@@ -458,7 +458,10 @@ export const createCredentialResolver = (
     const { asking } = entry;
 
     if (asking !== undefined) {
-      const failure = new TimeoutError(KEY_SET_INTERVAL);
+      const failure = new TimeoutError(
+        KEY_SET_INTERVAL,
+        `the key set's ask for ${entry.issuer} was unsettled as its deadline was reached`
+      );
 
       settle(entry, { ask: asking, outcome: { failure } });
       asking.controller.abort(failure);

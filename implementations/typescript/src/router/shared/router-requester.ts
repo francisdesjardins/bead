@@ -283,7 +283,10 @@ export const createRouterRequester = <Handle extends string>(
     clock.clearTimeout(pendingRequest.timer);
     pendingRequest.timer = isTimeout(delay)
       ? clock.setTimeout(() => {
-          endPending(new TimeoutError(delay), waiting);
+          endPending(
+            new TimeoutError(delay, `no answer came in ${String(delay)} milliseconds`),
+            waiting
+          );
         }, delay)
       : undefined;
   };

@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { IClock } from '../../../transport/shared/clock';
-import { CancelError, ProgrammerError } from '../../../transport/shared/errors';
+import { CancelError, ProgrammerError, TimeoutError } from '../../../transport/shared/errors';
 import {
   createTestClock,
   duesOn,
@@ -412,7 +412,8 @@ test.describe('createCredentialResolver', () => {
       .poll(() => {
         return (waiting.current as Error | undefined)?.message;
       })
-      .toMatch(/key set/);
+      .toBe(`the key set's ask for ${SET_ISSUER} was unsettled as its deadline was reached`);
+    expect(waiting.current).toBeInstanceOf(TimeoutError);
 
     // the next ask goes at once, its own signal live
     const next = resolver.resolve(named, signal);
