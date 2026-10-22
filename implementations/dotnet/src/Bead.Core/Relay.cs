@@ -533,7 +533,7 @@ internal sealed class Relay
             { Scheme: CredentialScheme.Elsewhere } when !carries
                 => UnreachableOf(destinationId, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             { Scheme: CredentialScheme.Jwt or CredentialScheme.Elsewhere } when !isSecure
-                => UnreachableOf(destinationId, "it is reached off the machine in the clear, which a bearer credential never crosses"),
+                => UnreachableOf(destinationId, "its transport leaves the machine in the clear, which a bearer credential never crosses"),
             _ => null,
         };
     }

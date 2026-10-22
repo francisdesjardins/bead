@@ -17,12 +17,14 @@ const headerOf = (credential?: Credential): IRequestHeader => {
 };
 
 const SESSION = Object.freeze({ data: 'ada' });
+// none presented, NONE, OPAQUE, a JWT and an ELSEWHERE
 const CREDENTIALS: readonly (Credential | undefined)[] = [
   undefined,
+  { scheme: CredentialScheme.NONE },
+  { scheme: CredentialScheme.OPAQUE, token: 'A'.repeat(22) as SessionToken },
   { scheme: CredentialScheme.JWT, token: 'a.b.c' },
   { scheme: CredentialScheme.ELSEWHERE },
 ];
-const OPAQUE = { scheme: CredentialScheme.OPAQUE, token: 'A'.repeat(22) as SessionToken } as const;
 
 // definition
 
@@ -42,6 +44,8 @@ test.describe('requireSession', () => {
       [true, false],
       [true, false],
       [true, false],
+      [true, false],
+      [true, false],
     ]);
     expect(requireSession.refusal).toBe(SERVER_FAILURES.sessionRequired);
   });
@@ -51,7 +55,7 @@ test.describe('requireCredential', () => {
   // spec 14.3.1
   test('admits a call presenting a JWT or an ELSEWHERE by its scheme alone, and refuses none and OPAQUE, in a session or in none, ACCESS_DENIED with its detail', () => {
     expect(
-      [...CREDENTIALS, OPAQUE].map((credential) => {
+      CREDENTIALS.map((credential) => {
         const header = headerOf(credential);
 
         // the call's session read nowhere: in one or in none, the same
@@ -63,9 +67,10 @@ test.describe('requireCredential', () => {
       })
     ).toEqual([
       [false, false],
-      [true, true],
-      [true, true],
       [false, false],
+      [false, false],
+      [true, true],
+      [true, true],
     ]);
     expect(requireCredential.refusal).toEqual({
       ...SERVER_FAILURES.accessDenied,
@@ -86,6 +91,8 @@ test.describe('shareLegBSession', () => {
         ];
       })
     ).toEqual([
+      [true, false],
+      [true, false],
       [true, false],
       [true, true],
       [true, true],

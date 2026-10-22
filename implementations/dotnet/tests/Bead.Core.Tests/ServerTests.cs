@@ -610,19 +610,24 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
+    public void RequireSession_admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
     {
         Start(new ServerOptions());
 
         var requireSession = Server.RequireSession;
         var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
-        var inSession = new AdmissionRequest(Handle, header) { Session = new CallSession() };
+        var opaque = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        Credential?[] credentials = [null, Credential.None, opaque, Credential.Jwt("a.b.c"), Credential.Elsewhere()];
 
-        Assert.True(requireSession.Admits(inSession));
-        Assert.True(requireSession.Admits(inSession with { Header = header with { Credential = Credential.Jwt("a.b.c") } }));
-        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header)));
-        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header with { Credential = Credential.Jwt("a.b.c") })));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSession.Refusal!.Code);
+        Assert.Equal(
+            [[true, false], [true, false], [true, false], [true, false], [true, false]],
+            credentials.Select((credential) =>
+            {
+                var request = new AdmissionRequest(Handle, header with { Credential = credential });
+
+                return new[] { requireSession.Admits(request with { Session = new CallSession() }), requireSession.Admits(request) };
+            }));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), requireSession.Refusal);
     }
 
     // spec 14.3.1
@@ -719,14 +724,18 @@ public sealed class ServerTests : IAsyncLifetime
 
         var shareLegBSession = Server.ShareLegBSession;
         var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
-        var inNone = new AdmissionRequest(Handle, header);
+        var opaque = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        Credential?[] credentials = [null, Credential.None, opaque, Credential.Jwt("not even a token"), Credential.Elsewhere()];
 
-        Assert.True(shareLegBSession.Admits(inNone with { Session = new CallSession() }));
-        Assert.True(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Jwt("not even a token") } }));
-        Assert.True(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Elsewhere() } }));
-        Assert.False(shareLegBSession.Admits(inNone));
-        Assert.False(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })) } }));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, shareLegBSession.Refusal!.Code);
+        Assert.Equal(
+            [[true, false], [true, false], [true, false], [true, true], [true, true]],
+            credentials.Select((credential) =>
+            {
+                var request = new AdmissionRequest(Handle, header with { Credential = credential });
+
+                return new[] { shareLegBSession.Admits(request with { Session = new CallSession() }), shareLegBSession.Admits(request) };
+            }));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), shareLegBSession.Refusal);
     }
 
     [Fact]

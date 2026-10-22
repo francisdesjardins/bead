@@ -990,6 +990,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     if (reason instanceof JsonFormError) {
       report(reason);
 
+      // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
       return problemOfOwn('unwritable', { detail: reason.message });
     }
 
@@ -1182,6 +1183,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
             {
               arose: 'gateway',
               code: ProtocolCode.PAYLOAD_UNDECODABLE,
+              // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
               detail: error.message,
               place: error.place,
               scope: 'protocol',

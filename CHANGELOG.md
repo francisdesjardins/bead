@@ -193,9 +193,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it takes its words beside its `timeout`, which it keeps. A call on an ask unsettled at its
   deadline fails with that `TimeoutError`, as the C# side's with its `TimeoutException`, and one on
   an ask that failed with `the key set's ask for <issuer> failed`, its issuer unquoted.
+- `tools/check-details.mjs` holds each allowed site itself: each carries its marker, `// ! a detail
+  of the side's own words: <why>`, on its line or right above it, and its file counts its marked
+  sites, so a new site beside an allowed one fails by its line and a site moved holds.
 
 ### Fixed
 
+- A relay words alike, on both sides, the `DESTINATION_UNREACHABLE` it answers a call whose
+  credential leg B cannot carry: `it verifies another audience than the one the token names, or
+  none`, `it was registered with no audience`, and `its transport leaves the machine in the clear,
+  which a bearer credential never crosses`, where the TypeScript side said each its own way and the
+  C# side the last another.
+- The C# server's gauges count the credentials' sessions it keeps and those of them timed,
+  `credentialSessions` and `timedCredentialSessions`, as the TypeScript server's do.
+- The TypeScript session manager times a session stored with a token of its own on a connection
+  that held none as one whose token it draws, as the C# side does: its gauges count it among
+  `timedConnections`.
 - The C# HTTP server tells nothing of a connection after its close: an envelope whose connection a
   `DELETE` closes as it is handed on is answered the 404 marked `connection-unknown`, as the
   TypeScript side answers it, where the router could hear it after the close and hold the
