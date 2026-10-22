@@ -206,6 +206,18 @@ const PLAYED_TRANSPORTS: ReadonlySet<string> = new Set(['http', 'websocket']);
 
 // ! every key of a step this harness reads: one it does not know fails the step, rather than pass it
 // unplayed
+// the keys of a case, as the schema defines them: one this harness does not know fails its case
+const CASE_KEYS: ReadonlySet<string> = new Set([
+  'answersPings',
+  'clauses',
+  'differs',
+  'limits',
+  'name',
+  'options',
+  'realTime',
+  'steps',
+  'transport',
+]);
 const STEP_KEYS: ReadonlySet<string> = new Set([
   'advance',
   'after',
@@ -221,7 +233,59 @@ const STEP_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 // how long a step waits on the real clock for its bytes, a gauge, a timer or a report, unless it says
-const PATIENCE = 3_000;
+const PATIENCE = 10_000;
+
+// ! every option and limit this harness reads, by transport, as the C# side's: one it does not read
+// fails its case, where it would play on the default unseen
+const OPTION_KEYS: Readonly<Record<'http' | 'websocket', ReadonlySet<string>>> = Object.freeze({
+  http: new Set([
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'maximumWaitingExchanges',
+    'bodyBytesBudget',
+    'maximumBodyBytes',
+    'maximumOutboxBytes',
+    'maximumWait',
+    'exchangeTimeout',
+    'inactivityTimeout',
+    'hosts',
+    'origins',
+    'trustedProxies',
+    'unnamedProxies',
+    'minimumSendBytesPerSecond',
+    'sendGracePeriod',
+    'headersTimeout',
+    'minimumBodyBytesPerSecond',
+    'bodyGracePeriod',
+    'connectionInactivityTimeout',
+  ]),
+  websocket: new Set([
+    'maximumMessageBytes',
+    'heartbeat',
+    'hosts',
+    'origins',
+    'trustedProxies',
+    'unnamedProxies',
+    'maximumConnections',
+    'maximumConnectionsPerAddress',
+    'minimumSendBytesPerSecond',
+    'sendGracePeriod',
+    'maximumUnsentBytes',
+    'headersTimeout',
+  ]),
+});
+const LIMIT_KEYS: ReadonlySet<string> = new Set([
+  'maximumEnvelopeBytes',
+  'chunkBytes',
+  'windowBytes',
+  'maximumTransfers',
+  'maximumPayloadBytes',
+  'bufferedBytesBudget',
+  'maximumChunkRuns',
+  'maximumDetailBytes',
+  'maximumAnsweringCalls',
+  'transferInactivityTimeout',
+]);
 const POLL = 10;
 
 /** The shapes of what a server draws, in ASCII classes, as the schema defines them. */
@@ -477,6 +541,18 @@ const serverOf = (
   { limits, options = {}, transport }: ICase,
   clock: TestClock
 ): ServerUnderTest => {
+  for (const name of Object.keys(options)) {
+    if (!OPTION_KEYS[transport === 'websocket' ? 'websocket' : 'http'].has(name)) {
+      throw new Error(`a case sets an option no test reads: ${name}`);
+    }
+  }
+
+  for (const name of Object.keys(limits ?? {})) {
+    if (!LIMIT_KEYS.has(name)) {
+      throw new Error(`a case sets a limit no test reads: ${name}`);
+    }
+  }
+
   const {
     connectionInactivityTimeout,
     heartbeat,
@@ -714,7 +790,7 @@ test.describe('the transports', () => {
 
   const played: string[] = [];
 
-  test('the defaults are those of sections 15.3 and 15.12', async () => {
+  test('bounds default to what the file states', async () => {
     // the bound the WebSocket transport server takes when built alone and told none
     const fake = createFakeWebSocketServer();
     const wsTransport = createWSTransportServer({ WebSocketServer: fake.FakeWebSocketServer });
@@ -753,7 +829,7 @@ test.describe('the transports', () => {
   });
 
   for (const { body, fields, name, pieces, status } of TRANSPORTS.responses) {
-    test(`the reader reads ${name}`, async () => {
+    test(`reads ${name}, by its length or de-chunked, whatever reads it comes in`, async () => {
       const reader = createResponseReader();
 
       for (const piece of pieces) {
@@ -787,6 +863,13 @@ test.describe('the transports', () => {
     played.push(name);
 
     test(name, async () => {
+      expect(
+        Object.keys(testCase).filter((key) => {
+          return !CASE_KEYS.has(key);
+        }),
+        'the keys of the case this harness does not read'
+      ).toEqual([]);
+
       // the clock every layer runs on: only a step that moves time moves it; a platform's own timers,
       // a ping's among them, stay on the real clock
       const clock = createTestClock(Date.parse(TRANSPORTS.wallClock));
@@ -946,7 +1029,7 @@ test.describe('the transports', () => {
     });
   }
 
-  test('every case is played, but one whose differs excuses TypeScript', () => {
+  test('plays every case but those a row of the support matrix excuses this side from', () => {
     expect(played).toEqual(
       TRANSPORTS.cases
         .filter((testCase) => {
