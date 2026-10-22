@@ -222,9 +222,9 @@
       "additionalProperties": false,
       "properties": {
         "head": {
-          "description": "The request's line and fields, as text, CRLF after each and one more after the last, or none for a head that never comes whole; {host} and a captured value's {name} put in. Each character is one octet, its code point (ISO-8859-1), so one past U+007F is an octet past ASCII.",
+          "description": "The request's line and fields, as text, CRLF after each and one more after the last, or none for a head that never comes whole; {host} and a captured value's {name} put in. Each character is one octet, its code point (ISO-8859-1), so one past U+007F is an octet past ASCII; its target holds any octet but a space and LF, a control character, HTAB and a bare CR among them.",
           "type": "string",
-          "pattern": "^[A-Z]+ \\S+ HTTP/1\\.[01]\\r\\n(?:[a-z0-9-]+: [^\\r\\n\\u0100-\\uffff]*\\r\\n)*(?:\\r\\n)?$"
+          "pattern": "^[A-Z]+ (?:[^ \\r\\n\\u0100-\\uffff]|\\r(?!\\n))+ HTTP/1\\.[01]\\r\\n(?:[a-z0-9-]+: [^\\r\\n\\u0100-\\uffff]*\\r\\n)*(?:\\r\\n)?$"
         },
         "body": { "$ref": "common.schema.json#/$defs/bytes" }
       }

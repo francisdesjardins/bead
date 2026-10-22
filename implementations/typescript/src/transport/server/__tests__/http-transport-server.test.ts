@@ -1627,6 +1627,46 @@ test.describe('createHTTPTransportServer, over TLS', () => {
     expect(await answerOverHTTP2(session, { 'x-other': 'a\tb' })).toEqual([201, undefined]);
   });
 
+  test('resets over HTTP/2 the stream of a request whose target holds a control character, a space, DEL or an octet past ASCII, PROTOCOL_ERROR, and tells nothing', async () => {
+    await using started = await startSecure();
+    const { server, session } = started;
+    const told: unknown[] = [];
+
+    server.on('refusal', (refusal) => {
+      told.push(refusal);
+    });
+
+    // ! nghttp2 resets the stream of a control character, a space or DEL in :path before the
+    // transport reads the request; é, the one octet of its Latin-1 code, which Node hands on, and a
+    // NUL percent-encoded in its path the transport resets
+    expect(
+      await Promise.all(
+        [
+          '/be\u0001ad',
+          '/bead?a\u0001b',
+          '/bead?a\tb',
+          '/bead?a b',
+          '/bead?a\u007Fb',
+          '/bead?é',
+          '/be%00ad',
+          '/be\u0000ad',
+        ].map((path) => {
+          return resetOf(session, { ':path': path });
+        })
+      )
+    ).toEqual(
+      Array.from({ length: 8 }, () => {
+        return PROTOCOL_ERROR;
+      })
+    );
+    expect(told).toEqual([]);
+    // what its target percent-encodes is no octet of it, NUL in a query among them
+    expect(await answerOverHTTP2(session, { ':path': '/bead?a%01b%7F%00' })).toEqual([
+      201,
+      undefined,
+    ]);
+  });
+
   test('takes over HTTP/2 a request with a field holding a control character but a tab, or whose value starts or ends with a space or a tab, which Node’s parser drops before the transport reads the request', async () => {
     await using started = await startSecure();
     const { server, session } = started;

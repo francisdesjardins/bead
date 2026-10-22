@@ -40,6 +40,9 @@ public sealed class HttpGateway : IAsyncDisposable
     // the largest JWT a request's header holds with no other block (spec 4.4)
     private const int JwtBytes = 1_004;
 
+    // the code a malformed HTTP/2 request's stream is reset with (RFC 9113 §7)
+    private const int ProtocolError = 0x1;
+
     // the methods in the order an allow names them (transcoding 3.10)
     private static readonly string[] MethodOrder = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
 
@@ -254,10 +257,14 @@ public sealed class HttpGateway : IAsyncDisposable
     {
         var request = context.Request;
 
-        // 1. what HTTP refuses of its own, unmarked (spec 15.12)
-        if (!HasVisibleFields(request) || !IsTakenTarget(context))
+        // 1. what HTTP refuses of its own, unmarked (spec 15.12): a field or a target past visible
+        // ASCII, which Kestrel takes, over HTTP/2 its stream reset
+        if (!HasVisibleFields(request) || !IsVisibleTarget(context) || !IsTakenTarget(context))
         {
-            await RefuseAsHttp(context, StatusCodes.Status400BadRequest);
+            if (!ResetMalformed(context))
+            {
+                await RefuseAsHttp(context, StatusCodes.Status400BadRequest);
+            }
 
             return;
         }
@@ -1398,6 +1405,19 @@ public sealed class HttpGateway : IAsyncDisposable
         await context.Response.CompleteAsync();
     }
 
+    // a malformed HTTP/2 request's end: its stream reset, PROTOCOL_ERROR, nothing written (RFC 9113 §8.1.1)
+    private static bool ResetMalformed(HttpContext context)
+    {
+        if (HttpProtocol.IsHttp2(context.Request.Protocol) && context.Features.Get<IHttpResetFeature>() is { } reset)
+        {
+            reset.Reset(ProtocolError);
+
+            return true;
+        }
+
+        return false;
+    }
+
     private static void CloseBehind(HttpContext context)
     {
         if (!HttpProtocol.IsHttp2(context.Request.Protocol) && !HttpProtocol.IsHttp3(context.Request.Protocol))
@@ -1434,6 +1454,11 @@ public sealed class HttpGateway : IAsyncDisposable
     private static bool IsHttp1(HttpRequest request)
     {
         return HttpProtocol.IsHttp10(request.Protocol) || HttpProtocol.IsHttp11(request.Protocol);
+    }
+
+    private static bool IsVisibleTarget(HttpContext context)
+    {
+        return HostsAndOrigins.IsVisibleTarget(context.Features.Get<IHttpRequestFeature>()?.RawTarget);
     }
 
     private static bool IsTakenTarget(HttpContext context)

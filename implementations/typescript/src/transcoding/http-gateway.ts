@@ -52,6 +52,7 @@ import {
   isListedOrigin,
   isTakenHost,
   isTakenOrigin,
+  isVisibleTarget,
   ownAuthorityOf,
   requestTargetOf,
 } from '../transport/server/hosts-and-origins';
@@ -1570,8 +1571,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       response,
     };
 
-    // 1: what HTTP refuses of its own, unmarked
-    const named = hasVisibleFields(request.rawHeaders) ? authorityNamedBy(request) : undefined;
+    // 1: what HTTP refuses of its own, unmarked: a field or a target past visible ASCII among it
+    const named =
+      hasVisibleFields(request.rawHeaders) && isVisibleTarget(request.url)
+        ? authorityNamedBy(request)
+        : undefined;
 
     if (named === undefined || target === undefined) {
       refuseMalformed({ request, response });

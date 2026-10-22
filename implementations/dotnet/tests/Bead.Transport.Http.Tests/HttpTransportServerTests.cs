@@ -2447,6 +2447,35 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Resets_over_HTTP_2_the_stream_of_a_request_whose_target_holds_a_control_character_a_space_DEL_or_an_octet_past_ASCII_PROTOCOL_ERROR_and_tells_nothing()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+
+        var own = (":authority", $"{Host}:{_port}");
+        var bead = ("content-type", HttpTransport.MediaType);
+
+        // é in UTF-8, each of its two octets one character, which Kestrel decodes; a control
+        // character, a space and DEL Kestrel takes in :path, and the transport resets the stream of
+        // each, PROTOCOL_ERROR (RFC 9113 §8.1.1), nothing written; a NUL percent-encoded in its path
+        // Kestrel resets of its own
+        var cafe = Encoding.Latin1.GetString(Encoding.UTF8.GetBytes("é"));
+
+        foreach (var path in (string[])["/be\u0001ad", "/bead?a\u0001b", "/bead?a\tb", "/bead?a b", "/bead?a\u007fb", $"/bead?{cafe}", "/be%00ad"])
+        {
+            Assert.Equal(new TlsAnswer(null, null, 0x1), await Http2Of((":path", path), own, bead));
+        }
+
+        // ! NUL, and a lone 0xE9, no UTF-8, Kestrel refuses of its own, ending the session, PROTOCOL_ERROR
+        Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of((":path", "/be\u0000ad"), own, bead));
+        Assert.Equal(new TlsAnswer(null, null, null, 0x1), await Http2Of((":path", "/bead?é"), own, bead));
+        Assert.Empty(_refusals);
+        Assert.Empty(_connections);
+
+        // what its target percent-encodes is no octet of it, NUL in a query among them
+        Assert.Equal(new TlsAnswer(201, null, null), await Http2Of((":path", "/bead?a%01b%7F%00"), own, bead));
+    }
+
+    [Fact]
     public async Task Resets_over_HTTP_2_the_stream_of_a_request_with_a_field_holding_a_control_character_but_a_tab_or_whose_value_starts_or_ends_with_a_space_or_a_tab_and_Kestrel_ends_the_session_of_an_octet_that_is_no_UTF_8()
     {
         await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
