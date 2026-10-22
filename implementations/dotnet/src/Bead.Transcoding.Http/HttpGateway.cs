@@ -69,8 +69,9 @@ public sealed class HttpGateway : IAsyncDisposable
 
     /// <summary>
     /// A gateway, not yet listening, its options held: an entry of its hosts, origins or proxies none
-    /// takes, a member that parts from its policy, a route of a method none of <c>http.proto</c>'s or
-    /// of a template off its grammar, or a notification where its procedure does not notify, or none
+    /// takes, a member that parts from its policy, a route of a method none of <c>http.proto</c>'s, of
+    /// a template off its grammar or that ties another of its method, or a notification where its
+    /// procedure does not notify, or none
     /// where it does, is an <see cref="ArgumentException"/>; a bound not above 0, or a duration off
     /// its range, an <see cref="ArgumentOutOfRangeException"/>.
     /// </summary>
@@ -128,6 +129,21 @@ public sealed class HttpGateway : IAsyncDisposable
                 }
 
                 _served.Add(new Served(route, rule, template));
+            }
+        }
+
+        // ! two routes of one method that tie are refused as the gateway is built, naming both (3.5): a
+        // table is a list, which two tables built apart may join with a tie no builder saw
+        for (var index = 0; index < _served.Count; index += 1)
+        {
+            var one = _served[index];
+
+            if (_served.Take(index).FirstOrDefault((other) =>
+            {
+                return string.Equals(other.Rule.Method, one.Rule.Method, StringComparison.Ordinal) && other.Template.Ties(one.Template);
+            }) is { } tied)
+            {
+                throw new ArgumentException($"{one.Route.Procedure.ProcedureName}'s route {one.Rule.Method} {one.Rule.Template} ties {tied.Route.Procedure.ProcedureName}'s route {tied.Rule.Method} {tied.Rule.Template}", nameof(options));
             }
         }
 
@@ -909,12 +925,12 @@ public sealed class HttpGateway : IAsyncDisposable
     private ReadOnlyMemory<byte> PayloadOf((Served Served, string Target, byte[] Body) request)
     {
         var (served, target, body) = request;
+        var question = target.IndexOf('?', StringComparison.Ordinal);
+        var query = question < 0 ? null : target[(question + 1)..];
 
         if (served.Route.Request.Descriptor is not { } descriptor)
         {
-            var question = target.IndexOf('?', StringComparison.Ordinal);
-
-            if (question >= 0 && target[(question + 1)..].Split('&').Any((sequence) =>
+            if (query is not null && query.Split('&').Any((sequence) =>
             {
                 return sequence.Length > 0;
             }))
@@ -925,9 +941,15 @@ public sealed class HttpGateway : IAsyncDisposable
             return body;
         }
 
-        var message = _binding.Bind(
-            new BindingRoute { Request = descriptor, Rule = served.Rule, Template = served.Template },
-            new BindingRequest { Target = target, Body = body });
+        // the path matched already: its variables decoded, a value that does not decode refused at its own
+        var message = _binding.Bind(descriptor, new BindingOptions
+        {
+            Variables = served.Template.ValuesOf(HttpPath.Of(question < 0 ? target : target[..question])!),
+            Query = query,
+            Body = served.Rule.Body is null ? null : new ReadOnlyMemory<byte>(body),
+            RouteBody = served.Rule.Body,
+            IsPatch = string.Equals(served.Rule.Method, "PATCH", StringComparison.Ordinal),
+        });
 
         return message.ToByteArray();
     }

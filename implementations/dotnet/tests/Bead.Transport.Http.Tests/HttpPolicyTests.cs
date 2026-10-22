@@ -54,8 +54,9 @@ public sealed class HttpPolicyTests
         Assert.Equal(["api.example"], applied.Hosts);
         Assert.Equal((1_024, "/bead"), (applied.MaximumBodyBytes, applied.Pathname));
 
-        // a member the policy gives none of is the listener's own
+        // a member the policy gives none of is the listener's own, beside a policy or with none
         Assert.Equal(["https://app.example"], new HttpTransportServerOptions { Origins = ["https://app.example"], Policy = policy }.PolicyApplied().Origins);
+        Assert.Equal(["https://app.example"], new HttpTransportServerOptions { Origins = ["https://app.example"] }.PolicyApplied().Origins);
         Assert.Equal(
             "Hosts is given in the policy and beside it: give it once (Parameter 'Hosts')",
             Assert.Throws<ArgumentException>(() =>

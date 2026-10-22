@@ -1293,6 +1293,41 @@ test('refuses a route off its template’s grammar, and listens once', async () 
   await never.stop();
 });
 
+test('refuses a route table of two routes of one method that tie, naming both', async () => {
+  await using fixture = await startTranscoding();
+  const echo = HTTP_ROUTES.find((init) => {
+    return init.procedure === TranscodingProcedures.echo;
+  });
+
+  if (echo === undefined) {
+    throw new Error('no echo in the route table');
+  }
+
+  const tying: IHttpRouteInit = {
+    ...echo,
+    routes: [{ method: 'GET', template: '/v1/books/{id}' }],
+  };
+  const beside: IHttpRouteInit = {
+    ...echo,
+    routes: [{ body: '*', method: 'POST', template: '/v1/books/{id}' }],
+  };
+
+  // * two tables built apart and joined: the tie no builder saw is refused as the gateway is built
+  expect(() => {
+    return createHTTPGateway({ routes: [...HTTP_ROUTES, tying], transport: fixture.memory });
+  }).toThrow(
+    new ProgrammerError("echo's route GET /v1/books/{id} ties getBook's route GET /v1/books/{name}")
+  );
+
+  // a route of another method at that template ties none
+  await using gateway = createHTTPGateway({
+    routes: [...HTTP_ROUTES, beside],
+    transport: fixture.memory,
+  });
+
+  await gateway.stop();
+});
+
 test('answers as the endpoint an application maps, and a caller of no address as local', async () => {
   await using fixture = await startTranscoding();
   const drawn: string[] = [];

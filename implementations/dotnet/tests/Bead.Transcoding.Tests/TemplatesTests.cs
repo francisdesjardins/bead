@@ -64,17 +64,28 @@ public sealed class TemplatesTests
         Assert.Equal("a+b", single.ValuesOf(PathOf("/v1/books/a+b"))["name"]);
         Assert.Equal("shelves/a%2Fb/books/c", multi.ValuesOf(PathOf("/v1/shelves/a%2Fb/books/c"))["name"]);
         Assert.Equal("shelves/ /books/x", multi.ValuesOf(PathOf("/v1/shelves/%20/books/x"))["name"]);
+        Assert.Equal("", HttpTemplate.Parse("/v1/{name=**}").ValuesOf(PathOf("/v1"))["name"]);
 
-        // * matched raw: a path is case-sensitive, and an encoded slash is no segment's end
+        // * matched raw: a path is case-sensitive, a literal its text and no encoded spelling of it,
+        // and an encoded slash is no segment's end
         Assert.False(HttpTemplate.Parse("/api/Transcoding/echo").Matches(PathOf("/api/transcoding/echo")));
+        Assert.False(HttpTemplate.Parse("/v1/books").Matches(PathOf("/v1/bo%6Fks")));
         Assert.True(single.Matches(PathOf("/v1/books/a%2Fb")));
 
-        foreach (var refused in new[] { "/v1/books/%ZZ", "/v1/books/%4", "/v1/books/%FF", "/v1/books/%C3%28" })
+        foreach (var (refused, reason) in new[]
         {
-            Assert.Throws<JsonFormException>(() =>
+            ("/v1/books/%ZZ", "a % that two hexadecimal digits do not follow"),
+            ("/v1/books/%4", "a % that two hexadecimal digits do not follow"),
+            ("/v1/books/%FF", "a value whose bytes are not UTF-8"),
+            ("/v1/books/%C3%28", "a value whose bytes are not UTF-8"),
+        })
+        {
+            var refusal = Assert.Throws<JsonFormException>(() =>
             {
                 single.ValuesOf(PathOf(refused));
             });
+
+            Assert.Equal((reason, "name"), (refusal.Message, refusal.Place?.Parameter));
         }
     }
 
@@ -96,6 +107,7 @@ public sealed class TemplatesTests
         var literal = new[] { HttpTemplate.Parse("/v1/books/{name}"), HttpTemplate.Parse("/v1/books/special") };
         var star = new[] { HttpTemplate.Parse("/v1/{name=things/**}"), HttpTemplate.Parse("/v1/things/{id}") };
         var operations = new[] { HttpTemplate.Parse("/v1/{name=operations}"), HttpTemplate.Parse("/v1/{name=operations/**}") };
+        var given = new[] { operations[1], operations[0] };
 
         Assert.Equal(1, HttpTemplate.Answering(literal, PathOf("/v1/books/special")));
         Assert.Equal(0, HttpTemplate.Answering(literal, PathOf("/v1/books/other")));
@@ -106,6 +118,12 @@ public sealed class TemplatesTests
         Assert.Equal(0, HttpTemplate.Answering(operations, PathOf("/v1/operations")));
         Assert.Equal(1, HttpTemplate.Answering(operations, PathOf("/v1/operations/abc")));
         Assert.Null(HttpTemplate.Answering(operations, PathOf("/v2/operations")));
+
+        // and whatever their order: the double star given first answers no path its other ends at
+        Assert.Equal(1, HttpTemplate.Answering(given, PathOf("/v1/operations")));
+        Assert.Equal("operations", given[1].ValuesOf(PathOf("/v1/operations"))["name"]);
+        Assert.Equal(0, HttpTemplate.Answering(given, PathOf("/v1/operations/abc")));
+        Assert.Equal("operations/abc", given[0].ValuesOf(PathOf("/v1/operations/abc"))["name"]);
 
         // two of one shape tie, whatever their variables' names; a star and a double star do not
         Assert.True(HttpTemplate.Parse("/v1/books/{name}").Ties(HttpTemplate.Parse("/v1/books/{id}")));

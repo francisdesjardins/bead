@@ -1959,6 +1959,27 @@ def json_path(fields):
     return tuple(field.json_name for field in fields)
 
 
+def held_by_builder(procedure, rule, template):
+    """Stops the generator at a rule a builder refuses (3.9), so no entry binds by a route no gateway
+    is built of: a variable whose field path names no field, passes a repeated field, or ends at a
+    repeated, a map or a message field; a body that names no top-level field or one a variable binds;
+    a body on a get or a delete."""
+    each = TYPES[procedure.request]
+
+    for path, _, _ in template.variables:
+        fields = fields_along(each, path, by_json=False)
+
+        if fields is None or fields[-1].label is not None or fields[-1].is_message:
+            raise SystemExit(f'bindings: {rule.template}: {path} is a variable 3.9 refuses')
+
+    if rule.body not in (None, '*') and (rule.body not in each.by_name
+                                         or any(path == rule.body for path, _, _ in template.variables)):
+        raise SystemExit(f'bindings: {rule.template}: a body of {rule.body}, which 3.9 refuses')
+
+    if rule.body is not None and rule.method in ('get', 'delete'):
+        raise SystemExit(f'bindings: {rule.template}: a body on a {rule.method}, which 3.9 refuses')
+
+
 def bind(procedure, rule, target, body):
     """The request a route binds from its variables, its query and its body (section 4): its value. A
     refusal tells where the request carried what it refuses, as 7.4 places it."""
@@ -1966,6 +1987,8 @@ def bind(procedure, rule, target, body):
     path, _, query = target.partition('?')
     template = Template(rule.template)
     split = split_path(path)
+
+    held_by_builder(procedure, rule, template)
 
     if split is None or not matches(template, *split):
         raise ValueError(f'{target} is not of {rule.template}')
@@ -2372,9 +2395,14 @@ def stream_of(steps):
 
 def templates_entry(name, clauses, templates, paths):
     """Templates and raw paths: the template each path's route is by 3.5's precedence, its variables
-    and its verb; none where none matches; refused where a variable's value does not decode."""
+    and its verb; none where none matches; refused where a variable's value does not decode. Two
+    templates that tie stop the generator: a gateway refuses a table that holds them (3.5)."""
     parsed = [Template(text) for text in templates]
     found = []
+
+    for index, one in enumerate(parsed):
+        if any(ties(one, other) for other in parsed[index + 1:]):
+            raise SystemExit(f'templates: {name}: {one.text} ties a template beside it')
 
     for path in paths:
         index, _ = route_for(parsed, path)
@@ -2420,6 +2448,8 @@ TEMPLATES = [
     templates_entry("google.longrunning's operations, a route that ends before a double star of none",
                     ['3.5', '3.6', '3.8'], ['/v1/{name=operations}', '/v1/{name=operations/**}'],
                     ['/v1/operations', '/v1/operations/abc', '/v1/operations/a/b']),
+    templates_entry('a route that ends before a double star of none, the double star given first',
+                    ['3.5', '3.6', '3.8'], ['/v1/{name=operations/**}', '/v1/{name=operations}'], ['/v1/operations']),
     templates_entry('a default route, literal whole, before a rule of a double star', ['3.2', '3.5'],
                     ['/api/{name=**}', '/api/Transcoding/echo'], ['/api/Transcoding/echo', '/api/Transcoding/other']),
     templates_entry('the verb at the last colon its last segment holds unencoded', ['3.7', '3.8'],
@@ -2427,14 +2457,21 @@ TEMPLATES = [
                     ['/v1/shelves/1/books/2:archive', '/v1/shelves/1/books/2', '/v1/shelves/1/books/a:b:archive',
                      '/v1/shelves/1/books/2:frobnicate', '/v1/shelves/1/books/2%3Aarchive']),
     templates_entry('a single-segment variable decoded whole', ['3.6', '3.7', '3.8'], ['/v1/books/{name}'],
-                    ['/v1/books/a%2Fb', '/v1/books/caf%C3%A9', '/v1/books/a%3Ab', '/v1/books/a:b', '/v1/books/a+b']),
+                    ['/v1/books/a%2Fb', '/v1/books/caf%C3%A9', '/v1/books/a%3Ab', '/v1/books/a:b', '/v1/books/a+b',
+                     '/v1/books/a/b']),
     templates_entry('a multi-segment variable decoded but its %2F', ['3.8'], ['/v1/{name=shelves/*/books/*}'],
-                    ['/v1/shelves/a%2Fb/books/c', '/v1/shelves/1/books/%2f', '/v1/shelves/%20/books/x']),
+                    ['/v1/shelves/a%2Fb/books/c', '/v1/shelves/1/books/%2f', '/v1/shelves/%20/books/x',
+                     '/v1/shelves/a%2f%41/books/c']),
+    templates_entry('a literal matches its text, never an encoded spelling of it', ['3.6'],
+                    ['/api/Transcoding/echo', '/v1/books/{name}'], ['/api/Transcoding/ech%6F', '/v1/bo%6Fks/a']),
     templates_entry('a double star of no segment binds an empty value', ['3.6', '3.8'], ['/v1/{name=**}'],
                     ['/v1', '/v1/a/b/c']),
     templates_entry('no path with an empty or a dot segment matches', ['3.6'], ['/v1/books/{name}', '/v1/{name=**}'],
                     ['/v1/books/..', '/v1/books/.', '/v1/books/%2E%2E', '/v1/books/%2e', '/v1/books/', '/v1//books/a',
                      '/v1/books/a/..']),
+    templates_entry('the path / is one empty segment, which no double star takes', ['3.6'], ['/{name=**}'], ['/', '/a']),
+    templates_entry('a segment of dots beside other characters is a segment, decoded once', ['3.6', '3.8'],
+                    ['/v1/books/{name}'], ['/v1/books/...', '/v1/books/a..b', '/v1/books/.%2E', '/v1/books/%252E']),
     templates_entry('a value whose decoding fails', ['3.8'], ['/v1/books/{name}'],
                     ['/v1/books/%ZZ', '/v1/books/%4', '/v1/books/%FF', '/v1/books/%C3%28']),
     templates_entry('a path is matched case-sensitively', ['3.3', '3.6'], ['/api/Transcoding/echo'],
@@ -2891,6 +2928,7 @@ BOOK_RULE, BOOK_BINDING = GET_BOOK_PROCEDURE.rules
 GET_OPERATION_PROCEDURE = BY_PROCEDURE['getOperation']
 OPERATION_GET = default_routes(GET_OPERATION_PROCEDURE)[1]
 ECHO_POST = default_routes(ECHO)[0]
+EVERY = Rule('get', '/v1/every')
 QUERY = ['4.1', '4.3']
 
 BINDINGS = [
@@ -2900,6 +2938,8 @@ BINDINGS = [
             '/v1/shelves/1/books/2?revision=3&tags=a&tags=b&sub.name=x&sub.count=2'),
     binding('a single-segment variable decoded whole', ['4.2', '4.2.1', '3.8'], GET_BOOK_PROCEDURE, BOOK_BINDING,
             '/v1/books/a%2Fb'),
+    binding('a variable whose bytes are not UTF-8', ['3.8', '4.2', '7.4'], GET_BOOK_PROCEDURE, BOOK_BINDING,
+            '/v1/books/%FF'),
     binding('variables of bytes, a bool, an enum by its name, a 64-bit integer and a field within a field',
             ['4.2', '4.2.2', '4.2.3', '4.2.4', '4.2.5'], ECHO,
             Rule('get', '/v1/every/{some_bytes}/{a_bool}/{color}/{an_int64}/{inner.count}'),
@@ -2916,6 +2956,8 @@ BINDINGS = [
             '/v1/shelves/s/books?pageSize=5&page_size=6'),
     binding('a field named twice', QUERY + ['4.3.3'], GET_BOOK_PROCEDURE, BOOK_RULE,
             '/v1/shelves/1/books/2?revision=1&revision=2'),
+    binding('a field within a field named twice', QUERY + ['4.3.3'], GET_BOOK_PROCEDURE, BOOK_RULE,
+            '/v1/shelves/1/books/2?sub.count=1&sub.count=2'),
     binding('a repeated field repeats', QUERY + ['4.3.1'], GET_BOOK_PROCEDURE, BOOK_RULE,
             '/v1/shelves/1/books/2?tags=a&tags=b&tags=c'),
     binding('a parameter no field path names', QUERY + ['4.3.3'], GET_BOOK_PROCEDURE, BOOK_RULE,
@@ -2938,6 +2980,12 @@ BINDINGS = [
     binding('a bool parameter of 1', QUERY + ['4.2.3'], GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?flag=1'),
     binding('a Timestamp parameter', QUERY + ['4.3.2'], GET_BOOK_PROCEDURE, BOOK_RULE,
             '/v1/shelves/1/books/2?at=2026-10-21T12:00:00Z'),
+    binding('wrappers and a Duration in the query', QUERY + ['4.3.2'], ECHO, EVERY,
+            '/v1/every?wrappedInt64=7&wrappedBool=true&took=1.5s&wrappedString=x'),
+    binding('a Value parameter', QUERY + ['4.3.3'], ECHO, EVERY, '/v1/every?anyValue=x'),
+    binding("a query's empty sequences skipped, a name of no = an empty value, a value that holds = past its first",
+            QUERY + ['4.3.1'], GET_BOOK_PROCEDURE, BOOK_RULE,
+            '/v1/shelves/1/books/2?&flag=false&&tags&tags=%F0%9F%98%80&sub.name=a=b&'),
     binding('a plus in the query is a space', QUERY, GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?tags=a+b'),
     binding('an encoded plus is a plus', QUERY, GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?tags=a%2Bb'),
     binding('a parameter of no value', QUERY, GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?tags='),
@@ -2980,6 +3028,10 @@ BINDINGS = [
             ARCHIVE, ARCHIVE.rules[0], '/v1/shelves/1/books/2:archive', '[]'),
     binding("a refusal in a body that names a field, its pointer from that field", ['4.4', '7.4', '7.4.2'], UPDATE,
             UPDATE.rules[0], '/v1/shelves/1/books/2', '{"pages":"x"}'),
+    binding("a body under a field that is no object, beside a variable within that field", ['4.1', '4.4', '7.4'],
+            UPDATE, UPDATE.rules[0], '/v1/shelves/1/books/2', '1'),
+    binding("a member of a body under a field that names no field, its pointer from that field",
+            ['4.4', '5.2.2', '7.4', '7.4.2'], UPDATE, UPDATE.rules[0], '/v1/shelves/1/books/2', '{"title":"t","nope":1}'),
     binding("a refusal of a member of the request whole, its pointer by JSON names", ['4.4', '7.4', '7.4.2'], ARCHIVE,
             ARCHIVE.rules[0], '/v1/shelves/1/books/2:archive', '{"sub":{"count":"x"}}'),
     binding("a refusal of a parameter within a message, its parameter by JSON names", ['4.3', '7.4', '7.4.1'],
@@ -3674,6 +3726,16 @@ EXCHANGES = [
              [send('GET', '/v1/books/2', ['host: {host}', 'host: {host}']),
               {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
                'on': 'a'}]),
+    # * a head's characters are its octets, so a character past U+007F is one octet past US-ASCII: é as
+    # the two octets of its UTF-8, in the path and in the query
+    exchange("a target holding an octet past US-ASCII, refused as HTTP refuses it, unmarked, its body empty",
+             ['3.6', '10.1', '10.1.1'],
+             [send('GET', '/v1/books/' + chr(0xC3) + chr(0xA9), on='a'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'a'},
+              send('GET', '/v1/books/2?tags=' + chr(0xC3) + chr(0xA9), on='b'),
+              {'expect': {'status': 400, 'fields': {'bead-refusal': None, 'content-type': None}, 'body': ''},
+               'on': 'b'}]),
     exchange("a body past maximumBodyBytes as it comes, 413", ['9.3', '10.1', '10.1.10'],
              [{'send': {'head': 'POST /api/Transcoding/echo HTTP/1.1' + chr(13) + chr(10) + 'host: {host}' + chr(13) + chr(10)
                         + 'content-type: application/json' + chr(13) + chr(10) + 'transfer-encoding: chunked'
@@ -3781,7 +3843,7 @@ DOCUMENT_JSON = {
         "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
         "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
         "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+        "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
         "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
         "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them.",
     ],

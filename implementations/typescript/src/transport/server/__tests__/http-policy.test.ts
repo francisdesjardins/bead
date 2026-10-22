@@ -48,6 +48,12 @@ test('gives a listener its members from its policy, and refuses one given in it 
     maximumBodyBytes: 1_024,
     pathname: '/bead',
   });
+  // a member the policy gives none of is the listener's own, beside a policy or with none
+  expect(withPolicy({ origins: ['https://app.example'], policy })).toEqual({
+    hosts: ['api.example'],
+    maximumBodyBytes: 1_024,
+    origins: ['https://app.example'],
+  });
   expect(withPolicy({ origins: ['https://app.example'], policy: undefined })).toEqual({
     origins: ['https://app.example'],
   });

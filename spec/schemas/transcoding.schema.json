@@ -395,7 +395,12 @@
                 "required": ["head"],
                 "additionalProperties": false,
                 "properties": {
-                  "head": { "type": "string", "minLength": 1 },
+                  "head": {
+                    "description": "Its octets as text, each character one octet, as ISO-8859-1 writes it.",
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[\u0000-\u00ff]+$"
+                  },
                   "body": { "$ref": "common.schema.json#/$defs/bytes" }
                 }
               },
