@@ -82,10 +82,6 @@ test('matches a raw path, a single segment decoded whole and a multi-segment one
     index: 0,
     variables: { name: 'a/b c' },
   });
-  expect(answerOf(['/v1/books/{name}'], '/v1/books/caf%C3%A9+x')).toEqual({
-    index: 0,
-    variables: { name: 'café+x' },
-  });
   expect(answerOf(['/v1/{name=shelves/*/books/*}'], '/v1/shelves/a%2Fb/books/%2f%41')).toEqual({
     index: 0,
     variables: { name: 'shelves/a%2Fb/books/%2fA' },
@@ -98,12 +94,14 @@ test('matches a raw path, a single segment decoded whole and a multi-segment one
 
   const template = templateOf('/v1/books/{name}');
 
-  expect(variablesOf(template, pathOf('/v1/books/%ZZ')).reason).toBe(
-    'a % that two hexadecimal digits do not follow'
-  );
-  expect(variablesOf(template, pathOf('/v1/books/%C3%28')).reason).toBe(
-    'a value whose bytes are not UTF-8'
-  );
+  for (const [path, reason] of [
+    ['/v1/books/%ZZ', 'a % that two hexadecimal digits do not follow'],
+    ['/v1/books/%4', 'a % that two hexadecimal digits do not follow'],
+    ['/v1/books/%FF', 'a value whose bytes are not UTF-8'],
+    ['/v1/books/%C3%28', 'a value whose bytes are not UTF-8'],
+  ] as const) {
+    expect(variablesOf(template, pathOf(path)), path).toEqual({ fieldPath: 'name', reason });
+  }
 });
 
 test('matches no path with an empty or a dot segment', () => {
@@ -142,6 +140,14 @@ test('answers by a literal before a star, a star before a double star, and a rou
     index: 0,
     variables: { name: 'operations/abc' },
   });
+
+  // and whatever their order: the one that ends where the path ends given first
+  expect(answerOf(operations.toReversed(), '/v1/operations')).toEqual({
+    index: 0,
+    variables: { name: 'operations' },
+  });
+  expect(answerOf(operations.toReversed(), '/v1/operations/abc').index).toBe(1);
+  expect(answerOf(operations, '/v2/operations').index).toBeUndefined();
   expect(answerOf(['/api/{name=**}', '/api/Hello/sayHello'], '/api/Hello/sayHello').index).toBe(1);
 });
 

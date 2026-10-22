@@ -110,7 +110,8 @@ internal static partial class Exchanges
                     var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
 
                     await socket.ConnectAsync(Host, address.Port);
-                    await socket.SendAsync(Encoding.UTF8.GetBytes(head));
+                    // * each character of a head is one octet (transcoding.json's exchanges)
+                    await socket.SendAsync(Encoding.Latin1.GetBytes(head));
 
                     if (StringOf(send, "body") is { } body)
                     {

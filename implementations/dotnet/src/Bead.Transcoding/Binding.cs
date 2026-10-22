@@ -5,27 +5,26 @@ using Google.Protobuf.WellKnownTypes;
 
 namespace Bead.Transcoding;
 
-/// <summary>A route a request is bound by: its request's message, its rule and its template, parsed once.</summary>
-public sealed record BindingRoute
+/// <summary>
+/// What a request is bound from (transcoding 4): its variables, decoded, its query, raw, its body, and
+/// its route's body and whether its route is a <c>patch</c> rule's.
+/// </summary>
+public sealed record BindingOptions
 {
-    /// <summary>The message its request is.</summary>
-    public required MessageDescriptor Request { get; init; }
+    /// <summary>Each variable's value, decoded, by its field path of proto names.</summary>
+    public required IReadOnlyDictionary<string, string> Variables { get; init; }
 
-    /// <summary>The route: its method, its template's text and its body.</summary>
-    public required HttpRouteTemplate Rule { get; init; }
+    /// <summary>Its query, raw, after the first <c>?</c>; none where its target has none.</summary>
+    public string? Query { get; init; }
 
-    /// <summary>Its template, parsed.</summary>
-    public required HttpTemplate Template { get; init; }
-}
+    /// <summary>Its body's bytes, a <c>proto</c> body's JSON text; none where its route takes none.</summary>
+    public ReadOnlyMemory<byte>? Body { get; init; }
 
-/// <summary>What a request brings to its binding: its target, raw, and its body, where it has one.</summary>
-public sealed record BindingRequest
-{
-    /// <summary>Its target as it came: its path, raw, then its query after the first <c>?</c>.</summary>
-    public required string Target { get; init; }
+    /// <summary>Its route's body: <c>*</c>, a top-level field's proto name, or none.</summary>
+    public string? RouteBody { get; init; }
 
-    /// <summary>Its body's bytes; none for a route that takes none.</summary>
-    public ReadOnlyMemory<byte> Body { get; init; }
+    /// <summary>Whether its route is a <c>patch</c> rule's, whose <c>update_mask</c> its body's keys fill (4.5).</summary>
+    public bool IsPatch { get; init; }
 }
 
 /// <summary>
@@ -62,39 +61,30 @@ public sealed class HttpBinding
     }
 
     /// <summary>
-    /// The request <paramref name="request"/> brings, bound by <paramref name="route"/>, whose template
-    /// matches its path: its message, or a <see cref="JsonFormException"/> saying why it is refused.
+    /// A request of <paramref name="request"/> bound from what <paramref name="options"/> gives, its
+    /// route's template having matched its path: its message, or a <see cref="JsonFormException"/>
+    /// saying why it is refused.
     /// </summary>
-    public IMessage Bind(BindingRoute route, BindingRequest request)
+    public IMessage Bind(MessageDescriptor request, BindingOptions options)
     {
-        ArgumentNullException.ThrowIfNull(route);
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(options);
 
-        var question = request.Target.IndexOf('?', StringComparison.Ordinal);
-        var path = question < 0 ? request.Target : request.Target[..question];
-        var query = question < 0 ? "" : request.Target[(question + 1)..];
-        var split = HttpPath.Of(path);
-
-        if (split is null || !route.Template.Matches(split))
-        {
-            throw new ArgumentException($"{request.Target} is not of {route.Rule.Template}", nameof(request));
-        }
-
-        var variables = route.Template.ValuesOf(split);
-        var body = route.Rule.Body;
+        var query = options.Query ?? "";
+        var body = options.RouteBody;
         JsonNode root;
         List<KeyValuePair<string, JsonNode>>? sent = null;
 
-        if (body == Whole)
+        if (body == Whole && options.Body is { } whole)
         {
-            root = JsonText.Read(request.Body.Span);
+            root = JsonText.Read(whole.Span);
 
             // * not an object: the reading refuses it as the message's, with nothing bound beside it
             if (root.Kind != JsonNodeKind.Object)
             {
                 try
                 {
-                    return _form.ReadNode(route.Request, root);
+                    return _form.ReadNode(request, root);
                 }
                 catch (JsonFormException refused) when (refused.At is { } at)
                 {
@@ -102,10 +92,10 @@ public sealed class HttpBinding
                 }
             }
         }
-        else if (body is not null)
+        else if (body is not null and not Whole && options.Body is { } given)
         {
             // * a body null under a field is that field's JSON, null, which leaves it unset (5.2, item 2)
-            var inner = JsonText.Read(request.Body.Span);
+            var inner = JsonText.Read(given.Span);
 
             // ! the mask is of the members the body holds as its caller sent them, before a variable
             // joins it: none for a null
@@ -127,10 +117,10 @@ public sealed class HttpBinding
         var byVariable = new List<(List<FieldDescriptor> Fields, string Parameter)>();
         var byQuery = new List<List<FieldDescriptor>>();
 
-        foreach (var (fieldPath, text) in variables)
+        foreach (var (fieldPath, text) in options.Variables)
         {
-            var fields = FieldsAlong(route.Request, (fieldPath, false))
-                ?? throw new ArgumentException($"{route.Rule.Template} binds {fieldPath}, which names no field", nameof(route));
+            var fields = FieldsAlong(request, (fieldPath, false))
+                ?? throw new ArgumentException($"{fieldPath} names no field of {request.FullName}", nameof(options));
 
             SetAlong(root, (fields, TextJson(fields[^1].FieldType, text), fieldPath));
             bound.Add(KeyOf(fields));
@@ -150,7 +140,7 @@ public sealed class HttpBinding
 
         foreach (var (name, text) in pairs)
         {
-            var fields = FieldsAlong(route.Request, (name, true))
+            var fields = FieldsAlong(request, (name, true))
                 ?? throw Refused("a parameter no field path names", JsonPlaces.CutOf(name));
             var leaf = fields[^1];
             var key = KeyOf(fields);
@@ -208,7 +198,7 @@ public sealed class HttpBinding
 
         try
         {
-            message = _form.ReadNode(route.Request, root);
+            message = _form.ReadNode(request, root);
         }
         catch (JsonFormException refused) when (refused.At is { } at)
         {
@@ -216,13 +206,13 @@ public sealed class HttpBinding
         }
 
         // * a PATCH whose caller left its update_mask unset: the members its body's object holds (AIP-134)
-        if (string.Equals(route.Rule.Method, "PATCH", StringComparison.Ordinal)
+        if (options.IsPatch
             && body is not null and not Whole
-            && route.Request.FindFieldByName(UpdateMask) is { } mask
+            && request.FindFieldByName(UpdateMask) is { } mask
             && mask is { IsRepeated: false, FieldType: FieldType.Message }
             && mask.MessageType.FullName == FieldMask.Descriptor.FullName
             && !named.Contains(UpdateMask)
-            && route.Request.FindFieldByName(body) is { FieldType: FieldType.Message } bodyField
+            && request.FindFieldByName(body) is { FieldType: FieldType.Message } bodyField
             && sent is not null)
         {
             var paths = new FieldMask();

@@ -117,6 +117,7 @@ import {
 } from './problems';
 import type { HttpMethod, HttpPayload, IHttpRouteInit, IHttpRouteTemplate } from './routes';
 import {
+  isTie,
   type ITemplate,
   parseTemplate,
   rawPathOf,
@@ -566,6 +567,20 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
       };
     });
   });
+
+  // ! two routes of one method that tie are refused as the gateway is built, naming both (3.5): a
+  // table is a list, which two tables built apart may join with a tie no builder saw
+  for (const [index, one] of served.entries()) {
+    const tied = served.slice(0, index).find((other) => {
+      return other.method === one.method && isTie(other.template, one.template);
+    });
+
+    if (tied !== undefined) {
+      throw new ProgrammerError(
+        `${one.init.procedure.procedure.procedureName}'s route ${one.method} ${one.route.template} ties ${tied.init.procedure.procedure.procedureName}'s route ${tied.method} ${tied.route.template}`
+      );
+    }
+  }
   const registry: ITypeRegistry = typeRegistryOf(
     routes.flatMap(({ notification, request, result }) => {
       return [request, result, notification].filter((payload): payload is DescMessage => {

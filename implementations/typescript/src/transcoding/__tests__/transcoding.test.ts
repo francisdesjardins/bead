@@ -501,15 +501,20 @@ test.describe('plays transcoding.json', () => {
         throw new Error(`${entry.target} matches no route`);
       }
 
-      const { variables = {} } = variablesOf(template, path);
+      const decoded = variablesOf(template, path);
       const bind = (): Message => {
+        // * as its gateway binds it: a value that does not decode refused at its own variable
+        if (decoded.variables === undefined) {
+          throw new JsonFormError(decoded.reason, { place: { parameter: decoded.fieldPath } });
+        }
+
         return bindRequest(schema, {
           ...(entry.body === undefined ? {} : { body: ENCODER.encode(entry.body) }),
           isPatch: entry.route.method === 'PATCH',
           ...(queries.length === 0 ? {} : { query: queries.join('?') }),
           registry: REGISTRY,
           routeBody: entry.route.body,
-          variables,
+          variables: decoded.variables,
         });
       };
 
