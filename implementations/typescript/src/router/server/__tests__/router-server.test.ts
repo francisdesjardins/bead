@@ -279,6 +279,8 @@ const createScriptedTransport = ({
   const control = {
     /** Called with each envelope as it is handed over, before the send settles. */
     onSend: undefined as ((sentEnvelope: ISentEnvelope) => void) | undefined,
+    /** What the next send waits on, when set: it settles as the test settles it. */
+    pending: undefined as PromiseWithResolvers<void> | undefined,
     /** What a send to each connection rejects with, when set. */
     sendErrors: new Map<Handle, Error>(),
   };
@@ -303,9 +305,16 @@ const createScriptedTransport = ({
         }),
       };
       const sendError = control.sendErrors.get(connectionHandle);
+      const { pending } = control;
 
       sent.push(sentEnvelope);
       control.onSend?.(sentEnvelope);
+
+      if (pending !== undefined) {
+        control.pending = undefined;
+
+        return pending.promise;
+      }
 
       return sendError === undefined ? Promise.resolve() : Promise.reject(sendError);
     },
@@ -402,8 +411,9 @@ test.describe('createRouterServer', () => {
     const { transport } = createScriptedTransport();
     using onItsTransport = createRouterServer(createWSTransportServer({ clock, WebSocketServer }));
     using onItsOwn = createRouterServer(transport, { clock });
+    using same = createRouterServer(createWSTransportServer({ clock, WebSocketServer }), { clock });
 
-    expect([onItsTransport.clock, onItsOwn.clock]).toEqual([clock, clock]);
+    expect([onItsTransport.clock, onItsOwn.clock, same.clock]).toEqual([clock, clock, clock]);
     expect(() => {
       createRouterServer(createWSTransportServer({ WebSocketServer }), { clock });
     }).toThrow(
@@ -506,10 +516,16 @@ test.describe('createRouterServer', () => {
       const { deliver, sent, transport } = createScriptedTransport();
       const order: unknown[] = [];
       using router = createRouterServer(transport, {
+        // none for a request presenting none, the connection's for one presenting its token, and
+        // none for one whose OPAQUE does not hold
         sessionOf: ({ connectionHandle, header }, signal) => {
           order.push(['session', connectionHandle, header.callId, signal.aborted]);
 
-          return header.credential === undefined ? undefined : Object.freeze({ data: 'ada' });
+          const { credential } = header;
+
+          return credential !== undefined && 'token' in credential && credential.token === TOKEN
+            ? Object.freeze({ data: 'ada' })
+            : undefined;
         },
       });
       const services = createServiceManager(router);
@@ -529,6 +545,7 @@ test.describe('createRouterServer', () => {
 
       deliver(first, requestOf(31));
       deliver(first, requestOf(33, { credential: OPAQUE }));
+      deliver(first, requestOf(35, { credential: { ...OPAQUE, token: OTHER_TOKEN } }));
       await sleep(0);
 
       expect(order).toEqual([
@@ -538,10 +555,12 @@ test.describe('createRouterServer', () => {
         ['session', first, 33, false],
         ['admit', 33, { data: 'ada' }],
         ['callback', 33, { data: 'ada' }],
+        ['session', first, 35, false],
       ]);
       expect(answersOf(sent)).toEqual([
         [first, 'result', 31, 'ok'],
         [first, 'result', 33, 'ok'],
+        [first, 'failure', 35, ProtocolCode.SESSION_REQUIRED],
       ]);
     });
 
@@ -677,7 +696,9 @@ test.describe('createRouterServer', () => {
       emitter.emit('message', { data: 'text' }, first);
 
       // a refusal that cannot go out
-      control.sendErrors.set(second, new Error('gone'));
+      const gone = new Error('gone');
+
+      control.sendErrors.set(second, gone);
       deliver(second, requestOf(3, { procedure: { ...echo, serviceId: 99 } }));
       await sleep(0);
 
@@ -687,6 +708,7 @@ test.describe('createRouterServer', () => {
         ['rejected', first],
         ['gone', second],
       ]);
+      expect(errors[3]?.[0]).toBe(gone);
       // each resolver that failed answered PROCEDURE_FAILED: the one that threw within its
       // delivery, before its connection's sends fail, then the one that rejected
       expect(answersOf(sent)).toEqual([
@@ -746,6 +768,7 @@ test.describe('createRouterServer', () => {
 
       expect(sent).toEqual([]);
       expect(reportedOf(errors)).toEqual([['no session', first]]);
+      expect(errors[0]?.[0]).toBe(failure);
     });
 
     test('refuse a second resolver for one procedure', () => {
@@ -830,34 +853,42 @@ test.describe('createRouterServer', () => {
 
     test('present OPAQUE when they ask, their connection’s session as sessionTokenOf gives it, and fail before they go, SESSION_REQUIRED, when it has none', async () => {
       const { deliver, open, sent, transport } = createScriptedTransport();
+      // the first's session as its provider gives it as each request goes, the second's none
+      const provider: { held?: typeof TOKEN } = {};
       using router = createRouterServer(transport, {
         sessionTokenOf: (connectionHandle) => {
-          return connectionHandle === first ? TOKEN : undefined;
+          return connectionHandle === first ? provider.held : undefined;
         },
       });
       const asking = {
         ...options,
         credential: { scheme: CredentialScheme.OPAQUE },
       } as const;
+      const presenting = (connectionHandle: Handle) => {
+        return router.request(new Uint8Array(0), {
+          options: { ...asking, connectionHandle },
+          procedure: echo,
+        });
+      };
+      const refused = {
+        code: ProtocolCode.SESSION_REQUIRED,
+        origin: 'local',
+        side: 'server',
+      };
 
       open(first);
       open(second);
 
-      await expect(
-        router.request(new Uint8Array(0), {
-          options: { ...asking, connectionHandle: second },
-          procedure: echo,
-        })
-      ).rejects.toMatchObject({
-        code: ProtocolCode.SESSION_REQUIRED,
-        origin: 'local',
-        side: 'server',
-      });
+      await expect(presenting(first)).rejects.toMatchObject(refused);
 
-      const answering = router.request(new Uint8Array(0), {
-        options: { ...asking, connectionHandle: first },
-        procedure: echo,
-      });
+      // the first's provider gives one now, which the second's does not
+      provider.held = TOKEN;
+
+      await expect(presenting(second)).rejects.toMatchObject(refused);
+      await sleep(0);
+      expect(sent).toEqual([]);
+
+      const answering = presenting(first);
 
       await sleep(0);
       deliver(first, resultOf(2));
@@ -923,7 +954,9 @@ test.describe('createRouterServer', () => {
     test('reach a connection that spoke before the router saw it open', async () => {
       const { deliver, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
+      const errors = recordErrors(router);
 
+      // an advisory kind, which is skipped
       deliver(first, Uint8Array.of(0xa1, 0x80, 0, 2, 0, 0, 0, 1));
 
       const answering = router.request(new Uint8Array(0), {
@@ -935,6 +968,7 @@ test.describe('createRouterServer', () => {
       deliver(first, resultOf(sent.at(-1)?.envelope?.header.callId ?? 0));
 
       await expect(answering).resolves.toBeDefined();
+      expect(errors).toEqual([]);
     });
 
     test('reject with the failure answered, time out, and are rejected when their connection closes', async () => {
@@ -964,7 +998,12 @@ test.describe('createRouterServer', () => {
         origin: 'peer',
         side: 'client',
       });
-      await expect(request(first, 10)).rejects.toBeInstanceOf(TimeoutError);
+
+      // its own timer's, after the delay it was given
+      const timing = request(first, 10);
+
+      await expect(timing).rejects.toBeInstanceOf(TimeoutError);
+      await expect(timing).rejects.toMatchObject({ message: 'timed out after 10ms', timeout: 10 });
 
       const closing = request(first);
       const staying = request(second);
@@ -980,7 +1019,7 @@ test.describe('createRouterServer', () => {
     });
 
     test('refuse a payload too large, here', async () => {
-      const { open, transport } = createScriptedTransport();
+      const { open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
 
       open(first);
@@ -991,6 +1030,7 @@ test.describe('createRouterServer', () => {
           procedure: echo,
         })
       ).rejects.toMatchObject({ code: ProtocolCode.PAYLOAD_TOO_LARGE, side: 'server' });
+      expect(sent).toEqual([]);
     });
   });
 
@@ -1208,23 +1248,29 @@ test.describe('createRouterServer', () => {
         return response('ok');
       });
 
+      const filter = ({ connectionHandle }: { connectionHandle: Handle }) => {
+        if (connectionHandle === second) {
+          throw failure;
+        }
+
+        return true;
+      };
+
       deliver(first, subscribingOf(1));
       deliver(second, subscribingOf(1));
       await sleep(0);
       sent.length = 0;
 
-      await resolver.notify('flash', {
-        filter: ({ connectionHandle }) => {
-          if (connectionHandle === second) {
-            throw failure;
-          }
-
-          return true;
-        },
-      });
+      await resolver.notify('flash', { filter });
 
       expect(sent).toEqual([]);
+
+      // its manager tells its debug event of the failure, which its router's notify throws
       expect(seen).toContain(failure);
+      await expect(router.notify(text.encode('flash'), { filter, procedure: news })).rejects.toBe(
+        failure
+      );
+      expect(sent).toEqual([]);
     });
 
     // spec 11.7.3
@@ -1244,32 +1290,30 @@ test.describe('createRouterServer', () => {
       ) => {
         return response('ok');
       });
+      const full = new Error('full');
 
       deliver(first, subscribingOf(1));
       deliver(second, subscribingOf(1));
       await sleep(0);
 
-      control.sendErrors.set(first, new Error('full'));
+      control.sendErrors.set(first, full);
       sent.length = 0;
       await resolver.notify('flash');
 
       expect(reportedOf(errors)).toEqual([['full', first]]);
-      expect(
-        sent.map(({ connectionHandle }) => {
-          return connectionHandle;
-        })
-      ).toEqual([first, second]);
+      expect(errors[0]?.[0]).toBe(full);
+      expect(answersOf(sent)).toEqual([
+        [first, EnvelopeKind.NOTIFICATION, 1, 'flash'],
+        [second, EnvelopeKind.NOTIFICATION, 1, 'flash'],
+      ]);
       expect(activity).toEqual(['notification second']);
 
       close(first);
       sent.length = 0;
       await resolver.notify('flash');
 
-      expect(
-        sent.map(({ connectionHandle }) => {
-          return connectionHandle;
-        })
-      ).toEqual([second]);
+      expect(answersOf(sent)).toEqual([[second, EnvelopeKind.NOTIFICATION, 1, 'flash']]);
+      expect(errors).toHaveLength(1);
     });
 
     test('notify refuses a payload too large for each connection, and reports it with that connection', async () => {
@@ -1344,7 +1388,7 @@ test.describe('createRouterServer', () => {
     });
 
     test('a connection that closes before its answer goes out is not subscribed', async () => {
-      const { close, deliver, open, transport } = createScriptedTransport();
+      const { close, deliver, open, sent, transport } = createScriptedTransport();
       using router = createRouterServer(transport);
       const services = createServiceManager(router);
       const { promise: closed, resolve: onClosed } = Promise.withResolvers<void>();
@@ -1365,6 +1409,7 @@ test.describe('createRouterServer', () => {
       await answered;
 
       expect(router.notifications.subscriptions()).toEqual([]);
+      expect(sent).toEqual([]);
     });
 
     test('a callback that subscribes before it answers gets its request’s call id, and the one held each time after', async () => {
@@ -1396,7 +1441,7 @@ test.describe('createRouterServer', () => {
       sent.length = 0;
       await resolver.notify('flash');
 
-      expect(sent[0]?.envelope?.header).toEqual({ callId: 7, kind: EnvelopeKind.NOTIFICATION });
+      expect(answersOf(sent)).toEqual([[first, EnvelopeKind.NOTIFICATION, 7, 'flash']]);
     });
 
     test('keeps apart the subscribing calls in flight on one connection, each settled by its own answer', async () => {
@@ -1426,7 +1471,10 @@ test.describe('createRouterServer', () => {
       deliver(first, subscribingOf(3, { payload: text.encode('in'), procedure: other }));
       await sleep(0);
 
-      expect(router.notifications.subscriptions(first)).toHaveLength(2);
+      expect(router.notifications.subscriptions(first)).toEqual([
+        { callId: 1, connectionHandle: first, procedureId: 5, serviceId: 2 },
+        { callId: 3, connectionHandle: first, procedureId: 7, serviceId: 2 },
+      ]);
 
       gates.get(news.procedureId)?.resolve();
       gates.get(other.procedureId)?.resolve();
@@ -1662,59 +1710,61 @@ test.describe('createRouterServer', () => {
       ]);
     });
 
+    /**
+     * A server where a request of `hold` subscribes and waits, then fails or waits for its cancel
+     * as `outcome` says, and any other subscribes at once and answers.
+     */
+    const createHolding = (outcome: 'answer' | 'cancel' | 'fail') => {
+      const scripted = createScriptedTransport();
+      const router = createRouterServer(scripted.transport);
+      const services = createServiceManager(router);
+      const { promise: released, resolve: release } = Promise.withResolvers<void>();
+
+      scripted.open(first);
+
+      const newsResolver = services.getNotificationResolver(news, { serializer: answering })(async (
+        request,
+        response
+      ) => {
+        response.registerNotification();
+
+        if (request.payload !== 'hold') {
+          return response('ok');
+        }
+
+        if (outcome === 'cancel') {
+          await new Promise<void>((_resolve, reject) => {
+            request.signal.addEventListener('abort', () => {
+              reject(new Error('stopped'));
+            });
+          });
+        }
+
+        await released;
+
+        return outcome === 'fail' ? response(null, { code: 1 }) : response('held');
+      });
+
+      // the call that holds the place, then the one answered meanwhile
+      scripted.deliver(first, subscribingOf(1, { payload: text.encode('hold') }));
+      scripted.deliver(first, subscribingOf(3, { payload: text.encode('subscribe') }));
+
+      return { ...scripted, newsResolver, release, router, services };
+    };
+
+    /** The subscription of the call `callId` to `news`, on the first connection, alone. */
+    const held = (callId = 1) => {
+      return [
+        {
+          callId,
+          connectionHandle: first,
+          procedureId: news.procedureId,
+          serviceId: news.serviceId,
+        },
+      ];
+    };
+
     test.describe('a subscription answered while another call, still in flight, holds its place', () => {
-      /**
-       * A server where a request of `hold` subscribes and waits, then fails or waits for its cancel
-       * as `outcome` says, and any other subscribes at once and answers.
-       */
-      const createHolding = (outcome: 'answer' | 'cancel' | 'fail') => {
-        const scripted = createScriptedTransport();
-        const router = createRouterServer(scripted.transport);
-        const services = createServiceManager(router);
-        const { promise: released, resolve: release } = Promise.withResolvers<void>();
-
-        scripted.open(first);
-
-        const newsResolver = services.getNotificationResolver(news, { serializer: answering })(
-          async (request, response) => {
-            response.registerNotification();
-
-            if (request.payload !== 'hold') {
-              return response('ok');
-            }
-
-            if (outcome === 'cancel') {
-              await new Promise<void>((_resolve, reject) => {
-                request.signal.addEventListener('abort', () => {
-                  reject(new Error('stopped'));
-                });
-              });
-            }
-
-            await released;
-
-            return outcome === 'fail' ? response(null, { code: 1 }) : response('held');
-          }
-        );
-
-        // the call that holds the place, then the one answered meanwhile
-        scripted.deliver(first, subscribingOf(1, { payload: text.encode('hold') }));
-        scripted.deliver(first, subscribingOf(3, { payload: text.encode('subscribe') }));
-
-        return { ...scripted, newsResolver, release, router };
-      };
-
-      const held = () => {
-        return [
-          {
-            callId: 1,
-            connectionHandle: first,
-            procedureId: news.procedureId,
-            serviceId: news.serviceId,
-          },
-        ];
-      };
-
       test('takes the place when that call fails, and hears what comes', async () => {
         const { newsResolver, release, router, sent } = createHolding('fail');
 
@@ -1738,19 +1788,25 @@ test.describe('createRouterServer', () => {
         deliver(first, cancelOf(1));
         await sleep(0);
 
-        expect(router.notifications.subscriptions()).toMatchObject([{ callId: 3 }]);
+        expect(router.notifications.subscriptions()).toEqual(held(3));
         router[Symbol.dispose]();
       });
 
       test('takes the place when the answer of that call cannot go out', async () => {
-        const { control, release, router } = createHolding('answer');
+        const { control, newsResolver, release, router, sent } = createHolding('answer');
 
         await sleep(0);
         control.sendErrors.set(first, new Error('gone'));
         release();
         await sleep(0);
+        control.sendErrors.clear();
 
-        expect(router.notifications.subscriptions()).toMatchObject([{ callId: 3 }]);
+        expect(router.notifications.subscriptions()).toEqual(held(3));
+
+        sent.length = 0;
+        await newsResolver.notify('flash');
+
+        expect(answersOf(sent)).toEqual([[first, EnvelopeKind.NOTIFICATION, 3, 'flash']]);
         router[Symbol.dispose]();
       });
 
@@ -1779,7 +1835,8 @@ test.describe('createRouterServer', () => {
           if (leave === 'cancel') {
             deliver(first, cancelOf(3));
           } else {
-            router.unsubscribe({ callId: 3, connectionHandle: first });
+            // waiting, it holds no subscription to take away
+            expect(router.unsubscribe({ callId: 3, connectionHandle: first })).toBe(false);
           }
 
           release();
@@ -1823,41 +1880,46 @@ test.describe('createRouterServer', () => {
         release();
         await sleep(0);
 
-        expect(
-          router.notifications.subscriptions().map(({ callId, procedureId }) => {
-            return [callId, procedureId];
-          })
-        ).toEqual([
-          [5, news.procedureId],
-          [7, other.procedureId],
+        expect(router.notifications.subscriptions()).toEqual([
+          { callId: 5, connectionHandle: first, procedureId: news.procedureId, serviceId: 2 },
+          { callId: 7, connectionHandle: first, procedureId: other.procedureId, serviceId: 2 },
         ]);
       });
 
       test('is the first answered: one answered after it waits for nothing', async () => {
-        const { deliver, release, router } = createHolding('fail');
+        const { deliver, newsResolver, release, router, sent } = createHolding('fail');
 
         deliver(first, subscribingOf(5, { payload: text.encode('subscribe') }));
         await sleep(0);
         release();
         await sleep(0);
 
-        expect(router.notifications.subscriptions()).toMatchObject([{ callId: 3 }]);
+        expect(router.notifications.subscriptions()).toEqual(held(3));
+
+        sent.length = 0;
+        await newsResolver.notify('flash');
+
+        expect(answersOf(sent)).toEqual([[first, EnvelopeKind.NOTIFICATION, 3, 'flash']]);
         router[Symbol.dispose]();
       });
 
       test('takes no place on a connection that closed as the answer of that call failed to go out', async () => {
         const { close, control, release, router } = createHolding('answer');
+        const errors = recordErrors(router);
+        const sending = Promise.withResolvers<void>();
 
         await sleep(0);
-        control.sendErrors.set(first, new Error('gone'));
-        control.onSend = ({ envelope }) => {
-          if (envelope?.header.callId === 1) {
-            close(first);
-          }
-        };
+
+        // the answer waits at the transport, which has it, until the close was heard, then fails
+        control.pending = sending;
         release();
         await sleep(0);
+        close(first);
+        await sleep(0);
+        sending.reject(new Error('gone'));
+        await sleep(0);
 
+        expect(reportedOf(errors)).toEqual([['gone', first]]);
         expect(router.notifications.subscriptions()).toEqual([]);
         router[Symbol.dispose]();
       });
@@ -1906,6 +1968,7 @@ test.describe('createRouterServer', () => {
       const { deliver, open, transport } = createScriptedTransport();
       const router = createRouterServer(transport);
       const services = createServiceManager(router);
+      const errors = recordErrors(router);
       const thrown: unknown[] = [];
 
       open(first);
@@ -1930,6 +1993,7 @@ test.describe('createRouterServer', () => {
 
       expect(thrown).toEqual([expect.any(DisconnectError)]);
       expect(router.notifications.subscriptions()).toEqual([]);
+      expect(errors).toEqual([]);
     });
 
     test('a command that times out is cancelled, on its even call id', async () => {
@@ -1938,19 +2002,17 @@ test.describe('createRouterServer', () => {
 
       open(first);
 
-      await expect(
-        router.request(text.encode('ping'), {
-          options: { connectionHandle: first, timeout: 20 },
-          procedure: echo,
-        })
-      ).rejects.toBeInstanceOf(TimeoutError);
-      expect(
-        sent.map(({ connectionHandle, envelope }) => {
-          return [connectionHandle, envelope?.kind, envelope?.header.callId];
-        })
-      ).toEqual([
-        [first, EnvelopeKind.REQUEST, 2],
-        [first, EnvelopeKind.CANCEL, 2],
+      const asking = router.request(text.encode('ping'), {
+        options: { connectionHandle: first, timeout: 20 },
+        procedure: echo,
+      });
+
+      // its own timer's, after the delay it was given
+      await expect(asking).rejects.toBeInstanceOf(TimeoutError);
+      await expect(asking).rejects.toMatchObject({ message: 'timed out after 20ms', timeout: 20 });
+      expect(answersOf(sent)).toEqual([
+        [first, EnvelopeKind.REQUEST, 2, 'ping'],
+        [first, EnvelopeKind.CANCEL, 2, undefined],
       ]);
     });
 
@@ -2054,6 +2116,60 @@ test.describe('createRouterServer', () => {
 
       expect(reportedOf(errors)).toEqual([['gone', second]]);
       expect(router.notifications.subscriptions(second)).toEqual([]);
+    });
+
+    test('dropSubscriptions ends the established and the waiting, never one in flight, and no call waits after', async () => {
+      const { deliver, release, router, sent, services } = createHolding('answer');
+      const other: IProcedure = { ...news, procedureId: 7, procedureName: 'other' };
+
+      using _router = router;
+
+      services.getNotificationResolver(other, { serializer: answering })((_request, response) => {
+        return response('ok');
+      });
+      deliver(first, subscribingOf(5, { procedure: other }));
+      await sleep(0);
+      sent.length = 0;
+
+      await router.dropSubscriptions({
+        connectionHandle: first,
+        failure: SERVER_FAILURES.sessionRequired,
+      });
+
+      expect(answersOf(sent.splice(0))).toEqual([
+        [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+        [first, 'failure', 3, ProtocolCode.SESSION_REQUIRED],
+      ]);
+
+      // the holder, left to its own answer, keeps its place
+      release();
+      await sleep(0);
+
+      expect(answersOf(sent)).toEqual([[first, 'result', 1, 'held']]);
+      expect(router.notifications.subscriptions()).toEqual(held());
+    });
+
+    // a handle opened again finds no call of the connection that closed waiting
+    test('a connection that closes takes its calls in flight and waiting away', async () => {
+      const { close, deliver, open, release, router, sent } = createHolding('fail');
+
+      using _router = router;
+
+      await sleep(0);
+      close(first);
+      open(first);
+      // a new holder, on the call id of the one that went with its connection
+      deliver(first, subscribingOf(1, { payload: text.encode('hold') }));
+      await sleep(0);
+      release();
+      await sleep(0);
+
+      expect(
+        answersOf(sent).filter(([, kind]) => {
+          return kind === 'failure';
+        })
+      ).toEqual([[first, 'failure', 1, 1]]);
+      expect(router.notifications.subscriptions()).toEqual([]);
     });
 
     test('a server does not subscribe: it notifies', async () => {
@@ -2248,9 +2364,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
         const notification = client.services.getNotification(news, {
           serializer: asking,
           unsubscribe: async (callId, response) => {
-            unsubscribed.push(`${String(callId)} ${response}`);
-
-            return unsubscribe(String(callId))();
+            unsubscribed.push(
+              `${String(callId)} ${response} ${await unsubscribe(String(callId))()}`
+            );
           },
         });
         const registration = await notification('subscribe', (payload) => {
@@ -2274,7 +2390,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS) {
         // unsubscribed at the server, by the call id that subscribed, by the time it is taken away
         await registration.unregister();
 
-        expect(unsubscribed).toEqual(['3 3']);
+        expect(unsubscribed).toEqual(['3 3 true']);
         expect(serverRouter.notifications.subscriptions()).toEqual([]);
         expect(told).toContainEqual(['rx', EnvelopeKind.REQUEST, 2, undefined]);
         // announced once, on the first answer
@@ -4203,7 +4319,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
   };
 
   test('sends one notification per credit, and queues the others, the latest of a key in its place', async () => {
-    const { deliver, resolver, router, sentSince } = createPaced();
+    const { deliver, errors, resolver, router, sentSince } = createPaced();
 
     using _router = router;
 
@@ -4250,6 +4366,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
       [first, EnvelopeKind.NOTIFICATION, 3, 'after'],
     ]);
     expect(queuedOf(router)).toEqual({ pausedSubscriptions: 1, queuedNotifications: 1 });
+    expect(errors).toEqual([]);
   });
 
   test('paces no subscription that did not ask, beside one that did', async () => {
@@ -4282,6 +4399,7 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     await sleep(0);
 
     // a notification the credit let go is one sent, as any
+    expect(sentSince()).toEqual([[first, EnvelopeKind.NOTIFICATION, 3, 'b']]);
     expect(activity).toEqual(['notification first']);
   });
 
@@ -4375,6 +4493,12 @@ test.describe('createRouterServer, its paced subscriptions', () => {
     expect(router.notifications.subscriptions()).toEqual([
       { callId: 5, connectionHandle: first, procedureId: 5, serviceId: 2 },
     ]);
+
+    // the place is its own: its credit lets go what it queued
+    deliver(first, pacedCreditOf(5, 2));
+    await sleep(0);
+
+    expect(sentSince()).toEqual([[first, EnvelopeKind.NOTIFICATION, 5, 'e']]);
     expect(errors).toEqual([]);
   });
 
@@ -4436,18 +4560,77 @@ test.describe('createRouterServer, its paced subscriptions', () => {
 
     using _router = router;
 
+    const gone = new Error('gone');
+
     deliver(first, pacedOf(3, text.encode('hold')));
     await sleep(0);
     await resolver.notify('a');
     await resolver.notify('b');
-    control.sendErrors.set(first, new Error('gone'));
+    control.sendErrors.set(first, gone);
     await resolver.notify('c');
     release();
     await sleep(0);
+    control.sendErrors.clear();
 
     expect(sentSince().at(-1)).toEqual([first, 'failure', 3, ProtocolCode.CAPACITY_EXCEEDED]);
-    expect(reportedOf(errors)).toContainEqual(['gone', first]);
+    expect(errors).toContainEqual([gone, first]);
+
+    // no subscription remains on the call: a credit lets nothing go, and nothing hears a notification
+    deliver(first, pacedCreditOf(3, 10));
+    await sleep(0);
+
+    expect(sentSince()).toEqual([]);
     expect(router.notifications.subscriptions()).toEqual([]);
+  });
+
+  test('paces a call handed its place as its own request asked, whatever its holder asked', async () => {
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(transport);
+    const services = createServiceManager(router);
+    const { promise: released, resolve: release } = Promise.withResolvers<void>();
+
+    open(first);
+    open(second);
+
+    const resolver = services.getNotificationResolver(news, { serializer: answering })(async (
+      request,
+      response
+    ) => {
+      response.registerNotification();
+
+      if (request.payload === 'hold') {
+        await released;
+
+        return response(null, { code: 1 });
+      }
+
+      return response('ok');
+    });
+
+    // on the first, a paced holder and a waiter that is not; on the second, the other way round
+    deliver(first, pacedOf(1, text.encode('hold')));
+    deliver(first, subscribingOf(3, { payload: text.encode('subscribe') }));
+    deliver(second, subscribingOf(1, { payload: text.encode('hold') }));
+    deliver(second, pacedOf(3, text.encode('subscribe')));
+    await sleep(0);
+
+    // the first's holder fails, the second's is cancelled: each hands its place over
+    deliver(second, cancelOf(1));
+    await sleep(0);
+    release();
+    await sleep(0);
+    sent.length = 0;
+
+    for (const word of ['a', 'b']) {
+      await resolver.notify(word);
+    }
+
+    // the second's handed over first, so notified first
+    expect(answersOf(sent)).toEqual([
+      [second, EnvelopeKind.NOTIFICATION, 3, 'a'],
+      [first, EnvelopeKind.NOTIFICATION, 3, 'a'],
+      [first, EnvelopeKind.NOTIFICATION, 3, 'b'],
+    ]);
   });
 
   // spec 11.7.3
