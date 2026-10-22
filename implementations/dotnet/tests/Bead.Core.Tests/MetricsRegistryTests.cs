@@ -36,13 +36,13 @@ public sealed class MetricsRegistryTests
         server.DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "fail" }, false);
 
         Assert.Equal(
-            "a metrics registry holds 1/1 as \"echo\": \"other\" is another name at its address (Parameter 'procedure')",
+            "the metrics registry holds 1/1 as \"echo\", and is given \"other\": another name at its address (Parameter 'procedure')",
             RefusalOf(() =>
             {
                 server.DeclareRequester(Echo with { ProcedureName = "other" });
             }));
         Assert.Equal(
-            "a metrics registry holds \"echo\" at 1/1: \"echo\" at 1/3 is its name at another address (Parameter 'procedure')",
+            "the metrics registry holds \"echo\" at 1/1, and is given \"echo\" at 1/3: its name at another address (Parameter 'procedure')",
             RefusalOf(() =>
             {
                 server.DeclareResolver(Echo with { ProcedureId = 3 }, false);
@@ -71,7 +71,7 @@ public sealed class MetricsRegistryTests
         server.DeclareResolver(Echo with { ProcedureName = "getHTTPStatus" }, false);
 
         Assert.Equal(
-            "a metrics registry holds \"getHTTPStatus\" at 1/1: \"getHttpStatus\" at 1/2 is its name at another address (Parameter 'procedure')",
+            "the metrics registry holds \"getHTTPStatus\" at 1/1, and is given \"getHttpStatus\" at 1/2: its name at another address (Parameter 'procedure')",
             Assert.Throws<ArgumentException>(() =>
             {
                 server.DeclareRequester(Echo with { ProcedureId = 2, ProcedureName = "getHttpStatus" });
@@ -273,7 +273,7 @@ public sealed class MetricsRegistryTests
             });
         });
 
-        Assert.Contains("is its name at another address", renamed.Message, StringComparison.Ordinal);
+        Assert.Contains(": its name at another address", renamed.Message, StringComparison.Ordinal);
 
         // registered nothing: its address is free, for its own name
         services.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "twice" }, dependencies)((_, response) =>
@@ -281,7 +281,7 @@ public sealed class MetricsRegistryTests
             return response.Answer("twice");
         });
         Assert.Contains(
-            "is another name at its address",
+            ": another name at its address",
             Assert.Throws<ArgumentException>(() =>
             {
                 return services.GetCommand(Echo with { ProcedureName = "clock" }, new RequestDependencies<string, string> { Serializer = new Texts() });

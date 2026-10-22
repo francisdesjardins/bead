@@ -213,7 +213,7 @@ public sealed class MetricsRegistry
         if (_names.TryGetValue(address, out var held) && !string.Equals(held, name, StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                string.Create(CultureInfo.InvariantCulture, $"a metrics registry holds {address.ServiceId}/{address.ProcedureId} as \"{held}\": \"{name}\" is another name at its address"),
+                string.Create(CultureInfo.InvariantCulture, $"the metrics registry holds {address.ServiceId}/{address.ProcedureId} as \"{held}\", and is given \"{name}\": another name at its address"),
                 nameof(procedure));
         }
 
@@ -222,7 +222,7 @@ public sealed class MetricsRegistry
             if (other.ServiceId == address.ServiceId && other != address && Identity.AreOneName(otherName, name))
             {
                 throw new ArgumentException(
-                    string.Create(CultureInfo.InvariantCulture, $"a metrics registry holds \"{otherName}\" at {other.ServiceId}/{other.ProcedureId}: \"{name}\" at {address.ServiceId}/{address.ProcedureId} is its name at another address"),
+                    string.Create(CultureInfo.InvariantCulture, $"the metrics registry holds \"{otherName}\" at {other.ServiceId}/{other.ProcedureId}, and is given \"{name}\" at {address.ServiceId}/{address.ProcedureId}: its name at another address"),
                     nameof(procedure));
             }
         }

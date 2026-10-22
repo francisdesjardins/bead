@@ -41,7 +41,12 @@ public sealed class GaugesTests
         Assert.Equal(new Dictionary<string, long> { ["bytes"] = 8 }, merged.Ceilings);
         Assert.Equal(["a", "b"], merged.ConnectionHandles.Order());
         Assert.Equal(new Dictionary<string, long> { ["bytes"] = 1, ["calls"] = 2 }, merged.Counts);
-        Assert.Empty(Gauges.Merge([]).Counts);
+        var none = Gauges.Merge([]);
+
+        Assert.Empty(none.Anomalies);
+        Assert.Empty(none.Ceilings);
+        Assert.Empty(none.ConnectionHandles);
+        Assert.Empty(none.Counts);
         Assert.Equal(
             "two parts count calls (Parameter 'parts')",
             Assert.Throws<ArgumentException>(() =>

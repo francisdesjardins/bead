@@ -3,6 +3,8 @@ import { type IncomingMessage, request } from 'node:http';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
+import { InteropProcedures } from '../../../interop/generated/interop_bead';
+import { offerInterop } from '../../../interop/handlers';
 import { createRouterServer } from '../../router/server/router-server';
 import { createSessionManager } from '../../router/server/session-manager';
 import { CredentialScheme, EnvelopeKind } from '../../router/shared/constants';
@@ -17,6 +19,7 @@ import type {
   IServiceManagerOptions,
 } from '../../router/shared/types';
 import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
+import { LONGEST_TIMER } from '../../transport/shared/clock';
 import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
 import type {
   ITransportServerRefusal,
@@ -655,6 +658,70 @@ test.describe('createServer', () => {
     expect(told.closed).toEqual([first]);
     expect(quiet.closed).toEqual([]);
     expect([server.sessions.getAll(), untold.sessions.getAll()]).toEqual([[], []]);
+  });
+
+  test('answers slow once its server’s clock passed its wait, never before', async () => {
+    const clock = createTestClock();
+    const scripted = createScriptedTransport();
+    const { procedure } = InteropProcedures.slow;
+
+    await using server = createServer<IServerTransportLike, string>(
+      { transport: scripted.transport },
+      { clock }
+    );
+
+    offerInterop(server);
+    scripted.open(first);
+    scripted.emitter.emit(
+      'message',
+      {
+        data: envelopeOf({
+          header: {
+            callId: 1,
+            kind: EnvelopeKind.REQUEST,
+            procedureId: procedure.procedureId,
+            serviceId: procedure.serviceId,
+          },
+          kind: EnvelopeKind.REQUEST,
+          payload: text.encode('{"milliseconds":50}'),
+        }),
+      },
+      first
+    );
+    await sleep(0);
+    await clock.tickAsync(49);
+
+    expect(scripted.sent).toEqual([]);
+
+    await clock.tickAsync(1);
+    await expect
+      .poll(() => {
+        return scripted.sent.map(({ envelope }) => {
+          return envelope?.header;
+        });
+      })
+      .toEqual([{ callId: 1, kind: EnvelopeKind.RESULT }]);
+  });
+
+  test('closes a connection silent for a millisecond or the longest timer at its due', async () => {
+    for (const timeout of [1, LONGEST_TIMER]) {
+      const clock = createTestClock();
+      const scripted = createScriptedTransport();
+
+      await using server = createServer(
+        { transport: scripted.transport },
+        { clock, connectionInactivityTimeout: timeout }
+      );
+
+      scripted.open(first);
+      clock.tick(timeout - 1);
+
+      expect([timeout, scripted.closed]).toEqual([timeout, []]);
+
+      clock.tick(1);
+
+      expect([timeout, scripted.closed, server.sessions.getAll()]).toEqual([timeout, [first], []]);
+    }
   });
 
   test('a listen held is no silence: a connection with no session is not closed while one is, and is closed the server’s own timeout after the last ends', async () => {

@@ -482,7 +482,7 @@ test.describe('createTransportClient #reconnect', () => {
     expect(taps).toEqual([[10, 1]]);
   });
 
-  test('passes the previous wait to a "delay" function', async () => {
+  test('hands its "delay" function the wait before and the attempt that failed', async () => {
     const { client } = createStubClient({ failures: 5 });
     const seen: [number | undefined, number][] = [];
 
@@ -527,6 +527,33 @@ test.describe('createTransportClient #reconnect', () => {
     );
 
     expect(calls).toEqual(['connect:1', 'connect:1']);
+  });
+
+  test('makes five attempts a second apart when told nothing', async () => {
+    const clock = createTestClock();
+    const { calls, client } = createStubClient({ clock, failures: 10 });
+    const taps: [number, number][] = [];
+
+    await expect(client.connect(target)).rejects.toBeInstanceOf(ConnectError);
+
+    const reconnecting = client.reconnect({
+      // each wait moved by as it is armed, so the next attempt follows
+      tap: (nextDelay, attempt) => {
+        taps.push([nextDelay, attempt]);
+        clock.tick(nextDelay);
+      },
+    });
+
+    await expect(reconnecting).rejects.toBeInstanceOf(ReconnectError);
+    await expect(reconnecting).rejects.toHaveProperty('message', 'attempt 5 reached');
+    expect(taps).toEqual([
+      [1_000, 1],
+      [1_000, 2],
+      [1_000, 3],
+      [1_000, 4],
+    ]);
+    expect(calls).toHaveLength(1 + 5);
+    expect(delaysOn(clock)).toEqual([]);
   });
 
   test('rejects a maxAttempts that is not a number, leaving the state as it was', async () => {

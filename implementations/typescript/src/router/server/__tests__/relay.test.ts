@@ -306,14 +306,31 @@ test.describe('createRelay, credentials', () => {
     relay.register({ connectionHandle: plain }, { audience: 'bead-interop', destinationId: 9 });
 
     // an ELSEWHERE admitted with what leg A's transport carried, as its resolution needs
-    const codeOf = (credential: Credential | undefined, destinationId: number) => {
-      return relay.handlerOf(destinationId)?.admit?.({
+    const refusalOf = (credential: Credential | undefined, destinationId: number) => {
+      const refusal = relay.handlerOf(destinationId)?.admit?.({
         connectionHandle: first,
         header: presentingOf(1, { credential, destinationId }),
         ...(credential === ELSEWHERE ? { transportCredential: CARRIED } : {}),
-      })?.code;
+      });
+
+      return refusal === undefined ? undefined : [refusal.code, refusal.detail];
     };
-    const unreachable = ProtocolCode.DESTINATION_UNREACHABLE;
+    const unreachable = (destinationId: number, why: string) => {
+      return [
+        ProtocolCode.DESTINATION_UNREACHABLE,
+        `destination ${String(destinationId)} is unreachable: ${why}`,
+      ];
+    };
+    const audienceOf = (destinationId: number) => {
+      return unreachable(
+        destinationId,
+        'it verifies another audience than the one the token names, or none'
+      );
+    };
+    const inTheClear = unreachable(
+      9,
+      'its transport leaves the machine in the clear, which a bearer credential never crosses'
+    );
 
     expect(
       [
@@ -326,17 +343,25 @@ test.describe('createRelay, credentials', () => {
         ELSEWHERE,
       ].map((credential) => {
         return [3, 5, 7, 9].map((destinationId) => {
-          return codeOf(credential as Credential | undefined, destinationId);
+          return refusalOf(credential as Credential | undefined, destinationId);
         });
       })
     ).toEqual([
       [undefined, undefined, undefined, undefined],
       [undefined, undefined, undefined, undefined],
-      [undefined, unreachable, undefined, unreachable],
-      [undefined, unreachable, undefined, unreachable],
-      [unreachable, unreachable, unreachable, unreachable],
-      [unreachable, unreachable, unreachable, unreachable],
-      [undefined, unreachable, unreachable, unreachable],
+      [undefined, audienceOf(5), undefined, inTheClear],
+      [undefined, audienceOf(5), undefined, inTheClear],
+      [audienceOf(3), audienceOf(5), audienceOf(7), audienceOf(9)],
+      [audienceOf(3), audienceOf(5), audienceOf(7), audienceOf(9)],
+      [
+        undefined,
+        unreachable(5, 'it was registered with no audience'),
+        unreachable(
+          7,
+          'its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another'
+        ),
+        inTheClear,
+      ],
     ]);
   });
 
@@ -692,9 +717,15 @@ test.describe('createRelay', () => {
 
     throwing.relay.register(createTarget().target, { destinationId: 7 });
 
-    expect(() => {
-      return throwing.relay.handlerOf(7)?.admit?.({ connectionHandle: first, header: headerOf(1) });
-    }).toThrow(thrown);
+    let caught: unknown;
+
+    try {
+      throwing.relay.handlerOf(7)?.admit?.({ connectionHandle: first, header: headerOf(1) });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBe(thrown);
 
     for (const refusal of [SERVER_FAILURES.payloadTooLarge, CLIENT_FAILURES.accessDenied]) {
       expect(() => {
@@ -729,6 +760,11 @@ test.describe('createRelay', () => {
       [9],
     ]);
     expect(asked).toHaveLength(1);
+
+    // one its router admitted already goes on, not asked again
+    await relay.handlerOf(7)?.(propsOf(headerOf(1)));
+
+    expect(asked).toHaveLength(2);
   });
 
   test('holds a payload to the smaller of the two legs’ limits, and to one envelope of a target that takes no transfer', () => {
@@ -798,7 +834,18 @@ test.describe('createRelay', () => {
     relay.register({ connectionHandle: device }, { destinationId: 7 });
     await relay.handlerOf(7)?.(props);
 
-    expect(own).toMatchObject([{ options: { connectionHandle: device, timeout: Infinity } }]);
+    expect(
+      own.map(({ options }) => {
+        return options;
+      })
+    ).toEqual([
+      {
+        connectionHandle: device,
+        credential: { scheme: CredentialScheme.NONE },
+        signal: props.signal,
+        timeout: Infinity,
+      },
+    ]);
     expect(own[0]?.options.signal).toBe(props.signal);
     // a relay told nothing of what its connections take passes a request on to any
     expect(
@@ -931,7 +978,7 @@ test.describe('createRelay', () => {
   });
 
   test('answers nothing once leg A ended: leg B, cancelled by the same signal, rejects', async () => {
-    const { answers, relay } = createTestRelay();
+    const { answers, relay, reports } = createTestRelay();
     const { control, target } = createTarget();
     const controller = new AbortController();
 
@@ -945,6 +992,7 @@ test.describe('createRelay', () => {
     await relay.handlerOf(7)?.(propsOf(headerOf(1), { signal: controller.signal }));
 
     expect(answers).toEqual([]);
+    expect(reports).toEqual([]);
   });
 
   test('registers a destination given or drawn — never 0, nor one taken — lists them, and takes out its own alone', () => {
@@ -980,6 +1028,31 @@ test.describe('createRelay', () => {
       { destinationId: 7, isClosed: false, label: undefined },
     ]);
     expect(again.unregister()).toBe(true);
+  });
+
+  test('draws a destination again when 0 or in use', () => {
+    const fills = [Uint8Array.of(0, 0, 0, 0), Uint8Array.of(0, 0, 0, 5), Uint8Array.of(0, 0, 1, 7)];
+    const relay = createRelay({
+      failures: SERVER_FAILURES,
+      fill: (bytes) => {
+        bytes.set(fills.shift() ?? Uint8Array.of(0, 0, 0, 9));
+      },
+      limits: LIMIT_DEFAULTS,
+      options: undefined,
+      report: () => {},
+      request: () => {
+        return Promise.reject(new Error('asked nothing'));
+      },
+      respond: () => {
+        return Promise.resolve();
+      },
+    });
+    const { target } = createTarget();
+
+    relay.register(target, { destinationId: 5 });
+
+    expect(relay.register(target).destinationId).toBe(263);
+    expect(fills).toEqual([]);
   });
 
   test('binds a call to its destination as it opens: one registered in its place later takes nothing of it', async () => {
@@ -1088,6 +1161,16 @@ test.describe('createRelay', () => {
     expect(relay.handlerOf(7)?.admit?.({ connectionHandle: first, header: headerOf(1) })).toEqual(
       unreachable
     );
+    // a subscription is refused before a connection closed
+    expect(
+      relay.handlerOf(7)?.admit?.({
+        connectionHandle: first,
+        header: headerOf(1, { opensSubscription: true }),
+      })
+    ).toEqual({
+      ...SERVER_FAILURES.subscriptionUnsupported,
+      detail: 'this relay carries no subscription',
+    });
     await admitted?.(propsOf(headerOf(3)));
     // the others are reached still
     await relay.handlerOf(8)?.(propsOf(headerOf(5, { destinationId: 8 })));
@@ -1246,6 +1329,8 @@ test.describe('createRelay', () => {
     expect(() => {
       return relay.register(createTarget().target, { audience: '\ud800' });
     }).toThrow(ProgrammerError);
+    // the one refused is not registered
+    expect(relay.destinations()).toHaveLength(4);
   });
 
   test('forwards a credential unresolved unless it verifies, as each of its handlers says, to a destination registered or not', () => {

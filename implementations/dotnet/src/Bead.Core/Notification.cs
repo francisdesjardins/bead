@@ -167,6 +167,7 @@ internal sealed class Notification<TRequest, TResponse, TNotification> : INotifi
         catch (Exception reason)
         {
             var undecodable = new FailureException(
+                // ! a detail of the side's own words: the decoder's, for the side's report alone
                 Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message),
                 (new FailureException.Raised(FailureOrigin.Local, _router.Side), reason))
             {

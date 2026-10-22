@@ -198,7 +198,7 @@ public sealed partial class RouterServerTests
     public async Task Hands_beforeRoute_a_JWT_unresolved_refusing_a_scheme_to_come_CREDENTIAL_UNSUPPORTED_and_an_ELSEWHERE_that_carried_nothing_SESSION_REQUIRED_before_it_OPAQUE_resolves_to_leg_A_s_connection_s_session_which_beforeRoute_reads()
     {
         var token = SessionToken.Parse("AAECAwQFBgcICQoLDA0ODw");
-        var admitted = new List<object?>();
+        var admitted = new List<(uint CallId, object? Data)>();
 
         using var device = StartRelayed(new Setup
         {
@@ -210,7 +210,7 @@ public sealed partial class RouterServerTests
             {
                 BeforeRoute = new BeforeRequest((request) =>
                 {
-                    admitted.Add(request.Session?.Data);
+                    admitted.Add((request.Header.CallId, request.Session?.Data));
 
                     return true;
                 }),
@@ -227,15 +227,19 @@ public sealed partial class RouterServerTests
         await Settle();
 
         Assert.Equal(
-            ["no credential came", "OPAQUE, JWT, ELSEWHERE"],
-            _transport.Sent.Skip(1).Select((entry) =>
+            [
+                "destination 7 is unreachable: it verifies another audience than the one the token names, or none",
+                "no credential came",
+                "OPAQUE, JWT, ELSEWHERE",
+            ],
+            _transport.Sent.Select((entry) =>
             {
                 return entry.Envelope.Failure!.Detail;
             }));
         Assert.Equal(
             ["first failure 1 DestinationUnreachable", "first failure 3 SessionRequired", "first failure 5 CredentialUnsupported"],
             SentSince());
-        Assert.Equal([null], admitted);
+        Assert.Equal([(1u, (object?)null)], admitted);
         Assert.Empty(device.Pipe.ClientSent);
         admitted.Clear();
 
@@ -248,16 +252,17 @@ public sealed partial class RouterServerTests
         Deliver(First, To(7, Presenting(RequestOf(11), SessionToken.Parse("AQIDBAUGBwgJCgsMDQ4PEA"))));
         await Settle();
 
+        Assert.Equal("the credential does not hold", _transport.Sent[^1].Envelope.Failure!.Detail);
         Assert.Equal(["first result 7 HI", "first result 9 HO", "first failure 11 SessionRequired"], SentSince());
-        Assert.Equal(["ada", "ada"], admitted);
+        Assert.Equal([(7u, (object?)"ada"), (9u, "ada")], admitted);
 
-        // leg B presents nothing
-        Assert.All(device.Pipe.ClientSent, (bytes) =>
-        {
-            var header = EnvelopeCodec.ReadEnvelope(bytes, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
-
-            Assert.Null(Assert.IsType<RequestHeader>(header).Credential);
-        });
+        // leg B presents nothing, for each of the two it carried
+        Assert.Equal(
+            [new RequestHeader { CallId = 1, ServiceId = 2, ProcedureId = 1 }, new RequestHeader { CallId = 3, ServiceId = 2, ProcedureId = 1 }],
+            device.Pipe.ClientSent.Select((bytes) =>
+            {
+                return (RequestHeader)EnvelopeCodec.ReadEnvelope(bytes, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
+            }));
     }
 
     [Fact]
@@ -725,8 +730,8 @@ public sealed partial class RouterServerTests
         Assert.Equal(["the connection closed before the answer first"], Reported());
     }
 
-    // relay.test.ts:333 and :614 test the relay alone; here, through the router, which hands it its
-    // own limits and what its transport says each connection carries
+    // RelayTests tests the relay alone; here, through the router, which hands it its own limits and
+    // what its transport says each connection carries
     [Fact]
     public async Task Holds_a_connection_of_its_own_to_the_router_s_own_limits_and_passes_nothing_on_to_one_that_carries_no_request()
     {

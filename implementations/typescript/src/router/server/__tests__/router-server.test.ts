@@ -10,6 +10,7 @@ import { createEmitter } from '../../../transport/shared/emitter';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { bytesOf, readEnvelope } from '../../shared/envelope';
 import { headerBytesOf } from '../../shared/header';
+import { connectionSessionOf } from '../../shared/call-session';
 import { toSessionToken } from '../../shared/identifiers';
 import { createServiceManager } from '../../shared/service-manager';
 import type {
@@ -2476,7 +2477,7 @@ test.describe('createRouterServer, credentials', () => {
     const clock = createTestClock(1_767_225_600_000);
     const now = clock.Date.now();
     const settling = new Map<string, PromiseWithResolvers<IElsewhereSession | undefined>>();
-    const { carry, deliver, router } = createVerifying(
+    const { carry, deliver, errors, router, sent } = createVerifying(
       (carried) => {
         const resolution = Promise.withResolvers<IElsewhereSession | undefined>();
 
@@ -2521,6 +2522,22 @@ test.describe('createRouterServer, credentials', () => {
     await sleep(0);
 
     expect(delaysOn(clock)).toEqual([90_000]);
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'subscribed'],
+      [first, 'result', 5, '"ada"'],
+    ]);
+
+    // it ends at the end it was moved to
+    await clock.tickAsync(89_999);
+
+    expect(sent).toHaveLength(2);
+
+    await clock.tickAsync(1);
+
+    expect(answersOf(sent.slice(2))).toEqual([
+      [first, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
+    ]);
+    expect(errors).toEqual([]);
   });
 
   test('requests run in none without a sessionOf, and one presenting a credential is refused SESSION_REQUIRED or CREDENTIAL_UNSUPPORTED', async () => {
@@ -2628,6 +2645,10 @@ test.describe('createRouterServer, credentials', () => {
     });
     carry(first, { credential: CARRIED, envelope: requestOf(3) });
     carry(first, { credential: CARRIED, envelope: requestOf(5, { credential: OPAQUE }) });
+    carry(first, {
+      credential: CARRIED,
+      envelope: requestOf(9, { credential: { scheme: CredentialScheme.JWT, token: 'a.b.c' } }),
+    });
     deliver(first, requestOf(7, { credential: ELSEWHERE }));
     await sleep(0);
 
@@ -2635,11 +2656,13 @@ test.describe('createRouterServer, credentials', () => {
     expect(answersOf(sent)).toEqual([
       [first, 'result', 3, 'none'],
       [first, 'failure', 5, ProtocolCode.SESSION_REQUIRED],
+      [first, 'failure', 9, ProtocolCode.CREDENTIAL_UNSUPPORTED],
       [first, 'failure', 7, ProtocolCode.SESSION_REQUIRED],
       [first, 'result', 1, JSON.stringify(` \t${CARRIED}`)],
     ]);
     expect(failuresOf(sent)).toEqual([
       [5, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
+      [9, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, ELSEWHERE'],
       [7, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
     ]);
   });
@@ -2655,11 +2678,10 @@ test.describe('createRouterServer, credentials', () => {
     deliver(first, requestOf(3));
     await sleep(0);
 
-    expect(
-      sent.map(({ envelope }) => {
-        return envelope?.header.callId;
-      })
-    ).toEqual([3, 1]);
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 3, 'none'],
+      [first, 'result', 1, JSON.stringify(CARRIED)],
+    ]);
   });
 
   test('a cancel and a close during resolution abort the signal, and what the verifier settles to after is dropped in silence', async () => {
@@ -2751,8 +2773,11 @@ test.describe('createRouterServer, credentials', () => {
     });
     await sleep(0);
 
-    expect(failuresOf(sent)).toHaveLength(2);
-    expect(JSON.stringify(told)).not.toContain('secret');
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 3, ProtocolCode.CREDENTIAL_UNSUPPORTED],
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+    ]);
+    expect(JSON.stringify([told, sent])).not.toContain('secret');
     expect(
       told.flatMap((info) => {
         return typeof info === 'object' && info !== null && 'direction' in info
@@ -2791,6 +2816,7 @@ test.describe('createRouterServer, credentials', () => {
       const { open, sent, transport } = createScriptedTransport({ carriesCredential, isSecure });
 
       using router = createRouterServer(transport);
+      const errors = recordErrors(router);
 
       open(first);
 
@@ -2810,7 +2836,31 @@ test.describe('createRouterServer, credentials', () => {
         expect([await command(router, jwt)]).toEqual([unreachable]);
         expect(sent).toEqual([]);
       }
+
+      expect(errors).toEqual([]);
     }
+
+    // an ELSEWHERE goes over a transport that carries it, what it stands for beside its envelope
+    const { carried, open, sent, transport } = createScriptedTransport();
+
+    using router = createRouterServer(transport);
+    const errors = recordErrors(router);
+
+    open(first);
+
+    const going = command(router, elsewhere);
+
+    await sleep(0);
+
+    expect(sent[0]?.envelope?.header).toMatchObject({
+      callId: 2,
+      credential: { scheme: CredentialScheme.ELSEWHERE },
+    });
+    expect(carried).toEqual([CARRIED]);
+    router[Symbol.dispose]();
+    await going;
+
+    expect(errors).toEqual([]);
   });
 
   // spec 13.4, spec/debugging.md 9.3
@@ -2920,6 +2970,17 @@ test.describe('createRouterServer, credentials', () => {
         credentials: { audience: 'https://bead.example', keySet: { ask, issuers: [] } },
       });
     }).toThrow(ProgrammerError);
+
+    // an ELSEWHERE's verifier needs none
+    expect(() => {
+      createRouterServer(transport, {
+        credentials: {
+          verify: () => {
+            return Promise.resolve(undefined);
+          },
+        },
+      })[Symbol.dispose]();
+    }).not.toThrow();
   });
 
   test("hands the filter one subscriber, its connection and its session's identifier", async () => {
@@ -3002,6 +3063,15 @@ test.describe('createRouterServer, credentials', () => {
     subscribe(5, 'bob');
     subscribe(7, 'ada');
     await sleep(0);
+
+    // ada's second call is answered, its session holding its one subscription already
+    expect(answersOf(sent)).toEqual([
+      [first, 'result', 1, 'subscribed'],
+      [first, 'result', 3, 'subscribed'],
+      [first, 'result', 5, 'subscribed'],
+      [first, 'result', 7, 'subscribed'],
+    ]);
+
     sent.length = 0;
 
     await notification.notify('to ada', {
@@ -3045,8 +3115,9 @@ test.describe('createRouterServer, credentials', () => {
     const flash: IProcedure = { ...news, procedureId: 7, procedureName: 'flash' };
     const released = Promise.withResolvers<void>();
     const withdrawn: unknown[] = [];
-    const dropped = new Map<string, number | undefined>();
+    const dropped: [string, number | undefined][] = [];
     const errors: unknown[] = [];
+    const serverErrors = recordErrors(server);
     let entered = 0;
 
     // news subscribes in flight once released, and answers a turn later; flash's answer alone
@@ -3081,7 +3152,7 @@ test.describe('createRouterServer, credentials', () => {
       const notification: INotificationLike = {
         ...procedure,
         drop: (failure) => {
-          dropped.set(procedure.procedureName, failure?.code);
+          dropped.push([procedure.procedureName, failure?.code]);
         },
         trigger: () => {
           return Promise.resolve([]);
@@ -3111,7 +3182,7 @@ test.describe('createRouterServer, credentials', () => {
     expect(await Promise.all(subscribing)).toEqual(['subscribed', 'subscribed']);
     await expect
       .poll(() => {
-        return dropped.size;
+        return dropped.length;
       })
       .toBe(2);
 
@@ -3141,13 +3212,18 @@ test.describe('createRouterServer, credentials', () => {
     }
 
     expect(answers).toHaveLength(4);
-    expect(Object.fromEntries(dropped)).toEqual({
-      flash: ProtocolCode.SESSION_REQUIRED,
-      news: ProtocolCode.SESSION_REQUIRED,
-    });
+    // each dropped once
+    expect(
+      dropped.toSorted(([a], [b]) => {
+        return a.localeCompare(b);
+      })
+    ).toEqual([
+      ['flash', ProtocolCode.SESSION_REQUIRED],
+      ['news', ProtocolCode.SESSION_REQUIRED],
+    ]);
     expect(withdrawn).toEqual([]);
     expect(client.credential).toEqual(credential);
-    expect(errors).toEqual([]);
+    expect([errors, serverErrors]).toEqual([[], []]);
   });
 
   test('answers nothing to a call cancelled while it waits on its key set, whose ask goes on for the others', async () => {
@@ -3165,8 +3241,12 @@ test.describe('createRouterServer, credentials', () => {
       },
     } as const;
 
+    let ran = 0;
+
     createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
       (request, response) => {
+        ran += 1;
+
         return response(String((request.session?.data as { sub?: unknown } | undefined)?.sub));
       }
     );
@@ -3187,7 +3267,7 @@ test.describe('createRouterServer, credentials', () => {
     await sleep(0);
 
     expect(answersOf(sent)).toEqual([[first, 'result', 3, 'grace']]);
-    expect(asks).toHaveLength(1);
+    expect([asks.length, ran]).toEqual([1, 1]);
     expect(errors).toEqual([]);
   });
 
@@ -3199,33 +3279,49 @@ test.describe('createRouterServer, credentials', () => {
       credentials: { audience: AUDIENCE, keySet },
     });
     const errors = recordErrors(router);
+    // a router left live, given the same call: once it answered, the disposed one had its key and
+    // its signature verified as long, had its call gone on
+    const live = createScriptedTransport();
+    using liveRouter = createRouterServer(live.transport, {
+      clock: createTestClock(NOW),
+      credentials: { audience: AUDIENCE, keySet },
+    });
+    const request = requestOf(1, {
+      credential: {
+        scheme: CredentialScheme.JWT,
+        token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
+      },
+    });
     let resolved = 0;
 
-    createServiceManager(router).getRequestResolver(echo, { serializer: answering })(
-      (_request, response) => {
-        resolved += 1;
+    for (const each of [router, liveRouter]) {
+      createServiceManager(each).getRequestResolver(echo, { serializer: answering })(
+        (_request, response) => {
+          resolved += each === router ? 1 : 0;
 
-        return response('ran');
-      }
-    );
-    deliver(
-      first,
-      requestOf(1, {
-        credential: {
-          scheme: CredentialScheme.JWT,
-          token: jwtOf(NOW / 1_000 + 3_600, { kid: SET_KID }),
-        },
-      })
-    );
+          return response('ran');
+        }
+      );
+    }
+
+    deliver(first, request);
+    live.deliver(first, request);
     await expect
       .poll(() => {
         return asks.length;
       })
-      .toBe(1);
+      .toBe(2);
     router[Symbol.dispose]();
-    asks[0]?.settle.resolve([SET_KEY]);
-    // long enough for its key to be found and its signature verified, had its call gone on
-    await sleep(20);
+
+    for (const { settle } of asks) {
+      settle.resolve([SET_KEY]);
+    }
+
+    await expect
+      .poll(() => {
+        return answersOf(live.sent);
+      })
+      .toEqual([[first, 'result', 1, 'ran']]);
 
     expect(resolved).toBe(0);
     expect(sent).toEqual([]);
@@ -3452,6 +3548,27 @@ test.describe('createRouterServer, credentials', () => {
       [first, 5, { issuer: otherIssuer, scheme: CredentialScheme.JWT, sub: 'grace' }],
       [first, 7, { id: ISSUER, scheme: CredentialScheme.ELSEWHERE }],
     ]);
+
+    // ending refuses no credential: one that still holds opens its session anew
+    sent.length = 0;
+    deliver(first, presenting(9, jwt({ sid: 'one' })));
+    await expect
+      .poll(() => {
+        return sent.length;
+      })
+      .toBe(1);
+
+    expect(answersOf(sent)).toEqual([[first, 'result', 9, 'subscribed']]);
+    expect(
+      router.notifications
+        .subscriptions()
+        .map(({ callId }) => {
+          return callId;
+        })
+        .toSorted((a, b) => {
+          return a - b;
+        })
+    ).toEqual([5, 7, 9]);
     expect(errors).toEqual([]);
   });
 
@@ -3461,6 +3578,7 @@ test.describe('createRouterServer, credentials', () => {
       clock: createTestClock(NOW),
       credentials: { audience: AUDIENCE, keys: [KEY] },
     });
+    const errors = recordErrors(router);
     const subscribing = subscribingOf(1);
 
     createServiceManager(router).getNotificationResolver(news, { serializer: answering })(
@@ -3490,6 +3608,7 @@ test.describe('createRouterServer, credentials', () => {
 
     expect(sent).toHaveLength(1);
     expect(router.notifications.subscriptions()).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 });
 
@@ -3645,25 +3764,36 @@ test.describe('createRouterServer, relaying', () => {
   });
 
   test('hands beforeRoute a JWT unresolved, refusing a scheme to come CREDENTIAL_UNSUPPORTED and an ELSEWHERE that carried nothing SESSION_REQUIRED before it; OPAQUE resolves to leg A’s connection’s session, which beforeRoute reads', async () => {
-    const routed: unknown[] = [];
+    const admitted: unknown[] = [];
     using relayed = createRelayed({
       relay: {
         beforeRoute: ({ header, session }) => {
-          routed.push([header.callId, session]);
+          admitted.push([header.callId, session?.data]);
 
-          return session !== undefined;
+          return true;
         },
       },
       sessionOf: ({ header }) => {
-        const { credential } = header;
-
-        return credential !== undefined && 'token' in credential && credential.token === TOKEN
-          ? Object.freeze({ data: 'leg A' })
-          : undefined;
+        return connectionSessionOf(header.credential, {
+          dataOf: () => {
+            return 'ada';
+          },
+          token: TOKEN,
+        });
       },
     });
     const { deliver, pipe, sent } = relayed;
+    const failuresOf = () => {
+      return sent.splice(0).map(({ envelope }) => {
+        return envelope?.kind === EnvelopeKind.FAILURE
+          ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
+          : [envelope?.header.callId, envelope?.kind];
+      });
+    };
 
+    // a JWT read from its scheme alone reaches beforeRoute in no session, and its destination,
+    // registered with no audience, cannot take it; a scheme to come is refused before its
+    // destination, unknown, is looked for
     deliver(
       first,
       requestOf(1, {
@@ -3675,45 +3805,50 @@ test.describe('createRouterServer, relaying', () => {
       first,
       requestOf(3, { credential: { scheme: CredentialScheme.ELSEWHERE }, destinationId: 7 })
     );
-    deliver(first, requestOf(5, { destinationId: 7 }));
     deliver(
       first,
-      requestOf(7, { credential: OPAQUE, destinationId: 7, payload: text.encode('hi') })
+      requestOf(5, { credential: { bytes: new Uint8Array(), scheme: 7 }, destinationId: 8 })
+    );
+    await sleep(0);
+
+    // the scheme to come in the turn it came; a JWT and an ELSEWHERE in a later one
+    expect(failuresOf()).toEqual([
+      [5, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
+      [
+        1,
+        ProtocolCode.DESTINATION_UNREACHABLE,
+        'destination 7 is unreachable: it verifies another audience than the one the token names, or none',
+      ],
+      [3, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+    ]);
+    expect(admitted.splice(0)).toEqual([[1, undefined]]);
+    expect(pipe.sent.client).toEqual([]);
+
+    // none and its OPAQUE run in leg A's connection's session; another token does not hold
+    deliver(first, requestOf(7, { destinationId: 7, payload: text.encode('hi') }));
+    deliver(
+      first,
+      requestOf(9, { credential: OPAQUE, destinationId: 7, payload: text.encode('ho') })
     );
     deliver(
       first,
-      requestOf(9, {
+      requestOf(11, {
         credential: { scheme: CredentialScheme.OPAQUE, token: OTHER_TOKEN },
         destinationId: 7,
       })
     );
-    deliver(
-      first,
-      requestOf(11, { credential: { bytes: new Uint8Array(), scheme: 4 }, destinationId: 7 })
-    );
     await sleep(0);
 
-    // none and OPAQUE in the turn they came; a JWT and an ELSEWHERE in a later one
-    expect(
-      sent.map(({ envelope }) => {
-        return envelope?.kind === EnvelopeKind.FAILURE
-          ? [envelope.header.callId, envelope.failure.code, envelope.failure.detail]
-          : [envelope?.header.callId, envelope?.kind];
-      })
-    ).toEqual([
-      [5, ProtocolCode.ACCESS_DENIED, ''],
-      [9, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
-      [11, ProtocolCode.CREDENTIAL_UNSUPPORTED, 'OPAQUE, JWT, ELSEWHERE'],
-      [1, ProtocolCode.ACCESS_DENIED, ''],
-      [3, ProtocolCode.SESSION_REQUIRED, 'no credential came'],
+    expect(failuresOf()).toEqual([
+      [11, ProtocolCode.SESSION_REQUIRED, 'the credential does not hold'],
       [7, EnvelopeKind.RESULT],
+      [9, EnvelopeKind.RESULT],
     ]);
-    expect(routed).toEqual([
-      [5, undefined],
-      [7, { data: 'leg A' }],
-      [1, undefined],
+    expect(admitted).toEqual([
+      [7, 'ada'],
+      [9, 'ada'],
     ]);
-    // leg B carried the one admitted alone, and no credential
+    // leg B presents nothing
     expect(
       pipe.sent.client.map((bytes) => {
         return readEnvelope(bytes, {
@@ -3721,7 +3856,10 @@ test.describe('createRouterServer, relaying', () => {
           maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
         })?.header;
       })
-    ).toEqual([{ callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 }]);
+    ).toEqual([
+      { callId: 1, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 },
+      { callId: 3, kind: EnvelopeKind.REQUEST, procedureId: 1, serviceId: 2 },
+    ]);
   });
 
   test('answers a JWT and an ELSEWHERE it forwards without verifying ACCESS_DENIED once beforeRoute is requireSession, a call in none SESSION_REQUIRED, and relays an OPAQUE that holds', async () => {
@@ -3826,9 +3964,7 @@ test.describe('createRouterServer, relaying', () => {
       })
       .toBe(1);
 
-    expect(answersOf(legA.sent)).toEqual([
-      [first, 'failure', expect.any(Number), ProtocolCode.CAPACITY_EXCEEDED],
-    ]);
+    expect(answersOf(legA.sent)).toEqual([[first, 'failure', 5, ProtocolCode.CAPACITY_EXCEEDED]]);
     expect([asks.length, behind.pipe.sent.client]).toEqual([1, []]);
 
     // at the deadline, the ask then names its kid: verified, the other goes on through leg B,
@@ -3904,7 +4040,7 @@ test.describe('createRouterServer, relaying', () => {
 
   test('cancels leg B when leg A cancels its call, when its connection goes, and when the relay is disposed, freeing the call id each time', async () => {
     using relayed = createRelayed();
-    const { aborted, close, deliver, open, router, sent } = relayed;
+    const { aborted, close, deliver, open, pipe, router, sent } = relayed;
 
     deliver(first, requestOf(1, { destinationId: 7, procedure: held }));
     await sleep(0);
@@ -3931,6 +4067,22 @@ test.describe('createRouterServer, relaying', () => {
       expect.any(CancelError),
       expect.any(CancelError),
       expect.any(CancelError),
+    ]);
+    // each end went to the target as a CANCEL
+    expect(
+      pipe.sent.client.map((bytes) => {
+        return readEnvelope(bytes, {
+          failures: SERVER_FAILURES,
+          maximumEnvelopeBytes: Number.MAX_SAFE_INTEGER,
+        })?.kind;
+      })
+    ).toEqual([
+      EnvelopeKind.REQUEST,
+      EnvelopeKind.CANCEL,
+      EnvelopeKind.REQUEST,
+      EnvelopeKind.CANCEL,
+      EnvelopeKind.REQUEST,
+      EnvelopeKind.CANCEL,
     ]);
     // leg A heard nothing: each answer went nowhere
     expect(sent).toEqual([]);
@@ -3997,13 +4149,21 @@ test.describe('createRouterServer, relaying', () => {
     // the relay's own, with no address behind it: why is reported, with leg A's connection
     expect(
       sent.map(({ envelope }) => {
-        return envelope?.kind === EnvelopeKind.FAILURE
-          ? [envelope.failure.relays, envelope.failure.detail]
-          : undefined;
+        return envelope?.kind === EnvelopeKind.FAILURE ? envelope.failure : undefined;
       })
     ).toEqual([
-      [0, 'destination 7 was lost once handed the request: the procedure may have run'],
-      [0, 'destination 7 is unreachable: nothing was tried'],
+      {
+        code: ProtocolCode.DESTINATION_LOST,
+        detail: 'destination 7 was lost once handed the request: the procedure may have run',
+        relays: 0,
+        scope: FailureScope.PROTOCOL,
+      },
+      {
+        code: ProtocolCode.DESTINATION_UNREACHABLE,
+        detail: 'destination 7 is unreachable: nothing was tried',
+        relays: 0,
+        scope: FailureScope.PROTOCOL,
+      },
     ]);
     expect(reportedOf(errors)).toEqual([
       ['the connection closed before the answer', first],
@@ -4041,13 +4201,11 @@ test.describe('createRouterServer, relaying', () => {
       [first, 'result', 1, 'X'.repeat(36)],
       [first, 'failure', 3, ProtocolCode.PROCEDURE_FAILED],
     ]);
-    expect(sent[1]?.envelope).toMatchObject({
-      failure: {
-        code: ProtocolCode.PROCEDURE_FAILED,
-        detail: '',
-        relays: 0,
-        scope: FailureScope.PROTOCOL,
-      },
+    expect(sent[1]?.envelope?.kind === EnvelopeKind.FAILURE && sent[1].envelope.failure).toEqual({
+      code: ProtocolCode.PROCEDURE_FAILED,
+      detail: '',
+      relays: 0,
+      scope: FailureScope.PROTOCOL,
     });
     expect(reportedOf(errors)).toEqual([[ProtocolCode.PAYLOAD_TOO_LARGE, first]]);
   });
@@ -4228,6 +4386,50 @@ test.describe('createRouterServer, relaying', () => {
     expect(registration.unregister()).toBe(false);
     expect(answersOf(sent.slice(8))).toEqual([[newcomer, EnvelopeKind.REQUEST, 8, 'again']]);
     expect(reportedOf(errors)).toEqual([['the connection closed before the answer', first]]);
+  });
+
+  // relay.test.ts tests the relay alone; here, through the router, which hands it its own limits
+  // and what its transport says each connection carries
+  test('holds a connection of its own to the router’s own limits, and passes nothing on to one that carries no request', async () => {
+    const third: Handle = 'type=WS;ip=127.0.0.1;port=50003;ordinal=1';
+    // past the default, so a limit not the router's own shows
+    const past = LIMIT_DEFAULTS.maximumPayloadBytes + 1;
+    const { deliver, open, sent, transport } = createScriptedTransport();
+    using router = createRouterServer(
+      {
+        ...transport,
+        isTwoWay: (connectionHandle) => {
+          return connectionHandle !== third;
+        },
+      },
+      { limits: { maximumPayloadBytes: 2 * past }, relay: admitting }
+    );
+    const opening = requestOf(1, { destinationId: 9, payload: new Uint8Array(16) });
+
+    for (const connectionHandle of [first, second, third]) {
+      open(connectionHandle);
+    }
+
+    router.registerDestination({ connectionHandle: second }, { destinationId: 9 });
+    router.registerDestination({ connectionHandle: third }, { destinationId: 11 });
+
+    // a transfer's opening past the default, credited; nothing goes on before it is whole
+    deliver(first, { ...opening, header: { ...opening.header, total: past } } as OutgoingEnvelope);
+    deliver(first, requestOf(3, { destinationId: 11 }));
+    await sleep(0);
+
+    const last = sent.at(-1)?.envelope;
+
+    expect(last?.kind === EnvelopeKind.FAILURE ? last.failure : undefined).toEqual({
+      code: ProtocolCode.DESTINATION_UNREACHABLE,
+      detail: 'destination 11 is unreachable: its connection carries no request',
+      relays: 0,
+      scope: FailureScope.PROTOCOL,
+    });
+    expect(answersOf(sent)).toEqual([
+      [first, EnvelopeKind.CREDIT, 1, undefined],
+      [first, 'failure', 3, ProtocolCode.DESTINATION_UNREACHABLE],
+    ]);
   });
 });
 
@@ -4774,6 +4976,9 @@ test.describe('createRouterServer, its metrics', () => {
       made('handled_total{outcome="closed"} 1'),
       made('started_total{} 1'),
     ]);
+    expect(metricsRegistry.exposition().text).toContain(
+      'bead_client_call_duration_seconds_bucket{service="2",procedure="echo",type="command",le="0.0"} 1\n'
+    );
     await expect(asking).rejects.toBeInstanceOf(DisconnectError);
   });
 
@@ -4816,13 +5021,15 @@ test.describe('createRouterServer, its metrics', () => {
   });
 
   // spec 17.2.6
-  test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, and reports why once', async () => {
+  test('counts a notification whose value does not write as failed for each subscription it was for, sends it to none, reports why once, and fails no caller', async () => {
     const metricsRegistry = createMetricsRegistry();
     const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(transport, { clock: createTestClock(), metricsRegistry });
     const errors = recordErrors(router);
     const refusal = new TypeError('this value does not write');
-    const notifying = createServiceManager(router).getNotificationResolver(news, {
+    const services = createServiceManager(router);
+    const told: [boolean, string][] = [];
+    const notifying = services.getNotificationResolver(news, {
       serializer: {
         ...answering,
         encodeNotification: () => {
@@ -4838,12 +5045,20 @@ test.describe('createRouterServer, its metrics', () => {
     deliver(first, subscribingOf(1));
     deliver(second, subscribingOf(1));
     await sleep(0);
+    services.on('debug', (error, { direction }) => {
+      told.push([error === refusal, direction]);
+    });
 
     const answered = sent.length;
 
     await expect(notifying.notify('x')).resolves.toBeUndefined();
     expect(sent).toHaveLength(answered);
     expect(errors).toEqual([[refusal, undefined]]);
+    // told as a notification sent, then as its failure to go at that start (spec/debugging.md 4.2)
+    expect(told).toEqual([
+      [false, 'tx'],
+      [true, 'tx'],
+    ]);
     expect(
       countedOf(metricsRegistry).filter((line) => {
         return line.startsWith('bead_notifications');
@@ -4854,7 +5069,7 @@ test.describe('createRouterServer, its metrics', () => {
   // debugging 9.4.6
   test('counts a call whose admission fails PROCEDURE_FAILED, and one whose subscription its connection cannot carry back SUBSCRIPTION_UNSUPPORTED', async () => {
     const metricsRegistry = createMetricsRegistry();
-    const { deliver, open, transport } = createScriptedTransport();
+    const { deliver, open, sent, transport } = createScriptedTransport();
     using router = createRouterServer(
       {
         ...transport,
@@ -4883,7 +5098,11 @@ test.describe('createRouterServer, its metrics', () => {
     deliver(first, subscribingOf(3));
     await sleep(0);
 
-    expect(errors).toHaveLength(1);
+    expect(answersOf(sent)).toEqual([
+      [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
+      [first, 'failure', 3, ProtocolCode.SUBSCRIPTION_UNSUPPORTED],
+    ]);
+    expect(reportedOf(errors)).toEqual([['this admission fails', first]]);
     expect(
       countedOf(metricsRegistry).filter((line) => {
         return line.startsWith('bead_server_call_handled_total');
@@ -4892,6 +5111,12 @@ test.describe('createRouterServer, its metrics', () => {
       'bead_server_call_handled_total{service="2",procedure="echo",type="request",outcome="failure",code="PROCEDURE_FAILED"} 1',
       'bead_server_call_handled_total{service="2",procedure="news",type="request",outcome="failure",code="SUBSCRIPTION_UNSUPPORTED"} 1',
     ]);
+    // a subscription refused in its own answer is its call's failure: none dropped
+    expect(
+      countedOf(metricsRegistry).filter((line) => {
+        return line.startsWith('bead_subscriptions_dropped_total');
+      })
+    ).toEqual([]);
   });
 
   test('one registry given to a client’s router and a server’s counts a call at each of its ends, a command among them', async () => {
@@ -5085,6 +5310,15 @@ test.describe('createRouterServer, its metrics', () => {
       'bead_subscriptions_dropped_total{service="2",procedure="news",code="application"} 1',
       'bead_subscriptions_dropped_total{service="2",procedure="news",code="_OTHER"} 1',
     ]);
+    // nothing under none, and every code a series, made at 0 as its procedure was declared
+    expect(
+      metricsRegistry
+        .exposition()
+        .text.split('\n')
+        .filter((line) => {
+          return line.startsWith('bead_subscriptions_dropped_total{service="2",procedure="news"');
+        })
+    ).toHaveLength(26);
   });
 
   // spec 16.7
@@ -5179,7 +5413,7 @@ test.describe('createRouterServer, the accesses it refuses', () => {
   };
 
   test('tells each access it refuses, its stage, its code, its reason and what was called, with the connection and the request’s address and port, never the credential', async () => {
-    const { send, sent, told } = createRefusing({
+    const { errors, send, sent, told } = createRefusing({
       credentials: { audience: AUDIENCE, keys: [KEY] },
     });
     const token = 'eyJ.not.a-token';
@@ -5233,6 +5467,7 @@ test.describe('createRouterServer, the accesses it refuses', () => {
     ]);
     expect(JSON.stringify(told)).not.toContain(token);
     expect(told.every(Object.isFrozen)).toBe(true);
+    expect(errors).toEqual([]);
   });
 
   test('tells a JWT refused by the step of section 13.8 that refused it, for every verdict of spec/vectors.json that refuses', async () => {
@@ -5276,11 +5511,19 @@ test.describe('createRouterServer, the accesses it refuses', () => {
         )
         .toBe(1);
 
-      expect(told[0], name).toMatchObject({
-        code: ProtocolCode.SESSION_REQUIRED,
-        reason: verdict.reason,
-        stage: 'credential',
-      });
+      expect(told, name).toEqual([
+        {
+          ...FROM,
+          code: ProtocolCode.SESSION_REQUIRED,
+          connectionHandle: first,
+          credentialScheme: CredentialScheme.JWT,
+          ...(isSet ? { destinationId: 7 } : {}),
+          procedureId: echo.procedureId,
+          reason: verdict.reason,
+          serviceId: echo.serviceId,
+          stage: 'credential',
+        },
+      ]);
       router[Symbol.dispose]();
     }
   });
@@ -5291,7 +5534,7 @@ test.describe('createRouterServer, the accesses it refuses', () => {
       // the verifier's settling, or none: none makes no session, a past end one whose end came
       const settled =
         situation === 'end-come' ? { data: 'ada', end: NOW - 1, id: 'ada' } : undefined;
-      const { router, send, told } = createRefusing({
+      const { router, send, sent, told } = createRefusing({
         clock,
         ...(situation === 'no-verifier' || situation === 'no-keys' || situation === 'scheme-to-come'
           ? {}
@@ -5338,7 +5581,19 @@ test.describe('createRouterServer, the accesses it refuses', () => {
         )
         .toBe(1);
 
-      expect(told[0], name).toMatchObject({ code, reason, stage: 'credential' });
+      expect(answersOf(sent), name).toEqual([[first, 'failure', 1, code]]);
+      expect(told, name).toEqual([
+        {
+          ...FROM,
+          code,
+          connectionHandle: first,
+          credentialScheme: credential.scheme,
+          procedureId: echo.procedureId,
+          reason,
+          serviceId: echo.serviceId,
+          stage: 'credential',
+        },
+      ]);
       router[Symbol.dispose]();
     }
   });
@@ -5459,16 +5714,23 @@ test.describe('createRouterServer, the accesses it refuses', () => {
       [first, 'failure', 1, ProtocolCode.PROCEDURE_FAILED],
       [first, 'failure', expect.any(Number), ProtocolCode.CAPACITY_EXCEEDED],
     ]);
-    expect(reportedOf(errors)).toHaveLength(2);
+    expect(reportedOf(errors)).toEqual([
+      ['the admission fails', first],
+      ['the verifier fails', first],
+    ]);
     expect(told).toEqual([]);
   });
 
   test('refuses as it would though an accessRefused listener throws, the throw reported with its connection', async () => {
     const { errors, router, send, sent } = createRefusing();
     const thrown = new Error('an accessRefused listener that throws');
+    const after: unknown[] = [];
 
     router.on('accessRefused', () => {
       throw thrown;
+    });
+    router.on('accessRefused', (refusal) => {
+      after.push(refusal);
     });
     send(requestOf(1, { procedure: guarded }));
     send(requestOf(3));
@@ -5482,6 +5744,8 @@ test.describe('createRouterServer, the accesses it refuses', () => {
       [first, 'failure', 1, ProtocolCode.SESSION_REQUIRED],
       [first, 'result', 3, 'ok'],
     ]);
+    // the listener after it told all the same
+    expect(after).toHaveLength(1);
     expect(errors).toEqual([[thrown, first]]);
   });
 });
