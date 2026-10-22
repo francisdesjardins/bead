@@ -39,7 +39,7 @@ test.describe('mountSides', () => {
   test('shows a role on both sides, its resolvers first, as examples/hello holds them', async ({
     page,
   }) => {
-    await page.goto(served?.url ?? '');
+    await page.goto(`${served?.url ?? ''}#code`);
 
     expect(await shownOf(page)).toEqual({
       csharp: SAMPLES.resolvers.csharp.file,
@@ -57,7 +57,7 @@ test.describe('mountSides', () => {
   test('changes role by a click and by the arrow keys, Home and End, the focus with the tab', async ({
     page,
   }) => {
-    await page.goto(served?.url ?? '');
+    await page.goto(`${served?.url ?? ''}#code`);
 
     await page.getByRole('tab', { name: 'Its client' }).click();
     expect(await shownOf(page)).toEqual({

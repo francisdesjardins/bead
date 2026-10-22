@@ -20,7 +20,7 @@ const MESSAGES = Object.freeze({
 
 /** The lines of the envelopes' log that open a sign-up: a REQUEST to service 2's procedure 1. */
 const requestsOf = (page: Page) => {
-  return page.locator('#envelopes li', { hasText: /^→ REQUEST #\d+ signUp \(2\/1\)/u });
+  return page.locator('#envelopes-log li', { hasText: /^→ REQUEST #\d+ signUp \(2\/1\)/u });
 };
 
 /** Each field marked refused, described by its messages, which say what `MESSAGES` holds. */
@@ -63,9 +63,9 @@ test.describe('mountSignUp', () => {
     await served?.close();
   });
 
-  // a page of it, connected to its worker
+  // a page of it on its payload rules, connected to its worker
   test.beforeEach(async ({ page }) => {
-    await page.goto(served?.url ?? '');
+    await page.goto(`${served?.url ?? ''}#rules`);
     await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
   });
 
@@ -160,8 +160,6 @@ test.describe('mountSignUp', () => {
     const request = page.locator('#sign-up-http-request');
     const answer = page.locator('#sign-up-http-answer');
 
-    await page.locator('#sign-up-http > summary').click();
-
     // * the internal demo's origin, as this page's server is a worker, the body in Bead's JSON form
     await expect(request).toContainText('curl -X POST http://localhost:8080/api/SignUp/signUp');
     await expect(request).toContainText(`-d '{"name":"ada","seats":2,"email":"ada@example.org"}'`);
@@ -183,7 +181,7 @@ test.describe('mountSignUp', () => {
     await expect(answer).toContainText('"title": "PAYLOAD_INVALID"');
 
     // its OpenAPI document, beadc's, its one path the sign-up's route
-    await page.locator('#sign-up-openapi summary').click();
+    await page.getByRole('tab', { name: 'OpenAPI' }).click();
     await expect(page.locator('#sign-up-openapi-document')).toContainText('"openapi": "3.1.1"');
     await expect(page.locator('#sign-up-openapi-document')).toContainText('"/api/SignUp/signUp"');
   });

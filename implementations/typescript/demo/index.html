@@ -4,49 +4,63 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>bead — a binary call protocol, its server in a Web Worker</title>
+    <link rel="stylesheet" href="penumbra/tokens.system.css" />
+    <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
     <style>
+      /* the demo's skin over penumbra's two sheets: its typefaces, its brand, and the colours it
+         draws with, each declared here on purpose */
       :root {
         color-scheme: light dark;
-        --paper: #eef2f0;
-        --surface: #ffffff;
+        --app-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        --app-font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
+        /* a board of rows reads denser than a page of prose */
+        --app-lh-body: 1.45;
+
+        --app-flame: #0b6e5a;
+        --app-flame-wash: rgb(11 110 90 / 0.1);
+        --app-accent: #0b6e5a;
+        --app-ring: #0b6e5a;
+
+        --app-bg: #eef2f0;
+        --app-paper: #ffffff;
+        --app-text: #14201c;
+        --app-text-secondary: #5d6b66;
+        --app-divider: #dce3e0;
+        --app-error: #b91c1c;
+        --app-ok: #15803d;
+        --app-ok-wash: rgb(21 128 61 / 0.12);
+        --app-warn: #a16207;
+        --app-warn-wash: rgb(161 98 7 / 0.12);
+
+        /* the demo's own: the ground of what is code, a refusal's wash, and a write's mark */
         --raised: #f6f8f7;
-        --ink: #14201c;
-        --muted: #5d6b66;
-        --line: #dce3e0;
-        --accent: #0b6e5a;
-        --accent-soft: rgb(11 110 90 / 0.1);
-        --warn: #b4460f;
-        --ok: #15803d;
-        --ok-soft: rgb(21 128 61 / 0.12);
-        --bad: #b91c1c;
         --bad-soft: rgb(185 28 28 / 0.1);
-        --caution: #a16207;
-        --caution-soft: rgb(161 98 7 / 0.12);
-        --mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Consolas, monospace;
-        font:
-          13px/1.45 system-ui,
-          -apple-system,
-          'Segoe UI',
-          sans-serif;
+        --write: #b4460f;
+        /* code reads a step under the body, between penumbra's two smallest */
+        --text-code: 0.75rem;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --paper: #0b100e;
-          --surface: #131b18;
+          --app-flame: #3cc7a6;
+          --app-flame-wash: rgb(60 199 166 / 0.13);
+          --app-accent: #3cc7a6;
+          --app-ring: #3cc7a6;
+
+          --app-bg: #0b100e;
+          --app-paper: #131b18;
+          --app-text: #e2ebe7;
+          --app-text-secondary: #93a39d;
+          --app-divider: #25302c;
+          --app-error: #f87171;
+          --app-ok: #4ade80;
+          --app-ok-wash: rgb(74 222 128 / 0.12);
+          --app-warn: #facc15;
+          --app-warn-wash: rgb(250 204 21 / 0.12);
+
           --raised: #18221e;
-          --ink: #e2ebe7;
-          --muted: #93a39d;
-          --line: #25302c;
-          --accent: #3cc7a6;
-          --accent-soft: rgb(60 199 166 / 0.13);
-          --warn: #f0a45b;
-          --ok: #4ade80;
-          --ok-soft: rgb(74 222 128 / 0.12);
-          --bad: #f87171;
           --bad-soft: rgb(248 113 113 / 0.12);
-          --caution: #facc15;
-          --caution-soft: rgb(250 204 21 / 0.12);
+          --write: #f0a45b;
         }
       }
 
@@ -56,8 +70,10 @@
 
       body {
         margin: 0;
-        background: var(--paper);
-        color: var(--ink);
+        background: var(--app-bg);
+        color: var(--app-text);
+        /* ! on the body, never the root: penumbra's scale is in rem, which the root's size sets */
+        font: var(--app-text-sm) / var(--app-lh-body) var(--app-font-body);
       }
 
       /* served as files alone, the page has its worker and no server: what needs one is not shown */
@@ -77,16 +93,16 @@
       }
 
       a {
-        color: var(--accent);
+        color: var(--app-accent);
       }
 
       code {
-        font: 12px var(--mono);
+        font: var(--text-code) var(--app-font-mono);
         overflow-wrap: anywhere;
       }
 
       .note {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         overflow-wrap: anywhere;
       }
 
@@ -96,43 +112,45 @@
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: 10px 20px;
-        padding: 10px 16px;
-        border-bottom: 1px solid var(--line);
-        background: var(--surface);
+        gap: var(--app-space-3) var(--app-space-5);
+        padding: var(--app-space-3) var(--app-space-4);
+        border-bottom: 1px solid var(--app-divider);
+        background: var(--app-paper);
       }
 
       .brand {
         display: grid;
+        /* a hairline between the way back and the title */
         gap: 1px;
         margin-right: auto;
       }
 
       .back {
-        font-size: 12px;
+        font-size: var(--text-code);
         text-decoration: none;
       }
 
       h1 {
-        font-size: 17px;
+        font-size: var(--app-text-base);
         font-weight: 650;
-        letter-spacing: -0.01em;
+        letter-spacing: var(--app-tracking-snug);
       }
 
       h1 span {
-        margin-left: 6px;
-        color: var(--muted);
-        font-size: 13px;
+        margin-left: var(--app-space-1);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-sm);
         font-weight: 400;
         letter-spacing: 0;
       }
 
       .transports {
         display: flex;
-        gap: 4px;
+        gap: var(--app-space-1);
+        /* the pill's inset, a hair inside its edge */
         padding: 3px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-pill);
         background: var(--raised);
       }
 
@@ -141,43 +159,43 @@
       }
 
       .transports a {
-        padding: 3px 11px;
-        border-radius: 999px;
-        color: var(--muted);
+        padding: 3px var(--app-space-3);
+        border-radius: var(--app-radius-pill);
+        color: var(--app-text-secondary);
         font-weight: 550;
         text-decoration: none;
       }
 
       .transports a:hover {
-        color: var(--ink);
+        color: var(--app-text);
       }
 
       .transports a[aria-current] {
-        background: var(--surface);
-        color: var(--accent);
-        box-shadow: 0 0 0 1px var(--line);
+        background: var(--app-paper);
+        color: var(--app-accent);
+        box-shadow: 0 0 0 1px var(--app-divider);
       }
 
       .status {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: var(--app-space-2);
       }
 
       .status div {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: var(--app-space-2);
         min-width: 0;
-        padding: 3px 10px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
+        padding: 3px var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-pill);
         background: var(--raised);
       }
 
       .status dt {
-        color: var(--muted);
-        font-size: 11px;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-xs);
         letter-spacing: 0.06em;
         text-transform: uppercase;
       }
@@ -192,30 +210,30 @@
         display: inline-block;
         width: 7px;
         height: 7px;
-        margin-right: 6px;
+        margin-right: var(--app-space-2);
         border-radius: 50%;
-        background: var(--caution);
+        background: var(--app-warn);
         vertical-align: 1px;
       }
 
       #connection[data-state='open']::before {
-        background: var(--ok);
+        background: var(--app-ok);
       }
 
       #connection[data-state='closed']::before {
-        background: var(--bad);
+        background: var(--app-error);
       }
 
       /* ── the sign-up: a field a row, its violations under it ─────────────── */
 
       .form {
         display: grid;
-        gap: 9px;
+        gap: var(--app-space-2);
       }
 
       .field {
         display: grid;
-        gap: 3px;
+        gap: var(--app-space-1);
         min-width: 0;
       }
 
@@ -226,29 +244,29 @@
       .field input {
         width: 100%;
         min-height: 30px;
-        padding: 5px 9px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
+        padding: var(--app-space-1) var(--app-space-2);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
         background: var(--raised);
-        color: var(--ink);
-        font: 13px var(--mono);
+        color: var(--app-text);
+        font: var(--app-text-sm) var(--app-font-mono);
       }
 
       .field input:focus-visible,
       .check input:focus-visible,
       .unbound:focus-visible {
-        outline: 2px solid var(--accent);
+        outline: 2px solid var(--app-ring);
         outline-offset: 2px;
       }
 
       .field input[aria-invalid='true'] {
-        border-color: var(--bad);
+        border-color: var(--app-error);
         background: var(--bad-soft);
       }
 
       .hint {
-        color: var(--muted);
-        font-size: 12px;
+        color: var(--app-text-secondary);
+        font-size: var(--text-code);
       }
 
       /* a violation, under the input its path names, or above the form when it names none */
@@ -256,8 +274,8 @@
         display: grid;
         gap: 2px;
         padding: 0;
-        color: var(--bad);
-        font-size: 12px;
+        color: var(--app-error);
+        font-size: var(--text-code);
         font-weight: 550;
         list-style: none;
         overflow-wrap: anywhere;
@@ -276,15 +294,15 @@
       }
 
       .unbound {
-        padding: 6px 9px;
-        border-radius: 8px;
+        padding: var(--app-space-2);
+        border-radius: var(--app-radius-md);
         background: var(--bad-soft);
       }
 
       .check {
         display: flex;
         align-items: center;
-        gap: 7px;
+        gap: var(--app-space-2);
         font-weight: 600;
         cursor: pointer;
       }
@@ -293,7 +311,7 @@
         width: 15px;
         height: 15px;
         margin: 0;
-        accent-color: var(--accent);
+        accent-color: var(--app-accent);
       }
 
       #sign-up-status {
@@ -308,37 +326,131 @@
         }
       }
 
-      /* ── the board: what to do, what stands, what went across ───────────── */
+      /* ── the board: the scenes, one a tab, and the logs beside them ──────── */
 
       .dashboard {
         display: grid;
-        gap: 12px;
+        gap: var(--app-space-3);
         max-width: 760px;
         margin: 0 auto;
-        padding: 12px 16px 16px;
+        padding: var(--app-space-3) var(--app-space-4) var(--app-space-4);
       }
 
+      .scenes,
+      .scene,
       .column {
         display: grid;
         align-content: start;
-        gap: 12px;
+        gap: var(--app-space-3);
         min-width: 0;
+      }
+
+      /* a card is as tall as what it holds, never as its neighbour */
+      .scene {
+        align-items: start;
+      }
+
+      .scene[hidden] {
+        display: none;
+      }
+
+      .intro {
+        max-width: var(--app-measure);
+        font-size: var(--app-text-md);
+      }
+
+      .scene-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--app-space-1);
+        border-bottom: 1px solid var(--app-divider);
+      }
+
+      .scene-tabs [role='tab'] {
+        min-height: var(--app-space-8);
+        /* the selected tab's bar lies on the list's hairline */
+        margin-bottom: -1px;
+        padding: 0 var(--app-space-3);
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: var(--app-radius-md) var(--app-radius-md) 0 0;
+        background: none;
+        color: var(--app-text-secondary);
+        font-weight: 600;
+      }
+
+      /* a phone's width holds the five tabs on one line */
+      @media (max-width: 600px) {
+        .scene-tabs [role='tab'] {
+          padding: 0 var(--app-space-2);
+        }
+      }
+
+      .scene-tabs [role='tab']:hover {
+        border-color: transparent;
+        background: var(--app-flame-wash);
+        color: var(--app-text);
+      }
+
+      .scene-tabs [role='tab'][aria-selected='true'] {
+        border-bottom-color: var(--app-accent);
+        color: var(--app-accent);
+      }
+
+      /* what to try first, in its order */
+      .steps {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--app-space-1) var(--app-space-5);
+        padding: 0;
+        color: var(--app-text-secondary);
+        list-style: none;
+        counter-reset: step;
+      }
+
+      .steps li {
+        counter-increment: step;
+      }
+
+      .steps li::before {
+        content: counter(step);
+        display: inline-grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        margin-right: var(--app-space-2);
+        border-radius: var(--app-radius-pill);
+        background: var(--app-flame-wash);
+        color: var(--app-accent);
+        font-size: var(--app-text-xs);
+        font-weight: 650;
+      }
+
+      /* a scene of two: what to do, and what it does */
+      @media (min-width: 900px) {
+        .scene.split {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
+
+        .scene.split > .steps {
+          grid-column: 1 / -1;
+        }
       }
 
       .card {
         display: grid;
-        gap: 8px;
+        gap: var(--app-space-2);
         min-width: 0;
-        padding: 11px 13px;
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        background: var(--surface);
+        padding: var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-lg);
+        background: var(--app-paper);
         box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
       }
 
       h2 {
-        color: var(--muted);
-        font-size: 11px;
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-xs);
         font-weight: 650;
         letter-spacing: 0.08em;
         text-transform: uppercase;
@@ -347,44 +459,45 @@
       .buttons {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px;
+        gap: var(--app-space-2);
       }
 
       button {
         min-height: 30px;
-        padding: 5px 10px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
+        padding: var(--app-space-1) var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-md);
         background: var(--raised);
-        color: var(--ink);
+        color: var(--app-text);
         font: inherit;
         font-weight: 550;
         text-align: left;
         cursor: pointer;
         transition:
-          border-color 0.12s,
-          background 0.12s;
+          border-color var(--app-quick) var(--app-ease),
+          background var(--app-quick) var(--app-ease);
       }
 
       button:hover {
-        border-color: var(--accent);
-        background: var(--accent-soft);
+        border-color: var(--app-accent);
+        background: var(--app-flame-wash);
       }
 
       button:focus-visible,
-      .transports a:focus-visible {
-        outline: 2px solid var(--accent);
+      .transports a:focus-visible,
+      pre:focus-visible {
+        outline: 2px solid var(--app-ring);
         outline-offset: 2px;
       }
 
       /* a write, refused without the permission */
       button.write {
-        box-shadow: inset 3px 0 0 var(--warn);
+        box-shadow: inset 3px 0 0 var(--write);
       }
 
       #result {
         min-height: 38px;
-        font-size: 14px;
+        font-size: var(--app-text-md);
         font-weight: 500;
         overflow-wrap: anywhere;
       }
@@ -392,19 +505,19 @@
       .metric {
         display: flex;
         align-items: baseline;
-        gap: 10px;
+        gap: var(--app-space-3);
       }
 
       #counter {
-        color: var(--accent);
-        font: 650 34px/1 var(--mono);
+        color: var(--app-accent);
+        font: 650 var(--app-text-2xl) / var(--app-lh-tight) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
       }
 
       .label {
-        margin-right: 4px;
-        color: var(--muted);
-        font-size: 11px;
+        margin-right: var(--app-space-1);
+        color: var(--app-text-secondary);
+        font-size: var(--app-text-xs);
         font-weight: 650;
         letter-spacing: 0.06em;
         text-transform: uppercase;
@@ -414,15 +527,15 @@
       .glyph {
         display: flex;
         align-items: center;
-        gap: 14px;
+        gap: var(--app-space-4);
       }
 
       .glyph canvas {
         width: 112px;
         height: 112px;
         flex: none;
-        border-radius: 10px;
-        box-shadow: 0 0 0 1px var(--line);
+        border-radius: var(--app-radius-lg);
+        box-shadow: 0 0 0 1px var(--app-divider);
       }
 
       .glyph canvas[hidden] {
@@ -432,12 +545,12 @@
       .facts {
         display: grid;
         grid-template-columns: max-content minmax(0, 1fr);
-        gap: 6px 12px;
+        gap: var(--app-space-2) var(--app-space-3);
         align-items: baseline;
       }
 
       .facts dt {
-        color: var(--muted);
+        color: var(--app-text-secondary);
       }
 
       .facts dd {
@@ -447,27 +560,27 @@
       /* the verdict, coloured as health checks are read */
       #health {
         justify-self: start;
-        padding: 1px 9px;
-        border-radius: 999px;
-        background: var(--caution-soft);
-        color: var(--caution);
+        padding: 1px var(--app-space-2);
+        border-radius: var(--app-radius-pill);
+        background: var(--app-warn-wash);
+        color: var(--app-warn);
         font-weight: 650;
       }
 
       #health[data-status='pass'] {
-        background: var(--ok-soft);
-        color: var(--ok);
+        background: var(--app-ok-wash);
+        color: var(--app-ok);
       }
 
       #health[data-status='fail'],
       #health[data-status='unread'] {
         background: var(--bad-soft);
-        color: var(--bad);
+        color: var(--app-error);
       }
 
       .gauges {
         display: grid;
-        gap: 6px;
+        gap: var(--app-space-2);
         padding: 0;
         list-style: none;
       }
@@ -475,40 +588,40 @@
       .gauges li {
         display: grid;
         grid-template-columns: 70px minmax(0, 1fr);
-        gap: 8px;
+        gap: var(--app-space-2);
         align-items: baseline;
       }
 
       .layer {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         font-weight: 600;
       }
 
       .chips {
         display: flex;
         flex-wrap: wrap;
-        gap: 4px;
+        gap: var(--app-space-1);
       }
 
       .chip {
         padding: 1px 7px;
-        border-radius: 6px;
+        border-radius: var(--app-radius);
         background: var(--raised);
-        box-shadow: 0 0 0 1px var(--line);
-        font: 11.5px var(--mono);
+        box-shadow: 0 0 0 1px var(--app-divider);
+        font: var(--app-text-xs) var(--app-font-mono);
         font-variant-numeric: tabular-nums;
         overflow-wrap: anywhere;
       }
 
       .chip.quiet {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         box-shadow: none;
         background: none;
       }
 
       .chip.failure {
         background: var(--bad-soft);
-        color: var(--bad);
+        color: var(--app-error);
         box-shadow: none;
       }
 
@@ -517,132 +630,161 @@
         grid-template-columns: 84px minmax(0, 1fr);
       }
 
-      /* its lines, long, scroll within it: the card keeps its width, and the chips wrap */
+      /* ── what is code: a document, an exchange, an exposition, a file ───── */
+
+      /* its lines, long, scroll within it: the card keeps its width; its height is the page's */
+      pre.code,
+      .exposition pre,
+      .sides pre {
+        margin: 0;
+        padding: var(--app-space-2) var(--app-space-3);
+        overflow: auto;
+        border-radius: var(--app-radius-md);
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--app-divider);
+        font: var(--app-text-xs) / 1.5 var(--app-font-mono);
+      }
+
       .exposition {
         min-width: 0;
       }
 
       .exposition summary {
-        color: var(--muted);
+        color: var(--app-text-secondary);
         font-weight: 600;
         cursor: pointer;
       }
 
       .exposition pre {
-        max-height: 40vh;
-        margin: 6px 0 0;
-        padding: 8px 10px;
-        overflow: auto;
-        border-radius: 8px;
-        background: var(--raised);
-        box-shadow: 0 0 0 1px var(--line);
-        font: 11px/1.5 var(--mono);
+        margin-top: var(--app-space-2);
       }
 
-      /* ── the two sides: one role a tab, its two files one under the other ── */
+      /* ── the two sides: one role a tab, its two files side by side ──────── */
 
       .sides-tabs {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: var(--app-space-2);
       }
 
       .sides-tabs [role='tab'] {
-        padding: 4px 10px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
+        min-height: 0;
+        padding: var(--app-space-1) var(--app-space-3);
+        border: 1px solid var(--app-divider);
+        border-radius: var(--app-radius-pill);
         background: var(--raised);
-        color: var(--muted);
-        font: inherit;
+        color: var(--app-text-secondary);
         font-weight: 600;
-        cursor: pointer;
       }
 
       .sides-tabs [role='tab'][aria-selected='true'] {
-        border-color: var(--accent);
-        color: var(--accent);
+        border-color: var(--app-accent);
+        color: var(--app-accent);
       }
 
       .sides {
         display: grid;
-        gap: 8px;
+        gap: var(--app-space-3);
       }
 
       .sides figure {
         display: grid;
-        gap: 4px;
+        grid-template-rows: auto minmax(0, 1fr);
+        gap: var(--app-space-1);
         min-width: 0;
         margin: 0;
       }
 
       .sides figcaption {
-        color: var(--muted);
-        font: 11px/1.4 var(--mono);
+        color: var(--app-text-secondary);
+        font: var(--app-text-xs) / var(--app-lh-snug) var(--app-font-mono);
       }
 
+      /* a file is the one scroll of its own a scene keeps, beside the logs */
       .sides pre {
-        max-height: 40vh;
-        margin: 0;
-        padding: 8px 10px;
-        overflow: auto;
-        border-radius: 8px;
-        background: var(--raised);
-        box-shadow: 0 0 0 1px var(--line);
-        font: 11px/1.5 var(--mono);
+        max-height: 70vh;
+      }
+
+      @media (min-width: 900px) {
+        .sides {
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        }
       }
 
       /* ── the logs: newest first, each line by the way it went ───────────── */
+
+      .logs,
+      .logs-body {
+        display: grid;
+        align-content: start;
+        gap: var(--app-space-3);
+        min-width: 0;
+      }
+
+      .logs-toggle {
+        justify-self: end;
+        min-height: 0;
+        padding: var(--app-space-1) var(--app-space-3);
+        border-radius: var(--app-radius-pill);
+        color: var(--app-text-secondary);
+        font-weight: 600;
+      }
+
+      .logs[data-folded] .logs-body {
+        display: none;
+      }
 
       .log ol {
         height: 50vh;
         overflow: auto;
         padding: 0;
         list-style: none;
-        font: 12px/1.55 var(--mono);
+        font: var(--text-code) / 1.55 var(--app-font-mono);
         font-variant-numeric: tabular-nums;
       }
 
       .log li {
-        padding: 2px 0 2px 8px;
-        border-bottom: 1px solid var(--line);
-        box-shadow: inset 2px 0 0 var(--accent);
+        padding: 2px 0 2px var(--app-space-2);
+        border-bottom: 1px solid var(--app-divider);
+        box-shadow: inset 2px 0 0 var(--app-accent);
         white-space: pre-wrap;
         overflow-wrap: anywhere;
       }
 
       .log li[data-direction='tx'] {
-        box-shadow: inset 2px 0 0 var(--muted);
-        color: var(--muted);
+        box-shadow: inset 2px 0 0 var(--app-text-secondary);
+        color: var(--app-text-secondary);
       }
 
-      /* one screen on a desktop: three columns, and the logs scroll within their own */
+      /* a desktop: the scenes, and the logs in a rail beside them that stays as the page scrolls,
+         each log scrolling within its own half */
       @media (min-width: 1100px) {
-        body {
-          display: grid;
-          grid-template-rows: auto minmax(0, 1fr);
-          height: 100vh;
-          height: 100dvh;
-          overflow: hidden;
-        }
-
         .dashboard {
-          grid-template-columns:
-            minmax(270px, 310px) minmax(300px, 1fr)
-            minmax(380px, 1.35fr);
+          grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+          align-items: start;
           width: 100%;
           max-width: 1680px;
-          min-height: 0;
         }
 
-        .column {
-          min-height: 0;
-          overflow: auto;
+        .dashboard:has(.logs[data-folded]) {
+          grid-template-columns: minmax(0, 1fr) auto;
         }
 
         .logs {
+          position: sticky;
+          top: var(--app-space-3);
+          grid-template-rows: auto minmax(0, 1fr);
+          height: calc(100dvh - 2 * var(--app-space-3));
+        }
+
+        .logs[data-folded] {
+          height: auto;
+        }
+
+        .logs-body {
           grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
           align-content: stretch;
-          overflow: hidden;
+          min-height: 0;
         }
 
         .log {
@@ -653,33 +795,6 @@
         .log ol {
           height: auto;
           min-height: 0;
-        }
-      }
-
-      /* a laptop's shorter screen: what gives is the spacing and the glyph's size, never a word */
-      @media (min-width: 1100px) and (max-height: 820px) {
-        .dashboard,
-        .column {
-          gap: 10px;
-        }
-
-        .dashboard {
-          padding-top: 10px;
-          padding-bottom: 12px;
-        }
-
-        .card {
-          gap: 6px;
-          padding: 9px 12px;
-        }
-
-        .glyph canvas {
-          width: 84px;
-          height: 84px;
-        }
-
-        #counter {
-          font-size: 28px;
         }
       }
     </style>
@@ -722,139 +837,248 @@
     </header>
 
     <main class="dashboard">
-      <div class="column">
-        <section class="card" aria-labelledby="identity-h">
-          <h2 id="identity-h">Identity</h2>
-          <p class="note">
-            An access token, a JWT each call presents in its header: a read needs one that holds, a
-            write one whose scope holds <code>write</code>.
-          </p>
-          <div class="buttons">
-            <button type="button" data-action="reader">Log in as a reader</button>
-            <button type="button" data-action="writer">Log in as a writer</button>
-            <button type="button" data-action="forged">Forged token</button>
-            <button type="button" data-action="logout">Log out</button>
-          </div>
-        </section>
+      <div class="scenes">
+        <p class="intro">
+          Bead is a binary call protocol, one surface in TypeScript and in C#, the same over a
+          WebSocket, over HTTP or in a Web Worker. Each tab shows a side of it; the logs follow
+          every call that crosses.
+        </p>
+        <div id="scene-tabs" class="scene-tabs" role="tablist" aria-label="What to see of Bead">
+          <button
+            id="scene-calls"
+            type="button"
+            role="tab"
+            aria-controls="calls-scene"
+            data-scene="calls"
+          >
+            Calls
+          </button>
+          <button
+            id="scene-rules"
+            type="button"
+            role="tab"
+            aria-controls="rules-scene"
+            data-scene="rules"
+          >
+            Payload rules
+          </button>
+          <button
+            id="scene-openapi"
+            type="button"
+            role="tab"
+            aria-controls="openapi-scene"
+            data-scene="openapi"
+          >
+            OpenAPI
+          </button>
+          <button
+            id="scene-server"
+            type="button"
+            role="tab"
+            aria-controls="server-scene"
+            data-scene="server"
+          >
+            Server
+          </button>
+          <button
+            id="scene-code"
+            type="button"
+            role="tab"
+            aria-controls="code-scene"
+            data-scene="code"
+          >
+            Code
+          </button>
+        </div>
 
-        <section class="card" aria-labelledby="counter-h">
-          <h2 id="counter-h">Counter</h2>
-          <p class="note">Subscribe, then burst: see the counter's value.</p>
-          <div class="buttons">
-            <button type="button" data-action="read">Read</button>
-            <button type="button" class="write" data-action="increment">Increment</button>
-            <button type="button" class="write" data-action="burst">Burst of 5</button>
-            <button type="button" id="subscribe" data-action="subscribe">
-              Subscribe (value + signal)
-            </button>
-          </div>
-        </section>
-
-        <section class="card" aria-labelledby="transfers-h">
-          <h2 id="transfers-h">Transfers</h2>
-          <p class="note">A glyph drawn at random, 8 MiB: it crosses in chunks.</p>
-          <div class="buttons">
-            <button type="button" class="write" data-action="upload">Send a glyph</button>
-            <button type="button" data-action="download">Receive a glyph</button>
-          </div>
-        </section>
-
-        <section class="card" aria-labelledby="calls-h">
-          <h2 id="calls-h">Calls</h2>
-          <p class="note">Slow, cancelled, timed out, failed — and the server asking back.</p>
-          <div class="buttons">
-            <button type="button" data-action="slow">Slow call (5 s)</button>
-            <button type="button" data-action="cancel">Cancel it</button>
-            <button type="button" data-action="timeout">Timeout (1 s)</button>
-            <button type="button" data-action="fail">Procedure fails</button>
-            <button type="button" data-action="ask">Server asks my time</button>
-          </div>
-        </section>
-
-        <section class="card" aria-labelledby="sign-up-h">
-          <h2 id="sign-up-h">Payload rules</h2>
-          <p class="note">
-            A sign-up whose <code>.proto</code> holds protovalidate's rules, compiled by beadc: the
-            server judges each request before its resolver, and answers one they refuse
-            <code>PAYLOAD_INVALID</code>, each violation shown under its field.
-          </p>
-          <form id="sign-up" class="form" novalidate>
-            <div id="sign-up-unbound" class="unbound" tabindex="-1" role="alert" hidden>
-              <ul id="sign-up-unbound-list" class="violations"></ul>
-            </div>
-            <div class="field">
-              <label for="sign-up-name">Name</label>
-              <input
-                id="sign-up-name"
-                name="name"
-                autocomplete="username"
-                autocapitalize="none"
-                spellcheck="false"
-                aria-describedby="sign-up-name-hint"
-              />
-              <ul id="sign-up-name-messages" class="violations" hidden></ul>
-              <p id="sign-up-name-hint" class="hint">
-                1 to 63 characters: a lower-case letter, then letters, digits or hyphens
+        <div id="calls-scene" class="scene split" role="tabpanel" aria-labelledby="scene-calls">
+          <ol class="steps" aria-label="To try first">
+            <li>Log in as a writer</li>
+            <li>Subscribe, then burst</li>
+            <li>Send a glyph, or start a slow call and cancel it</li>
+          </ol>
+          <div class="column">
+            <section class="card" aria-labelledby="identity-h">
+              <h2 id="identity-h">Identity</h2>
+              <p class="note">
+                An access token, a JWT each call presents in its header: a read needs one that
+                holds, a write one whose scope holds <code>write</code>.
               </p>
-            </div>
-            <div class="field">
-              <label for="sign-up-seats">Seats</label>
-              <input
-                id="sign-up-seats"
-                name="seats"
-                inputmode="numeric"
-                autocomplete="off"
-                aria-describedby="sign-up-seats-hint"
-              />
-              <ul id="sign-up-seats-messages" class="violations" hidden></ul>
-              <p id="sign-up-seats-hint" class="hint">From 1 to 10</p>
-            </div>
-            <div class="field">
-              <label for="sign-up-email">Email</label>
-              <input
-                id="sign-up-email"
-                name="email"
-                type="email"
-                autocomplete="email"
-                spellcheck="false"
-                aria-describedby="sign-up-email-hint"
-              />
-              <ul id="sign-up-email-messages" class="violations" hidden></ul>
-              <p id="sign-up-email-hint" class="hint">Or a phone: exactly one of the two</p>
-            </div>
-            <div class="field">
-              <label for="sign-up-phone">Phone</label>
-              <input
-                id="sign-up-phone"
-                name="phone"
-                type="tel"
-                autocomplete="tel"
-                aria-describedby="sign-up-phone-hint"
-              />
-              <ul id="sign-up-phone-messages" class="violations" hidden></ul>
-              <p id="sign-up-phone-hint" class="hint">E.164: a +, then 7 to 15 digits</p>
-            </div>
-            <label class="check">
-              <input
-                id="sign-up-validates"
-                type="checkbox"
-                aria-describedby="sign-up-validates-note"
-              />
-              Validate before sending
-            </label>
-            <p id="sign-up-validates-note" class="note">
-              The client judges the request by the same rules: a refusal fails at once, and nothing
-              goes on the wire.
+              <div class="buttons">
+                <button type="button" data-action="reader">Log in as a reader</button>
+                <button type="button" data-action="writer">Log in as a writer</button>
+                <button type="button" data-action="forged">Forged token</button>
+                <button type="button" data-action="logout">Log out</button>
+              </div>
+            </section>
+
+            <section class="card" aria-labelledby="counter-h">
+              <h2 id="counter-h">Counter</h2>
+              <p class="note">Subscribe, then burst: see the counter's value.</p>
+              <div class="buttons">
+                <button type="button" data-action="read">Read</button>
+                <button type="button" class="write" data-action="increment">Increment</button>
+                <button type="button" class="write" data-action="burst">Burst of 5</button>
+                <button type="button" id="subscribe" data-action="subscribe">
+                  Subscribe (value + signal)
+                </button>
+              </div>
+            </section>
+
+            <section class="card" aria-labelledby="transfers-h">
+              <h2 id="transfers-h">Transfers</h2>
+              <p class="note">A glyph drawn at random, 8 MiB: it crosses in chunks.</p>
+              <div class="buttons">
+                <button type="button" class="write" data-action="upload">Send a glyph</button>
+                <button type="button" data-action="download">Receive a glyph</button>
+              </div>
+            </section>
+
+            <section class="card" aria-labelledby="calls-h">
+              <h2 id="calls-h">Calls</h2>
+              <p class="note">Slow, cancelled, timed out, failed — and the server asking back.</p>
+              <div class="buttons">
+                <button type="button" data-action="slow">Slow call (5 s)</button>
+                <button type="button" data-action="cancel">Cancel it</button>
+                <button type="button" data-action="timeout">Timeout (1 s)</button>
+                <button type="button" data-action="fail">Procedure fails</button>
+                <button type="button" data-action="ask">Server asks my time</button>
+              </div>
+            </section>
+          </div>
+
+          <div class="column">
+            <section class="card" aria-labelledby="result-h">
+              <h2 id="result-h">Result</h2>
+              <p id="result">—</p>
+            </section>
+
+            <section class="card" aria-labelledby="value-h">
+              <h2 id="value-h">Counter's value</h2>
+              <div class="metric"><span id="counter">—</span></div>
+              <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
+              <p class="note"><span class="label">Last burst</span> <span id="burst">—</span></p>
+              <p class="note">
+                Subscribed, five changes come as two notifications, paced — the first, then the
+                latest — and five signals merged into two reads.
+              </p>
+            </section>
+
+            <section class="card" aria-labelledby="glyph-h">
+              <h2 id="glyph-h">Glyph</h2>
+              <div class="glyph">
+                <canvas
+                  id="glyph"
+                  width="1448"
+                  height="1448"
+                  role="img"
+                  aria-label="The last glyph that went across, drawn at random"
+                  hidden
+                ></canvas>
+                <span id="glyph-caption" class="note">none yet: send one, or receive one</span>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div
+          id="rules-scene"
+          class="scene split"
+          role="tabpanel"
+          aria-labelledby="scene-rules"
+          hidden
+        >
+          <ol class="steps" aria-label="To try first">
+            <li>Sign up the valid one it holds</li>
+            <li>Break several fields, and sign up</li>
+            <li>Validate before sending: the client refuses it first</li>
+          </ol>
+          <section class="card" aria-labelledby="sign-up-h">
+            <h2 id="sign-up-h">Payload rules</h2>
+            <p class="note">
+              A sign-up whose <code>.proto</code> holds protovalidate's rules, compiled by beadc:
+              the server judges each request before its resolver, and answers one they refuse
+              <code>PAYLOAD_INVALID</code>, each violation shown under its field.
             </p>
-            <div class="buttons">
-              <button type="submit">Sign up</button>
-              <button type="button" id="sign-up-broken">Break several fields</button>
-              <button type="button" id="sign-up-valid">Fill a valid one</button>
-            </div>
-            <p id="sign-up-status" role="status">—</p>
-          </form>
-          <details id="sign-up-http" class="exposition">
-            <summary>The same sign-up over HTTP and JSON</summary>
+            <form id="sign-up" class="form" novalidate>
+              <div id="sign-up-unbound" class="unbound" tabindex="-1" role="alert" hidden>
+                <ul id="sign-up-unbound-list" class="violations"></ul>
+              </div>
+              <div class="field">
+                <label for="sign-up-name">Name</label>
+                <input
+                  id="sign-up-name"
+                  name="name"
+                  autocomplete="username"
+                  autocapitalize="none"
+                  spellcheck="false"
+                  aria-describedby="sign-up-name-hint"
+                />
+                <ul id="sign-up-name-messages" class="violations" hidden></ul>
+                <p id="sign-up-name-hint" class="hint">
+                  1 to 63 characters: a lower-case letter, then letters, digits or hyphens
+                </p>
+              </div>
+              <div class="field">
+                <label for="sign-up-seats">Seats</label>
+                <input
+                  id="sign-up-seats"
+                  name="seats"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  aria-describedby="sign-up-seats-hint"
+                />
+                <ul id="sign-up-seats-messages" class="violations" hidden></ul>
+                <p id="sign-up-seats-hint" class="hint">From 1 to 10</p>
+              </div>
+              <div class="field">
+                <label for="sign-up-email">Email</label>
+                <input
+                  id="sign-up-email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  spellcheck="false"
+                  aria-describedby="sign-up-email-hint"
+                />
+                <ul id="sign-up-email-messages" class="violations" hidden></ul>
+                <p id="sign-up-email-hint" class="hint">Or a phone: exactly one of the two</p>
+              </div>
+              <div class="field">
+                <label for="sign-up-phone">Phone</label>
+                <input
+                  id="sign-up-phone"
+                  name="phone"
+                  type="tel"
+                  autocomplete="tel"
+                  aria-describedby="sign-up-phone-hint"
+                />
+                <ul id="sign-up-phone-messages" class="violations" hidden></ul>
+                <p id="sign-up-phone-hint" class="hint">E.164: a +, then 7 to 15 digits</p>
+              </div>
+              <label class="check">
+                <input
+                  id="sign-up-validates"
+                  type="checkbox"
+                  aria-describedby="sign-up-validates-note"
+                />
+                Validate before sending
+              </label>
+              <p id="sign-up-validates-note" class="note">
+                The client judges the request by the same rules: a refusal fails at once, and
+                nothing goes on the wire.
+              </p>
+              <div class="buttons">
+                <button type="submit">Sign up</button>
+                <button type="button" id="sign-up-broken">Break several fields</button>
+                <button type="button" id="sign-up-valid">Fill a valid one</button>
+              </div>
+              <p id="sign-up-status" role="status">—</p>
+            </form>
+          </section>
+
+          <section id="sign-up-http" class="card" aria-labelledby="sign-up-http-h">
+            <h2 id="sign-up-http-h">The same sign-up over HTTP and JSON</h2>
             <p class="note">
               A gateway answers it as one more client of the server, its route
               <code>POST /api/SignUp/signUp</code>, a refusal in RFC 9457's problem<span data-static
@@ -862,167 +1086,170 @@
                 cannot</span
               >.
             </p>
-            <pre id="sign-up-http-request"></pre>
-            <pre id="sign-up-http-answer">What it answers shows once the sign-up is sent.</pre>
-            <details id="sign-up-openapi" class="exposition">
-              <summary>
-                Its OpenAPI document, as beadc wrote it<span data-served
-                  >, served at <a href="/openapi.json">/openapi.json</a></span
-                >
-              </summary>
-              <pre id="sign-up-openapi-document"></pre>
+            <p class="label">Its request, as it is filled</p>
+            <pre id="sign-up-http-request" class="code" tabindex="0"></pre>
+            <p class="label">What the gateway answers</p>
+            <pre id="sign-up-http-answer" class="code" tabindex="0">
+What it answers shows once the sign-up is sent.</pre>
+          </section>
+        </div>
+
+        <div
+          id="openapi-scene"
+          class="scene"
+          role="tabpanel"
+          aria-labelledby="scene-openapi"
+          hidden
+        >
+          <section id="sign-up-openapi" class="card" aria-labelledby="sign-up-openapi-h">
+            <h2 id="sign-up-openapi-h">The sign-up's OpenAPI document</h2>
+            <p class="note">
+              What beadc wrote of the sign-up's routes, OpenAPI 3.1.1: what its HTTP form takes, and
+              each answer it gives<span data-served
+                >; the gateway serves it at <a href="/openapi.json">/openapi.json</a></span
+              >.
+            </p>
+            <pre id="sign-up-openapi-document" class="code" tabindex="0"></pre>
+          </section>
+        </div>
+
+        <div
+          id="server-scene"
+          class="scene split"
+          role="tabpanel"
+          aria-labelledby="scene-server"
+          hidden
+        >
+          <section class="card" aria-labelledby="server-h">
+            <h2 id="server-h">Server</h2>
+            <p class="note">
+              Read every second, its health and what each layer holds by a <code>stats</code> call,
+              the calls it answered by the <code>metrics</code> call beside, both left out of the
+              logs and of those counts: a median estimated within its bucket.
+            </p>
+            <p class="note" id="tabs" hidden>
+              Open this page in a second tab: each tab is a client of this one server, which counts
+              them, and they share its counter.
+            </p>
+            <dl class="facts">
+              <dt>Health</dt>
+              <dd id="health">—</dd>
+              <dt>Answers</dt>
+              <dd id="durations">—</dd>
+            </dl>
+            <ul id="gauges" class="gauges" aria-label="What each layer holds, and its ceiling"></ul>
+          </section>
+
+          <section class="card" aria-labelledby="metrics-h">
+            <h2 id="metrics-h">Metrics</h2>
+            <p class="note">
+              What each end's metrics registry counts, every second: the server's by a
+              <code>metrics</code> call, over Bead itself, so a server in a Web Worker answers it as
+              a Node one does<span data-served
+                >, and <code>/metrics</code> serves it to a scraper</span
+              >; this tab's client's, in the page. The reads are left out, the durations estimated
+              within their buckets.
+            </p>
+            <p class="label">Server</p>
+            <ul
+              id="server-metrics"
+              class="gauges metrics"
+              aria-label="What the server counted, by procedure"
+            ></ul>
+            <p class="label">This tab's client</p>
+            <ul
+              id="client-metrics"
+              class="gauges metrics"
+              aria-label="What this tab's client counted, by procedure"
+            ></ul>
+            <details id="server-exposition" class="exposition">
+              <summary>The server's exposition, as a scrape reads it</summary>
+              <pre></pre>
             </details>
-          </details>
-        </section>
+            <details id="client-exposition" class="exposition">
+              <summary>The client's exposition</summary>
+              <pre></pre>
+            </details>
+          </section>
+        </div>
+
+        <div id="code-scene" class="scene" role="tabpanel" aria-labelledby="scene-code" hidden>
+          <section id="sides" class="card" aria-labelledby="sides-h">
+            <h2 id="sides-h">The same service, in TypeScript and in C#</h2>
+            <p class="note">
+              <code>examples/hello</code>'s HelloService, both sides as the repository builds and
+              runs them: one surface, name for name, each in its language's own idiom.
+            </p>
+            <div id="sides-tabs" class="sides-tabs" role="tablist" aria-label="What to read of it">
+              <button
+                id="sides-resolvers"
+                type="button"
+                role="tab"
+                aria-controls="sides-panel"
+                data-role="resolvers"
+              >
+                Its resolvers
+              </button>
+              <button
+                id="sides-serving"
+                type="button"
+                role="tab"
+                aria-controls="sides-panel"
+                data-role="serving"
+              >
+                Its server
+              </button>
+              <button
+                id="sides-calling"
+                type="button"
+                role="tab"
+                aria-controls="sides-panel"
+                data-role="calling"
+              >
+                Its client
+              </button>
+            </div>
+            <div id="sides-panel" class="sides" role="tabpanel">
+              <figure>
+                <figcaption id="side-typescript-file"></figcaption>
+                <pre id="side-typescript" tabindex="0" aria-labelledby="side-typescript-file"></pre>
+              </figure>
+              <figure>
+                <figcaption id="side-csharp-file"></figcaption>
+                <pre id="side-csharp" tabindex="0" aria-labelledby="side-csharp-file"></pre>
+              </figure>
+            </div>
+          </section>
+        </div>
       </div>
 
-      <div class="column">
-        <section class="card" aria-labelledby="result-h">
-          <h2 id="result-h">Result</h2>
-          <p id="result">—</p>
-        </section>
-
-        <section class="card" aria-labelledby="value-h">
-          <h2 id="value-h">Counter's value</h2>
-          <div class="metric"><span id="counter">—</span></div>
-          <p class="note">2 subscriptions: the value, paced; the signal, merged by the page</p>
-          <p class="note"><span class="label">Last burst</span> <span id="burst">—</span></p>
-          <p class="note">
-            Subscribed, five changes come as two notifications, paced — the first, then the latest —
-            and five signals merged into two reads.
-          </p>
-        </section>
-
-        <section class="card" aria-labelledby="glyph-h">
-          <h2 id="glyph-h">Glyph</h2>
-          <div class="glyph">
-            <canvas
-              id="glyph"
-              width="1448"
-              height="1448"
-              role="img"
-              aria-label="The last glyph that went across, drawn at random"
-              hidden
-            ></canvas>
-            <span id="glyph-caption" class="note">none yet: send one, or receive one</span>
-          </div>
-        </section>
-
-        <section class="card" aria-labelledby="server-h">
-          <h2 id="server-h">Server</h2>
-          <p class="note">
-            Read every second, its health and what each layer holds by a <code>stats</code> call,
-            the calls it answered by the <code>metrics</code> call below, both left out of the logs
-            and of those counts: a median estimated within its bucket.
-          </p>
-          <p class="note" id="tabs" hidden>
-            Open this page in a second tab: each tab is a client of this one server, which counts
-            them, and they share its counter.
-          </p>
-          <dl class="facts">
-            <dt>Health</dt>
-            <dd id="health">—</dd>
-            <dt>Answers</dt>
-            <dd id="durations">—</dd>
-          </dl>
-          <ul id="gauges" class="gauges" aria-label="What each layer holds, and its ceiling"></ul>
-        </section>
-
-        <section class="card" aria-labelledby="metrics-h">
-          <h2 id="metrics-h">Metrics</h2>
-          <p class="note">
-            What each end's metrics registry counts, every second: the server's by a
-            <code>metrics</code> call, over Bead itself, so a server in a Web Worker answers it as a
-            Node one does<span data-served>, and <code>/metrics</code> serves it to a scraper</span
-            >; this tab's client's, in the page. The reads are left out, the durations estimated
-            within their buckets.
-          </p>
-          <p class="label">Server</p>
-          <ul
-            id="server-metrics"
-            class="gauges metrics"
-            aria-label="What the server counted, by procedure"
-          ></ul>
-          <p class="label">This tab's client</p>
-          <ul
-            id="client-metrics"
-            class="gauges metrics"
-            aria-label="What this tab's client counted, by procedure"
-          ></ul>
-          <details id="server-exposition" class="exposition">
-            <summary>The server's exposition, as a scrape reads it</summary>
-            <pre></pre>
-          </details>
-          <details id="client-exposition" class="exposition">
-            <summary>The client's exposition</summary>
-            <pre></pre>
-          </details>
-        </section>
-
-        <section id="sides" class="card" aria-labelledby="sides-h">
-          <h2 id="sides-h">The same service, in TypeScript and in C#</h2>
-          <p class="note">
-            <code>examples/hello</code>'s HelloService, both sides as the repository builds and runs
-            them: one surface, name for name, each in its language's own idiom.
-          </p>
-          <div id="sides-tabs" class="sides-tabs" role="tablist" aria-label="What to read of it">
-            <button
-              id="sides-resolvers"
-              type="button"
-              role="tab"
-              aria-controls="sides-panel"
-              data-role="resolvers"
-            >
-              Its resolvers
-            </button>
-            <button
-              id="sides-serving"
-              type="button"
-              role="tab"
-              aria-controls="sides-panel"
-              data-role="serving"
-            >
-              Its server
-            </button>
-            <button
-              id="sides-calling"
-              type="button"
-              role="tab"
-              aria-controls="sides-panel"
-              data-role="calling"
-            >
-              Its client
-            </button>
-          </div>
-          <div id="sides-panel" class="sides" role="tabpanel">
-            <figure>
-              <figcaption id="side-typescript-file"></figcaption>
-              <pre id="side-typescript" tabindex="0" aria-labelledby="side-typescript-file"></pre>
-            </figure>
-            <figure>
-              <figcaption id="side-csharp-file"></figcaption>
-              <pre id="side-csharp" tabindex="0" aria-labelledby="side-csharp-file"></pre>
-            </figure>
-          </div>
-        </section>
-      </div>
-
-      <div class="column logs">
-        <section class="card log" aria-labelledby="calls-log-h">
-          <h2 id="calls-log-h">Calls, newest first</h2>
-          <p class="note">
-            → goes out, ← comes in. In the console too, with no reload:
-            <code>localStorage.setItem('bead:debug', '*')</code>, or a filter such as
-            <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes.
-          </p>
-          <ol id="calls"></ol>
-        </section>
-        <section class="card log" aria-labelledby="envelopes-log-h">
-          <h2 id="envelopes-log-h">Envelopes, newest first</h2>
-          <p class="note">What crossed the transport, as the client read and wrote it.</p>
-          <ol id="envelopes"></ol>
-        </section>
-      </div>
+      <aside id="logs" class="logs" aria-label="What went across">
+        <button
+          type="button"
+          id="logs-toggle"
+          class="logs-toggle"
+          aria-expanded="true"
+          aria-controls="logs-body"
+        >
+          Hide the logs
+        </button>
+        <div id="logs-body" class="logs-body">
+          <section class="card log" aria-labelledby="calls-log-h">
+            <h2 id="calls-log-h">Calls, newest first</h2>
+            <p class="note">
+              → goes out, ← comes in. In the console too, with no reload:
+              <code>localStorage.setItem('bead:debug', '*')</code>, or a filter such as
+              <code>d(rx), -token</code>, and <code>e(notification)</code> for the envelopes.
+            </p>
+            <ol id="calls-log"></ol>
+          </section>
+          <section class="card log" aria-labelledby="envelopes-log-h">
+            <h2 id="envelopes-log-h">Envelopes, newest first</h2>
+            <p class="note">What crossed the transport, as the client read and wrote it.</p>
+            <ol id="envelopes-log"></ol>
+          </section>
+        </div>
+      </aside>
     </main>
     <script type="module" src="./page.js"></script>
   </body>

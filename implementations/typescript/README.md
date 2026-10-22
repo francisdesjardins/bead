@@ -1746,6 +1746,18 @@ the demo's tests, in a Playwright config of their own: its procedures in Node, a
 joined in memory, and the form in Chromium, against the static build `yarn playground:build:file`
 makes.
 
+The internal demo mounts beside the page a gateway of beadc's route table for that service,
+`POST /api/SignUp/signUp` and `/openapi.json`, over a third Bead server on the in-memory transport;
+the page shows the same sign-up as a `curl` and the gateway's answer, a refusal as RFC 9457's
+problem, written by the runtime's own mapping where its server is a Web Worker. It lays its parts
+out in scenes, one a tab, as `demo/scenes.ts` mounts them: the calls, the payload rules beside that
+HTTP form, the sign-up's OpenAPI document, the server and its metrics, and `examples/hello` on both
+sides, its TypeScript file beside its C# one (`demo/sides.ts`). The address's fragment names the
+scene shown, `#rules`, and the logs stay in a rail beside the scenes, which a visitor folds away.
+Each tablist follows the WAI-ARIA tabs pattern, in `demo/tabs.ts`. The page's type scale, spacing
+and radii are penumbra's, the DevTools panel's copy of its two sheets, which the internal demo
+serves and the static build writes into the page.
+
 Its security is the library's. The demo's tokens are access tokens of RFC 9068's profile: the page
 presents its token as a `JWT` on every call, its client's default `credential`, and the server
 verifies it through its `credentials`, its key and its audience, so each call runs in its
