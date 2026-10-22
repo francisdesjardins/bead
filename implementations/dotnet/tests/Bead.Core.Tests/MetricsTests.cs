@@ -172,7 +172,7 @@ public sealed class MetricsTests
                 var refusal = Assert.Throws<ArgumentException>(Declare);
 
                 Assert.Equal("procedure", refusal.ParamName);
-                Assert.EndsWith($" is {refused.GetString()} (Parameter 'procedure')", refusal.Message, StringComparison.Ordinal);
+                Assert.EndsWith($": {refused.GetString()} (Parameter 'procedure')", refusal.Message, StringComparison.Ordinal);
 
                 continue;
             }
