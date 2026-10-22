@@ -93,7 +93,7 @@ const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | unde
  * in-memory transport beside a WebSocket one, a WebSocket transport beside an HTTP one. Each handle
  * stays the one its transport drew, and names that transport by its type, so two transports of one
  * type, whose handles might be one, are a {@link ProgrammerError} as the join is built: one
- * transport binds both addresses instead. So is none, and two clocks.
+ * transport binds both addresses instead. So is none, a join among them, and two clocks.
  *
  * A connection's flags, sends and closes go to the transport that drew its handle; each transport's
  * events are told on with that handle, in the order it told them, each listener within a guard
@@ -118,6 +118,13 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
   const byType = new Map<string, IJoinableTransportServer>();
 
   for (const transport of transports) {
+    // a join names no type of its own, past the types, so its handles would be no one's
+    if (typeof transport.type !== 'string') {
+      throw new ProgrammerError(
+        'a join takes transports that name the type of their handles, never a join'
+      );
+    }
+
     if (byType.has(transport.type)) {
       throw new ProgrammerError(
         `a join takes one transport of each type: two are ${transport.type}, whose handles might be one`

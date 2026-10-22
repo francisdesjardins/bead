@@ -189,7 +189,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
     /// <summary>
     /// Hands a copy of the bytes of <paramref name="message"/> to its server, with the credential
-    /// beside them, in a later turn, after what went before; refused with a
+    /// beside them, an empty one carrying none, in a later turn, after what went before; refused with a
     /// <see cref="DisconnectException"/> unless Open, and with an <see cref="ArgumentException"/>,
     /// its connection kept, for a text message, which is no envelope, or a credential no field
     /// carries.
@@ -222,8 +222,9 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             return Task.FromException(new ArgumentException("a credential holds visible ASCII, spaces and tabs alone, none first or last", nameof(message)));
         }
 
-        // * copied as it is sent: the sender's buffer stays its own, as a socket's does
-        connection.Server.Receive(connection, new TransportMessage(message.Bytes.ToArray(), message.IsText) { Credential = message.Credential });
+        // * copied as it is sent: the sender's buffer stays its own, as a socket's does; an empty
+        // credential carries none, as an empty field does
+        connection.Server.Receive(connection, new TransportMessage(message.Bytes.ToArray(), message.IsText) { Credential = message.Credential is "" ? null : message.Credential });
 
         return Task.CompletedTask;
     }

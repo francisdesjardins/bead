@@ -484,7 +484,7 @@ test.describe('createServiceServer', () => {
       shout: commandOf({
         admission: 'none',
         failures: {},
-        procedure: { procedureId: 2, procedureName: 'shout', serviceId: 8, serviceRevision: 1 },
+        procedure: { procedureId: 3, procedureName: 'shout', serviceId: 8, serviceRevision: 1 },
         request: PAYLOAD_CODECS.text,
         result: PAYLOAD_CODECS.text,
         validate: notEmpty,
@@ -521,6 +521,7 @@ test.describe('createServiceServer', () => {
       code: ProtocolCode.PAYLOAD_INVALID,
       detail: NOT_EMPTY_DETAIL,
       origin: 'local',
+      side: 'server',
     });
     expect(heard).toEqual([]);
     await expect(

@@ -232,18 +232,48 @@ public sealed class ServiceClientTests
         server.Offer(link.Server);
 
         var validating = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client, new ServiceClientOptions<CheckedProcedures> { Validates = true });
+        var trusting = new ServiceClient<CheckedProcedures>(CheckedProcedures.All, link.Client);
+        var steps = new List<DebugEvent>();
+
+        link.Client.Services.Debug += (_, step) =>
+        {
+            steps.Add(step);
+        };
+
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
             return validating.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
         });
 
-        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
+        Assert.Equal(((ushort)ProtocolCode.PayloadInvalid, FailureScope.Protocol), (refused.Code, refused.Scope));
         Assert.Equal((FailureOrigin.Local, RouterSide.Client), (refused.Origin, refused.Side));
+        Assert.Null(refused.DestinationId);
         Assert.Equal(CheckedProcedures.Detail, refused.Detail);
         Assert.Equal(CheckedProcedures.Echo.Procedure.Address, refused.ProcedureAddress);
+
+        var violations = Violations.Of(refused.Failure);
+        var violation = Assert.Single(violations.Violations);
+
+        Assert.Equal(
+            ("string.min_len", "must be at least 1 characters", "{\"min_len\":\"1\"}", (long?)0),
+            (violation.RuleId, violation.Message, violation.Bounds?.GetRawText(), violations.More));
+
+        // * a call refused before it goes: its tx step names no call, then its failure
+        Assert.Equal(
+            [(DebugDirection.Tx, (uint?)null), (DebugDirection.Rx, (uint?)null)],
+            steps.Select((step) =>
+            {
+                return (step.Direction, step.CallId);
+            }));
+
+        // the server's layer holds it too: the request went, and its resolver never saw it
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, (await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return trusting.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
+        })).Code);
         Assert.Empty(sent);
 
-        // * a value its rules take goes as ever
+        // a value its rules take goes as ever
         Assert.Equal("hi", await validating.RequesterOf(CheckedProcedures.Echo)("hi")().WaitAsync(Patience, Cancelled));
         Assert.Equal(["hi"], sent);
     }
@@ -294,8 +324,6 @@ public sealed class ServiceClientTests
         });
         server.Offer(link.Server);
 
-        Assert.Equal("HI", await server.CommandOf(CheckedProcedures.Shout)("hi")(Call).WaitAsync(Patience, Cancelled));
-
         var refused = await Assert.ThrowsAsync<FailureException>(() =>
         {
             return server.CommandOf(CheckedProcedures.Shout)("")(Call).WaitAsync(Patience, Cancelled);
@@ -304,6 +332,10 @@ public sealed class ServiceClientTests
         Assert.Equal((ushort)ProtocolCode.PayloadInvalid, refused.Code);
         Assert.Equal(FailureOrigin.Peer, refused.Origin);
         Assert.Equal(CheckedProcedures.Detail, refused.Detail);
+        Assert.Empty(heard);
+
+        // * a refusal leaves the next command alone
+        Assert.Equal("HI", await server.CommandOf(CheckedProcedures.Shout)("hi")(Call).WaitAsync(Patience, Cancelled));
         Assert.Equal(["hi"], heard);
     }
 
@@ -335,6 +367,8 @@ public sealed class ServiceClientTests
             return validating.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
         });
 
+        // ! read once its failure is heard, not as the call returns: the call is failed in its
+        // router's turn, on the router's scheduler, which the caller's thread does not run
         var exposition = registry.Exposition().Text;
 
         Assert.Contains("bead_client_call_started_total{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", exposition, StringComparison.Ordinal);

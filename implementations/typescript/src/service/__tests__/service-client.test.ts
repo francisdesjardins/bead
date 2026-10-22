@@ -332,6 +332,7 @@ test.describe('createServiceClient', () => {
     const echo = createServiceServer(ECHO_PROCEDURES);
     const validating = createServiceClient(ECHO_PROCEDURES, connected.client, { validates: true });
     const labels = 'service="8",procedure="echo",type="request"';
+    const steps: [unknown, IDebugEvent][] = [];
 
     echo.on('echo', (request, response) => {
       return response(request.payload);
@@ -340,6 +341,9 @@ test.describe('createServiceClient', () => {
       return response('');
     });
     echo.offer(connected.server);
+    connected.client.services.on('debug', (error, info) => {
+      steps.push([error, info]);
+    });
 
     const refused = failureOf(validating.request.echo('')());
     // * read in the turn the call started: it started, and it ended there
@@ -351,6 +355,20 @@ test.describe('createServiceClient', () => {
     );
     expect(text).toContain(`bead_client_call_duration_seconds_count{${labels}} 1\n`);
     expect((await refused).code).toBe(ProtocolCode.PAYLOAD_INVALID);
+
+    // its tx step told as it was refused, naming no call, then its failure
+    const [[txError, txStep] = [], [rxError, rxStep] = []] = steps;
+
+    expect(steps).toHaveLength(2);
+    expect([txStep?.direction, txStep?.callId, txStep?.tx, txError]).toEqual([
+      'tx',
+      undefined,
+      '',
+      null,
+    ]);
+    expect([rxStep?.direction, rxStep?.callId]).toEqual(['rx', undefined]);
+    expect(rxError).toBeInstanceOf(FailureError);
+    expect((rxError as FailureError).code).toBe(ProtocolCode.PAYLOAD_INVALID);
   });
 
   test("a mapped member keeps its descriptor's @deprecated", async () => {

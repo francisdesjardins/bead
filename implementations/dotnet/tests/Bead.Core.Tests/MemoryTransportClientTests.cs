@@ -86,16 +86,30 @@ public sealed class MemoryTransportClientTests
             byte[][] sent = [[1, 2, 3], [4], [5, 6]];
             byte[][] answered = [[7], [8, 9], [10]];
 
+            // a view on a larger buffer crosses as its own bytes alone
+            var pool = new byte[] { 9, 11, 12, 9 };
+
+            // ! every turn of the receiving ends held behind a gate until the buffers changed, both
+            // ways: a delivery that read the sender's buffer, not its copy, would hand on the change
+            using var gate = new ManualResetEventSlim();
+
+            scheduler.Post(() =>
+            {
+                gate.Wait(Patience);
+            });
+
             foreach (var bytes in sent)
             {
                 await Within(() =>
                 {
                     return client.Send(new TransportMessage(bytes, false));
                 });
-
-                // * the sender's buffer stays its own: what changes after its send never crosses
-                bytes[0] = 0;
             }
+
+            await Within(() =>
+            {
+                return client.Send(new TransportMessage(pool.AsMemory(1, 2), false));
+            });
 
             foreach (var bytes in answered)
             {
@@ -103,12 +117,22 @@ public sealed class MemoryTransportClientTests
                 {
                     return server.Send(new TransportMessage(bytes, false), connectionHandle);
                 });
-                bytes[0] = 0;
             }
 
+            // * nothing within the send; the sender's buffers its own once sent
+            Assert.Empty(toServer);
+            Assert.Empty(toClient);
+
+            foreach (var bytes in sent.Concat(answered))
+            {
+                Array.Fill(bytes, (byte)0);
+            }
+
+            Array.Fill(pool, (byte)0);
+            gate.Set();
             await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 
-            Assert.Equal([("010203", connectionHandle, false), ("04", connectionHandle, false), ("0506", connectionHandle, false)], toServer);
+            Assert.Equal([("010203", connectionHandle, false), ("04", connectionHandle, false), ("0506", connectionHandle, false), ("0B0C", connectionHandle, false)], toServer);
             Assert.Equal([("07", false), ("0809", false), ("0A", false)], toClient);
         }
     }
@@ -143,16 +167,19 @@ public sealed class MemoryTransportClientTests
 
             await client.Send(new TransportMessage(new byte[] { 1 }, false) { Credential = Carried });
             await client.Send(new TransportMessage(new byte[] { 2 }, false));
-            await server.Send(new TransportMessage(new byte[] { 3 }, false) { Credential = Carried }, connectionHandle);
+
+            // an empty field carries none
+            await client.Send(new TransportMessage(new byte[] { 3 }, false) { Credential = "" });
+            await server.Send(new TransportMessage(new byte[] { 4 }, false) { Credential = Carried }, connectionHandle);
 
             // one no field carries is refused before it goes, the connection kept
-            await Assert.ThrowsAsync<ArgumentException>(() =>
+            Assert.StartsWith("a credential holds visible ASCII, spaces and tabs alone", (await Assert.ThrowsAsync<ArgumentException>(() =>
             {
-                return client.Send(new TransportMessage(new byte[] { 4 }, false) { Credential = "Interop\nsub=ada" });
-            });
+                return client.Send(new TransportMessage(new byte[] { 5 }, false) { Credential = "Interop\nsub=ada" });
+            })).Message, StringComparison.Ordinal);
             await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
 
-            Assert.Equal([Carried, null], toServer);
+            Assert.Equal([Carried, null, null], toServer);
             Assert.Equal([null], toClient);
             Assert.Equal(ReadyState.Open, client.ReadyState);
         }
@@ -468,6 +495,8 @@ public sealed class MemoryTransportClientTests
     {
         var clock = new FakeTimeProvider();
         var held = 0;
+        // whether each connect its server held was told it was given up, in the order they came
+        var givenUp = new List<bool>();
 
         // * a server that holds each connect until its token is cancelled, as a peer that never answers
         await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
@@ -475,7 +504,18 @@ public sealed class MemoryTransportClientTests
             Accepting = async (token) =>
             {
                 Interlocked.Increment(ref held);
-                await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, TimeProvider.System, token);
+
+                try
+                {
+                    await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, TimeProvider.System, token);
+                }
+                finally
+                {
+                    lock (givenUp)
+                    {
+                        givenUp.Add(token.IsCancellationRequested);
+                    }
+                }
             },
         });
 
@@ -527,6 +567,7 @@ public sealed class MemoryTransportClientTests
         {
             return asking;
         });
+        Assert.Equal(ReadyState.Closed, asked.ReadyState);
 
         // its dispose
         var disposed = new MemoryTransportClient();
@@ -544,6 +585,12 @@ public sealed class MemoryTransportClientTests
         })).Message, StringComparison.Ordinal);
         Assert.Equal(ReadyState.Closed, disposed.ReadyState);
         Assert.Empty(server.ConnectionHandles);
+
+        // each connect its server held told it was given up, so none is drawn for it
+        lock (givenUp)
+        {
+            Assert.Equal([true, true, true], givenUp);
+        }
     }
 
     [Fact]
