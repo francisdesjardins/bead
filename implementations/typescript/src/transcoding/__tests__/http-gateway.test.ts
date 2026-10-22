@@ -1641,3 +1641,40 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
 
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
 });
+
+test('writes its comment a heartbeat after its last write, and none while writes go', async () => {
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({ clock, heartbeat: 1_000 });
+  const stream = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  await readUntil(stream, 'data: {}\n\n');
+  await clock.tickAsync(600);
+
+  const first = readUntil(stream, '"remaining":2');
+
+  await fixture.watched(2);
+  await first;
+  await clock.tickAsync(600);
+
+  // * 1.2 s after the result, 0.6 s after the notification: no comment came before this one
+  const second = readUntil(stream, '"remaining":1');
+
+  await fixture.watched(1);
+  expect(await second).not.toContain(':\n\r\n');
+
+  const comment = readUntil(stream, ':\n\r\n');
+
+  await clock.tickAsync(1_000);
+  expect((await comment).endsWith(':\n\r\n')).toBe(true);
+  stream.destroy();
+});
