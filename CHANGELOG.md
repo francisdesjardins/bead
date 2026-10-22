@@ -119,6 +119,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- beadc compiles and lints projects on another drive than its installation, using a temporary copy
+  of its options under the project's `.beadc/`.
 - The TypeScript WebSocket client over `ws` offers no `permessage-deflate`, as the C# client does,
   so a third-party server cannot negotiate compression on one side alone.
 - The demo's relay forwards a listen's `bead-after` and `bead-wait`, which the HTTP server needs:

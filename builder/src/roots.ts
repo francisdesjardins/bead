@@ -3,8 +3,8 @@
 // A project's `.proto` roots, read before buf compiles them: a `bead/options.proto` among them is a
 // copy of beadc's, which beadc compiles first and alone (OPTIONS_COPY), and so is a
 // `buf/validate/validate.proto`, protovalidate's, which beadc vendors at the version it compiles
-// (VALIDATE_COPY). Where a file of the set is on disk, for a finding's path. beadc writes nothing
-// into a root.
+// (VALIDATE_COPY). Where a file of the set is on disk, for a finding's path. The roots' source
+// files are read alone; beadc's work area belongs to its own module.
 
 // dependencies
 
