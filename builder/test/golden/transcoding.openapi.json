@@ -234,6 +234,11 @@
               }
             ]
           },
+          "aFixed32": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
+          },
           "aFloat": {
             "anyOf": [
               {
@@ -269,6 +274,22 @@
             "format": "int64",
             "pattern": "^-?(0|[1-9][0-9]{0,18})$",
             "type": "string"
+          },
+          "anSfixed32": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
+          },
+          "anSfixed64": {
+            "description": "A 64-bit integer, sfixed64, as a decimal string. One past its type's range is refused, which its pattern does not hold; Bead's mapping reads a JSON number of it too.",
+            "format": "int64",
+            "pattern": "^-?(0|[1-9][0-9]{0,18})$",
+            "type": "string"
+          },
+          "anSint32": {
+            "maximum": 2147483647,
+            "minimum": -2147483648,
+            "type": "integer"
           },
           "any": {
             "description": "A google.protobuf.Any: its @type, a URL whose last part names a message of the document's, then that message's members, or its value for a well-known type of a form of its own; {} the empty Any.",
