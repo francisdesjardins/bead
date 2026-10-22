@@ -261,6 +261,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   both sides until the connect settles, what was drawn closed unclean and no close told, where the
   C# client opened it and a reconnection then closed it clean, and the TypeScript client left it
   open.
+- The C# in-memory client carries an empty credential as none, as an empty field does and the
+  TypeScript client does, where its server was handed an empty one.
+- The TypeScript join refuses a transport that names no type, a join among them, with a
+  `ProgrammerError`, as the C# side does, where it took one whose handles no transport owned.
 
 ## [0.6.0] - 2026-10-20
 
