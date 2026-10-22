@@ -147,14 +147,21 @@ it answers `GET` at, as that `GET`, without its content
 3.5. Where more than one route of one method matches a path, a gateway MUST answer by the one that
 comes first when their templates are compared segment by segment from the first: at the first
 segment where they differ, a literal before `*`, and `*` before `**`; a template that ends where the
-path ends before one whose `**` takes no segment there.
+path ends before one whose `**` takes no segment there. A gateway MUST refuse, as it is built, a
+route table that holds two routes of one method that tie under this order, one template up to its
+variables' names, naming both: a table is a list, which two tables built apart may join with a tie
+no builder saw (section 3.9).
 
 3.6. A gateway MUST read a request's target raw: its path as it came, its query apart after the
 first `?`, never normalized, no dot segment removed and nothing percent-decoded before the match
 ([RFC 3986 §6.2.2](https://www.rfc-editor.org/rfc/rfc3986#section-6.2.2)). A path with an empty
-segment, or a segment that is `.` or `..`, raw or once percent-decoded, matches no route. A literal
-matches a segment that is its text exactly, `*` one segment, and `**` zero or more, as
-`http.proto` has it, its template's last but its verb.
+segment, `/` alone among them, which is one, or a segment that is `.` or `..`, raw or once
+percent-decoded, matches no route, a `**` of none among them. A literal matches a segment that is
+its text exactly, `*` one segment, and `**` zero or more, as `http.proto` has it, its template's
+last but its verb. A target that holds an octet past US-ASCII, which no URI holds
+([RFC 3986 §2](https://www.rfc-editor.org/rfc/rfc3986#section-2)), is what HTTP refuses of its own
+(section 10.1, step 1): 400 unmarked over HTTP/1.1, as section 15.12 of `spec.md` answers a field
+value that holds one, before anything else of it is judged.
 
 3.7. A path's verb is what follows the last `:` of its last segment that is not percent-encoded, and
 that segment is matched without it; a path whose last segment holds no such `:` has none. A route

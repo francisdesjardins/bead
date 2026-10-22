@@ -56,7 +56,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `*` among other tags, takes a raw or text route's query of empty sequences, and drops a stream
   past `maximumUnsentBytes` before any byte of it goes. It refuses, as it is built, a route whose
   method is none of `http.proto`'s, that has no template or whose template is off its grammar,
-  naming the route, and a notification where its procedure does not notify, or none where it does.
+  naming the route, two routes of one method that tie, naming both, and a notification where its
+  procedure does not notify, or none where it does. Each side binds a request's message from the
+  variables its gateway decoded of the route it matched, its query and its body: `bindRequest`, and
+  the C# side's `HttpBinding.Bind`, of a message and its `BindingOptions`. A target that holds an
+  octet past US-ASCII is refused 400 as HTTP refuses it, unmarked.
   The TypeScript gateway's own listener listens on `localhost`, both loopbacks, by default, once
   until it stops, and gives its address.
 - beadc reads `google.api.http` and `idempotency_level` into the blueprint's routes and messages'

@@ -1082,6 +1082,29 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Refuses_a_route_table_of_two_routes_of_one_method_that_tie_naming_both()
+    {
+        await using var service = await TranscodingService.Start();
+        var options = Exchanges.OptionsOf(service.Memory, null);
+        var echo = RouteOf("echo");
+        var tying = echo with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{id}" }] };
+        var beside = echo with { Routes = [new HttpRouteTemplate { Method = "POST", Template = "/v1/books/{id}", Body = "*" }] };
+
+        // * two tables built apart and joined: the tie no builder saw is refused as the gateway is built
+        Assert.Equal(
+            "echo's route GET /v1/books/{id} ties getBook's route GET /v1/books/{name} (Parameter 'options')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                _ = new HttpGateway(options with { Routes = [.. options.Routes, tying] });
+            }).Message);
+
+        // a route of another method at that template ties none
+        await using var gateway = new HttpGateway(options with { Routes = [.. options.Routes, beside] });
+
+        await gateway.Stop();
+    }
+
+    [Fact]
     public async Task Refuses_a_payload_of_no_schema_nor_encoding_a_notification_only_one_side_has_and_a_route_of_no_method_or_no_template()
     {
         await using var service = await TranscodingService.Start();

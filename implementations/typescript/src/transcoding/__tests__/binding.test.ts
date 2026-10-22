@@ -1,3 +1,4 @@
+import { create } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../transport/shared/errors';
 import { bindRequest, type IBindingOptions } from '../binding';
@@ -148,15 +149,21 @@ test('fills a PATCH’s update_mask with the keys its body holds', () => {
   expect(updateBook('{"title":"x"}').book?.name).toBe('shelves/1/books/2');
 });
 
-test('binds a wrapper and a well-known type of a string form from a variable or a parameter, never a Struct, a Value or a ListValue', () => {
-  const read = everything({
-    query: 'wrappedInt64=7&wrappedBool=true&took=1.5s',
-    variables: { at: '1970-01-01T00:00:01Z', wrapped_string: 'x' },
-  });
-
-  expect(read).toMatchObject({ wrappedBool: true, wrappedInt64: 7n, wrappedString: 'x' });
-  expect(read.at?.seconds).toBe(1n);
-  expect(read.took).toMatchObject({ nanos: 500_000_000, seconds: 1n });
+test('binds a wrapper and a well-known type of a string form from a parameter, never a Struct, a Value or a ListValue', () => {
+  expect(
+    everything({
+      query: 'wrappedInt64=7&wrappedBool=true&took=1.5s&wrappedString=x&at=1970-01-01T00:00:01Z',
+      variables: {},
+    })
+  ).toEqual(
+    create(EverythingSchema, {
+      at: { seconds: 1n },
+      took: { nanos: 500_000_000, seconds: 1n },
+      wrappedBool: true,
+      wrappedInt64: 7n,
+      wrappedString: 'x',
+    })
+  );
   expect(
     reasonOf(() => {
       return everything({ query: 'extra=x', variables: {} });
@@ -175,27 +182,23 @@ test('binds a wrapper and a well-known type of a string form from a variable or 
 });
 
 test('reads a parameter without its = as an empty value, and an enum’s by its name or its number', () => {
-  expect(getBook({ query: 'name&revision=2&color=COLOR_GREEN', variables: {} })).toMatchObject({
-    color: 2,
-    name: '',
-    revision: 2n,
-  });
+  expect(getBook({ query: 'name&revision=2&color=COLOR_GREEN', variables: {} })).toEqual(
+    create(GetBookRequestSchema, { color: 2, revision: 2n })
+  );
   expect(getBook({ query: 'color=1', variables: {} }).color).toBe(1);
   expect(refusalOf('flag')).toBe('no bool');
 
   // * an empty sequence skipped, a name with no `=` an empty value, false a bool, a character
-  // beyond the BMP as it came or percent-encoded
+  // beyond the BMP percent-encoded
   expect(
     getBook({
-      query: '&flag=false&&tags&tags=😀&tags=%F0%9F%98%80&sub.name=a=b&',
+      query: '&flag=false&&tags&tags=%F0%9F%98%80&sub.name=a=b&',
       variables: { name: '2' },
     })
-  ).toMatchObject({ flag: false, name: '2', sub: { name: 'a=b' }, tags: ['', '😀', '😀'] });
-  expect(getBook({ query: 'flag=true&revision=-1', variables: { name: '2' } })).toMatchObject({
-    flag: true,
-    name: '2',
-    revision: -1n,
-  });
+  ).toEqual(create(GetBookRequestSchema, { name: '2', sub: { name: 'a=b' }, tags: ['', '😀'] }));
+  expect(getBook({ query: 'flag=true&revision=-1', variables: { name: '2' } })).toEqual(
+    create(GetBookRequestSchema, { flag: true, name: '2', revision: -1n })
+  );
 });
 
 test('refuses a body that is no object as the request whole, or under a field a variable sets inside', () => {

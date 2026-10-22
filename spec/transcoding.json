@@ -10,7 +10,7 @@
     "bindings are requests bound by section 4: procedure, its procedure; route, its method, its template and its body as its rule gives them; target, the request's target, raw; body, its body's text where it has one; then payload, the request's message as its binary payload, compared as a reading's is, or refused, the reason, which a gateway answers 400 PAYLOAD_UNDECODABLE, and pointer or parameter, where the request carried it, as 7.4 places it, none for its text or its query whole.",
     "failures are a call's failure as a gateway answers it (section 7). failure is its code; its scope, protocol where none is given; its detail as the gateway's client read it; where it arose, arose: server, its server answered it of the request; client, its client raised it before the call went; answer, its client raised it of a result or a notification; gateway, the gateway's own reading of the request; encoding, of a request its server could not read, proto where none is given; credential, true where its call presented one; challenge, where the gateway is given one, Bearer otherwise; pointer or parameter, where the gateway's reading met what it refuses. Or own, a failure of the gateway's own — timeout, closed, unwritable, jwt, scheme or failed — with its detail, its words, empty for none. procedure and route, for PAYLOAD_INVALID, its procedure and the route its request came by; problemTypes, the problem types its definitions give, https://example.com/problems/ where none is given, null for none. status, fields beside it, and problem, the body's text, byte for byte.",
     "events are a stream's call as a gateway writes it (section 8): steps, what its call gives, in their order — result and notification, each its data: a JSON text, a text, as text, or bytes in hexadecimal, as raw, which 8.4 writes as JSON strings; heartbeat, its heartbeat's timer firing; failure, a problem's status and its text — then status, contentType and body, the response's, byte for byte.",
-    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
+    "exchanges are HTTP exchanges with a gateway of the Transcoding service, in process, its server joined, over a real socket, each step as spec/transports.json plays one. send writes a request on a socket of its own, opened for the exchange it names with on: head, its octets as text, each character one octet, as ISO-8859-1 writes it, in which {host} is the gateway's host and port, an IP literal, and {etag}, or any other name a field captured, the value captured under it; body, its octets in hexadecimal. expect reads the response on that exchange: its status; its fields, by name in any case, each its value, null for one absent, {\"shape\": \"etag\"} for a strong entity tag of 64 lower-case hexadecimal digits, the sha256 of the document, {\"capture\"} keeping it under that name; its body, its text exactly, or bodyBytes, in hexadecimal, read by its content-length or de-chunked to its end; or stream, the octets a body that does not end begins with. In a body, {document} stands for the document beadc wrote of spec/transcoding.proto, byte for byte; a refusal's words are the companion's (7.7), each in its body as it is. close drops a socket; until waits, on the real clock and within a patience, for a count the service keeps to reach its value.",
     "defaults are the gateway's options where a case gives none, by the names of transcoding 2.4, 7.6, 8.7, 8.8, 9.2, 10.3 and 11.1, and of spec 15.12, in milliseconds for a time; options, where given, are a case's beside them. service is what each procedure's resolver does, by its name, what its server verifies, and the counts an exchange waits on. A case marked realTime plays on the real clock.",
     "clauses are the units of transcoding.md an entry checks: a clause, 5.2; an item of its numbered list, 5.2.1; a row of its table, counted from 1, 7.6.8; and a unit of spec.md behind spec:, spec:9.2.5, after them."
   ],
@@ -162,6 +162,27 @@
       ]
     },
     {
+      "name": "a route that ends before a double star of none, the double star given first",
+      "clauses": [
+        "3.5",
+        "3.6",
+        "3.8"
+      ],
+      "templates": [
+        "/v1/{name=operations/**}",
+        "/v1/{name=operations}"
+      ],
+      "paths": [
+        {
+          "path": "/v1/operations",
+          "route": 1,
+          "variables": {
+            "name": "operations"
+          }
+        }
+      ]
+    },
+    {
       "name": "a default route, literal whole, before a rule of a double star",
       "clauses": [
         "3.2",
@@ -275,6 +296,10 @@
           "variables": {
             "name": "a+b"
           }
+        },
+        {
+          "path": "/v1/books/a/b",
+          "route": null
         }
       ]
     },
@@ -307,6 +332,33 @@
           "variables": {
             "name": "shelves/ /books/x"
           }
+        },
+        {
+          "path": "/v1/shelves/a%2f%41/books/c",
+          "route": 0,
+          "variables": {
+            "name": "shelves/a%2fA/books/c"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a literal matches its text, never an encoded spelling of it",
+      "clauses": [
+        "3.6"
+      ],
+      "templates": [
+        "/api/Transcoding/echo",
+        "/v1/books/{name}"
+      ],
+      "paths": [
+        {
+          "path": "/api/Transcoding/ech%6F",
+          "route": null
+        },
+        {
+          "path": "/v1/bo%6Fks/a",
+          "route": null
         }
       ]
     },
@@ -373,6 +425,65 @@
         {
           "path": "/v1/books/a/..",
           "route": null
+        }
+      ]
+    },
+    {
+      "name": "the path / is one empty segment, which no double star takes",
+      "clauses": [
+        "3.6"
+      ],
+      "templates": [
+        "/{name=**}"
+      ],
+      "paths": [
+        {
+          "path": "/",
+          "route": null
+        },
+        {
+          "path": "/a",
+          "route": 0,
+          "variables": {
+            "name": "a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a segment of dots beside other characters is a segment, decoded once",
+      "clauses": [
+        "3.6",
+        "3.8"
+      ],
+      "templates": [
+        "/v1/books/{name}"
+      ],
+      "paths": [
+        {
+          "path": "/v1/books/...",
+          "route": 0,
+          "variables": {
+            "name": "..."
+          }
+        },
+        {
+          "path": "/v1/books/a..b",
+          "route": 0,
+          "variables": {
+            "name": "a..b"
+          }
+        },
+        {
+          "path": "/v1/books/.%2E",
+          "route": null
+        },
+        {
+          "path": "/v1/books/%252E",
+          "route": 0,
+          "variables": {
+            "name": "%2E"
+          }
         }
       ]
     },
@@ -3524,6 +3635,22 @@
       "payload": "0A 03 61 2F 62"
     },
     {
+      "name": "a variable whose bytes are not UTF-8",
+      "clauses": [
+        "3.8",
+        "4.2",
+        "7.4"
+      ],
+      "procedure": "getBook",
+      "route": {
+        "method": "GET",
+        "template": "/v1/books/{name}"
+      },
+      "target": "/v1/books/%FF",
+      "refused": "a value whose bytes are not UTF-8",
+      "parameter": "name"
+    },
+    {
       "name": "variables of bytes, a bool, an enum by its name, a 64-bit integer and a field within a field",
       "clauses": [
         "4.2",
@@ -3628,6 +3755,22 @@
       "target": "/v1/shelves/1/books/2?revision=1&revision=2",
       "refused": "a field the query names twice",
       "parameter": "revision"
+    },
+    {
+      "name": "a field within a field named twice",
+      "clauses": [
+        "4.1",
+        "4.3",
+        "4.3.3"
+      ],
+      "procedure": "getBook",
+      "route": {
+        "method": "GET",
+        "template": "/v1/{name=shelves/*/books/*}"
+      },
+      "target": "/v1/shelves/1/books/2?sub.count=1&sub.count=2",
+      "refused": "a field the query names twice",
+      "parameter": "sub.count"
     },
     {
       "name": "a repeated field repeats",
@@ -3832,6 +3975,52 @@
       },
       "target": "/v1/shelves/1/books/2?at=2026-10-21T12:00:00Z",
       "payload": "0A 11 73 68 65 6C 76 65 73 2F 31 2F 62 6F 6F 6B 73 2F 32 2A 06 08 C0 D2 E2 D6 06"
+    },
+    {
+      "name": "wrappers and a Duration in the query",
+      "clauses": [
+        "4.1",
+        "4.3",
+        "4.3.2"
+      ],
+      "procedure": "echo",
+      "route": {
+        "method": "GET",
+        "template": "/v1/every"
+      },
+      "target": "/v1/every?wrappedInt64=7&wrappedBool=true&took=1.5s&wrappedString=x",
+      "payload": "BA 01 08 08 01 10 80 CA B5 EE 01 DA 01 02 08 07 E2 01 03 0A 01 78 82 02 02 08 01"
+    },
+    {
+      "name": "a Value parameter",
+      "clauses": [
+        "4.1",
+        "4.3",
+        "4.3.3"
+      ],
+      "procedure": "echo",
+      "route": {
+        "method": "GET",
+        "template": "/v1/every"
+      },
+      "target": "/v1/every?anyValue=x",
+      "refused": "a parameter of a message",
+      "parameter": "anyValue"
+    },
+    {
+      "name": "a query's empty sequences skipped, a name of no = an empty value, a value that holds = past its first",
+      "clauses": [
+        "4.1",
+        "4.3",
+        "4.3.1"
+      ],
+      "procedure": "getBook",
+      "route": {
+        "method": "GET",
+        "template": "/v1/{name=shelves/*/books/*}"
+      },
+      "target": "/v1/shelves/1/books/2?&flag=false&&tags&tags=%F0%9F%98%80&sub.name=a=b&",
+      "payload": "0A 11 73 68 65 6C 76 65 73 2F 31 2F 62 6F 6F 6B 73 2F 32 1A 05 0A 03 61 3D 62 22 00 22 04 F0 9F 98 80"
     },
     {
       "name": "a plus in the query is a space",
@@ -4208,6 +4397,43 @@
       "body": "{\"pages\":\"x\"}",
       "refused": "an int64 string off -?(0|[1-9][0-9]*)",
       "pointer": "#/pages"
+    },
+    {
+      "name": "a body under a field that is no object, beside a variable within that field",
+      "clauses": [
+        "4.1",
+        "4.4",
+        "7.4"
+      ],
+      "procedure": "updateBook",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/{book.name=shelves/*/books/*}",
+        "body": "book"
+      },
+      "target": "/v1/shelves/1/books/2",
+      "body": "1",
+      "refused": "a field that two of the request set",
+      "parameter": "book.name"
+    },
+    {
+      "name": "a member of a body under a field that names no field, its pointer from that field",
+      "clauses": [
+        "4.4",
+        "5.2.2",
+        "7.4",
+        "7.4.2"
+      ],
+      "procedure": "updateBook",
+      "route": {
+        "method": "PATCH",
+        "template": "/v1/{book.name=shelves/*/books/*}",
+        "body": "book"
+      },
+      "target": "/v1/shelves/1/books/2",
+      "body": "{\"title\":\"t\",\"nope\":1}",
+      "refused": "a key no field names",
+      "pointer": "#/nope"
     },
     {
       "name": "a refusal of a member of the request whole, its pointer by JSON names",
@@ -7741,6 +7967,50 @@
             "body": ""
           },
           "on": "a"
+        }
+      ]
+    },
+    {
+      "name": "a target holding an octet past US-ASCII, refused as HTTP refuses it, unmarked, its body empty",
+      "clauses": [
+        "3.6",
+        "10.1",
+        "10.1.1"
+      ],
+      "steps": [
+        {
+          "send": {
+            "head": "GET /v1/books/Ã© HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "a"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "a"
+        },
+        {
+          "send": {
+            "head": "GET /v1/books/2?tags=Ã© HTTP/1.1\r\nhost: {host}\r\nconnection: close\r\n\r\n"
+          },
+          "on": "b"
+        },
+        {
+          "expect": {
+            "status": 400,
+            "fields": {
+              "bead-refusal": null,
+              "content-type": null
+            },
+            "body": ""
+          },
+          "on": "b"
         }
       ]
     },

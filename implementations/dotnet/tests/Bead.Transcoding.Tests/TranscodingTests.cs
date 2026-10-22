@@ -232,18 +232,37 @@ public sealed class TranscodingTests
                 Template = given.GetProperty("template").GetString()!,
                 Body = StringOf(given, "body"),
             };
-            var route = new BindingRoute { Request = procedure.Request.Descriptor!, Rule = rule, Template = HttpTemplate.Parse(rule.Template) };
-            var request = new BindingRequest
+            var request = procedure.Request.Descriptor!;
+            var target = entry.GetProperty("target").GetString()!;
+            var question = target.IndexOf('?', StringComparison.Ordinal);
+            var path = HttpPath.Of(question < 0 ? target : target[..question]);
+            var template = HttpTemplate.Parse(rule.Template);
+
+            if (path is null || !template.Matches(path))
             {
-                Target = entry.GetProperty("target").GetString()!,
-                Body = StringOf(entry, "body") is { } body ? Encoding.UTF8.GetBytes(body) : ReadOnlyMemory<byte>.Empty,
-            };
+                parted.Add($"bindings: {name}: {target} is not of {rule.Template}");
+
+                continue;
+            }
+
+            // * as its gateway binds it: its variables decoded first, a value that does not decode refused at its own
+            IMessage Bind()
+            {
+                return binding.Bind(request, new BindingOptions
+                {
+                    Variables = template.ValuesOf(path),
+                    Query = question < 0 ? null : target[(question + 1)..],
+                    Body = StringOf(entry, "body") is { } body ? new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes(body)) : null,
+                    RouteBody = rule.Body,
+                    IsPatch = rule.Method == "PATCH",
+                });
+            }
 
             if (StringOf(entry, "refused") is { } reason)
             {
                 var refusal = Refused(() =>
                 {
-                    binding.Bind(route, request);
+                    Bind();
                 });
 
                 if (refusal?.Message != reason)
@@ -262,8 +281,8 @@ public sealed class TranscodingTests
 
             try
             {
-                var bound = binding.Bind(route, request);
-                var expected = Parsed(route.Request, Hex(entry.GetProperty("payload").GetString()!));
+                var bound = Bind();
+                var expected = Parsed(request, Hex(entry.GetProperty("payload").GetString()!));
 
                 if (!bound.Equals(expected))
                 {
