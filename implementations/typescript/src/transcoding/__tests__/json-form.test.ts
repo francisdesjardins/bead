@@ -161,6 +161,10 @@ test('reads a proto body by Bead’s mapping, each scalar and well-known form as
   expect(refusalOf('{"nullMember":null,"textMember":"a"}')).toBe('two members of one oneof');
   expect(refusalOf('{"ints":[1,null]}')).toBe('a null item');
   expect(refusalOf('{"anInt32":1,"an\\u0049nt32":2}')).toBe('a member named twice');
+  expect(refusalOf('{"anInt32":1,"anInt32":2}')).toBe('a member named twice');
+  expect(refusalOf('{"wrappedInt64":"1e3"}')).toBe('an int64 string off -?(0|[1-9][0-9]*)');
+  expect(refusalOf('{"took":"1.0000000001s"}')).toBe('a Duration off its form');
+  expect(refusalOf('{"nope":1}')).toBe('a key no field names');
   expect(() => {
     return readJsonText(Uint8Array.of(0xef, 0xbb, 0xbf, 0x7b, 0x7d));
   }).toThrow('a byte order mark');

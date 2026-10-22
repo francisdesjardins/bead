@@ -311,7 +311,7 @@ public sealed class HttpGatewayTests
 
             using var result = await started.Client.SendAsync(call, Cancelled);
 
-            Assert.Equal("{\"ticks\":2}", await result.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal((HttpStatusCode.OK, "{\"ticks\":2}"), (result.StatusCode, await result.Content.ReadAsStringAsync(Cancelled)));
         }
         finally
         {
@@ -436,7 +436,7 @@ public sealed class HttpGatewayTests
         {
             using var asked = await started.Client.SendAsync(Json("/api/Transcoding/ask", "{}"), Cancelled);
 
-            Assert.Equal("{\"code\":18}", await asked.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal((HttpStatusCode.OK, "{\"code\":18}"), (asked.StatusCode, await asked.Content.ReadAsStringAsync(Cancelled)));
             Assert.Equal(["no service 1"], started.Service.Refused);
         }
         finally
@@ -1052,7 +1052,7 @@ public sealed class HttpGatewayTests
 
         // * a template off http.proto's grammar is refused as the gateway is built, naming its route
         Assert.StartsWith(
-            "echo's route GET /v1/{name: ",
+            "echo's route GET /v1/{name: a variable that does not close",
             Assert.Throws<ArgumentException>(() =>
             {
                 _ = new HttpGateway(options with { Routes = [crooked] });
