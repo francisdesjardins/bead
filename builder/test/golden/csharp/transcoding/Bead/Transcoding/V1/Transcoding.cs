@@ -66,7 +66,7 @@ namespace Bead.Transcoding.V1 {
             "BVIFdmFsdWU6AjgBGjcKCUJ5SWRFbnRyeRIQCgNrZXkYASABKANSA2tleRIU",
             "CgV2YWx1ZRgCIAEoCVIFdmFsdWU6AjgBGjgKCkZsYWdzRW50cnkSEAoDa2V5",
             "GAEgASgIUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4AUIICgZjaG9p",
-            "Y2VCCAoGX21heWJlIsYMCgVFZGdlcxIqCgJhdBgBIAEoCzIaLmdvb2dsZS5w",
+            "Y2VCCAoGX21heWJlIsINCgVFZGdlcxIqCgJhdBgBIAEoCzIaLmdvb2dsZS5w",
             "cm90b2J1Zi5UaW1lc3RhbXBSAmF0Ei0KBHRvb2sYAiABKAsyGS5nb29nbGUu",
             "cHJvdG9idWYuRHVyYXRpb25SBHRvb2sSLgoEbWFzaxgDIAEoCzIaLmdvb2ds",
             "ZS5wcm90b2J1Zi5GaWVsZE1hc2tSBG1hc2sSLQoFZXh0cmEYBCABKAsyFy5n",
@@ -96,96 +96,99 @@ namespace Bead.Transcoding.V1 {
             "AygLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIGc3RhbXBzEj0KC251",
             "bGxfbWVtYmVyGBsgASgOMhouZ29vZ2xlLnByb3RvYnVmLk51bGxWYWx1ZUgA",
             "UgpudWxsTWVtYmVyEiEKC3RleHRfbWVtYmVyGBwgASgJSABSCnRleHRNZW1i",
-            "ZXIaOgoMQnlJbnQ2NEVudHJ5EhAKA2tleRgBIAEoA1IDa2V5EhQKBXZhbHVl",
-            "GAIgASgJUgV2YWx1ZToCOAEaOgoMQnlJbnQzMkVudHJ5EhAKA2tleRgBIAEo",
-            "BVIDa2V5EhQKBXZhbHVlGAIgASgJUgV2YWx1ZToCOAEaOwoNQnlVaW50MzJF",
-            "bnRyeRIQCgNrZXkYASABKA1SA2tleRIUCgV2YWx1ZRgCIAEoCVIFdmFsdWU6",
-            "AjgBGjkKC0xhYmVsc0VudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVl",
-            "GAIgASgFUgV2YWx1ZToCOAFCCgoIbnVsbGFibGVCDwoNX21heWJlX2RvdWJs",
-            "ZSJ6CgRCb29rEhIKBG5hbWUYASABKAlSBG5hbWUSFAoFdGl0bGUYAiABKAlS",
-            "BXRpdGxlEhQKBXBhZ2VzGAMgASgDUgVwYWdlcxIyCgZhdXRob3IYBCABKAsy",
-            "Gi5iZWFkLnRyYW5zY29kaW5nLnYxLklubmVyUgZhdXRob3IirAMKDkdldEJv",
-            "b2tSZXF1ZXN0EhIKBG5hbWUYASABKAlSBG5hbWUSGgoIcmV2aXNpb24YAiAB",
-            "KANSCHJldmlzaW9uEiwKA3N1YhgDIAEoCzIaLmJlYWQudHJhbnNjb2Rpbmcu",
-            "djEuSW5uZXJSA3N1YhISCgR0YWdzGAQgAygJUgR0YWdzEioKAmF0GAUgASgL",
-            "MhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFICYXQSMAoFY29sb3IYBiAB",
-            "KA4yGi5iZWFkLnRyYW5zY29kaW5nLnYxLkNvbG9yUgVjb2xvchISCgRmbGFn",
-            "GAcgASgIUgRmbGFnEjIKBmlubmVycxgIIAMoCzIaLmJlYWQudHJhbnNjb2Rp",
-            "bmcudjEuSW5uZXJSBmlubmVycxJHCgZsYWJlbHMYCSADKAsyLy5iZWFkLnRy",
-            "YW5zY29kaW5nLnYxLkdldEJvb2tSZXF1ZXN0LkxhYmVsc0VudHJ5UgZsYWJl",
-            "bHMaOQoLTGFiZWxzRW50cnkSEAoDa2V5GAEgASgJUgNrZXkSFAoFdmFsdWUY",
-            "AiABKAVSBXZhbHVlOgI4ASJHChBMaXN0Qm9va3NSZXF1ZXN0EhYKBnBhcmVu",
-            "dBgBIAEoCVIGcGFyZW50EhsKCXBhZ2Vfc2l6ZRgCIAEoBVIIcGFnZVNpemUi",
-            "bAoRTGlzdEJvb2tzUmVzcG9uc2USLwoFYm9va3MYASADKAsyGS5iZWFkLnRy",
-            "YW5zY29kaW5nLnYxLkJvb2tSBWJvb2tzEiYKD25leHRfcGFnZV90b2tlbhgC",
-            "IAEoCVINbmV4dFBhZ2VUb2tlbiJ/ChFVcGRhdGVCb29rUmVxdWVzdBItCgRi",
-            "b29rGAEgASgLMhkuYmVhZC50cmFuc2NvZGluZy52MS5Cb29rUgRib29rEjsK",
-            "C3VwZGF0ZV9tYXNrGAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLkZpZWxkTWFz",
-            "a1IKdXBkYXRlTWFzayIzCglPcGVyYXRpb24SEgoEbmFtZRgBIAEoCVIEbmFt",
-            "ZRISCgRkb25lGAIgASgIUgRkb25lIikKE0dldE9wZXJhdGlvblJlcXVlc3QS",
-            "EgoEbmFtZRgBIAEoCVIEbmFtZSJDChVMaXN0T3BlcmF0aW9uc1JlcXVlc3QS",
-            "EgoEbmFtZRgBIAEoCVIEbmFtZRIWCgZmaWx0ZXIYAiABKAlSBmZpbHRlciJY",
-            "ChZMaXN0T3BlcmF0aW9uc1Jlc3BvbnNlEj4KCm9wZXJhdGlvbnMYASADKAsy",
-            "Hi5iZWFkLnRyYW5zY29kaW5nLnYxLk9wZXJhdGlvblIKb3BlcmF0aW9ucyIx",
-            "CgVSdWxlZBISCgRmcm9tGAEgASgFUgRmcm9tEhQKBXRpdGxlGAIgASgJUgV0",
-            "aXRsZSIiCgxUaWNrc1JlcXVlc3QSEgoEZnJvbRgBIAEoBVIEZnJvbSIlCg1U",
-            "aWNrc1Jlc3BvbnNlEhQKBXRpY2tzGAEgASgFUgV0aWNrcyIkCgRUaWNrEhwK",
-            "CXJlbWFpbmluZxgBIAEoBVIJcmVtYWluaW5nIiUKC0ZhaWxSZXF1ZXN0EhYK",
-            "BmRldGFpbBgBIAEoCVIGZGV0YWlsIioKDldob0FtSVJlc3BvbnNlEhgKB3Nl",
-            "c3Npb24YASABKAlSB3Nlc3Npb24iIQoLQXNrUmVzcG9uc2USEgoEY29kZRgB",
-            "IAEoBVIEY29kZSIrCg5DYW5jZWxzUmVxdWVzdBIZCghhdF9sZWFzdBgBIAEo",
-            "BVIHYXRMZWFzdCInCg9DYW5jZWxzUmVzcG9uc2USFAoFY291bnQYASABKAVS",
-            "BWNvdW50Kj4KBUNvbG9yEhUKEUNPTE9SX1VOU1BFQ0lGSUVEEAASDQoJQ09M",
-            "T1JfUkVEEAESDwoLQ09MT1JfR1JFRU4QAipNCgdBbGlhc2VkEhcKE0FMSUFT",
-            "RURfVU5TUEVDSUZJRUQQABIRCg1BTElBU0VEX0ZJUlNUEAESEgoOQUxJQVNF",
-            "RF9TRUNPTkQQARoCEAEqewoSVHJhbnNjb2RpbmdGYWlsdXJlEiMKH1RSQU5T",
-            "Q09ESU5HX0ZBSUxVUkVfVU5TUEVDSUZJRUQQABIfChtUUkFOU0NPRElOR19G",
-            "QUlMVVJFX1JFRlVTRUQQARIfChtUUkFOU0NPRElOR19GQUlMVVJFX0NPVU5U",
-            "RUQQAjKxDQoSVHJhbnNjb2RpbmdTZXJ2aWNlElAKBEVjaG8SHy5iZWFkLnRy",
-            "YW5zY29kaW5nLnYxLkV2ZXJ5dGhpbmcaHy5iZWFkLnRyYW5zY29kaW5nLnYx",
-            "LkV2ZXJ5dGhpbmciBqLIHAIIARJLCglFY2hvRWRnZXMSGi5iZWFkLnRyYW5z",
-            "Y29kaW5nLnYxLkVkZ2VzGhouYmVhZC50cmFuc2NvZGluZy52MS5FZGdlcyIG",
-            "osgcAggCElQKB0dldEJvb2sSIy5iZWFkLnRyYW5zY29kaW5nLnYxLkdldEJv",
-            "b2tSZXF1ZXN0GhkuYmVhZC50cmFuc2NvZGluZy52MS5Cb29rIgmQAgGiyBwC",
-            "CAMSYgoJTGlzdEJvb2tzEiUuYmVhZC50cmFuc2NvZGluZy52MS5MaXN0Qm9v",
-            "a3NSZXF1ZXN0GiYuYmVhZC50cmFuc2NvZGluZy52MS5MaXN0Qm9va3NSZXNw",
-            "b25zZSIGosgcAggEEmQKClVwZGF0ZUJvb2sSJi5iZWFkLnRyYW5zY29kaW5n",
-            "LnYxLlVwZGF0ZUJvb2tSZXF1ZXN0GiYuYmVhZC50cmFuc2NvZGluZy52MS5V",
-            "cGRhdGVCb29rUmVxdWVzdCIGosgcAggFElIKC0FyY2hpdmVCb29rEiMuYmVh",
-            "ZC50cmFuc2NvZGluZy52MS5HZXRCb29rUmVxdWVzdBoWLmdvb2dsZS5wcm90",
-            "b2J1Zi5FbXB0eSIGosgcAggGEnEKDkxpc3RPcGVyYXRpb25zEiouYmVhZC50",
-            "cmFuc2NvZGluZy52MS5MaXN0T3BlcmF0aW9uc1JlcXVlc3QaKy5iZWFkLnRy",
-            "YW5zY29kaW5nLnYxLkxpc3RPcGVyYXRpb25zUmVzcG9uc2UiBqLIHAIIBxJj",
-            "CgxHZXRPcGVyYXRpb24SKC5iZWFkLnRyYW5zY29kaW5nLnYxLkdldE9wZXJh",
-            "dGlvblJlcXVlc3QaHi5iZWFkLnRyYW5zY29kaW5nLnYxLk9wZXJhdGlvbiIJ",
-            "kAIBosgcAggIEkMKBUp1ZGdlEhouYmVhZC50cmFuc2NvZGluZy52MS5SdWxl",
-            "ZBoWLmdvb2dsZS5wcm90b2J1Zi5FbXB0eSIGosgcAggJEpIBCgVUaWNrcxIh",
-            "LmJlYWQudHJhbnNjb2RpbmcudjEuVGlja3NSZXF1ZXN0GiIuYmVhZC50cmFu",
-            "c2NvZGluZy52MS5UaWNrc1Jlc3BvbnNlIkKQAgGiyBw7CAoSGgoYYmVhZC50",
-            "cmFuc2NvZGluZy52MS5UaWNrOhtUUkFOU0NPRElOR19GQUlMVVJFX0NPVU5U",
-            "RUQSWwoFV2F0Y2gSFi5nb29nbGUucHJvdG9idWYuRW1wdHkaFi5nb29nbGUu",
-            "cHJvdG9idWYuRW1wdHkiIqLIHB4ICxIaChhiZWFkLnRyYW5zY29kaW5nLnYx",
-            "LlRpY2sSIwoDUmF3EgkuYmVhZC5SYXcaCS5iZWFkLlJhdyIGosgcAggMEiYK",
-            "BFRleHQSCi5iZWFkLlRleHQaCi5iZWFkLlRleHQiBqLIHAIIDRImCgRKc29u",
-            "EgouYmVhZC5Kc29uGgouYmVhZC5Kc29uIgaiyBwCCA4SZQoERmFpbBIgLmJl",
-            "YWQudHJhbnNjb2RpbmcudjEuRmFpbFJlcXVlc3QaFi5nb29nbGUucHJvdG9i",
-            "dWYuRW1wdHkiI6LIHB8IDzobVFJBTlNDT0RJTkdfRkFJTFVSRV9SRUZVU0VE",
-            "ElEKBldob0FtSRIWLmdvb2dsZS5wcm90b2J1Zi5FbXB0eRojLmJlYWQudHJh",
-            "bnNjb2RpbmcudjEuV2hvQW1JUmVzcG9uc2UiCqLIHAYIECICEgASRwoDQXNr",
-            "EhYuZ29vZ2xlLnByb3RvYnVmLkVtcHR5GiAuYmVhZC50cmFuc2NvZGluZy52",
-            "MS5Bc2tSZXNwb25zZSIGosgcAggREkIKBkFuc3dlchIWLmdvb2dsZS5wcm90",
-            "b2J1Zi5FbXB0eRoWLmdvb2dsZS5wcm90b2J1Zi5FbXB0eSIIosgcBAgSGgAS",
-            "PgoESGFuZxIWLmdvb2dsZS5wcm90b2J1Zi5FbXB0eRoWLmdvb2dsZS5wcm90",
-            "b2J1Zi5FbXB0eSIGosgcAggTEl8KB0NhbmNlbHMSIy5iZWFkLnRyYW5zY29k",
-            "aW5nLnYxLkNhbmNlbHNSZXF1ZXN0GiQuYmVhZC50cmFuc2NvZGluZy52MS5D",
-            "YW5jZWxzUmVzcG9uc2UiCZACAaLIHAIIFBocosgcGAgBEAEiElRyYW5zY29k",
-            "aW5nRmFpbHVyZUIIosgcBAoCCgBiBnByb3RvMw=="));
+            "ZXISGwoJYW5fc2ludDMyGB0gASgRUghhblNpbnQzMhIfCgthbl9zZml4ZWQz",
+            "MhgeIAEoD1IKYW5TZml4ZWQzMhIbCglhX2ZpeGVkMzIYHyABKAdSCGFGaXhl",
+            "ZDMyEh8KC2FuX3NmaXhlZDY0GCAgASgQUgphblNmaXhlZDY0GjoKDEJ5SW50",
+            "NjRFbnRyeRIQCgNrZXkYASABKANSA2tleRIUCgV2YWx1ZRgCIAEoCVIFdmFs",
+            "dWU6AjgBGjoKDEJ5SW50MzJFbnRyeRIQCgNrZXkYASABKAVSA2tleRIUCgV2",
+            "YWx1ZRgCIAEoCVIFdmFsdWU6AjgBGjsKDUJ5VWludDMyRW50cnkSEAoDa2V5",
+            "GAEgASgNUgNrZXkSFAoFdmFsdWUYAiABKAlSBXZhbHVlOgI4ARo5CgtMYWJl",
+            "bHNFbnRyeRIQCgNrZXkYASABKAlSA2tleRIUCgV2YWx1ZRgCIAEoBVIFdmFs",
+            "dWU6AjgBQgoKCG51bGxhYmxlQg8KDV9tYXliZV9kb3VibGUiegoEQm9vaxIS",
+            "CgRuYW1lGAEgASgJUgRuYW1lEhQKBXRpdGxlGAIgASgJUgV0aXRsZRIUCgVw",
+            "YWdlcxgDIAEoA1IFcGFnZXMSMgoGYXV0aG9yGAQgASgLMhouYmVhZC50cmFu",
+            "c2NvZGluZy52MS5Jbm5lclIGYXV0aG9yIqwDCg5HZXRCb29rUmVxdWVzdBIS",
+            "CgRuYW1lGAEgASgJUgRuYW1lEhoKCHJldmlzaW9uGAIgASgDUghyZXZpc2lv",
+            "bhIsCgNzdWIYAyABKAsyGi5iZWFkLnRyYW5zY29kaW5nLnYxLklubmVyUgNz",
+            "dWISEgoEdGFncxgEIAMoCVIEdGFncxIqCgJhdBgFIAEoCzIaLmdvb2dsZS5w",
+            "cm90b2J1Zi5UaW1lc3RhbXBSAmF0EjAKBWNvbG9yGAYgASgOMhouYmVhZC50",
+            "cmFuc2NvZGluZy52MS5Db2xvclIFY29sb3ISEgoEZmxhZxgHIAEoCFIEZmxh",
+            "ZxIyCgZpbm5lcnMYCCADKAsyGi5iZWFkLnRyYW5zY29kaW5nLnYxLklubmVy",
+            "UgZpbm5lcnMSRwoGbGFiZWxzGAkgAygLMi8uYmVhZC50cmFuc2NvZGluZy52",
+            "MS5HZXRCb29rUmVxdWVzdC5MYWJlbHNFbnRyeVIGbGFiZWxzGjkKC0xhYmVs",
+            "c0VudHJ5EhAKA2tleRgBIAEoCVIDa2V5EhQKBXZhbHVlGAIgASgFUgV2YWx1",
+            "ZToCOAEiRwoQTGlzdEJvb2tzUmVxdWVzdBIWCgZwYXJlbnQYASABKAlSBnBh",
+            "cmVudBIbCglwYWdlX3NpemUYAiABKAVSCHBhZ2VTaXplImwKEUxpc3RCb29r",
+            "c1Jlc3BvbnNlEi8KBWJvb2tzGAEgAygLMhkuYmVhZC50cmFuc2NvZGluZy52",
+            "MS5Cb29rUgVib29rcxImCg9uZXh0X3BhZ2VfdG9rZW4YAiABKAlSDW5leHRQ",
+            "YWdlVG9rZW4ifwoRVXBkYXRlQm9va1JlcXVlc3QSLQoEYm9vaxgBIAEoCzIZ",
+            "LmJlYWQudHJhbnNjb2RpbmcudjEuQm9va1IEYm9vaxI7Cgt1cGRhdGVfbWFz",
+            "axgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE1hc2tSCnVwZGF0ZU1h",
+            "c2siMwoJT3BlcmF0aW9uEhIKBG5hbWUYASABKAlSBG5hbWUSEgoEZG9uZRgC",
+            "IAEoCFIEZG9uZSIpChNHZXRPcGVyYXRpb25SZXF1ZXN0EhIKBG5hbWUYASAB",
+            "KAlSBG5hbWUiQwoVTGlzdE9wZXJhdGlvbnNSZXF1ZXN0EhIKBG5hbWUYASAB",
+            "KAlSBG5hbWUSFgoGZmlsdGVyGAIgASgJUgZmaWx0ZXIiWAoWTGlzdE9wZXJh",
+            "dGlvbnNSZXNwb25zZRI+CgpvcGVyYXRpb25zGAEgAygLMh4uYmVhZC50cmFu",
+            "c2NvZGluZy52MS5PcGVyYXRpb25SCm9wZXJhdGlvbnMiMQoFUnVsZWQSEgoE",
+            "ZnJvbRgBIAEoBVIEZnJvbRIUCgV0aXRsZRgCIAEoCVIFdGl0bGUiIgoMVGlj",
+            "a3NSZXF1ZXN0EhIKBGZyb20YASABKAVSBGZyb20iJQoNVGlja3NSZXNwb25z",
+            "ZRIUCgV0aWNrcxgBIAEoBVIFdGlja3MiJAoEVGljaxIcCglyZW1haW5pbmcY",
+            "ASABKAVSCXJlbWFpbmluZyIlCgtGYWlsUmVxdWVzdBIWCgZkZXRhaWwYASAB",
+            "KAlSBmRldGFpbCIqCg5XaG9BbUlSZXNwb25zZRIYCgdzZXNzaW9uGAEgASgJ",
+            "UgdzZXNzaW9uIiEKC0Fza1Jlc3BvbnNlEhIKBGNvZGUYASABKAVSBGNvZGUi",
+            "KwoOQ2FuY2Vsc1JlcXVlc3QSGQoIYXRfbGVhc3QYASABKAVSB2F0TGVhc3Qi",
+            "JwoPQ2FuY2Vsc1Jlc3BvbnNlEhQKBWNvdW50GAEgASgFUgVjb3VudCo+CgVD",
+            "b2xvchIVChFDT0xPUl9VTlNQRUNJRklFRBAAEg0KCUNPTE9SX1JFRBABEg8K",
+            "C0NPTE9SX0dSRUVOEAIqTQoHQWxpYXNlZBIXChNBTElBU0VEX1VOU1BFQ0lG",
+            "SUVEEAASEQoNQUxJQVNFRF9GSVJTVBABEhIKDkFMSUFTRURfU0VDT05EEAEa",
+            "AhABKnsKElRyYW5zY29kaW5nRmFpbHVyZRIjCh9UUkFOU0NPRElOR19GQUlM",
+            "VVJFX1VOU1BFQ0lGSUVEEAASHwobVFJBTlNDT0RJTkdfRkFJTFVSRV9SRUZV",
+            "U0VEEAESHwobVFJBTlNDT0RJTkdfRkFJTFVSRV9DT1VOVEVEEAIysQ0KElRy",
+            "YW5zY29kaW5nU2VydmljZRJQCgRFY2hvEh8uYmVhZC50cmFuc2NvZGluZy52",
+            "MS5FdmVyeXRoaW5nGh8uYmVhZC50cmFuc2NvZGluZy52MS5FdmVyeXRoaW5n",
+            "IgaiyBwCCAESSwoJRWNob0VkZ2VzEhouYmVhZC50cmFuc2NvZGluZy52MS5F",
+            "ZGdlcxoaLmJlYWQudHJhbnNjb2RpbmcudjEuRWRnZXMiBqLIHAIIAhJUCgdH",
+            "ZXRCb29rEiMuYmVhZC50cmFuc2NvZGluZy52MS5HZXRCb29rUmVxdWVzdBoZ",
+            "LmJlYWQudHJhbnNjb2RpbmcudjEuQm9vayIJkAIBosgcAggDEmIKCUxpc3RC",
+            "b29rcxIlLmJlYWQudHJhbnNjb2RpbmcudjEuTGlzdEJvb2tzUmVxdWVzdBom",
+            "LmJlYWQudHJhbnNjb2RpbmcudjEuTGlzdEJvb2tzUmVzcG9uc2UiBqLIHAII",
+            "BBJkCgpVcGRhdGVCb29rEiYuYmVhZC50cmFuc2NvZGluZy52MS5VcGRhdGVC",
+            "b29rUmVxdWVzdBomLmJlYWQudHJhbnNjb2RpbmcudjEuVXBkYXRlQm9va1Jl",
+            "cXVlc3QiBqLIHAIIBRJSCgtBcmNoaXZlQm9vaxIjLmJlYWQudHJhbnNjb2Rp",
+            "bmcudjEuR2V0Qm9va1JlcXVlc3QaFi5nb29nbGUucHJvdG9idWYuRW1wdHki",
+            "BqLIHAIIBhJxCg5MaXN0T3BlcmF0aW9ucxIqLmJlYWQudHJhbnNjb2Rpbmcu",
+            "djEuTGlzdE9wZXJhdGlvbnNSZXF1ZXN0GisuYmVhZC50cmFuc2NvZGluZy52",
+            "MS5MaXN0T3BlcmF0aW9uc1Jlc3BvbnNlIgaiyBwCCAcSYwoMR2V0T3BlcmF0",
+            "aW9uEiguYmVhZC50cmFuc2NvZGluZy52MS5HZXRPcGVyYXRpb25SZXF1ZXN0",
+            "Gh4uYmVhZC50cmFuc2NvZGluZy52MS5PcGVyYXRpb24iCZACAaLIHAIICBJD",
+            "CgVKdWRnZRIaLmJlYWQudHJhbnNjb2RpbmcudjEuUnVsZWQaFi5nb29nbGUu",
+            "cHJvdG9idWYuRW1wdHkiBqLIHAIICRKSAQoFVGlja3MSIS5iZWFkLnRyYW5z",
+            "Y29kaW5nLnYxLlRpY2tzUmVxdWVzdBoiLmJlYWQudHJhbnNjb2RpbmcudjEu",
+            "VGlja3NSZXNwb25zZSJCkAIBosgcOwgKEhoKGGJlYWQudHJhbnNjb2Rpbmcu",
+            "djEuVGljazobVFJBTlNDT0RJTkdfRkFJTFVSRV9DT1VOVEVEElsKBVdhdGNo",
+            "EhYuZ29vZ2xlLnByb3RvYnVmLkVtcHR5GhYuZ29vZ2xlLnByb3RvYnVmLkVt",
+            "cHR5IiKiyBweCAsSGgoYYmVhZC50cmFuc2NvZGluZy52MS5UaWNrEiMKA1Jh",
+            "dxIJLmJlYWQuUmF3GgkuYmVhZC5SYXciBqLIHAIIDBImCgRUZXh0EgouYmVh",
+            "ZC5UZXh0GgouYmVhZC5UZXh0IgaiyBwCCA0SJgoESnNvbhIKLmJlYWQuSnNv",
+            "bhoKLmJlYWQuSnNvbiIGosgcAggOEmUKBEZhaWwSIC5iZWFkLnRyYW5zY29k",
+            "aW5nLnYxLkZhaWxSZXF1ZXN0GhYuZ29vZ2xlLnByb3RvYnVmLkVtcHR5IiOi",
+            "yBwfCA86G1RSQU5TQ09ESU5HX0ZBSUxVUkVfUkVGVVNFRBJRCgZXaG9BbUkS",
+            "Fi5nb29nbGUucHJvdG9idWYuRW1wdHkaIy5iZWFkLnRyYW5zY29kaW5nLnYx",
+            "Lldob0FtSVJlc3BvbnNlIgqiyBwGCBAiAhIAEkcKA0FzaxIWLmdvb2dsZS5w",
+            "cm90b2J1Zi5FbXB0eRogLmJlYWQudHJhbnNjb2RpbmcudjEuQXNrUmVzcG9u",
+            "c2UiBqLIHAIIERJCCgZBbnN3ZXISFi5nb29nbGUucHJvdG9idWYuRW1wdHka",
+            "Fi5nb29nbGUucHJvdG9idWYuRW1wdHkiCKLIHAQIEhoAEj4KBEhhbmcSFi5n",
+            "b29nbGUucHJvdG9idWYuRW1wdHkaFi5nb29nbGUucHJvdG9idWYuRW1wdHki",
+            "BqLIHAIIExJfCgdDYW5jZWxzEiMuYmVhZC50cmFuc2NvZGluZy52MS5DYW5j",
+            "ZWxzUmVxdWVzdBokLmJlYWQudHJhbnNjb2RpbmcudjEuQ2FuY2Vsc1Jlc3Bv",
+            "bnNlIgmQAgGiyBwCCBQaHKLIHBgIARABIhJUcmFuc2NvZGluZ0ZhaWx1cmVC",
+            "CKLIHAQKAgoAYgZwcm90bzM="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Bead.Protobuf.OptionsReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.AnyReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.DurationReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.EmptyReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.FieldMaskReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.StructReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.TimestampReflection.Descriptor, global::Google.Protobuf.WellKnownTypes.WrappersReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Bead.Transcoding.V1.Color), typeof(global::Bead.Transcoding.V1.Aliased), typeof(global::Bead.Transcoding.V1.TranscodingFailure), }, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.Inner), global::Bead.Transcoding.V1.Inner.Parser, new[]{ "Name", "Count" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.Everything), global::Bead.Transcoding.V1.Everything.Parser, new[]{ "ADouble", "AFloat", "AnInt64", "AUint64", "AnInt32", "AFixed64", "ABool", "AString", "SomeBytes", "AUint32", "ASint64", "Color", "Inner", "Int64S", "Inners", "Labels", "ById", "Flags", "Maybe", "ChoiceText", "ChoiceInner", "At", "Took", "Mask", "Extra", "AnyValue", "WrappedInt64", "WrappedString", "Nothing", "CustomNamed", "List", "WrappedBool" }, new[]{ "Choice", "Maybe" }, null, null, new pbr::GeneratedClrTypeInfo[] { null, null, null, }),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.Edges), global::Bead.Transcoding.V1.Edges.Parser, new[]{ "At", "Took", "Mask", "Extra", "Value", "Any", "WrappedFloat", "WrappedInt64", "WrappedUint64", "Aliased", "ByInt64", "ByInt32", "ByUint32", "Ints", "Labels", "AFloat", "ADouble", "AnInt32", "AUint32", "SomeBytes", "Nothing", "Child", "Children", "MaybeDouble", "AnInt64", "Stamps", "NullMember", "TextMember" }, new[]{ "Nullable", "MaybeDouble" }, null, null, new pbr::GeneratedClrTypeInfo[] { null, null, null, null, }),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.Edges), global::Bead.Transcoding.V1.Edges.Parser, new[]{ "At", "Took", "Mask", "Extra", "Value", "Any", "WrappedFloat", "WrappedInt64", "WrappedUint64", "Aliased", "ByInt64", "ByInt32", "ByUint32", "Ints", "Labels", "AFloat", "ADouble", "AnInt32", "AUint32", "SomeBytes", "Nothing", "Child", "Children", "MaybeDouble", "AnInt64", "Stamps", "NullMember", "TextMember", "AnSint32", "AnSfixed32", "AFixed32", "AnSfixed64" }, new[]{ "Nullable", "MaybeDouble" }, null, null, new pbr::GeneratedClrTypeInfo[] { null, null, null, null, }),
             new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.Book), global::Bead.Transcoding.V1.Book.Parser, new[]{ "Name", "Title", "Pages", "Author" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.GetBookRequest), global::Bead.Transcoding.V1.GetBookRequest.Parser, new[]{ "Name", "Revision", "Sub", "Tags", "At", "Color", "Flag", "Inners", "Labels" }, null, null, null, new pbr::GeneratedClrTypeInfo[] { null, }),
             new pbr::GeneratedClrTypeInfo(typeof(global::Bead.Transcoding.V1.ListBooksRequest), global::Bead.Transcoding.V1.ListBooksRequest.Parser, new[]{ "Parent", "PageSize" }, null, null, null, null),
@@ -2012,6 +2015,10 @@ namespace Bead.Transcoding.V1 {
       maybeDouble_ = other.maybeDouble_;
       anInt64_ = other.anInt64_;
       stamps_ = other.stamps_.Clone();
+      anSint32_ = other.anSint32_;
+      anSfixed32_ = other.anSfixed32_;
+      aFixed32_ = other.aFixed32_;
+      anSfixed64_ = other.anSfixed64_;
       switch (other.NullableCase) {
         case NullableOneofCase.NullMember:
           NullMember = other.NullMember;
@@ -2408,6 +2415,54 @@ namespace Bead.Transcoding.V1 {
       }
     }
 
+    /// <summary>Field number for the "an_sint32" field.</summary>
+    public const int AnSint32FieldNumber = 29;
+    private int anSint32_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int AnSint32 {
+      get { return anSint32_; }
+      set {
+        anSint32_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "an_sfixed32" field.</summary>
+    public const int AnSfixed32FieldNumber = 30;
+    private int anSfixed32_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public int AnSfixed32 {
+      get { return anSfixed32_; }
+      set {
+        anSfixed32_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "a_fixed32" field.</summary>
+    public const int AFixed32FieldNumber = 31;
+    private uint aFixed32_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint AFixed32 {
+      get { return aFixed32_; }
+      set {
+        aFixed32_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "an_sfixed64" field.</summary>
+    public const int AnSfixed64FieldNumber = 32;
+    private long anSfixed64_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public long AnSfixed64 {
+      get { return anSfixed64_; }
+      set {
+        anSfixed64_ = value;
+      }
+    }
+
     private object nullable_;
     /// <summary>Enum of possible cases for the "nullable" oneof.</summary>
     public enum NullableOneofCase {
@@ -2472,6 +2527,10 @@ namespace Bead.Transcoding.V1 {
       if(!stamps_.Equals(other.stamps_)) return false;
       if (NullMember != other.NullMember) return false;
       if (TextMember != other.TextMember) return false;
+      if (AnSint32 != other.AnSint32) return false;
+      if (AnSfixed32 != other.AnSfixed32) return false;
+      if (AFixed32 != other.AFixed32) return false;
+      if (AnSfixed64 != other.AnSfixed64) return false;
       if (NullableCase != other.NullableCase) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
@@ -2508,6 +2567,10 @@ namespace Bead.Transcoding.V1 {
       hash ^= stamps_.GetHashCode();
       if (HasNullMember) hash ^= NullMember.GetHashCode();
       if (HasTextMember) hash ^= TextMember.GetHashCode();
+      if (AnSint32 != 0) hash ^= AnSint32.GetHashCode();
+      if (AnSfixed32 != 0) hash ^= AnSfixed32.GetHashCode();
+      if (AFixed32 != 0) hash ^= AFixed32.GetHashCode();
+      if (AnSfixed64 != 0L) hash ^= AnSfixed64.GetHashCode();
       hash ^= (int) nullableCase_;
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
@@ -2615,6 +2678,22 @@ namespace Bead.Transcoding.V1 {
         output.WriteRawTag(226, 1);
         output.WriteString(TextMember);
       }
+      if (AnSint32 != 0) {
+        output.WriteRawTag(232, 1);
+        output.WriteSInt32(AnSint32);
+      }
+      if (AnSfixed32 != 0) {
+        output.WriteRawTag(245, 1);
+        output.WriteSFixed32(AnSfixed32);
+      }
+      if (AFixed32 != 0) {
+        output.WriteRawTag(253, 1);
+        output.WriteFixed32(AFixed32);
+      }
+      if (AnSfixed64 != 0L) {
+        output.WriteRawTag(129, 2);
+        output.WriteSFixed64(AnSfixed64);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -2713,6 +2792,22 @@ namespace Bead.Transcoding.V1 {
         output.WriteRawTag(226, 1);
         output.WriteString(TextMember);
       }
+      if (AnSint32 != 0) {
+        output.WriteRawTag(232, 1);
+        output.WriteSInt32(AnSint32);
+      }
+      if (AnSfixed32 != 0) {
+        output.WriteRawTag(245, 1);
+        output.WriteSFixed32(AnSfixed32);
+      }
+      if (AFixed32 != 0) {
+        output.WriteRawTag(253, 1);
+        output.WriteFixed32(AFixed32);
+      }
+      if (AnSfixed64 != 0L) {
+        output.WriteRawTag(129, 2);
+        output.WriteSFixed64(AnSfixed64);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -2792,6 +2887,18 @@ namespace Bead.Transcoding.V1 {
       }
       if (HasTextMember) {
         size += 2 + pb::CodedOutputStream.ComputeStringSize(TextMember);
+      }
+      if (AnSint32 != 0) {
+        size += 2 + pb::CodedOutputStream.ComputeSInt32Size(AnSint32);
+      }
+      if (AnSfixed32 != 0) {
+        size += 2 + 4;
+      }
+      if (AFixed32 != 0) {
+        size += 2 + 4;
+      }
+      if (AnSfixed64 != 0L) {
+        size += 2 + 8;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -2899,6 +3006,18 @@ namespace Bead.Transcoding.V1 {
         AnInt64 = other.AnInt64;
       }
       stamps_.Add(other.stamps_);
+      if (other.AnSint32 != 0) {
+        AnSint32 = other.AnSint32;
+      }
+      if (other.AnSfixed32 != 0) {
+        AnSfixed32 = other.AnSfixed32;
+      }
+      if (other.AFixed32 != 0) {
+        AFixed32 = other.AFixed32;
+      }
+      if (other.AnSfixed64 != 0L) {
+        AnSfixed64 = other.AnSfixed64;
+      }
       switch (other.NullableCase) {
         case NullableOneofCase.NullMember:
           NullMember = other.NullMember;
@@ -3074,6 +3193,22 @@ namespace Bead.Transcoding.V1 {
             TextMember = input.ReadString();
             break;
           }
+          case 232: {
+            AnSint32 = input.ReadSInt32();
+            break;
+          }
+          case 245: {
+            AnSfixed32 = input.ReadSFixed32();
+            break;
+          }
+          case 253: {
+            AFixed32 = input.ReadFixed32();
+            break;
+          }
+          case 257: {
+            AnSfixed64 = input.ReadSFixed64();
+            break;
+          }
         }
       }
     #endif
@@ -3238,6 +3373,22 @@ namespace Bead.Transcoding.V1 {
           }
           case 226: {
             TextMember = input.ReadString();
+            break;
+          }
+          case 232: {
+            AnSint32 = input.ReadSInt32();
+            break;
+          }
+          case 245: {
+            AnSfixed32 = input.ReadSFixed32();
+            break;
+          }
+          case 253: {
+            AFixed32 = input.ReadFixed32();
+            break;
+          }
+          case 257: {
+            AnSfixed64 = input.ReadSFixed64();
             break;
           }
         }
