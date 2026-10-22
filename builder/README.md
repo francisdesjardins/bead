@@ -294,8 +294,8 @@ number of protobuf's global registry
 | `(bead.procedure).failures`                               | The values of its service's failures enum it may answer, each by its name as the enum writes it                                                            |
 | `bead.Raw`, `bead.Text`, `bead.Json`                      | The payload types whose bytes are the payload itself: `raw`, `text` and `json` (spec 17); any other message is `proto`                                     |
 
-beadc compiles a temporary project-local copy of its options first among the roots; a project imports it as
-`import "bead/options.proto";` and keeps no copy of its own. So it does protovalidate's,
+beadc compiles a copy of the options of its own, under the project's `.beadc/`, first among the
+roots; a project imports it as `import "bead/options.proto";` and keeps no copy of its own. So it does protovalidate's,
 [`proto/buf/validate/validate.proto`](proto/buf/validate/validate.proto), vendored at
 [v1.2.2](https://github.com/bufbuild/protovalidate/blob/v1.2.2/proto/protovalidate/buf/validate/validate.proto)
 as Buf publishes it, Apache-2.0, its licence in [`licenses/protovalidate.txt`](licenses/protovalidate.txt):
