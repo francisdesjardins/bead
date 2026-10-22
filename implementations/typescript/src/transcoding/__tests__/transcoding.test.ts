@@ -8,8 +8,10 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { connect, type Socket } from 'node:net';
-import { type DescMessage, equals, fromBinary, type Message, toBinary } from '@bufbuild/protobuf';
+import { connect, Socket } from 'node:net';
+import { isDeepStrictEqual } from 'node:util';
+import { type DescMessage, fromBinary, type Message } from '@bufbuild/protobuf';
+import { reflect, type ReflectMessage } from '@bufbuild/protobuf/reflect';
 import { expect, test } from '@playwright/test';
 import { fromHexadecimal } from '../../router/shared/__tests__/vectors';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
@@ -196,10 +198,77 @@ const requestOf = (name: string): DescMessage => {
   return route.request;
 };
 
-/** Whether two messages are one: as messages, or by their bytes, where a NaN holds them apart. */
+/** A scalar number's bits, including its zero sign and NaN representation. */
+const scalarOf = (value: unknown): unknown => {
+  if (typeof value !== 'number') {
+    return value;
+  }
+
+  const bits = Buffer.alloc(8);
+
+  bits.writeDoubleLE(value);
+
+  return bits;
+};
+
+/** A message's set fields, with presence, signed zeros, NaNs and unknown fields intact. */
+const comparableOf = (message: ReflectMessage): unknown => {
+  const fields = new Map<number, unknown>();
+
+  for (const field of message.fields) {
+    if (!message.isSet(field)) {
+      continue;
+    }
+
+    switch (field.fieldKind) {
+      case 'message': {
+        fields.set(field.number, comparableOf(message.get(field)));
+        break;
+      }
+      case 'list': {
+        fields.set(
+          field.number,
+          [...message.get(field)].map((value) => {
+            return field.listKind === 'message'
+              ? comparableOf(value as ReflectMessage)
+              : scalarOf(value);
+          })
+        );
+        break;
+      }
+      case 'map': {
+        fields.set(
+          field.number,
+          new Map(
+            [...message.get(field)].map(([key, value]) => {
+              return [
+                key,
+                field.mapKind === 'message'
+                  ? comparableOf(value as ReflectMessage)
+                  : scalarOf(value),
+              ];
+            })
+          )
+        );
+        break;
+      }
+      case 'enum':
+      case 'scalar': {
+        fields.set(field.number, scalarOf(message.get(field)));
+        break;
+      }
+    }
+  }
+
+  return { fields, unknown: message.getUnknown() ?? [] };
+};
+
+/** Whole messages, including unknown fields, with floating values compared as the C# player does. */
 const isSame = (schema: DescMessage, { one, other }: { one: Message; other: Message }): boolean => {
   return (
-    equals(schema, one, other) || Buffer.from(toBinary(schema, one)).equals(toBinary(schema, other))
+    one.$typeName === schema.typeName &&
+    other.$typeName === schema.typeName &&
+    isDeepStrictEqual(comparableOf(reflect(schema, one)), comparableOf(reflect(schema, other)))
   );
 };
 
@@ -257,6 +326,7 @@ interface IPeer {
   /** Settles once more came, or the socket ended. */
   next: () => Promise<void>;
   isEnded: boolean;
+  taken: number;
 }
 
 /** A response as a peer read it: its status, its fields by lower-case name, and its body. */
@@ -278,6 +348,7 @@ const openPeer = (port: number, { body, head }: { body: Uint8Array; head: string
   let wake: (() => void) | undefined;
   const peer: IPeer = {
     isEnded: false,
+    taken: 0,
     method: head.split(' ')[0] ?? '',
     next: () => {
       return new Promise((resolve) => {
@@ -312,7 +383,7 @@ const openPeer = (port: number, { body, head }: { body: Uint8Array; head: string
 };
 
 /** A chunked body's bytes so far, and whether its last chunk came. */
-const dechunk = (bytes: Buffer): { body: Buffer; isWhole: boolean } => {
+const dechunk = (bytes: Buffer): { body: Buffer; isWhole: boolean; taken: number } => {
   const parts: Buffer[] = [];
   let at = 0;
 
@@ -320,19 +391,33 @@ const dechunk = (bytes: Buffer): { body: Buffer; isWhole: boolean } => {
     const end = bytes.indexOf('\r\n', at);
 
     if (end === -1) {
-      return { body: Buffer.concat(parts), isWhole: false };
+      return { body: Buffer.concat(parts), isWhole: false, taken: at };
     }
 
     const size = Number.parseInt(bytes.subarray(at, end).toString('latin1'), 16);
 
     if (size === 0) {
-      return { body: Buffer.concat(parts), isWhole: true };
+      let trailer = end + 2;
+
+      for (;;) {
+        const lineEnd = bytes.indexOf('\r\n', trailer);
+
+        if (lineEnd === -1) {
+          return { body: Buffer.concat(parts), isWhole: false, taken: at };
+        }
+
+        if (lineEnd === trailer) {
+          return { body: Buffer.concat(parts), isWhole: true, taken: lineEnd + 2 };
+        }
+
+        trailer = lineEnd + 2;
+      }
     }
 
-    if (bytes.length < end + 2 + size) {
+    if (bytes.length < end + 2 + size + 2) {
       parts.push(bytes.subarray(end + 2));
 
-      return { body: Buffer.concat(parts), isWhole: false };
+      return { body: Buffer.concat(parts), isWhole: false, taken: at };
     }
 
     parts.push(bytes.subarray(end + 2, end + 2 + size));
@@ -354,7 +439,7 @@ const readOn = async (peer: IPeer, { stream }: { stream?: string | undefined }):
   const deadline = performance.now() + PATIENCE;
 
   for (;;) {
-    const bytes = Buffer.concat(peer.received);
+    const bytes = Buffer.concat(peer.received).subarray(peer.taken);
     const at = bytes.indexOf(HEAD_END);
 
     if (at !== -1) {
@@ -377,23 +462,39 @@ const readOn = async (peer: IPeer, { stream }: { stream?: string | undefined }):
       const length = fields.get('content-length');
       const isChunked = fields.get('transfer-encoding') === 'chunked';
 
-      if (peer.method === 'HEAD' || status === 204 || status === 304) {
+      if (
+        peer.method === 'HEAD' ||
+        (status >= 100 && status < 200) ||
+        status === 204 ||
+        status === 304
+      ) {
+        peer.taken += at + HEAD_END.length;
+
         return { body: Buffer.alloc(0), fields, status };
       }
 
-      if (length !== undefined && rest.length >= Number(length)) {
+      if (!isChunked && length !== undefined && rest.length >= Number(length)) {
+        peer.taken += at + HEAD_END.length + Number(length);
+
         return { body: rest.subarray(0, Number(length)), fields, status };
       }
 
       if (isChunked) {
-        const { body, isWhole } = dechunk(rest);
+        const { body, isWhole, taken } = dechunk(rest);
 
-        if (isWhole || (stream !== undefined && body.toString('utf8').startsWith(stream))) {
+        if (
+          isWhole ||
+          (taken > 0 && stream !== undefined && body.toString('utf8').startsWith(stream))
+        ) {
+          peer.taken += at + HEAD_END.length + taken;
+
           return { body, fields, status };
         }
       }
 
       if (length === undefined && !isChunked && peer.isEnded) {
+        peer.taken += bytes.length;
+
         return { body: rest, fields, status };
       }
     }
@@ -422,6 +523,69 @@ const gatewayOptionsOf = (entry: IExchangeEntry): Record<string, unknown> => {
 };
 
 // tests
+
+test('compares payload signed zeros, NaNs and unknown fields', () => {
+  const cases: [string, string, boolean][] = [
+    ['C1 01 00 00 00 00 00 00 00 80', 'C1 01 00 00 00 00 00 00 00 00', false],
+    ['3A 05 0D 00 00 00 80', '3A 05 0D 00 00 00 00', false],
+    ['BA 01 0A C1 01 00 00 00 00 00 00 00 80', 'BA 01 0A C1 01 00 00 00 00 00 00 00 00', false],
+    ['C1 01 00 00 00 00 00 00 F8 7F', 'C1 01 00 00 00 00 00 00 F8 7F', true],
+    ['C1 01 00 00 00 00 00 00 F8 7F', 'C1 01 01 00 00 00 00 00 F8 7F', false],
+    [
+      '5A 05 08 01 12 01 61 5A 05 08 02 12 01 62',
+      '5A 05 08 02 12 01 62 5A 05 08 01 12 01 61',
+      true,
+    ],
+    ['', 'A0 06 01', false],
+    ['A0 06 01', 'A0 06 01', true],
+    ['A0 06 01', 'A0 06 02', false],
+  ];
+
+  for (const [one, other, expected] of cases) {
+    expect(
+      isSame(EdgesSchema, {
+        one: fromBinary(EdgesSchema, fromHexadecimal(one)),
+        other: fromBinary(EdgesSchema, fromHexadecimal(other)),
+      }),
+      `${one} / ${other}`
+    ).toBe(expected);
+  }
+});
+
+test('reads consecutive responses from their own bytes', async () => {
+  // ! both responses and the next head arrive together; no read may replay or eat its neighbour
+  const socket = new Socket();
+  const peer: IPeer = {
+    method: 'GET',
+    socket,
+    received: [
+      Buffer.from(
+        'HTTP/1.1 200 OK\r\ncontent-length: 3\r\n\r\none' +
+          'HTTP/1.1 201 Created\r\ntransfer-encoding: chunked\r\n\r\n3\r\ntwo\r\n0\r\nx-end: yes\r\n\r\n' +
+          'HTTP/1.1 204 No Content\r\n\r\n',
+        'latin1'
+      ),
+    ],
+    isEnded: true,
+    taken: 0,
+    next: () => {
+      return Promise.resolve();
+    },
+  };
+
+  try {
+    const first = await readOn(peer, {});
+    const second = await readOn(peer, {});
+    const third = await readOn(peer, {});
+
+    expect([first.status, first.body.toString()]).toEqual([200, 'one']);
+    expect([second.status, second.body.toString()]).toEqual([201, 'two']);
+    expect([third.status, third.body.toString()]).toEqual([204, '']);
+    expect(peer.taken).toBe(Buffer.concat(peer.received).length);
+  } finally {
+    socket.destroy();
+  }
+});
 
 test.describe('plays transcoding.json', () => {
   test('its version is the companion’s', () => {
