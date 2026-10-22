@@ -105,6 +105,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The demo shows its parts in scenes, one a tab: its calls, its payload rules beside the same
+  sign-up over HTTP, the sign-up's OpenAPI document, its server and its metrics, and its code, both
+  sides side by side; the address's fragment names the scene shown, the logs stay in a rail beside
+  them that a visitor folds away, and its type scale, spacing and radii are penumbra's.
 - A descriptor's `validate` gives its violations, and is given `failFast` and the bound of what it
   holds; a violation is answered `PAYLOAD_INVALID`, no longer `PROCEDURE_FAILED`, by the service
   manager. Generated code names `GENERATED_CODE_SUPPORTS_VERSION_4`, `GeneratedCode.SupportsVersion4`;

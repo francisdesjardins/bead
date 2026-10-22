@@ -33,6 +33,7 @@ import {
 import { drawGlyph, GLYPH_BYTES, GLYPH_SIDE } from './glyph';
 import { createQuietCalls, watchDebug } from './debug';
 import { SignUpProcedures } from './gen/typescript/demo/v1/sign_up_bead';
+import { mountScenes } from './scenes';
 import { mountSides } from './sides';
 import { mountSignUp } from './sign-up';
 import {
@@ -398,14 +399,14 @@ const port = Number(
 const pathname = document.body.dataset['beadPathname'] ?? '/';
 const shown = {
   burst: elementOf('burst'),
-  calls: elementOf('calls'),
+  calls: elementOf('calls-log'),
   // each a <details>, as the page declares it
   clientExposition: elementOf('client-exposition') as HTMLDetailsElement,
   clientMetrics: elementOf('client-metrics'),
   connection: elementOf('connection'),
   counter: elementOf('counter'),
   durations: elementOf('durations'),
-  envelopes: elementOf('envelopes'),
+  envelopes: elementOf('envelopes-log'),
   gauges: elementOf('gauges'),
   // a canvas, as the page declares it
   glyph: elementOf('glyph') as HTMLCanvasElement,
@@ -875,6 +876,8 @@ watchDebug(client, { quiet: READS });
 // the sign-up, its request held to the rules of its .proto
 mountSignUp(client, { reasonOf });
 mountSides();
+// the scenes, one a tab, and the logs beside them
+mountScenes();
 
 // an exposition opened is written at once, from its last text
 for (const details of [shown.clientExposition, shown.serverExposition]) {

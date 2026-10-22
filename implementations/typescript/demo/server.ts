@@ -58,6 +58,15 @@ const FILES = Object.freeze({
   '/': { path: new URL('../index.html', import.meta.url), type: 'text/html; charset=utf-8' },
   '/page.js': { path: new URL('./page.js', import.meta.url), type: 'text/javascript' },
   '/worker.js': { path: new URL('./worker.js', import.meta.url), type: 'text/javascript' },
+  // penumbra's two sheets, the DevTools panel's copy, under the page's skin
+  '/penumbra/tokens.skin.base.css': {
+    path: new URL('../../devtools/penumbra/tokens.skin.base.css', import.meta.url),
+    type: 'text/css',
+  },
+  '/penumbra/tokens.system.css': {
+    path: new URL('../../devtools/penumbra/tokens.system.css', import.meta.url),
+    type: 'text/css',
+  },
 });
 
 // helpers

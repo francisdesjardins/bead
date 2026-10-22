@@ -1,6 +1,11 @@
 import { defineConfig } from '@playwright/test';
 import { COMPONENT_TIMEOUT, playwrightBase } from './tools/playwright-base.mjs';
 
+/** The tests that load the demo's page, each of a module the page mounts. */
+const PAGE_TESTS = ['scenes', 'sides', 'sign-up', 'tabs'].map((name) => {
+  return `**/__tests__/${name}.test.ts`;
+});
+
 /**
  * The demo's tests, apart from the package's unit project, whose claim that nothing under test
  * needs a page they would break.
@@ -15,12 +20,12 @@ export default defineConfig({
   projects: [
     {
       name: 'unit',
-      testIgnore: ['**/__tests__/sign-up.test.ts', '**/__tests__/sides.test.ts'],
+      testIgnore: PAGE_TESTS,
       testMatch: ['**/__tests__/*.test.ts'],
     },
     {
       name: 'page',
-      testMatch: ['**/__tests__/sign-up.test.ts', '**/__tests__/sides.test.ts'],
+      testMatch: PAGE_TESTS,
       timeout: COMPONENT_TIMEOUT,
       use: { browserName: 'chromium' },
     },
