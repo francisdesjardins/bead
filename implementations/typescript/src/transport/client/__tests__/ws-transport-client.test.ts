@@ -77,6 +77,12 @@ const judgedOf = async (target: { host: string; secured?: boolean; port?: number
   return [client.carries(BEARER), client.isSecure];
 };
 
+/** What a reconnection its signal ended rejects with, as both sides word it. */
+const RECONNECTION_CANCELLED = Object.freeze({
+  message: 'the reconnection was cancelled',
+  name: 'CancelError',
+});
+
 // a bearer credential, as RFC 6750 §2.1 writes one
 const BEARER = 'Bearer mF_9.B5f-4.1JqM';
 
@@ -259,7 +265,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         await expect(client.connect({ host, port })).rejects.toBeInstanceOf(ProgrammerError);
 
         controller.abort();
-        await expect(reconnecting).rejects.toBeInstanceOf(CancelError);
+        await expect(reconnecting).rejects.toMatchObject(RECONNECTION_CANCELLED);
       });
 
       test('rejects a connect while a disconnect is pending', async () => {

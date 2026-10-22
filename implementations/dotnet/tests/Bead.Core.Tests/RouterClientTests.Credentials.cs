@@ -26,6 +26,19 @@ public sealed partial class RouterClientTests
         })];
     }
 
+    // what a call fails with, held to SESSION_REQUIRED
+    private static async Task<FailureException> SessionRequiredOf(Task call)
+    {
+        var refused = await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return call.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal((ushort)ProtocolCode.SessionRequired, refused.Code);
+
+        return refused;
+    }
+
     // a call of the router's, whatever it settles to, on its credential as its options say
     private static Task<RouterResult> CallOf(RouterClient router, Credential? credential = null)
     {
@@ -96,13 +109,39 @@ public sealed partial class RouterClientTests
             return new ScriptedRouter(new RouterClientOptions { Credential = Credential.Opaque(Token) });
         });
 
-        using var scripted = new ScriptedRouter(RouterLimits.Default with { ChunkBytes = 512, MaximumEnvelopeBytes = 512, WindowBytes = 1_024 });
+        // a default refused as it is given anew leaves the one it had
+        using var given = new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt });
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            given.Router.Credential = Credential.Opaque();
+        });
+        Assert.Equal(DefaultJwt, given.Router.Credential);
+
+        // * a JWT, presented or verified, needs limits that hold its header
+        var limits = RouterLimits.Default with { ChunkBytes = 512, MaximumEnvelopeBytes = 512, WindowBytes = 1_024 };
+        var key = new JwtKey
+        {
+            Algorithm = JwtAlgorithm.Hs256,
+            Issuer = "https://hs256.example",
+            Jwk = JsonSerializer.SerializeToElement(new Dictionary<string, string> { ["k"] = new('A', 43), ["kty"] = "oct" }),
+        };
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new ScriptedRouter(new RouterClientOptions { Credential = DefaultJwt, Limits = limits });
+        });
+        Assert.Throws<ArgumentException>(() =>
+        {
+            return new ScriptedRouter(new RouterClientOptions { Credentials = new Credentials { Audience = "bead-interop", Keys = [key] }, Limits = limits });
+        });
+
+        using var scripted = new ScriptedRouter(new RouterClientOptions { Credential = Credential.Elsewhere("Interop sub=ada"), Limits = limits });
 
         Assert.Throws<ArgumentException>(() =>
         {
             scripted.Router.Credential = DefaultJwt;
         });
-        scripted.Router.Credential = Credential.Elsewhere("Interop sub=ada");
         Assert.Equal(Credential.Elsewhere("Interop sub=ada"), scripted.Router.Credential);
     }
 
@@ -159,15 +198,9 @@ public sealed partial class RouterClientTests
         transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
         transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired));
 
-        var refused = await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return first.WaitAsync(Patience, Cancelled);
-        });
+        var refused = await SessionRequiredOf(first);
 
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return second.WaitAsync(Patience, Cancelled);
-        });
+        await SessionRequiredOf(second);
         Assert.False(refused.MayOvertake);
 
         // ! fails closed: never in the connection's session, nor in none, in silence
@@ -179,12 +212,12 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
 
         Assert.Equal(
-            (FailureOrigin.Local, FailureScope.Protocol, (ushort)ProtocolCode.SessionRequired, "the default credential was withdrawn"),
-            (next.Origin, next.Scope, next.Code, next.Failure.Detail));
+            (FailureOrigin.Local, RouterSide.Client, FailureScope.Protocol, (ushort)ProtocolCode.SessionRequired, "the default credential was withdrawn"),
+            (next.Origin, next.Side, next.Scope, next.Code, next.Failure.Detail));
         Assert.Equal([CredentialScheme.Jwt], withdrawn);
         Assert.Null(router.Credential);
         Assert.True(router.IsCredentialWithdrawn);
-        Assert.Equal(2, PresentedOf(transport).Count);
+        Assert.Equal([(1u, DefaultJwt, null), (3u, DefaultJwt, null)], PresentedOf(transport));
     }
 
     // spec 13.4
@@ -202,10 +235,7 @@ public sealed partial class RouterClientTests
 
         await scripted.Settle();
         transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return first.WaitAsync(Patience, Cancelled);
-        });
+        await SessionRequiredOf(first);
         Assert.True(router.IsCredentialWithdrawn);
 
         // a call's own credential, NONE among them, goes: the call that renews it presents none
@@ -224,10 +254,7 @@ public sealed partial class RouterClientTests
 
         await scripted.Settle();
         transport.Deliver(FailureOf(9, ProtocolCode.SessionRequired));
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return again.WaitAsync(Patience, Cancelled);
-        });
+        await SessionRequiredOf(again);
         Assert.True(router.IsCredentialWithdrawn);
         router.Credential = null;
         Assert.False(router.IsCredentialWithdrawn);
@@ -258,28 +285,23 @@ public sealed partial class RouterClientTests
 
         router.CredentialWithdrawn += withdrawn.Add;
 
-        var relayed = CallOf(router);
+        var toSeven = RequestOf(options: Options with { DestinationId = 7 });
+        var relayed = router.Request(ReadOnlyMemory<byte>.Empty, toSeven);
 
         await scripted.Settle();
         transport.Deliver(new Envelope { Header = new FailureHeader { CallId = 1 }, Failure = Failure.OfProtocol(ProtocolCode.SessionRequired) with { Relays = 1 } });
 
-        var refused = await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return relayed.WaitAsync(Patience, Cancelled);
-        });
+        var refused = await SessionRequiredOf(relayed);
 
         Assert.Equal(FailureOrigin.Relayed, refused.Origin);
         Assert.Equal([CredentialScheme.Elsewhere], withdrawn);
         Assert.Null(router.Credential);
 
         // the next call that would present it fails alike, before it goes
-        var next = await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return CallOf(router).WaitAsync(Patience, Cancelled);
-        });
+        var next = await SessionRequiredOf(router.Request(ReadOnlyMemory<byte>.Empty, toSeven));
 
         await scripted.Settle();
-        Assert.Equal((FailureOrigin.Local, (ushort)ProtocolCode.SessionRequired), (next.Origin, next.Code));
+        Assert.Equal((FailureOrigin.Local, (uint?)7), (next.Origin, next.DestinationId));
         Assert.Single(transport.Envelopes);
     }
 
@@ -297,10 +319,7 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         router.Credential = Credential.Jwt("d.e.f");
         transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return older.WaitAsync(Patience, Cancelled);
-        });
+        await SessionRequiredOf(older);
 
         Assert.Empty(withdrawn);
         Assert.Equal(Credential.Jwt("d.e.f"), router.Credential);
@@ -333,10 +352,7 @@ public sealed partial class RouterClientTests
             // set again while the call was on its way: by value, what it presented, or other bytes
             router.Credential = given;
             transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
-            await Assert.ThrowsAsync<FailureException>(() =>
-            {
-                return refused.WaitAsync(Patience, Cancelled);
-            });
+            await SessionRequiredOf(refused);
 
             List<CredentialScheme> told = isKept ? [] : [given.Scheme];
 
@@ -360,14 +376,8 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
         transport.Deliver(FailureOf(1, ProtocolCode.SessionRequired));
         transport.Deliver(FailureOf(3, ProtocolCode.SessionRequired));
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return own.WaitAsync(Patience, Cancelled);
-        });
-        await Assert.ThrowsAsync<FailureException>(() =>
-        {
-            return none.WaitAsync(Patience, Cancelled);
-        });
+        await SessionRequiredOf(own);
+        await SessionRequiredOf(none);
 
         Assert.Empty(withdrawn);
         Assert.Equal(DefaultJwt, router.Credential);
@@ -391,6 +401,7 @@ public sealed partial class RouterClientTests
         await scripted.Settle();
 
         Assert.Equal([Failure.OfProtocol(ProtocolCode.SessionRequired)], notification.Dropped);
+        Assert.False(router.HasNotification(notification));
         Assert.Empty(withdrawn);
         Assert.Equal(DefaultJwt, router.Credential);
     }
@@ -450,7 +461,7 @@ public sealed partial class RouterClientTests
 
         Assert.All([byDefault, own], (refused) =>
         {
-            Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local), (refused.Code, refused.Origin));
+            Assert.Equal(((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local, RouterSide.Client), (refused.Code, refused.Origin, refused.Side));
         });
         Assert.Equal([(1u, (Credential?)DefaultJwt, (string?)null)], PresentedOf(transport));
         Assert.Empty(withdrawn);
@@ -474,6 +485,9 @@ public sealed partial class RouterClientTests
         Assert.Equal(
             ((ushort)ProtocolCode.DestinationUnreachable, FailureOrigin.Local, "its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             (other.Code, other.Origin, other.Failure.Detail));
+
+        // ! a refusal names no credential's bytes, in its words or anywhere it is written
+        Assert.DoesNotContain("Interop sub=bob", other.ToString(), StringComparison.Ordinal);
         Assert.Equal([(1u, (Credential?)Credential.Elsewhere(), (string?)"Interop sub=ada")], PresentedOf(upgraded.Transport));
         Assert.Empty(upgraded.Errors);
     }
@@ -519,16 +533,16 @@ public sealed partial class RouterClientTests
                 {
                     verified.Add(carried);
 
-                    return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Id = "server" });
+                    return ValueTask.FromResult<ElsewhereSession?>(new ElsewhereSession { Data = "its data", Id = "server" });
                 },
             },
         });
         var (router, transport) = (scripted.Router, scripted.Transport);
-        var sessions = new List<SessionIdentifier?>();
+        var sessions = new List<(uint CallId, CallSession? Session)>();
 
         router.RegisterResolver(new ScriptedResolver(Service, (props) =>
         {
-            sessions.Add(props.Session?.Identifier);
+            sessions.Add((props.Header.CallId, props.Session));
 
             return router.Respond(RouterAnswer.OfPayload(new byte[] { 1 }), new AnswerTarget(props.ConnectionHandle, props.Header));
         }));
@@ -540,7 +554,13 @@ public sealed partial class RouterClientTests
         Assert.Equal([(2u, ProtocolCode.SessionRequired)], transport.Failures);
         Assert.Equal("no credential came", transport.Envelopes[0].Failure!.Detail);
         Assert.Equal(["Interop sub=server"], verified);
-        Assert.Equal([new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "server" }], sessions);
+        // * the whole session its verifier gave: its data, its identifier, and no end
+        var (callId, session) = Assert.Single(sessions);
+
+        Assert.Equal(4u, callId);
+        Assert.Equal(
+            ((object?)"its data", (SessionIdentifier?)new SessionIdentifier { Scheme = CredentialScheme.Elsewhere, Id = "server" }, (long?)null),
+            (session?.Data, session?.Identifier, session?.End));
     }
 
     [Fact]
@@ -577,7 +597,10 @@ public sealed partial class RouterClientTests
 
         // the command in none first: it resolves in the turn it came
         Assert.Equal([(4u, ProtocolCode.SessionRequired), (2u, ProtocolCode.AccessDenied)], transport.Failures);
-        Assert.Equal("short of its scope", transport.Envelopes[1].Failure!.Detail);
+        Assert.Equal(["short of its scope", "short of its scope"], transport.Envelopes.Select((envelope) =>
+        {
+            return envelope.Failure!.Detail;
+        }));
         Assert.Empty(scripted.Errors);
     }
 }

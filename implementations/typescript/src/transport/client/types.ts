@@ -138,9 +138,10 @@ export interface ITransportClient<
    * Connects again with the options of the last accepted `connect`, replacing an open socket without
    * a `close`. Attempts that run out end CLOSED without a `close`; a cancel after a successful
    * attempt disconnects, which emits one; a misuse or an already aborted signal leaves the state as it
-   * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError};
-   * an error thrown by `tap` passes through, and so does a {@link ProgrammerError} an attempt
-   * rejects with, which the next would meet again.
+   * was. Rejects with a {@link ProgrammerError}, a {@link ReconnectError} or a {@link CancelError},
+   * `the reconnection was cancelled`, its signal's reason its `cause`; an error thrown by `tap`
+   * passes through, and so does a {@link ProgrammerError} an attempt rejects with, which the next
+   * would meet again.
    */
   reconnect(options?: ITransportClientReconnectOptions): Promise<void>;
   removeAllListeners(event?: TRANSPORT_CLIENT_EVENTS): this;

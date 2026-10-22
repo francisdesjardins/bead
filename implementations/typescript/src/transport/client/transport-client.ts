@@ -7,6 +7,7 @@ import { ERROR_EVENT, RECONNECT_EVENT } from '../shared/constants';
 import { createPromise } from '../shared/create-promise';
 import { createEmitter } from '../shared/emitter';
 import {
+  CancelError,
   ProgrammerError,
   ReconnectError,
   toCancelError,
@@ -112,6 +113,9 @@ export const RECONNECT_DEFAULTS = Object.freeze({
   maxAttempts: 5,
 } satisfies ITransportClientReconnectOptions);
 
+/** What a reconnection its signal ended rejects with, as the C# side words it. */
+const RECONNECTION_CANCELLED = 'the reconnection was cancelled';
+
 // a field's value, and so a credential an `Authorization` carries (RFC 9110 §5.5): visible ASCII,
 // spaces and tabs alone, none first or last, which a field cannot keep
 const FIELD_VALUE = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
@@ -125,6 +129,11 @@ const FIELD_VALUE = /^(?:[!-~](?:[\t -~]*[!-~])?)?$/u;
  */
 export const isFieldValue = (value: string): boolean => {
   return FIELD_VALUE.test(value);
+};
+
+/** The {@link CancelError} a reconnection its `signal` ended rejects with, its reason the `cause`. */
+const reconnectionCancelOf = (signal: AbortSignal): CancelError => {
+  return new CancelError(RECONNECTION_CANCELLED, { cause: signal.reason });
 };
 
 const sleep = (
@@ -305,7 +314,7 @@ export const createTransportClient = <
 
       // before the dispose below, so an already aborted signal leaves an open connection alone
       if (signal?.aborted) {
-        throw toCancelError(signal);
+        throw reconnectionCancelOf(signal);
       }
 
       const target = lastConnectOptions;
@@ -341,7 +350,7 @@ export const createTransportClient = <
             break;
           } catch (reason) {
             if (signal?.aborted) {
-              throw toCancelError(signal);
+              throw reconnectionCancelOf(signal);
             }
 
             // a misuse an attempt met, the next would meet again
@@ -386,13 +395,17 @@ export const createTransportClient = <
 
           previousDelay = nextDelay;
 
-          await waiting;
+          try {
+            await waiting;
+          } catch (reason) {
+            throw signal?.aborted === true ? reconnectionCancelOf(signal) : reason;
+          }
         }
 
         if (signal?.aborted) {
           await client.disconnect().catch(noop);
 
-          throw toCancelError(signal);
+          throw reconnectionCancelOf(signal);
         }
       } catch (reason) {
         setReadyStateClosed(client);

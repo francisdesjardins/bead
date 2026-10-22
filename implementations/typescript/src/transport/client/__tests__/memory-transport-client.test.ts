@@ -651,8 +651,9 @@ test.describe('createMemoryTransportClient', () => {
 
     await turn();
 
-    // * a cancel says nothing of its own: the reason its signal was aborted with is its cause
+    // * worded as the C# side words it, the reason its signal was aborted with its cause
     expect(cancelled).toBeInstanceOf(CancelError);
+    expect(cancelled).toHaveProperty('message', 'the reconnection was cancelled');
     expect((cancelled as CancelError).cause).toBe(cancelling.signal.reason);
     expect([client.isClosed(), closedAtClient, closedAtServer, server.clients]).toEqual([
       true,
