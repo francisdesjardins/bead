@@ -186,15 +186,25 @@ public sealed class ValidatorsTests
             return GC.GetAllocatedBytesForCurrentThread() - before;
         }
 
+        // ! the runtime can allocate on this thread as it compiles the walk again, under coverage or
+        // as a loop's tier rises: the least of a few readings is the judging's own
+        long LeastAllocatedBy(Repeated message)
+        {
+            return Enumerable.Range(0, 5).Min((_) =>
+            {
+                return AllocatedBy(message);
+            });
+        }
+
         var one = TakenOf(1);
         var many = TakenOf(10_000);
 
-        AllocatedBy(one);
-        AllocatedBy(many);
+        LeastAllocatedBy(one);
+        LeastAllocatedBy(many);
 
         // * a step into each of 10,000 items allocates nothing: what the judging holds is the same
         // whatever it walks, and nothing of a path
-        Assert.Equal(AllocatedBy(one), AllocatedBy(many));
+        Assert.Equal(LeastAllocatedBy(one), LeastAllocatedBy(many));
     }
 
     [Fact]
