@@ -318,13 +318,18 @@ export interface IWebSocketLike {
 export interface IWebSocketConstructor {
   /**
    * `options` is `ws`'s alone, its `headers` written on the upgrade, its `closeTimeout` what it
-   * waits on a close within, its own 1009's among them, from ws 8.22; the global `WebSocket` takes
-   * two parameters, and still meets it.
+   * waits on a close within, its own 1009's among them, from ws 8.22; `perMessageDeflate: false`
+   * offers no compression. The global `WebSocket` takes two parameters, and still meets it.
    */
   new (
     url: string,
     protocols?: string | string[],
-    options?: { closeTimeout?: number; headers?: Record<string, string>; maxPayload?: number }
+    options?: {
+      closeTimeout?: number;
+      headers?: Record<string, string>;
+      maxPayload?: number;
+      perMessageDeflate?: false;
+    }
   ): IWebSocketLike;
   readonly CONNECTING: number;
   readonly OPEN: number;

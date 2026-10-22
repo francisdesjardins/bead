@@ -37,11 +37,15 @@ export interface IChecked {
 /**
  * Checks the `.proto` files of `roots`, or only `files` among them by their import paths; `image`
  * compiles buf's image, for `beadc breaking`, which reads as a set. Throws an {@link InputError} for
- * a root that is no folder or a set buf does not compile.
+ * a root that is no folder or a set buf does not compile. `folder` names the project's work area.
  */
 export const checkRoots = (
   roots: readonly string[],
-  options: { readonly files?: readonly string[]; readonly image?: boolean } = {}
+  options: {
+    readonly files?: readonly string[];
+    readonly image?: boolean;
+    readonly folder?: string;
+  } = {}
 ): IChecked => {
   assertRoots(roots);
 
@@ -61,6 +65,7 @@ export const checkRoots = (
     return path;
   });
   const set = compile(roots, {
+    ...(options.folder === undefined ? {} : { folder: options.folder }),
     ...(files === undefined ? {} : { files }),
     ...(options.image === true ? { image: true } : {}),
   });
@@ -71,6 +76,7 @@ export const checkRoots = (
   // * buf's own check that a field's rules are coherent, run only where a file states some
   const linted = importsValidate(input, VALIDATE_FILE)
     ? lintRules(roots, {
+        ...(options.folder === undefined ? {} : { folder: options.folder }),
         files: input.files.flatMap((file) => {
           const path = pathOnDisk(file.desc.proto.name, roots);
 

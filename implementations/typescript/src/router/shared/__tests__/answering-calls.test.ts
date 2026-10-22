@@ -82,6 +82,7 @@ test.describe('createAnsweringCalls', () => {
     expect(calls.isAnswering({ connectionHandle: 'a', header })).toBe(true);
     // a copy was never dispatched: it finds no call, and is taken as one to answer
     expect(calls.controllerOf({ ...header })).toBeUndefined();
+    expect(calls.isAnswering({ connectionHandle: 'a', header: { ...header } })).toBe(true);
   });
 
   test('answer a call no more once its answer goes out, while the call stays until closed; a copy of its header marks nothing', () => {

@@ -380,7 +380,7 @@ test.describe('createServiceManager', () => {
     });
 
     test('a failed notify resolves all the same, and only debug hears of it', async () => {
-      const { control, router } = createFakeRouter();
+      const { calls, control, router } = createFakeRouter();
       const manager = createServiceManager(router);
       const seen = recordDebug(manager);
       const failure = new Error('gone');
@@ -399,6 +399,15 @@ test.describe('createServiceManager', () => {
           return error;
         })
       ).toEqual([null, failure]);
+      expect(calls.notify).toHaveLength(1);
+      expect(
+        seen.map(({ info }) => {
+          return [info.direction, info.type];
+        })
+      ).toEqual([
+        ['tx', 'notification'],
+        ['tx', 'notification'],
+      ]);
     });
   });
 

@@ -668,8 +668,7 @@ export const againstOfText = (
 
 /**
  * A temporary folder of beadc's, made: under `options.folder`'s `.beadc/` where a `beadc.yaml` was
- * read, on the project's drive, which buf's build of one module over its roots and beadc's options
- * needs; under the system's temporary folder otherwise. The caller takes it out.
+ * read; under the system's temporary folder otherwise. The caller takes it out.
  */
 export const temporaryFolderOf = (
   prefix: string,

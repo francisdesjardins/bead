@@ -435,45 +435,92 @@ public sealed partial class RouterCoreTests
         pending[0].SetResult(new CallSession());
         await server.Settle();
         Assert.Equal([3u, 7u, 1u, 5u, 9u], admitted);
+        var queued = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Jwt, CredentialScheme.Elsewhere] };
+        var order = new List<string>();
+        var queuedResolver = queued.Resolve();
+        string[] synchronousOrder = [];
+
+        queued.Resolution = (request, _) =>
+        {
+            order.Add($"resolve {request.Header.CallId}");
+            return ValueTask.FromResult<CallSession?>(new CallSession { Data = "ada" });
+        };
+        queuedResolver.Admission = (request) =>
+        {
+            order.Add($"admit {request.Header.CallId} {request.Session?.Data}");
+            if (request.Header.CallId == 5)
+            {
+                synchronousOrder = [.. order];
+            }
+            return null;
+        };
+        queued.Loop.Post(() =>
+        {
+            queued.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, Credential.Jwt("a.b.c"))), Handle);
+            queued.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(PresentingOf(3, Credential.Elsewhere())), false) { Credential = "Bearer mF_9.B5f-4.1JqM" }, Handle);
+            queued.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(5, null)), Handle);
+            queued.Core.Receive(EnvelopeCodec.WriteEnvelope(PresentingOf(1, null)), Handle);
+        });
+        await queued.Settle();
+        Assert.Equal(["resolve 1", "resolve 3", "resolve 5", "admit 5 ada"], synchronousOrder);
+        Assert.Equal(["resolve 1", "resolve 3", "resolve 5", "admit 5 ada", "admit 1 ada", "admit 3 ada"], order);
+        Assert.Equal((ushort)ProtocolCode.EnvelopeMalformed, CodeOf(Assert.Single(queued.Reports)));
+        Assert.Equal([Handle], queued.ReportedOn);
+        Assert.Equal([(1u, null), (3u, "Bearer mF_9.B5f-4.1JqM"), (5u, null)], queued.Resolved.Select((resolved) =>
+        {
+            return (resolved.Request.Header.CallId, resolved.Request.TransportCredential);
+        }));
+        Assert.Empty(queued.Sent);
     }
 
     [Fact]
     public async Task A_credential_of_a_JWT_or_an_ELSEWHERE_its_handler_forwards_resolves_to_none_in_a_later_turn_all_the_same_a_request_presenting_none_delivered_behind_it_taken_first()
     {
-        var server = new Peer(RouterSide.Server);
-        var handler = new Held(server.Core) { ForwardsCredentials = true };
-        var admitted = new List<uint>();
-
-        // a destination's handler, a relay's that does not verify: the one handler that forwards
-        server.Destination = (_) =>
+        foreach (var (destinationId, transported) in new[] { (7u, "Bearer a.b.c"), (9u, "Bearer mF_9.B5f-4.1JqM") })
         {
-            return handler;
-        };
-        handler.Admission = (request) =>
-        {
-            admitted.Add(request.Header.CallId);
+            var server = new Peer(RouterSide.Server);
+            var handler = new Held(server.Core) { ForwardsCredentials = true };
+            var admitted = new List<uint>();
 
-            return null;
-        };
-
-        // ! in one turn of the router's scheduler, as one read brings them
-        server.Loop.Post(() =>
-        {
-            server.Core.Receive(EnvelopeCodec.WriteEnvelope(DestinedOf(1, Credential.Jwt("a.b.c"))), Handle);
-            server.Core.Receive(EnvelopeCodec.WriteEnvelope(DestinedOf(3, null)), Handle);
-            server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(DestinedOf(5, Credential.Elsewhere())), false) { Credential = "Bearer a.b.c" }, Handle);
-            server.Core.Receive(EnvelopeCodec.WriteEnvelope(DestinedOf(7, null)), Handle);
-        });
-        await server.Settle();
-
-        // read from their scheme alone, the JWT and the ELSEWHERE resolve to none, and later
-        Assert.Equal([3u, 7u, 1u, 5u], admitted);
-        Assert.Equal(
-            [3u, 7u],
-            server.Resolved.Select((resolved) =>
+            Envelope Destined(uint id, Credential? credential)
             {
-                return resolved.Request.Header.CallId;
-            }));
+                var envelope = DestinedOf(id, credential);
+                return new Envelope { Header = (RequestHeader)envelope.Header with { DestinationId = destinationId }, Payload = envelope.Payload };
+            }
+
+            // a destination's handler, a relay's that does not verify: the one handler that forwards
+            server.Destination = (_) =>
+            {
+                return handler;
+            };
+            handler.Admission = (request) =>
+            {
+                admitted.Add(request.Header.CallId);
+
+                return null;
+            };
+
+            // ! in one turn of the router's scheduler, as one read brings them
+            server.Loop.Post(() =>
+            {
+                server.Core.Receive(EnvelopeCodec.WriteEnvelope(Destined(1, Credential.Jwt("a.b.c"))), Handle);
+                server.Core.Receive(EnvelopeCodec.WriteEnvelope(Destined(3, null)), Handle);
+                server.Core.Receive(new TransportMessage(EnvelopeCodec.WriteEnvelope(Destined(5, Credential.Elsewhere())), false) { Credential = transported }, Handle);
+                server.Core.Receive(EnvelopeCodec.WriteEnvelope(Destined(7, null)), Handle);
+            });
+            await server.Settle();
+
+            // read from their scheme alone, the JWT and the ELSEWHERE resolve to none, and later
+            Assert.Equal([3u, 7u, 1u, 5u], admitted);
+            Assert.Equal(
+                [3u, 7u],
+                server.Resolved.Select((resolved) =>
+                {
+                    return resolved.Request.Header.CallId;
+                }));
+            Assert.Empty(server.Reports);
+            Assert.Empty(server.Sent);
+        }
     }
 
     // spec 13.1
@@ -723,21 +770,24 @@ public sealed partial class RouterCoreTests
     [Fact]
     public async Task A_credential_resolving_a_transfer_s_opening_gets_no_credit_until_its_resolution_and_its_admission_settle()
     {
-        var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
-        var resolver = server.Resolve();
-        var (resolution, pending) = Waiting();
-        var opening = RequestOpeningOf(1, (PatternOf(300), 20));
+        foreach (var (total, length) in new[] { (100, 8), (300, 20) })
+        {
+            var server = new Peer(RouterSide.Server) { Schemes = [CredentialScheme.Opaque, CredentialScheme.Jwt] };
+            var resolver = server.Resolve();
+            var (resolution, pending) = Waiting();
+            var opening = RequestOpeningOf(1, (PatternOf(total), length));
 
-        server.Resolution = resolution;
-        await server.Deliver(new Envelope { Header = (RequestHeader)opening.Header with { Credential = Credential.Jwt("a.b.c") }, Payload = opening.Payload });
-        await server.Advance(TimeSpan.FromSeconds(1));
-        Assert.Empty(server.Sent);
-        Assert.Equal(0, resolver.Admitted);
+            server.Resolution = resolution;
+            await server.Deliver(new Envelope { Header = (RequestHeader)opening.Header with { Credential = Credential.Jwt("a.b.c") }, Payload = opening.Payload });
+            await server.Advance(TimeSpan.FromSeconds(1));
+            Assert.Empty(server.Sent);
+            Assert.Equal(0, resolver.Admitted);
 
-        pending[0].SetResult(new CallSession());
-        await server.Settle();
-        Assert.Equal(1, resolver.Admitted);
-        Assert.Equal([148L], CreditsOf(server.Sent));
+            pending[0].SetResult(new CallSession());
+            await server.Settle();
+            Assert.Equal(1, resolver.Admitted);
+            Assert.Equal([(long)Math.Min(total, length + 128)], CreditsOf(server.Sent));
+        }
     }
 
     [Fact]

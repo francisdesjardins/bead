@@ -319,21 +319,26 @@ test.describe('createRouterCore', () => {
     test('refuse a notification too large for one envelope, and send one that fits', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port, { limits });
-      const notificationOf = (length: number): OutgoingEnvelope => {
+      const notificationOf = (length: number, callId: number): OutgoingEnvelope => {
         return {
-          header: { callId: 2, kind: EnvelopeKind.NOTIFICATION },
+          header: { callId, kind: EnvelopeKind.NOTIFICATION },
           kind: EnvelopeKind.NOTIFICATION,
           payload: new Uint8Array(length),
         };
       };
 
-      await expect(core.send(notificationOf(57), 'a')).rejects.toMatchObject({
-        code: ProtocolCode.PAYLOAD_TOO_LARGE,
-        detail: 'an envelope is 64 bytes at most, not 65',
-      });
-      await core.send(notificationOf(56), 'a');
+      for (const callId of [1, 2]) {
+        await expect(core.send(notificationOf(57, callId), 'a')).rejects.toMatchObject({
+          code: ProtocolCode.PAYLOAD_TOO_LARGE,
+          detail: 'an envelope is 64 bytes at most, not 65',
+        });
+        await core.send(notificationOf(56, callId), 'a');
+      }
 
-      expect(piecesOf(sent)).toEqual([[EnvelopeKind.NOTIFICATION, 2]]);
+      expect(piecesOf(sent)).toEqual([
+        [EnvelopeKind.NOTIFICATION, 1],
+        [EnvelopeKind.NOTIFICATION, 2],
+      ]);
     });
   });
 });

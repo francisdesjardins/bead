@@ -150,9 +150,9 @@ const sourceOf = (
   };
 };
 
-const checkSource = (source: Source): IChecked => {
+const checkSource = (source: Source, config?: IConfig): IChecked => {
   return 'proto' in source
-    ? checkRoots(source.proto)
+    ? checkRoots(source.proto, config === undefined ? {} : { folder: config.folder })
     : checkBlueprintFile(source.blueprint, { file: displayOf(source.blueprint) });
 };
 
@@ -234,11 +234,13 @@ const formDifferenceOf = (difference: IFormDifference, file: string): IFormDiffe
 };
 
 const runCheck = (call: ICall): Exit => {
-  return report(checkSource(call.source).diagnostics, call) ? Exit.FINDINGS : Exit.DONE;
+  return report(checkSource(call.source, call.config).diagnostics, call)
+    ? Exit.FINDINGS
+    : Exit.DONE;
 };
 
 const runBlueprint = (call: ICall): Exit => {
-  const checked = checkSource(call.source);
+  const checked = checkSource(call.source, call.config);
   const failed = report(checked.diagnostics, call);
 
   if (checked.blueprint === undefined || failed) {
@@ -297,7 +299,7 @@ const runGenerate = async (call: ICall): Promise<Exit> => {
     throw new InputError("generate writes beadc.yaml's outputs, and takes no input of its own");
   }
 
-  const checked = checkSource(call.source);
+  const checked = checkSource(call.source, call.config);
 
   if (report(checked.diagnostics, call)) {
     return Exit.FINDINGS;
