@@ -77,9 +77,12 @@ const LOWER_Z = 'z'.codePointAt(0) as number;
 
 // helpers
 
-/** `value` quoted as JSON writes a string (RFC 8259): what a refusal names, as it was written. */
+/**
+ * `value` quoted as JSON writes a string (RFC 8259): what a refusal names, as it was written; a value
+ * given whole that is no string, a kind's number among them, as its string.
+ */
 const quotedOf = (value: unknown): string => {
-  return JSON.stringify(value);
+  return JSON.stringify(String(value));
 };
 
 /** `text` with its ASCII capitals lowered, and nothing else: U+212A and U+0130 stay as they are. */

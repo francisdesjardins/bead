@@ -92,21 +92,39 @@ public sealed record RouterLimits
 
     /// <summary>
     /// These limits, checked, a transfer's inactivity held: whole numbers, positive but for the
-    /// transfers and the detail, a number of calls of 1 at least among them; an envelope of 64 bytes
-    /// at least; a chunk from 64 bytes to an envelope; a window of two chunks at least; a payload
-    /// within the budget; a transfer's inactivity from 1 to 2³¹ − 1 milliseconds, rounded to the
-    /// nearest whole one. Throws an
+    /// transfers and the detail, a number of calls of 1 at least among them, each refused by its name
+    /// and its value; then, held together, an envelope of 64 bytes at least; a chunk from 64 bytes
+    /// to an envelope; a window of two chunks at least; a payload within the budget; a transfer's
+    /// inactivity from 1 to 2³¹ − 1 milliseconds, rounded to the nearest whole one. Throws an
     /// <see cref="ArgumentException"/> for the first that does not hold, an
     /// <see cref="ArgumentOutOfRangeException"/> for the inactivity.
     /// </summary>
     public RouterLimits Validate()
     {
+        // each limit by its name, in the order of their names, and whether it may be 0
+        (string Name, int Value, bool MayBeNone)[] limits =
+        [
+            (nameof(BufferedBytesBudget), BufferedBytesBudget, false),
+            (nameof(ChunkBytes), ChunkBytes, false),
+            (nameof(MaximumAnsweringCalls), MaximumAnsweringCalls, false),
+            (nameof(MaximumChunkRuns), MaximumChunkRuns, false),
+            (nameof(MaximumDetailBytes), MaximumDetailBytes, true),
+            (nameof(MaximumEnvelopeBytes), MaximumEnvelopeBytes, false),
+            (nameof(MaximumPayloadBytes), MaximumPayloadBytes, false),
+            (nameof(MaximumTransfers), MaximumTransfers, true),
+            (nameof(WindowBytes), WindowBytes, false),
+        ];
+
+        foreach (var (name, value, mayBeNone) in limits)
+        {
+            if (value < (mayBeNone ? 0 : 1))
+            {
+                throw new ArgumentException($"{name} is a whole number{(mayBeNone ? "" : " above 0")}, not {value}");
+            }
+        }
+
         (string Rule, bool Holds)[] rules =
         [
-            ("every limit is above 0, but for the transfers and the detail",
-                BufferedBytesBudget > 0 && ChunkBytes > 0 && MaximumChunkRuns > 0
-                && MaximumEnvelopeBytes > 0 && MaximumPayloadBytes > 0 && WindowBytes > 0
-                && MaximumAnsweringCalls > 0 && MaximumDetailBytes >= 0 && MaximumTransfers >= 0),
             ("an envelope is 64 bytes at least", MaximumEnvelopeBytes >= 64),
             ("a chunk's envelope is 64 bytes at least, and an envelope at most",
                 ChunkBytes >= 64 && ChunkBytes <= MaximumEnvelopeBytes),

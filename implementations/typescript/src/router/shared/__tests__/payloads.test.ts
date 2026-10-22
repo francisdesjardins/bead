@@ -56,11 +56,15 @@ test.describe('the json codec', () => {
       ).toEqual(['SyntaxError', words]);
     }
 
-    expect(
-      refusalOf(() => {
-        return PAYLOAD_CODECS.json.decode(utf8('[1,]'));
-      })?.[1]
-    ).toMatch(/^the payload is not JSON: /);
+    // * the rest JSON.parse's words, after the codec's own
+    for (const text of ['', '[1,]']) {
+      expect(
+        refusalOf(() => {
+          return PAYLOAD_CODECS.json.decode(utf8(text));
+        }),
+        text
+      ).toEqual(['SyntaxError', expect.stringMatching(/^the payload is not JSON: /)]);
+    }
   });
 
   test('refuses a string never closed as not JSON, its scan bounded by the text', () => {

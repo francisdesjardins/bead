@@ -45,15 +45,24 @@ const answeredOf = (
 test.describe('createMetricsRegistry', () => {
   test('writes a lone surrogate in a name as U+FFFD, as spec 7.4 writes a detail', () => {
     const registry = createMetricsRegistry();
+    const client = registry.attach('client');
 
-    registry
-      .attach('client')
-      .declareNotification({ ...echo, procedureName: 'a\uD800b' })
-      .heard();
+    client.declareNotification({ ...echo, procedureName: 'a\uD800b' });
+    client.declareNotification({ ...echo, procedureId: 2, procedureName: 'c\uDC00' });
+    client.declareNotification({ ...echo, procedureId: 3, procedureName: '😀' });
 
-    expect(registry.exposition().text).toContain(
-      'bead_notifications_heard_total{service="2",procedure="a�b"} 1\n'
-    );
+    expect(
+      registry
+        .exposition()
+        .text.split('\n')
+        .filter((line) => {
+          return line.startsWith('bead_notifications_heard_total{');
+        })
+    ).toEqual([
+      'bead_notifications_heard_total{service="2",procedure="a�b"} 0',
+      'bead_notifications_heard_total{service="2",procedure="c�"} 0',
+      'bead_notifications_heard_total{service="2",procedure="😀"} 0',
+    ]);
   });
 
   // spec 16.7
@@ -97,6 +106,55 @@ test.describe('createMetricsRegistry', () => {
       )
     );
     expect(registry.exposition().text).toBe(before);
+
+    // refused, it declared nothing: its address is free for its own name, in other families
+    metrics.declareRequester({ ...echo, procedureId: 3, procedureName: 'slow' });
+
+    expect(registry.exposition().text.split('\n')).toContain(
+      'bead_client_call_started_total{service="2",procedure="slow",type="command"} 0'
+    );
+  });
+
+  // spec 16.7
+  test('refuses a name its service holds at another address in another case, declaring nothing', () => {
+    const registry = createMetricsRegistry();
+    const metrics = registry.attach('server');
+
+    metrics.declareResolver({ ...echo, procedureName: 'getHTTPStatus' }, { notifies: false });
+
+    expect(() => {
+      return metrics.declareRequester({ ...echo, procedureId: 2, procedureName: 'getHttpStatus' });
+    }).toThrow(
+      new ProgrammerError(
+        'the metrics registry holds "getHTTPStatus" at 2/1, and is given "getHttpStatus" at 2/2: its name at another address'
+      )
+    );
+
+    // refused, it declared nothing: the address takes another name, and another service holds
+    // the name
+    metrics.declareResolver(
+      { ...echo, procedureId: 2, procedureName: 'fail' },
+      { notifies: false }
+    );
+    metrics.declareResolver(
+      { ...echo, procedureName: 'getHttpStatus', serviceId: 3 },
+      { notifies: false }
+    );
+
+    expect(
+      registry
+        .exposition()
+        .text.split('\n')
+        .filter((line) => {
+          return (
+            line.startsWith('bead_server_call_started_total{service="') && !line.includes('_OTHER')
+          );
+        })
+    ).toEqual([
+      'bead_server_call_started_total{service="2",procedure="getHTTPStatus",type="request"} 0',
+      'bead_server_call_started_total{service="2",procedure="fail",type="request"} 0',
+      'bead_server_call_started_total{service="3",procedure="getHttpStatus",type="request"} 0',
+    ]);
   });
 
   // spec 16.7
@@ -206,7 +264,7 @@ test.describe('createMetricsRegistry', () => {
   test('refuses a ceiling that is not a whole number above 0, and names 1,000 procedures by default', () => {
     expect(METRICS_REGISTRY_DEFAULTS).toEqual({ maximumProcedures: 1_000 });
 
-    for (const maximumProcedures of [0, 1.5, Number.NaN, Infinity]) {
+    for (const maximumProcedures of [0, -1, 1.5, Number.NaN, Infinity]) {
       expect(() => {
         return createMetricsRegistry({ maximumProcedures });
       }, String(maximumProcedures)).toThrow(

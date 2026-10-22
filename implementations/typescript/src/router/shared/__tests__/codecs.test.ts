@@ -284,6 +284,19 @@ test.describe('the codecs', () => {
           return name;
         })
     ).toEqual(["a string's leading U+FEFF", 'an object naming a member twice']);
+
+    // * each value one no JavaScript value holds, which this side cannot build; the payload, protobuf-es's
+    // own reading, which the test below holds
+    for (const entry of CODECS.values.filter((value) => {
+      return isExcused(value);
+    })) {
+      expect(
+        thrownBy(() => {
+          return valueOf(entry);
+        }),
+        entry.name
+      ).toBeInstanceOf(Error);
+    }
   });
 
   test('plays every encoding of the file through a codec of its own, and no other', () => {
@@ -297,7 +310,7 @@ test.describe('the codecs', () => {
   });
 
   for (const entry of CODECS.payloads) {
-    test(`payloads: ${entry.name}`, () => {
+    test(`reads each payload, then refuses it or writes back its bytes, handing on the value of its canonical form: ${entry.name}`, () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       if (entry.encoding === 'proto') {
@@ -337,7 +350,7 @@ test.describe('the codecs', () => {
   }
 
   for (const entry of CODECS.values) {
-    test(`values: ${entry.name}`, () => {
+    test(`writes each value given in its form to its bytes, or refuses it: ${entry.name}`, () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       const codec = CODECS_BY_ENCODING[entry.encoding] as IPayloadCodec<unknown>;

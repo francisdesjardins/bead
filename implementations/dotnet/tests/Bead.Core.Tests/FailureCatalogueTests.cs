@@ -26,6 +26,7 @@ public sealed class FailureCatalogueTests
         };
 
         Assert.True(GreeterProcedures.Failures.Is(greeter, SayHelloFailure.NobodyToGreet));
+        Assert.False(GreeterProcedures.Failures.Is(greeter, new TooLoud()));
         Assert.False(GreeterProcedures.Failures.Is(other, SayHelloFailure.NobodyToGreet));
         Assert.False(GreeterProcedures.Failures.Is(protocol, SayHelloFailure.NobodyToGreet));
         Assert.False(GreeterProcedures.Failures.Is(received, SayHelloFailure.NobodyToGreet));
@@ -47,5 +48,17 @@ public sealed class FailureCatalogueTests
         Assert.Equal((ProtocolCode.AccessDenied, "too quiet"), (AdmissionFailure.AccessDenied("too quiet").Code, AdmissionFailure.AccessDenied("too quiet").Detail));
         Assert.Equal((ProtocolCode.SessionRequired, ""), (AdmissionFailure.SessionRequired().Code, AdmissionFailure.SessionRequired().Detail));
         Assert.Equal(Failure.OfProtocol(ProtocolCode.AccessDenied, "too quiet"), AdmissionFailure.AccessDenied("too quiet").Failure);
+    }
+
+    // another failure of the greeter's service, of another code
+    private sealed class TooLoud : IApplicationFailure
+    {
+        public ushort Code
+        {
+            get
+            {
+                return 2;
+            }
+        }
     }
 }

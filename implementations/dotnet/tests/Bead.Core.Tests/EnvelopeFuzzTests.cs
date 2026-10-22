@@ -139,6 +139,13 @@ public sealed class EnvelopeFuzzTests
 
     // definition
 
+    /// <summary>The vectors hold the bytes the mutations start from.</summary>
+    [Fact]
+    public void Finds_the_vectors_bytes()
+    {
+        Assert.True(Seeds.Count > 100, "the vectors hold their bytes");
+    }
+
     /// <summary>The readers return or refuse with a failure for every mutation of a vector.</summary>
     /// <param name="seed">The generator's seed.</param>
     [Theory]
@@ -147,8 +154,6 @@ public sealed class EnvelopeFuzzTests
     public void Reads_or_refuses_with_a_failure_every_mutation_of_a_vector(int seed)
     {
         var random = new Random(seed);
-
-        Assert.True(Seeds.Count > 100, "the vectors hold their bytes");
 
         for (var count = 0; count < Inputs; count++)
         {

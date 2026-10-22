@@ -84,6 +84,7 @@ test.describe('createServiceManager', () => {
     test('hands the callback a frozen, decoded request, and sends its answer back', async () => {
       const { calls, router } = createFakeRouter();
       const manager = createServiceManager(router);
+      const handed: unknown[] = [];
       let frozen = false;
 
       const resolver = manager.getRequestResolver(echo, { serializer: serverSerializer })((
@@ -91,6 +92,7 @@ test.describe('createServiceManager', () => {
         response
       ) => {
         frozen = Object.isFrozen(request);
+        handed.push(request.payload, request.connectionHandle, request.header);
 
         return response({ text: `${request.payload.text}!` });
       });
@@ -98,6 +100,8 @@ test.describe('createServiceManager', () => {
       await resolver(propsOf(encode({ text: 'hi' })));
 
       expect(frozen).toBe(true);
+      expect(handed).toEqual([{ text: 'hi' }, connectionHandle, header]);
+      expect(handed[2]).toBe(header);
       expect(calls.respond).toEqual([
         { request: { connectionHandle, header }, response: { payload: encode({ text: 'hi!' }) } },
       ]);
@@ -171,10 +175,12 @@ test.describe('createServiceManager', () => {
       const manager = createServiceManager(router);
       const reached: string[] = [];
       const seen: string[][] = [];
+      const handed: unknown[] = [];
 
       const resolver = manager.getRequestResolver(echo, {
         beforeRequest: (request) => {
           seen.push(Object.keys(request));
+          handed.push(request);
 
           return request.header.callId === 9;
         },
@@ -192,6 +198,10 @@ test.describe('createServiceManager', () => {
       expect(seen).toEqual([
         ['connectionHandle', 'header', 'session'],
         ['connectionHandle', 'header', 'session'],
+      ]);
+      expect(handed).toEqual([
+        { connectionHandle, header, session: undefined },
+        { connectionHandle, header: { ...header, callId: 9 }, session: undefined },
       ]);
       expect(calls.respond[0]?.response).toEqual({ failure: SERVER_FAILURES.accessDenied });
     });

@@ -35,6 +35,8 @@ public sealed class MetricsRegistryTests
         server.DeclareResolver(Echo, false);
         server.DeclareResolver(Echo with { ProcedureId = 2, ProcedureName = "fail" }, false);
 
+        var before = registry.Exposition().Text;
+
         Assert.Equal(
             "the metrics registry holds 1/1 as \"echo\", and is given \"other\": another name at its address (Parameter 'procedure')",
             RefusalOf(() =>
@@ -48,11 +50,19 @@ public sealed class MetricsRegistryTests
                 server.DeclareResolver(Echo with { ProcedureId = 3 }, false);
             }));
         Assert.Equal(
+            "the metrics registry holds \"echo\" at 1/1, and is given \"ECHO\" at 1/3: its name at another address (Parameter 'procedure')",
+            RefusalOf(() =>
+            {
+                server.DeclareRequester(Echo with { ProcedureId = 3, ProcedureName = "ECHO" });
+            }));
+        Assert.Equal(
             "the metrics registry's server families name 2 procedures at most, and 1/3 is one more: past the ceiling (Parameter 'procedure')",
             RefusalOf(() =>
             {
                 server.DeclareResolver(Echo with { ProcedureId = 3, ProcedureName = "slow" }, false);
             }));
+
+        Assert.Equal(before, registry.Exposition().Text);
 
         // refused, it declared nothing: its address is free for its own name, in other families
         server.DeclareRequester(Echo with { ProcedureId = 3, ProcedureName = "slow" });
@@ -91,6 +101,37 @@ public sealed class MetricsRegistryTests
             {
                 return line.StartsWith("bead_server_call_started_total{service=\"", StringComparison.Ordinal) && !line.Contains("_OTHER", StringComparison.Ordinal);
             }));
+    }
+
+    // spec 16.7
+    [Fact]
+    public void Folds_ASCII_letters_alone_as_it_compares_names_a_name_outside_ASCII_its_own_and_takes_a_name_at_its_address_exactly()
+    {
+        var server = new MetricsRegistry().Give(RouterSide.Server);
+
+        void Resolve(ushort procedureId, string procedureName)
+        {
+            server.DeclareResolver(Echo with { ProcedureId = procedureId, ProcedureName = procedureName }, false);
+        }
+
+        Resolve(1, "caf\u00e9");
+        Resolve(2, "caf\u00c9");
+        Resolve(3, "key");
+        Resolve(4, "\u212aey");
+        server.DeclareRequester(Echo with { ProcedureName = "caf\u00e9" });
+
+        Assert.Equal(
+            "the metrics registry holds 1/1 as \"caf\u00e9\", and is given \"CAF\u00e9\": another name at its address (Parameter 'procedure')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                server.DeclareRequester(Echo with { ProcedureName = "CAF\u00e9" });
+            }).Message);
+        Assert.Equal(
+            "the metrics registry holds \"key\" at 1/3, and is given \"KEY\" at 1/5: its name at another address (Parameter 'procedure')",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                Resolve(5, "KEY");
+            }).Message);
     }
 
     // spec 16.7
@@ -239,12 +280,17 @@ public sealed class MetricsRegistryTests
     public void Refuses_a_ceiling_that_is_not_a_whole_number_above_0_and_names_1000_procedures_by_default()
     {
         Assert.Equal(1_000, new MetricsRegistryOptions().MaximumProcedures);
-        Assert.Equal(
-            "MaximumProcedures is a whole number above 0, not 0 (Parameter 'options')",
-            Assert.Throws<ArgumentException>(() =>
-            {
-                return new MetricsRegistry(new MetricsRegistryOptions { MaximumProcedures = 0 });
-            }).Message);
+
+        foreach (var maximumProcedures in new[] { 0, -1 })
+        {
+            Assert.Equal(
+                $"MaximumProcedures is a whole number above 0, not {maximumProcedures} (Parameter 'options')",
+                Assert.Throws<ArgumentException>(() =>
+                {
+                    return new MetricsRegistry(new MetricsRegistryOptions { MaximumProcedures = maximumProcedures });
+                }).Message);
+        }
+
         Assert.Equal(new MetricsExposition("text/plain; version=0.0.4; charset=utf-8", ""), new MetricsRegistry().Exposition());
     }
 
@@ -273,7 +319,7 @@ public sealed class MetricsRegistryTests
             });
         });
 
-        Assert.Contains(": its name at another address", renamed.Message, StringComparison.Ordinal);
+        Assert.Contains("its name at another address", renamed.Message, StringComparison.Ordinal);
 
         // registered nothing: its address is free, for its own name
         services.GetRequestResolver(Echo with { ProcedureId = 2, ProcedureName = "twice" }, dependencies)((_, response) =>
@@ -281,7 +327,7 @@ public sealed class MetricsRegistryTests
             return response.Answer("twice");
         });
         Assert.Contains(
-            ": another name at its address",
+            "another name at its address",
             Assert.Throws<ArgumentException>(() =>
             {
                 return services.GetCommand(Echo with { ProcedureName = "clock" }, new RequestDependencies<string, string> { Serializer = new Texts() });

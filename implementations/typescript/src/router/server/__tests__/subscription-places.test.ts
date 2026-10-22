@@ -160,6 +160,14 @@ test.describe('createSubscriptionPlaces', () => {
   });
 
   test('an undo hands the place over, to a connection still open that holds none', () => {
+    const stillOpen = createPlaces();
+
+    stillOpen.places.subscribe({ callId: 3, connectionHandle: first }, news);
+    stillOpen.places.settle({ callId: 5, connectionHandle: first }, subscribing);
+    stillOpen.places.settle({ callId: 3, connectionHandle: first }, subscribing)?.();
+
+    expect(stillOpen.held()).toEqual([5]);
+
     const { held, open, places } = createPlaces();
     const holder = { callId: 3, connectionHandle: first };
 
@@ -213,21 +221,26 @@ test.describe('createSubscriptionPlaces', () => {
   });
 
   test('holds a place a procedure for each session of a connection, and drop gives a session’s own: its connection’s, or a credential’s by its identifier', () => {
-    const { places } = createPlaces();
+    const { held, places } = createPlaces();
     const grace = { id: 'grace', scheme: CredentialScheme.ELSEWHERE } as const;
+    const inGrace = (callId: number) => {
+      return { callId, connectionHandle: first, identifier: { ...grace } };
+    };
 
-    for (const call of [
-      { callId: 21, connectionHandle: first, identifier: grace },
-      { callId: 23, connectionHandle: first },
-      { callId: 25, connectionHandle: first, identifier: { ...grace } },
-    ]) {
-      places.settle(call, subscribing);
-    }
+    places.settle({ callId: 1, connectionHandle: first }, subscribing);
+    places.settle(inGrace(3), subscribing);
+    places.settle(inGrace(5), { ...subscribing, procedure: other });
+    // a later call of a session that holds its place holds nothing more
+    places.settle(inGrace(7), subscribing);
 
-    expect(callIdsOf(places.drop({ connectionHandle: first }))).toEqual([23]);
+    expect(held()).toEqual([1, 3, 5]);
+    expect(callIdsOf(places.drop({ connectionHandle: first }))).toEqual([1]);
     expect(callIdsOf(places.drop({ connectionHandle: first, identifier: { ...grace } }))).toEqual([
-      21,
+      3, 5,
     ]);
+    expect(places.drop({ connectionHandle: first, identifier: { ...grace, id: 'Grace' } })).toEqual(
+      []
+    );
   });
 
   test('drop gives the established and the waiting, never one in flight, and no call waits after', () => {
@@ -298,16 +311,12 @@ test.describe('createSubscriptionPlaces', () => {
     places.subscribe({ callId: 5, connectionHandle: first }, news);
     places.settle({ callId: 5, connectionHandle: first }, subscribing);
 
-    expect(places.gauges()).toMatchObject({
-      connectionHandles: new Set([first]),
-      counts: { subscriptionsInFlight: 1, subscriptionsWaiting: 1 },
-    });
+    expect(places.gauges().connectionHandles).toEqual(new Set([first]));
+    expect(places.gauges().counts).toEqual({ subscriptionsInFlight: 1, subscriptionsWaiting: 1 });
 
     places.clear(first);
 
-    expect(places.gauges()).toMatchObject({
-      connectionHandles: new Set(),
-      counts: { subscriptionsInFlight: 0, subscriptionsWaiting: 0 },
-    });
+    expect(places.gauges().connectionHandles).toEqual(new Set());
+    expect(places.gauges().counts).toEqual({ subscriptionsInFlight: 0, subscriptionsWaiting: 0 });
   });
 });

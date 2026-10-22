@@ -60,6 +60,11 @@ public sealed class MetricsRegistry
     // what a lone surrogate is written as: U+FFFD, REPLACEMENT CHARACTER
     private const char Replacement = (char)0xFFFD;
 
+    // each group of families, as a declaration past its ceiling names it
+    private const string ClientFamilies = "client families";
+    private const string NotificationFamilies = "notification families";
+    private const string ServerFamilies = "server families";
+
     // the families, in the order of their names, each with its type and its help (8.1)
     private const string ClientDuration = "bead_client_call_duration_seconds";
     private const string ClientHandled = "bead_client_call_handled_total";
@@ -205,7 +210,7 @@ public sealed class MetricsRegistry
     // one by spec 16.6; or one procedure past a group's ceiling. Its service at another revision
     // takes the same series, which no label tells apart (8.1). Under the lock; a declaration refused
     // declares nothing
-    private void Declare(Procedure procedure, (HashSet<ProcedureAddress> Keys, string What)[] groups)
+    private void Declare(Procedure procedure, (HashSet<ProcedureAddress> Addresses, string What)[] groups)
     {
         var address = procedure.Address;
         var name = procedure.ProcedureName;
@@ -213,7 +218,7 @@ public sealed class MetricsRegistry
         if (_names.TryGetValue(address, out var held) && !string.Equals(held, name, StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                string.Create(CultureInfo.InvariantCulture, $"the metrics registry holds {address.ServiceId}/{address.ProcedureId} as \"{held}\", and is given \"{name}\": another name at its address"),
+                string.Create(CultureInfo.InvariantCulture, $"the metrics registry holds {address.ServiceId}/{address.ProcedureId} as {DebugFilter.QuotedOf(held)}, and is given {DebugFilter.QuotedOf(name)}: another name at its address"),
                 nameof(procedure));
         }
 
@@ -222,14 +227,14 @@ public sealed class MetricsRegistry
             if (other.ServiceId == address.ServiceId && other != address && Identity.AreOneName(otherName, name))
             {
                 throw new ArgumentException(
-                    string.Create(CultureInfo.InvariantCulture, $"the metrics registry holds \"{otherName}\" at {other.ServiceId}/{other.ProcedureId}, and is given \"{name}\" at {address.ServiceId}/{address.ProcedureId}: its name at another address"),
+                    string.Create(CultureInfo.InvariantCulture, $"the metrics registry holds {DebugFilter.QuotedOf(otherName)} at {other.ServiceId}/{other.ProcedureId}, and is given {DebugFilter.QuotedOf(name)} at {address.ServiceId}/{address.ProcedureId}: its name at another address"),
                     nameof(procedure));
             }
         }
 
-        foreach (var (keys, what) in groups)
+        foreach (var (addresses, what) in groups)
         {
-            if (!keys.Contains(address) && keys.Count >= _maximumProcedures)
+            if (!addresses.Contains(address) && addresses.Count >= _maximumProcedures)
             {
                 throw new ArgumentException(
                     string.Create(CultureInfo.InvariantCulture, $"the metrics registry's {what} name {_maximumProcedures} procedures at most, and {address.ServiceId}/{address.ProcedureId} is one more: past the ceiling"),
@@ -239,9 +244,9 @@ public sealed class MetricsRegistry
 
         _names[address] = name;
 
-        foreach (var (keys, _) in groups)
+        foreach (var (addresses, _) in groups)
         {
-            keys.Add(address);
+            addresses.Add(address);
         }
     }
 
@@ -471,7 +476,7 @@ public sealed class MetricsRegistry
 
         lock (_gate)
         {
-            Declare(procedure, notifies ? [(_server, "server families"), (_notification, "notification families")] : [(_server, "server families")]);
+            Declare(procedure, notifies ? [(_server, ServerFamilies), (_notification, NotificationFamilies)] : [(_server, ServerFamilies)]);
 
             var calls = CallsHeld((CallRole.Server, procedure.Address), side);
 
@@ -501,7 +506,7 @@ public sealed class MetricsRegistry
     {
         lock (_gate)
         {
-            Declare(procedure, [(_client, "client families")]);
+            Declare(procedure, [(_client, ClientFamilies)]);
 
             return CallsHeld((CallRole.Client, procedure.Address), side);
         }
@@ -515,7 +520,7 @@ public sealed class MetricsRegistry
     {
         lock (_gate)
         {
-            Declare(procedure, [(_notification, "notification families")]);
+            Declare(procedure, [(_notification, NotificationFamilies)]);
 
             var address = procedure.Address;
             var dropped = DroppedOf(address);

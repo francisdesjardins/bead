@@ -74,8 +74,9 @@ public sealed class CallSessionTests
 
         Assert.Null(presented);
         Assert.Null(carried);
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, refusal!.Code);
-        Assert.Equal(FailureScope.Protocol, refusal.Scope);
+        Assert.Equal(
+            ((ushort)ProtocolCode.SessionRequired, FailureScope.Protocol, "no session is known for OPAQUE to stand for"),
+            (refusal!.Code, refusal.Scope, refusal.Detail));
     }
 
     [Fact]

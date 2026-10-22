@@ -157,7 +157,7 @@ public sealed class IdentitiesTests
                 return declare(procedure, (client, server));
             });
 
-            Assert.Contains($" is {refused}", refusal.Message, StringComparison.Ordinal);
+            Assert.Contains(refused, refusal.Message, StringComparison.Ordinal);
             await declare(Echo, (client, server)).WaitAsync(Cancelled);
         }
     }
@@ -251,13 +251,11 @@ public sealed class IdentitiesTests
     {
         var entry = EntryOf(("folds", name));
         var names = entry.GetProperty("names");
+        var (one, other) = (names[0].GetString()!, names[1].GetString()!);
+        var isOne = entry.GetProperty("one").GetBoolean();
 
-        Assert.Equal(
-            entry.GetProperty("one").GetBoolean(),
-            Identity.AreOneName(names[0].GetString()!, names[1].GetString()!));
-        Assert.Equal(
-            entry.GetProperty("one").GetBoolean(),
-            Identity.AreOneName(names[1].GetString()!, names[0].GetString()!));
+        // either way round
+        Assert.Equal((isOne, isOne), (Identity.AreOneName(one, other), Identity.AreOneName(other, one)));
     }
 
     [Fact]

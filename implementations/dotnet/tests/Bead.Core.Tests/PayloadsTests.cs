@@ -158,6 +158,7 @@ public sealed class PayloadsTests
         Assert.Equal("{\"a\":1,\"b\":[-1.5,\"x\"]}", Payloads.ReadJson("{\"a\":1,\"b\":[-1.5,\"x\"]}"u8.ToArray()).GetRawText());
         Assert.Equal("1", Payloads.ReadJson("1.0"u8.ToArray()).GetRawText());
         Assert.Equal("0", Payloads.ReadJson("-0"u8.ToArray()).GetRawText());
+        Assert.Equal("[0,{\"a\":0}]", Payloads.ReadJson("[-0,{\"a\":-0}]"u8.ToArray()).GetRawText());
         Assert.Equal("12345678901234567000", Payloads.ReadJson("12345678901234567890"u8.ToArray()).GetRawText());
         Assert.Equal(1, Payloads.ReadJson("1.0"u8.ToArray()).GetInt32());
 

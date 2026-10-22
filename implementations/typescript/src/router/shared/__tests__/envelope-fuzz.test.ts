@@ -147,7 +147,7 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
   });
 
   for (const seed of [1, 2]) {
-    test(`return or refuse with a failure, seed ${String(seed)}`, () => {
+    test(`read or refuse with a failure every mutation of a vector, seed ${String(seed)}`, () => {
       const below = generatorOf(seed);
       const defects: (string | undefined)[] = [];
 

@@ -22,6 +22,16 @@ public sealed class SessionTokenTests
         Assert.Equal(Text, token.ToString());
         Assert.Equal(token, SessionToken.Parse(Text));
         Assert.Equal(Bytes, written);
+
+        // the characters base64 has that base64url replaces
+        var highBytes = Enumerable.Repeat((byte)0xFB, SessionToken.Bytes).ToArray();
+        var high = SessionToken.FromBytes(highBytes);
+        var highWritten = new byte[SessionToken.Bytes];
+
+        SessionToken.Parse("-_v7-_v7-_v7-_v7-_v7-w").CopyTo(highWritten);
+
+        Assert.Equal("-_v7-_v7-_v7-_v7-_v7-w", high.ToString());
+        Assert.Equal(highBytes, highWritten);
     }
 
     [Fact]
@@ -44,6 +54,7 @@ public sealed class SessionTokenTests
     }
 
     [Theory]
+    [InlineData(0)]
     [InlineData(15)]
     [InlineData(17)]
     public void Refuses_bytes_of_another_length(int length)
@@ -76,6 +87,16 @@ public sealed class SessionTokenTests
     public void Refuses_text_that_spells_no_token(string? text)
     {
         Assert.False(SessionToken.IsSessionToken(text));
+    }
+
+    [Theory]
+    [InlineData('A')]
+    [InlineData('Q')]
+    [InlineData('g')]
+    [InlineData('w')]
+    public void Takes_as_its_last_character_each_one_that_spells_16_bytes_whole(char last)
+    {
+        Assert.True(SessionToken.IsSessionToken($"AAECAwQFBgcICQoLDA0OD{last}"));
     }
 
     [Fact]

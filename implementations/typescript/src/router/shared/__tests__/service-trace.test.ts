@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { createTestClock } from '../../../transport/shared/__tests__/fixtures';
@@ -46,35 +45,11 @@ test.describe('createServiceManager', () => {
 
     // debugging 4.1, 4.1.1, 4.1.2, 4.1.3, 4.1.4, 4.1.6 and 4.1.8
     test('tells each step of a request, with copies and, once answered, a duration', async () => {
-      const manager = createServiceManager(createFakeRouter().router);
-      const seen = recordDebug(manager);
-      const payload = { text: 'hello' };
-
-      await manager.getRequest(echo, { serializer })(payload)();
-      payload.text = 'changed after';
-
-      expect(
-        seen.map(({ info }) => {
-          return [info.direction, info.type, info.tx, info.rx];
-        })
-      ).toEqual([
-        ['tx', 'request', { text: 'hello' }, undefined],
-        ['rx', 'request', { text: 'hello' }, { text: 'hello' }],
-      ]);
-      expect(seen[0]?.info.duration).toBeUndefined();
-      expect(seen[1]?.info.duration).toBeGreaterThanOrEqual(0);
-      expect(seen[1]?.info.duration).toBeLessThan(1_000);
-      expect(seen[1]?.info).toMatchObject({
-        procedureId: 1,
-        procedureName: 'echo',
-        serviceId: 2,
-        serviceRevision: 3,
-      });
-
       const clock = createTestClock(1_000);
       const { control, router } = createFakeRouter('server', clock);
-      const timed = createServiceManager(router);
-      const steps = recordDebug(timed);
+      const manager = createServiceManager(router);
+      const steps = recordDebug(manager);
+      const payload = { text: 'hello' };
 
       control.answer = (bytes) => {
         clock.tick(30);
@@ -82,7 +57,10 @@ test.describe('createServiceManager', () => {
         return Promise.resolve(answerOf(bytes));
       };
 
-      await timed.getRequest(echo, { serializer })({ text: 'hello' })();
+      await manager.getRequest(echo, { serializer })(payload)();
+
+      // * a copy: the call's value changed after it, its steps tell it as it went
+      payload.text = 'changed after';
 
       const sent = {
         callId: 7,
@@ -354,9 +332,8 @@ test.describe('createServiceManager', () => {
           await readingsOf(() => {
             return resolver.notify({ text: 'news' });
           }),
-          await readingsOf(async () => {
-            client.deliver(echo, { text: 'news' });
-            await sleep(0);
+          await readingsOf(() => {
+            return client.delivered(echo, { text: 'news' });
           }),
         ];
       };

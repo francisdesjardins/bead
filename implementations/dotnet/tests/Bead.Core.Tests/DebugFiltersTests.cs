@@ -188,6 +188,16 @@ public sealed class DebugFiltersTests
                     return DebugFilter.Parse(filter);
                 })));
 
+            // refused as a listener's filter too, as it is made
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return DebugFilters.FilterDebug(
+                    (_, _) =>
+                    {
+                    },
+                    filter);
+            });
+
             return;
         }
 

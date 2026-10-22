@@ -119,7 +119,8 @@ test.describe('violationsOf', () => {
     const firstLine = detail.indexOf('\n');
 
     expect(readOf(detail)).toEqual({ more: 3, violations: [FROM, NAME] });
-    // cut inside its second line, the first whole; after the first, its line feed kept or not
+    // cut inside its second line, as a reader's lower bound cuts it (spec 7.3), the first whole;
+    // after the first, its line feed kept or not
     expect(readOf(detail.slice(0, firstLine + 20))).toEqual({ violations: [FROM] });
     expect(readOf(detail.slice(0, firstLine + 1))).toEqual({ violations: [FROM] });
     expect(readOf(detail.slice(0, firstLine))).toEqual({ violations: [FROM] });
@@ -141,6 +142,10 @@ test.describe('violationsOf', () => {
     expect(readOf(whole.slice(0, 10))).toEqual({ violations: [] });
     expect(readOf(`{"error":"invalid"}\n${whole}`)).toEqual({ violations: [] });
     expect(readOf('{"error":"invalid"}\n{"more":0}')).toEqual({ violations: [] });
+    // a line of another form first: the lines after it are not read
+    expect(readOf('{"error":"invalid"}\n{"ruleId":"required"}\n{"more":0}')).toEqual({
+      violations: [],
+    });
     expect(readOf('[1,2,3]')).toEqual({ violations: [] });
     // a line of 18.3's members but its ruleId, which every violation has, or with one of another type
     expect(readOf('{"fieldPath":"from"}\n{"more":0}')).toEqual({ violations: [] });
@@ -171,6 +176,10 @@ test.describe('violationsOf', () => {
         scope: FailureScope.APPLICATION,
       })
     ).toEqual({ violations: [] });
+    expect(readOf('{"ruleId":"required"}\n{"more":0}')).toEqual({
+      more: 0,
+      violations: [{ ruleId: 'required' }],
+    });
     // and PAYLOAD_INVALID's, of the protocol, its violations
     expect(readOf(whole)).toEqual({ more: 0, violations: [FROM] });
   });

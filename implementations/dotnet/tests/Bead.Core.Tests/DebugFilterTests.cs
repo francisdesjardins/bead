@@ -203,19 +203,17 @@ public sealed class DebugFilterTests
         {
             return Assert.Throws<ArgumentException>(() =>
             {
-                return DebugFilters.FilterEnvelopeDebug(UnheardEnvelope, filter);
+                return DebugFilters.FilterDebug(Unheard, filter);
             }).Message;
         }
 
+        Assert.Equal("a debug filter takes a type among request, command, notification, not \"5\"", RefusalOf(new DebugFilter { Types = [(DebugType)5] }));
         Assert.Equal("a debug filter takes a direction among rx, tx, not \"7\"", RefusalOf(new DebugFilter { Directions = [(DebugDirection)7] }));
         Assert.Equal(
-            "a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not \"9\"",
-            RefusalOf(new DebugFilter { Kinds = [(EnvelopeKind)9] }));
-        Assert.Equal(
-            "a debug filter takes a type among request, command, notification, not \"5\"",
+            "a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not \"153\"",
             Assert.Throws<ArgumentException>(() =>
             {
-                return DebugFilters.FilterDebug(Unheard, new DebugFilter { Types = [(DebugType)5] });
+                return DebugFilters.FilterEnvelopeDebug(UnheardEnvelope, new DebugFilter { Kinds = [(EnvelopeKind)0x99] });
             }).Message);
     }
 
@@ -283,7 +281,7 @@ public sealed class DebugFilterTests
     }
 
     [Fact]
-    public void Takes_a_filter_as_it_is_its_values_checked_once_as_it_is_given()
+    public void Takes_a_filter_given_whole_its_values_checked_once_as_it_is_given()
     {
         Assert.Equal(
             ["getStatus tx request"],

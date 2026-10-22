@@ -10,6 +10,8 @@ namespace Bead;
 /// </summary>
 public sealed class FailureException : Exception
 {
+    private readonly IEnvelopeHeader? _header;
+
     /// <summary>A failure raised or received, with the side that raised it and where.</summary>
     public FailureException(Failure failure, FailureException.Raised raised)
     {
@@ -77,8 +79,22 @@ public sealed class FailureException : Exception
     /// <summary>The side that raised it; none through a relay.</summary>
     public RouterSide? Side { get; }
 
-    /// <summary>The envelope that said it, its credential left out; none for a failure raised before any.</summary>
-    public IEnvelopeHeader? Header { get; init; }
+    /// <summary>
+    /// The envelope that said it, kept redacted: its credential's scheme alone in place of its
+    /// credential, whatever header it is given; none for a failure raised before any.
+    /// </summary>
+    public IEnvelopeHeader? Header
+    {
+        get
+        {
+            return _header;
+        }
+
+        init
+        {
+            _header = value is null ? null : RouterCore.Redact(value);
+        }
+    }
 
     /// <summary>The procedure the call asked for, which a failure envelope does not repeat.</summary>
     public ProcedureAddress? ProcedureAddress { get; init; }

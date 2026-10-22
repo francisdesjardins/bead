@@ -89,16 +89,25 @@ const KIND_NAMES = new Map(
   })
 );
 
-// each reason of the file, by how the TypeScript side's refusal opens
-const REASONS: readonly [opening: string, reason: string][] = [
+// the first words of each refusal's sentence, this side's own, by the reason it gives; the value or
+// the word it names follows, quoted as JSON
+const REASONS: readonly [words: string, reason: string][] = [
   ["a debug filter's selector names a value, not ", 'selector empty'],
   ["a debug filter's selector leaves no value empty, not ", 'value empty'],
-  ['a debug filter holds a parenthesis', 'holds a parenthesis'],
-  ['a debug filter takes a ', 'names nothing'],
+  ['a debug filter takes a direction among rx, tx, not ', 'names nothing'],
+  [
+    'a debug filter takes a type among request, command, notification, r, c, n, not ',
+    'names nothing',
+  ],
+  [
+    'a debug filter takes a kind among request, result, failure, notification, chunk, credit, cancel, not ',
+    'names nothing',
+  ],
+  [
+    'a debug filter holds a parenthesis in a selector alone, d(…), t(…) or e(…), not ',
+    'holds a parenthesis',
+  ],
 ];
-
-// what a refusal names, as JSON quotes it, at its end
-const WRITTEN = /, not ("(?:[^"\\]|\\.)*")$/;
 
 // helpers
 
@@ -132,14 +141,13 @@ const refusalOf = (error: unknown): { reason: string; written: string } | undefi
     return undefined;
   }
 
-  const reason = REASONS.find(([opening]) => {
-    return error.message.startsWith(opening);
-  })?.[1];
-  const written = WRITTEN.exec(error.message)?.[1];
+  const found = REASONS.find(([words]) => {
+    return error.message.startsWith(words);
+  });
 
-  return reason === undefined || written === undefined
+  return found === undefined
     ? undefined
-    : { reason, written: JSON.parse(written) as string };
+    : { reason: found[1], written: JSON.parse(error.message.slice(found[0].length)) as string };
 };
 
 /** The indices of the fixtures a listener filtered by `filter` hears, of each kind. */

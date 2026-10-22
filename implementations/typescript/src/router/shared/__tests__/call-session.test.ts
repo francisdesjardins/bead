@@ -120,6 +120,7 @@ test.describe('presentedCredentialOf', () => {
       expect(thrown).toBeInstanceOf(FailureError);
       expect(thrown).toMatchObject({
         code: ProtocolCode.SESSION_REQUIRED,
+        detail: 'no session is known for OPAQUE to stand for',
         origin: 'local',
         side: failures.side,
       });

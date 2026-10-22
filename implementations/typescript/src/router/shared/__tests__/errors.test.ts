@@ -81,8 +81,16 @@ test.describe('FailureError', () => {
     expect(error.message).toBe('local client protocol failure 34 PAYLOAD_TOO_LARGE');
   });
 
-  // spec 8.1
-  test('says what it is', () => {
+  test('says a local protocol failure by its side, its code and its name', () => {
+    // an empty detail says nothing
+    expect(new FailureError({ ...SERVER_FAILURES.accessDenied, detail: '' }).message).toBe(
+      'local server protocol failure 33 ACCESS_DENIED'
+    );
+    expect(
+      new FailureError({ ...CLIENT_FAILURES.envelopeMalformed, detail: 'a call id is never 0' })
+        .message
+    ).toBe('local client protocol failure 1 ENVELOPE_MALFORMED: a call id is never 0');
+    // raised by the peer, it is not local
     expect(
       new FailureError({
         ...SERVER_FAILURES.procedureUnknown,
@@ -90,26 +98,9 @@ test.describe('FailureError', () => {
         origin: 'peer',
       }).message
     ).toBe('server protocol failure 19 PROCEDURE_UNKNOWN: no procedure 1 in service 2');
-    expect(
-      new FailureError(
-        {
-          code: 21,
-          detail: 'out of range',
-          origin: 'peer',
-          scope: FailureScope.APPLICATION,
-          side: 'server',
-        },
-        { procedureAddress: { procedureId: 1, serviceId: 2 } }
-      ).message
-    ).toBe('server application failure 21 (service 2, procedure 1): out of range');
-    expect(
-      new FailureError({
-        code: 21,
-        origin: 'peer',
-        scope: FailureScope.APPLICATION,
-        side: 'client',
-      }).message
-    ).toBe('client application failure 21');
+  });
+
+  test('says a failure relayed has no side it knows', () => {
     expect(
       new FailureError({ code: 18, origin: 'relayed', relays: 1, scope: FailureScope.PROTOCOL })
         .message
@@ -123,15 +114,40 @@ test.describe('FailureError', () => {
         scope: FailureScope.PROTOCOL,
       }).message
     ).toBe('unknown side protocol failure 18 SERVICE_UNKNOWN, through 2 relays: gone');
-    // a code no name is known for stays a number
-    expect(
-      new FailureError({ code: 23, origin: 'peer', scope: FailureScope.PROTOCOL, side: 'server' })
-        .message
-    ).toBe('server protocol failure 23');
-    // an empty detail says nothing
-    expect(new FailureError({ ...SERVER_FAILURES.accessDenied, detail: '' }).message).toBe(
-      'local server protocol failure 33 ACCESS_DENIED'
+  });
+
+  test('names no protocol code for an application failure', () => {
+    const error = new FailureError(
+      {
+        code: 21,
+        detail: 'out of range',
+        origin: 'peer',
+        scope: FailureScope.APPLICATION,
+        side: 'server',
+      },
+      { procedureAddress: { procedureId: 1, serviceId: 2 } }
     );
+
+    expect(error.message).toBe(
+      'server application failure 21 (service 2, procedure 1): out of range'
+    );
+    expect(error).toMatchObject({ code: 21, origin: 'peer', scope: FailureScope.APPLICATION });
+    expect(
+      new FailureError({
+        code: 21,
+        origin: 'peer',
+        scope: FailureScope.APPLICATION,
+        side: 'client',
+      }).message
+    ).toBe('client application failure 21');
+  });
+
+  // spec 8.1
+  test('keeps a protocol code no name has as a number', () => {
+    expect(
+      new FailureError({ code: 77, origin: 'peer', scope: FailureScope.PROTOCOL, side: 'client' })
+        .message
+    ).toBe('client protocol failure 77');
   });
 
   test('"isProtocol" matches the protocol codes, and the side when given; through a relay, the code alone', () => {

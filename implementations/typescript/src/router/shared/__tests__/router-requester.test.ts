@@ -258,7 +258,7 @@ test.describe('createRouterCore', () => {
 
   test.describe('its own requests', () => {
     test('go out on a call id of its side, naming their procedure, and nothing of a session', async () => {
-      const { activities, control, port, sent, traced } = createPort();
+      const { activities, control, port, reported, sent, traced } = createPort();
       using core = createRouterCore(port);
       const told: number[] = [];
 
@@ -298,6 +298,7 @@ test.describe('createRouterCore', () => {
         payload: Uint8Array.of(9),
       });
       expect(activities).toEqual(['request a', 'response a']);
+      expect(reported).toEqual([]);
 
       const client = createPort({ failures: CLIENT_FAILURES });
       using clientCore = createRouterCore(client.port);
@@ -333,7 +334,7 @@ test.describe('createRouterCore', () => {
       expect(client.reported).toEqual([]);
     });
 
-    test('write the destination they name', async () => {
+    test('write the destination they name, and none left out', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
 
@@ -541,7 +542,7 @@ test.describe('createRouterCore', () => {
       await expect(application).rejects.toBeInstanceOf(FailureError);
     });
 
-    test('reject a result whose transfer is past the payload’s limit, here, and cancel its call', async () => {
+    test('reject a result whose transfer is past the payload’s limit, and cancel its call', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
       const answering = core.request(new Uint8Array(0), {
@@ -586,15 +587,21 @@ test.describe('createRouterCore', () => {
 
     test('time out, and reject — never throw — what their payload or the transport fails with', async () => {
       const { control, port, sent } = createPort();
-      using core = createRouterCore(port);
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock });
+      const timing = core.request(new Uint8Array(0), {
+        connectionHandle: 'a',
+        options: { timeout: 10 },
+        procedure: echo,
+      });
 
-      await expect(
-        core.request(new Uint8Array(0), {
-          connectionHandle: 'a',
-          options: { timeout: 10 },
-          procedure: echo,
-        })
-      ).rejects.toBeInstanceOf(TimeoutError);
+      clock.tick(10);
+
+      await expect(timing).rejects.toMatchObject({
+        message: 'no answer came in 10 milliseconds',
+        name: 'TimeoutError',
+        timeout: 10,
+      });
 
       control.sendErrors.set('b', new Error('gone'));
 
@@ -664,7 +671,8 @@ test.describe('createRouterCore', () => {
       await Promise.allSettled([six, eight, twoAgain]);
 
       // each side draws its own parity by default, and a last of the other is a programmer error
-      using client = createRouterCore({ ...port, failures: CLIENT_FAILURES });
+      const clock = createTestClock();
+      using client = createRouterCore({ ...port, failures: CLIENT_FAILURES }, { clock });
       const first = client.request(new Uint8Array(0), {
         connectionHandle: 'a',
         onCallId: (callId) => {
@@ -673,6 +681,8 @@ test.describe('createRouterCore', () => {
         options: { timeout: 1 },
         procedure: echo,
       });
+
+      clock.tick(1);
 
       await expect(first).rejects.toBeInstanceOf(TimeoutError);
       expect(drawn.at(-1)).toBe(1);
@@ -708,6 +718,7 @@ test.describe('createRouterCore', () => {
       await expect(request('a')).rejects.toMatchObject({
         code: ProtocolCode.CAPACITY_EXCEEDED,
         detail: 'the calls waiting on a are 2 at most',
+        origin: 'local',
         side: 'server',
       });
       expect(drawn).toEqual([2, 4, 6]);
@@ -806,7 +817,7 @@ test.describe('createRouterCore', () => {
   });
 
   test.describe('its answers', () => {
-    test('hear their request handed to the transport — whole, or its transfer’s opening — then refused by it, and none it never had', async () => {
+    test('hear their request handed to the transport — whole, or its transfer’s opening — then refused by it, and nothing of one never handed', async () => {
       const heard: string[] = [];
       const { control, port } = createPort();
       using core = createRouterCore(
@@ -924,25 +935,26 @@ test.describe('createRouterCore', () => {
 
     test('take an answer too late in silence while its call id is reserved, then report it', async () => {
       const { port, reported } = createPort();
-      using core = createRouterCore(port);
+      const clock = createTestClock();
+      using core = createRouterCore(port, { clock });
+      const asking = core.request(new Uint8Array(0), {
+        connectionHandle: 'a',
+        options,
+        procedure: echo,
+      });
 
-      await expect(
-        core.request(new Uint8Array(0), {
-          connectionHandle: 'a',
-          options: { timeout: 20 },
-          procedure: echo,
-        })
-      ).rejects.toBeInstanceOf(TimeoutError);
+      clock.tick(1_000);
+
+      await expect(asking).rejects.toBeInstanceOf(TimeoutError);
 
       core.receive(resultOf(2), 'a');
 
       expect(reported).toEqual([]);
 
-      await expect
-        .poll(() => {
-          return core.isReserved(2, 'a');
-        })
-        .toBe(false);
+      // reserved as long as its call was given
+      clock.tick(1_000);
+
+      expect(core.isReserved(2, 'a')).toBe(false);
       core.receive(resultOf(2), 'a');
 
       expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
@@ -994,7 +1006,7 @@ test.describe('createRouterCore', () => {
       expect(codesOf(reported)).toEqual([[ProtocolCode.CALL_UNKNOWN, 'a']]);
     });
 
-    test('send no cancel for a request that never reached the transport, though given up at once', async () => {
+    test('send no cancel for a request the transport never had, though given up at once, and reserve nothing', async () => {
       const { port, sent } = createPort();
       // a transport that refuses what it is given outright: nothing is handed over
       using core = createRouterCore({
@@ -1050,7 +1062,7 @@ test.describe('createRouterCore', () => {
     });
 
     // spec 10.4
-    test('cancel a call still waiting once: rejected, told, and its call id reserved', async () => {
+    test('cancel a call still waiting once: rejected, told, and its call id reserved on its connection alone', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
       const waiting = core.request(new Uint8Array(0), {
@@ -1180,7 +1192,7 @@ test.describe('createRouterCore', () => {
       core[Symbol.dispose]();
     });
 
-    test('reserve by connection, and forget the reservations of one connection or of all', () => {
+    test('reserve by connection, and forget the reservations of a connection or of every one, as they go', () => {
       const { port, reported } = createPort();
       using core = createRouterCore(port);
 
@@ -1200,7 +1212,7 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('take an answer of this layout that does not read, on a call id reserved, in silence', () => {
+    test('take an answer of this layout that does not read, on a call id reserved, in silence, and report one of a layout to come', () => {
       const { port, reported } = createPort();
       using core = createRouterCore(port);
 
@@ -1658,7 +1670,7 @@ test.describe('createRouterCore', () => {
       }
     });
 
-    test('end a request whose chunk cannot go out, telling the peer to cancel it; a send failed behind its answer ends nothing more', async () => {
+    test('end a request whose chunk cannot go out, telling the peer to cancel it', async () => {
       const failing = createPort();
       using core = createRouterCore(failing.port, { limits });
       const asking = core.request(patternOf(200), {
@@ -1677,7 +1689,9 @@ test.describe('createRouterCore', () => {
         [EnvelopeKind.CANCEL, 2],
       ]);
       expect(core.isReserved(2, 'a')).toBe(true);
+    });
 
+    test('end nothing more by a chunk whose send failed behind its answer', async () => {
       const answered = createPort();
       using answeredCore = createRouterCore(answered.port, { limits });
       const answering = answeredCore.request(patternOf(200), {

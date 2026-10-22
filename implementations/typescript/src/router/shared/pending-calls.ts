@@ -78,8 +78,9 @@ export interface IPendingCalls<Handle extends string> {
   get(call: ICallAddress<Handle>): IPendingRequest<Handle> | undefined;
   isReserved(callId: CallId, connectionHandle: Handle): boolean;
   /**
-   * Reserves a call id for `timeout`, held already, or for the default time for none or `Infinity`;
-   * reserved twice, the later end stands. Nothing waits on a reservation: it keeps no process alive.
+   * Reserves a call id for `timeout`, held as {@link assertReservation} holds one, or for the default
+   * time for none or `Infinity`; reserved twice, the later end stands, compared on its clock's
+   * monotonic reading. Nothing waits on a reservation: it keeps no process alive.
    */
   reserve(call: ICallAddress<Handle> & { timeout?: number | undefined }): void;
   /**
@@ -199,7 +200,7 @@ export const createPendingCalls = <Handle extends string>(
     },
     isReserved,
     reserve: ({ callId, connectionHandle, timeout }) => {
-      const lasts = reservationOf(timeout);
+      const lasts = reservationOf(assertReservation(timeout));
       const ends = clock.performance.now() + lasts;
       const reserved = reservations.get(connectionHandle) ?? new Map<CallId, IReservation>();
       const previous = reserved.get(callId);

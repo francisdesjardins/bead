@@ -140,6 +140,37 @@ public sealed partial class ServiceManagerTests
         Assert.Equal([new ValidateOptions { FailFast = true, MaximumBytes = 512 }, new ValidateOptions { FailFast = true, MaximumBytes = 512 }], given);
     }
 
+    [Fact]
+    public async Task Answers_PROCEDURE_FAILED_to_rules_that_throw_and_hands_why_on_for_its_router_to_report()
+    {
+        var router = new RecordingRouter();
+        var manager = new ServiceManager(router);
+        var seen = RecordDebug(manager);
+        var broken = new ArgumentOutOfRangeException("request", "a rule that fails to judge");
+        var resolver = manager.GetRequestResolver(Echo, Answered() with
+        {
+            Validate = (_, _) =>
+            {
+                throw broken;
+            },
+        })((request, response) =>
+        {
+            return response.Answer(request.Payload);
+        });
+
+        Assert.Same(broken, await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+        {
+            return resolver.Handle(PropsOf(Encode(new Text("hi")))).WaitAsync(Patience, Cancelled);
+        }));
+        Assert.Equal([new Responded(Target, null, Failure.OfProtocol(ProtocolCode.ProcedureFailed))], router.Responses);
+        Assert.Equal<(DebugDirection, Exception?)>(
+            [(DebugDirection.Rx, null), (DebugDirection.Tx, broken)],
+            seen.Select((told) =>
+            {
+                return (told.Event.Direction, told.Error);
+            }));
+    }
+
     // debugging 4.3
     [Fact]
     public async Task Traces_a_request_its_rules_refuse_its_rx_then_its_failure()
@@ -709,7 +740,7 @@ public sealed partial class ServiceManagerTests
     }
 
     [Fact]
-    public void Is_the_resolver_one_to_answer_for_its_router_nothing_admits_a_failure_refuses_a_throw_goes_on()
+    public void Is_the_resolver_s_to_answer_for_its_router_nothing_admits_a_failure_refuses_a_throw_goes_on()
     {
         var manager = new ServiceManager(new RecordingRouter());
         var thrown = new InvalidOperationException("thrown");

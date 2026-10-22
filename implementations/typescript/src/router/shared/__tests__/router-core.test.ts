@@ -555,7 +555,7 @@ test.describe('createRouterCore', () => {
       expect(reported[0]?.[0]).toMatchObject({ side: 'client' });
     });
 
-    test('lets go of the call id of a refusal that cannot go out, so the call id may be refused again', async () => {
+    test('lets go of the call id of a refusal that cannot go out, so the same request is refused again', async () => {
       const { control, port, reported } = createPort();
       using core = createRouterCore(port);
 
@@ -636,7 +636,10 @@ test.describe('createRouterCore', () => {
       });
       clock.tick(50);
       await expect(second).rejects.toBeInstanceOf(TimeoutError);
-      await expect(second).rejects.toMatchObject({ timeout: 50 });
+      await expect(second).rejects.toMatchObject({
+        message: 'no answer came in 50 milliseconds',
+        timeout: 50,
+      });
       // the peer, which may hold either call still, is told of each
       expect(answersOf(sent)).toEqual([
         ['a', EnvelopeKind.REQUEST, 2],
@@ -767,7 +770,7 @@ test.describe('createRouterCore', () => {
       ]);
     });
 
-    test('send nothing for an answer whose call its connection took away, though the peer opens its call id again', async () => {
+    test('sends nothing for an answer whose call its connection took away, though the peer opens its call id again', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
       const seen: number[] = [];
@@ -882,7 +885,7 @@ test.describe('createRouterCore', () => {
       expect(traced).toEqual([]);
     });
 
-    test('routes a request that opens a transfer, then refuses it before its resolver', async () => {
+    test('routes a request that opens a transfer, then refuses it, its route first', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
       const seen: IRequestResolverProps<Handle>[] = [];
@@ -2089,7 +2092,9 @@ test.describe('createRouterCore', () => {
       core.registerResolver(resolverOf(echo));
       core.receive(requestOf(3), 'b');
 
-      expect(core.gauges()).toMatchObject({
+      const { anomalies, ceilings, connectionHandles, counts } = core.gauges();
+
+      expect({ anomalies, ceilings, connectionHandles, counts }).toEqual({
         anomalies: [],
         ceilings: { bufferedBytes: LIMIT_DEFAULTS.bufferedBytesBudget, largestAnsweringCalls: 64 },
         connectionHandles: new Set(['a', 'b']),
@@ -2412,7 +2417,7 @@ test.describe('createRouterCore', () => {
       expect(sent).toEqual([]);
     });
 
-    test('abort the signal of each call a closing connection opened, once nothing can answer it', async () => {
+    test('abort the signal of each call a closing connection opened, and of no other, once nothing can answer it', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
       const reasons: unknown[] = [];
@@ -3138,7 +3143,7 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
-    test('report a chunk no transfer takes, on a call open without one or on none; drop a credit in silence', async () => {
+    test('report a chunk no transfer takes, on a call open without one or on none, and drop one on a call id reserved and a credit in silence', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port, { limits });
       const asking = core
@@ -3150,9 +3155,10 @@ test.describe('createRouterCore', () => {
       core.registerResolver(resolverOf(echo));
       await sleep(0);
       core.receive(requestOf(1), 'a');
+      core.reserve({ callId: 6, connectionHandle: 'a', timeout: 5_000 });
 
-      // the peer's call open, and none; this side's, then none
-      for (const callId of [1, 3, 2, 4]) {
+      // the peer's call open, and none; this side's, then none; then one on a call id reserved
+      for (const callId of [1, 3, 2, 4, 6]) {
         core.receive(chunkOf(callId, { offset: 0, payload: Uint8Array.of(1), total: 8 }), 'a');
       }
 
@@ -3169,6 +3175,8 @@ test.describe('createRouterCore', () => {
         [ProtocolCode.ENVELOPE_MALFORMED, 'a'],
         [ProtocolCode.CALL_UNKNOWN, 'a'],
       ]);
+      expect(reported[0]?.[0].message).toContain('call 1 receives no transfer');
+      expect(reported[2]?.[0].message).toContain('call 2 receives no transfer');
       core.cancel({ callId: 2, connectionHandle: 'a' });
       await expect(asking).resolves.toBeInstanceOf(CancelError);
     });
@@ -3840,6 +3848,26 @@ test.describe('createRouterCore', () => {
         expect(reported).toEqual([]);
         await expect(responding).rejects.toThrow(message);
       }
+    });
+
+    test('end a result whose opening cannot go out, forgetting its call', async () => {
+      const answering = createAnswering();
+      using core = answering.core;
+      const { control, reported, seen, sent } = answering;
+      const refused = new Error('the transport refused the opening');
+
+      core.receive(requestOf(1, { payload: Uint8Array.of(1) }), 'a');
+      control.sendErrors.set('a', refused);
+
+      await expect(answerOf(answering, { payload: patternOf(100) })).rejects.toBe(refused);
+      expect(piecesOf(sent)).toEqual([[EnvelopeKind.RESULT, 1, 100, 28]]);
+
+      // forgotten: a request on its call id is dispatched
+      control.sendErrors.delete('a');
+      core.receive(requestOf(1, { payload: Uint8Array.of(2) }), 'a');
+
+      expect(seen).toHaveLength(2);
+      expect(reported).toEqual([]);
     });
 
     test('end a transfer it sends that no credit comes for: a request with a timeout, a result with a failure', async () => {

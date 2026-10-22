@@ -123,18 +123,18 @@ test.describe('createRouterCore', () => {
       expect(reported).toEqual([]);
     });
 
-    test('refuse a procedure’s limit that is not a whole number above 0, drawing nothing', async () => {
+    test('refuse a procedure’s limit that is not a whole number above 0, drawing nothing, and take its edge', async () => {
       const { port, sent } = createPort();
       using core = createRouterCore(port);
       const drawn: number[] = [];
-      const ask = (procedure: IProcedure, timeout: number = options.timeout): Promise<unknown> => {
+      const ask = (procedure: IProcedure, payload = new Uint8Array(0)): Promise<unknown> => {
         return core
-          .request(new Uint8Array(0), {
+          .request(payload, {
             connectionHandle: 'a',
             onCallId: (callId) => {
               drawn.push(callId);
             },
-            options: { timeout },
+            options,
             procedure,
           })
           .catch((reason: unknown) => {
@@ -158,7 +158,7 @@ test.describe('createRouterCore', () => {
 
       // at its edge, a limit of 1 is taken
       core.registerResolver(resolverOf({ ...echo, maximumPayloadBytes: 1 }));
-      void ask(echo);
+      void ask({ ...echo, maximumPayloadBytes: 1 }, Uint8Array.of(1));
 
       expect(drawn).toEqual([2]);
     });
