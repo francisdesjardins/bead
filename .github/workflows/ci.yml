@@ -102,7 +102,7 @@ jobs:
     timeout-minutes: 15
     # the image of the Playwright the side pins, Chromium in it: no browser to install
     container:
-      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
       options: --ipc=host
     strategy:
       fail-fast: false
@@ -188,7 +188,7 @@ jobs:
     timeout-minutes: 20
     # the image of the Playwright the TypeScript side pins, for the page of another origin's Chromium
     container:
-      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-noble
+      image: mcr.microsoft.com/playwright:v${{ needs.playwright.outputs.version }}-resolute
       options: --ipc=host
     env:
       BEAD_INTEROP_REQUIRED: 1
