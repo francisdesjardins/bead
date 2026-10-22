@@ -107,7 +107,7 @@ const compileEarlier = (
 ): { blueprint: IBlueprint; placeOf: PlaceOf; image: Uint8Array } => {
   assertRoots(roots, { from: folder });
 
-  const image = compile(roots, { image: true });
+  const image = compile(roots, { image: true, folder });
 
   return { ...blueprintOf(readSet(image, { roots })), image };
 };

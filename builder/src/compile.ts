@@ -11,16 +11,18 @@
 // dependencies
 
 import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { bufDiagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
-import { displayOf } from './roots.ts';
+import { temporaryFolderOf } from './config.ts';
+import { BEADC_FILES, displayOf } from './roots.ts';
 
 // constants
 
-/** Where beadc's own `bead/options.proto` is: the root it compiles first. */
+/** Where beadc's own options are: copied to the project's drive for buf. */
 export const OPTIONS_ROOT = fileURLToPath(new URL('../proto/', import.meta.url));
 
 // a set holds every file of a project's roots and their imports, which can be many
@@ -51,9 +53,7 @@ const ancestorOf = (folders: readonly string[]): string => {
       const parent = dirname(ancestor);
 
       if (parent === ancestor) {
-        throw new InputError(
-          `${folder} and beadc's ${OPTIONS_ROOT} share no folder, which buf needs to build them as one`
-        );
+        throw new InputError(`the .proto roots share no folder: ${folders.join(', ')}`);
       }
 
       ancestor = parent;
@@ -73,19 +73,55 @@ const moduleOf = (ancestor: string, folder: string): string => {
 // buf's configuration and its folder: the options' root and `roots`, one module each, under the folder
 // that holds them all
 const workspaceOf = (
-  roots: readonly string[]
-): { readonly ancestor: string; readonly modules: { path: string }[] } => {
-  const folders = [OPTIONS_ROOT, ...roots].map((folder) => {
+  roots: readonly string[],
+  options: { readonly folder?: string }
+): {
+  readonly ancestor: string;
+  readonly modules: { path: string; excludes?: string[] }[];
+  readonly folder: string;
+} => {
+  const project = roots.map((folder) => {
     return resolve(folder);
   });
-  const ancestor = ancestorOf(folders);
+  // * without a configuration, keep the copy beside a lone root, or under the roots' ancestor.
+  const base =
+    options.folder ?? (project.length === 1 ? dirname(project[0] ?? '.') : ancestorOf(project));
+  const folder = temporaryFolderOf('buf-', { folder: base });
 
-  return {
-    ancestor,
-    modules: folders.map((folder) => {
-      return { path: moduleOf(ancestor, folder) };
-    }),
-  };
+  try {
+    const include = join(folder, 'include');
+
+    for (const file of BEADC_FILES) {
+      const copy = join(include, file);
+
+      mkdirSync(dirname(copy), { recursive: true });
+      writeFileSync(copy, readFileSync(join(OPTIONS_ROOT, file)));
+    }
+
+    const folders = [include, ...project];
+    const ancestor = ancestorOf(folders);
+
+    return {
+      ancestor,
+      folder,
+      modules: folders.map((module) => {
+        const own = relative(module, join(resolve(base), '.beadc'));
+        // ! a project's root can hold the work area: the options belong to their own module alone.
+        const excludes =
+          own !== '' && own !== '..' && !own.startsWith(`..${sep}`) && !isAbsolute(own)
+            ? [own.split(sep).join('/')]
+            : [];
+
+        return {
+          path: moduleOf(ancestor, module),
+          ...(excludes.length === 0 ? {} : { excludes }),
+        };
+      }),
+    };
+  } catch (error) {
+    rmSync(folder, { recursive: true, force: true });
+    throw error;
+  }
 };
 
 // definition
@@ -99,9 +135,13 @@ const workspaceOf = (
  */
 export const compile = (
   roots: readonly string[],
-  options: { readonly files?: readonly string[]; readonly image?: boolean } = {}
+  options: {
+    readonly files?: readonly string[];
+    readonly image?: boolean;
+    readonly folder?: string;
+  } = {}
 ): Uint8Array => {
-  const { ancestor, modules } = workspaceOf(roots);
+  const { ancestor, modules, folder } = workspaceOf(roots, options);
   const config = { version: 'v2', modules };
   const buf = require.resolve('@bufbuild/buf/bin/buf');
   const paths = (options.files ?? []).flatMap((file) => {
@@ -128,6 +168,8 @@ export const compile = (
     const stderr = (error as { stderr?: Buffer }).stderr?.toString('utf8').trim() ?? '';
 
     throw new InputError(stderr === '' ? `buf did not compile ${roots.join(', ')}` : stderr);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
   }
 };
 
@@ -139,48 +181,61 @@ export const compile = (
  */
 export const lintRules = (
   roots: readonly string[],
-  options: { readonly files: readonly string[] }
+  options: { readonly files: readonly string[]; readonly folder?: string }
 ): IDiagnostic[] => {
-  const { ancestor, modules } = workspaceOf(roots);
-  const config = { version: 'v2', modules, lint: { use: ['PROTOVALIDATE'] } };
-  const buf = require.resolve('@bufbuild/buf/bin/buf');
-  // * the project's files alone: beadc's own module is never a project's
-  const paths = options.files.flatMap((path) => {
-    return ['--path', resolve(path)];
-  });
-  const run = spawnSync(
-    process.execPath,
-    [buf, 'lint', ancestor, '--config', JSON.stringify(config), '--error-format', 'json', ...paths],
-    { maxBuffer: LARGEST_FINDINGS, encoding: 'utf8' }
-  );
-
-  if (run.status !== 0 && run.status !== BUF_FINDINGS) {
-    const stderr = run.stderr.trim();
-
-    throw new InputError(stderr === '' ? `buf did not lint ${roots.join(', ')}` : stderr);
-  }
-
-  return run.stdout
-    .split('\n')
-    .filter((line) => {
-      return line.trim() !== '';
-    })
-    .map((line) => {
-      const finding = JSON.parse(line) as {
-        path: string;
-        start_line: number;
-        start_column: number;
-        type: string;
-        message: string;
-      };
-
-      return bufDiagnosticOf(finding.type, {
-        message: finding.message,
-        place: {
-          file: displayOf(resolve(ancestor, finding.path)),
-          line: finding.start_line,
-          column: finding.start_column,
-        },
-      });
+  const { ancestor, modules, folder } = workspaceOf(roots, options);
+  try {
+    const config = { version: 'v2', modules, lint: { use: ['PROTOVALIDATE'] } };
+    const buf = require.resolve('@bufbuild/buf/bin/buf');
+    // * the project's files alone: beadc's own module is never a project's
+    const paths = options.files.flatMap((path) => {
+      return ['--path', resolve(path)];
     });
+    const run = spawnSync(
+      process.execPath,
+      [
+        buf,
+        'lint',
+        ancestor,
+        '--config',
+        JSON.stringify(config),
+        '--error-format',
+        'json',
+        ...paths,
+      ],
+      { maxBuffer: LARGEST_FINDINGS, encoding: 'utf8' }
+    );
+
+    if (run.status !== 0 && run.status !== BUF_FINDINGS) {
+      const stderr = run.stderr.trim();
+
+      throw new InputError(stderr === '' ? `buf did not lint ${roots.join(', ')}` : stderr);
+    }
+
+    return run.stdout
+      .split('\n')
+      .filter((line) => {
+        return line.trim() !== '';
+      })
+      .map((line) => {
+        const finding = JSON.parse(line) as {
+          path: string;
+          start_line: number;
+          start_column: number;
+          type: string;
+          message: string;
+        };
+
+        return bufDiagnosticOf(finding.type, {
+          message: finding.message,
+          place: {
+            file: displayOf(resolve(ancestor, finding.path)),
+            line: finding.start_line,
+            column: finding.start_column,
+          },
+        });
+      });
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 };
