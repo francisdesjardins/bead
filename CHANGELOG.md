@@ -190,6 +190,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The C# HTTP server tells nothing of a connection after its close: an envelope whose connection a
+  `DELETE` closes as it is handed on is answered the 404 marked `connection-unknown`, as the
+  TypeScript side answers it, where the router could hear it after the close and hold the
+  connection for good; a connection's opening and its listens are told before its close too.
 - The DevTools panel's redraws keep what their reader did: a block scrolled stays scrolled and a
   section opened or closed stays so, the Metrics view's exposition among them, as each second's
   reading redraws the view, and a call's detail keeps its folded branches while that call and tab
