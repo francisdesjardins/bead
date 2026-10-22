@@ -74,9 +74,9 @@ internal sealed class JsonNode
 internal static class JsonText
 {
     // ! a message nested 100 deep below the request is 202 levels of JSON at most, a repeated
-    // field's array and its item's object each a level: past this, no message holds the text, and
-    // nothing deeper is built
-    public const int Depth = 256;
+    // field's array and its item's object each a level: past this, no message holds the text, which
+    // is refused as nested past 100 before anything deeper is built
+    public const int Depth = 202;
 
     private static ReadOnlySpan<byte> ByteOrderMark
     {
@@ -98,7 +98,7 @@ internal static class JsonText
             throw new JsonFormException("a byte order mark");
         }
 
-        var reader = new Utf8JsonReader(text, new JsonReaderOptions { MaxDepth = Depth });
+        var reader = new Utf8JsonReader(text, new JsonReaderOptions { MaxDepth = Depth + 2 });
 
         try
         {
@@ -156,6 +156,8 @@ internal static class JsonText
                 return JsonNode.NumberOf(digits);
             case JsonTokenType.String:
                 return JsonNode.StringOf(StringOf(ref reader));
+            case JsonTokenType.StartArray or JsonTokenType.StartObject when reader.CurrentDepth >= Depth:
+                throw new JsonFormException("nested past 100");
             case JsonTokenType.StartArray:
                 var items = new List<JsonNode>();
 
