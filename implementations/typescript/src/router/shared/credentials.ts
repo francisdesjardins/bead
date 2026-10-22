@@ -209,7 +209,7 @@ export const assertLimitsHoldJwt = ({
 }: Pick<IRouterLimits, 'chunkBytes' | 'maximumEnvelopeBytes'>): void => {
   if (chunkBytes < JWT_LIMIT_BYTES || maximumEnvelopeBytes < JWT_LIMIT_BYTES) {
     throw new ProgrammerError(
-      "the router's limits do not hold together: a side that takes or presents a JWT sets chunkBytes and maximumEnvelopeBytes to 1,024 bytes at least"
+      "the router's limits do not hold together: a side that takes or presents a JWT holds a chunk's envelope and an envelope of 1,024 bytes at least"
     );
   }
 };
