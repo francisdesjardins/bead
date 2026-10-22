@@ -4705,34 +4705,73 @@ test.describe('createRouterServer, its metrics', () => {
     ]);
   });
 
-  test('one registry given to a client’s router and a server’s counts a call at each of its ends', async () => {
+  test('one registry given to a client’s router and a server’s counts a call at each of its ends, a command among them', async () => {
     const metricsRegistry = createMetricsRegistry();
     const clock = createTestClock();
     const pipe = createPipedTransports({ connectionHandle: first });
     using server = createRouterServer(pipe.server, { clock, metricsRegistry });
     using client = createRouterClient(pipe.client, { clock, metricsRegistry });
-    const labels = 'service="2",procedure="echo",type="request"';
-    const made = lineOf('bead_client_call_', labels);
-    const answered = lineOf('bead_server_call_', labels);
+    const ask: IProcedure = { ...echo, procedureId: 2, procedureName: 'ask' };
+    const clockOf: IProcedure = { ...echo, procedureId: 3, procedureName: 'clock' };
+    const made = (procedure: string, type = 'request') => {
+      return lineOf('bead_client_call_', `service="2",procedure="${procedure}",type="${type}"`);
+    };
+    const answered = (procedure: string, type = 'request') => {
+      return lineOf('bead_server_call_', `service="2",procedure="${procedure}",type="${type}"`);
+    };
+    const serverServices = createServiceManager(server);
+    const asked = serverServices.getCommand(clockOf, { serializer: asking });
 
-    createServiceManager(server).getRequestResolver(echo, { serializer: answering })(
-      (request, response) => {
-        return response(request.payload);
+    serverServices.getRequestResolver(echo, { serializer: answering })((request, response) => {
+      return response(request.payload);
+    });
+    // * the server asks its client back, by a command, before it answers
+    serverServices.getRequestResolver(ask, { serializer: answering })(
+      async ({ connectionHandle }, response) => {
+        return response(await asked('now')({ connectionHandle, timeout: 1_000 }));
+      }
+    );
+    createServiceManager(client).getCommandResolver(clockOf, { serializer: answering })(
+      (_request, response) => {
+        return response('noon');
       }
     );
     pipe.open();
 
-    await expect(
-      createServiceManager(client).getRequest(echo, { serializer: asking })('hi')()
-    ).resolves.toBe('hi');
-    expect(countedOf(metricsRegistry)).toEqual([
-      made('duration_seconds_count{} 1'),
-      made('handled_total{outcome="result"} 1'),
-      made('started_total{} 1'),
-      answered('duration_seconds_count{} 1'),
-      answered('handled_total{outcome="result"} 1'),
-      answered('started_total{} 1'),
-    ]);
+    const clientServices = createServiceManager(client);
+
+    await expect(clientServices.getRequest(echo, { serializer: asking })('hi')()).resolves.toBe(
+      'hi'
+    );
+    await expect(clientServices.getRequest(ask, { serializer: asking })('')()).resolves.toBe(
+      'noon'
+    );
+    await sleep(0);
+
+    // the command: made by the server, among its client families; answered by the client, among
+    // its server families
+    expect(countedOf(metricsRegistry).toSorted()).toEqual(
+      [
+        made('echo')('duration_seconds_count{} 1'),
+        made('echo')('handled_total{outcome="result"} 1'),
+        made('echo')('started_total{} 1'),
+        answered('echo')('duration_seconds_count{} 1'),
+        answered('echo')('handled_total{outcome="result"} 1'),
+        answered('echo')('started_total{} 1'),
+        made('ask')('duration_seconds_count{} 1'),
+        made('ask')('handled_total{outcome="result"} 1'),
+        made('ask')('started_total{} 1'),
+        answered('ask')('duration_seconds_count{} 1'),
+        answered('ask')('handled_total{outcome="result"} 1'),
+        answered('ask')('started_total{} 1'),
+        made('clock', 'command')('duration_seconds_count{} 1'),
+        made('clock', 'command')('handled_total{outcome="result"} 1'),
+        made('clock', 'command')('started_total{} 1'),
+        answered('clock', 'command')('duration_seconds_count{} 1'),
+        answered('clock', 'command')('handled_total{outcome="result"} 1'),
+        answered('clock', 'command')('started_total{} 1'),
+      ].toSorted()
+    );
   });
 
   test('answers a call whose handler fails before it answers PROCEDURE_FAILED, and counts it so', async () => {

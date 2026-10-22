@@ -265,6 +265,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TypeScript client does, where its server was handed an empty one.
 - The TypeScript join refuses a transport that names no type, a join among them, with a
   `ProgrammerError`, as the C# side does, where it took one whose handles no transport owned.
+- A TypeScript transport client's reconnection its signal ends rejects with a `CancelError`
+  worded `the reconnection was cancelled`, as the C# side words it, the signal's reason its
+  `cause`, where it said nothing.
 
 ## [0.6.0] - 2026-10-20
 
