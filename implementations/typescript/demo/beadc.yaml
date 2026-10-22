@@ -11,5 +11,11 @@ outputs:
     importExtension: none
     runtime: ../../../src/service/service
     protoRuntime: ../../../src/proto/proto
+    http: true
+    httpRuntime: ../../../src/transcoding/transcoding
+# the OpenAPI document of the sign-up's routes, which the output embeds and the demo's gateway
+# serves
+openapi:
+  out: gen/openapi.json
 # the output's folder is beadc's own: generate takes out what it no longer writes there
 clean: true
