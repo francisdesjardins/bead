@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -271,6 +272,31 @@ public sealed class ClocksTests
         Assert.Equal<TimeSpan?>(
             [null, null, null],
             [Durations.InputOf("NaN").Given, Durations.InputOf("\"1000\"").Given, Durations.InputOf("true").Given]);
+    }
+
+    // a layer's clock: the one beneath it is never none here, where the TypeScript side's twin
+    // also plays a layer with nothing beneath it, which runs on the platform's
+    [Fact]
+    public void A_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_refuses_one_that_differs_naming_both()
+    {
+        var beneath = new FakeTimeProvider();
+        var given = new FakeTimeProvider();
+        var names = ("a server", "its transport");
+
+        Assert.Same(beneath, Clocks.Of((null, beneath), names));
+        Assert.Same(beneath, Clocks.Of((beneath, beneath), names));
+        Assert.Equal(
+            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, a FakeTimeProvider",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                Clocks.Of((given, beneath), names);
+            }).Message);
+        Assert.Equal(
+            "a server runs on the clock of its transport, a FakeTimeProvider, and was given another, the system's",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                Clocks.Of((TimeProvider.System, beneath), names);
+            }).Message);
     }
 
     // the test clock: what Bead never arms fails a test, on the TypeScript side's test clock as on

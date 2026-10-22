@@ -13,6 +13,7 @@ import {
   GenericError,
   ProgrammerError,
   ReadyStateError,
+  ReconnectError,
   TimeoutError,
 } from '../../shared/errors';
 import {
@@ -896,6 +897,24 @@ test.describe('createHTTPTransportClient', () => {
     expect(server.gauges().connectionHandles).toEqual(new Set([opened]));
     expect(clientCloses).toEqual([]);
     await client.disconnect();
+  });
+
+  test('rejects with a ReconnectError caused by a ConnectError when the server is gone', async () => {
+    await using started = await startServer();
+    const { port, server } = started;
+    const client = createHTTPTransportClient({ isListening: false });
+
+    await client.connect({ host, port });
+    await server.stop();
+
+    // one attempt, for a port nothing listens on takes some systems two seconds to refuse
+    const reason = await client.reconnect({ maxAttempts: 1 }).catch((error: unknown) => {
+      return error;
+    });
+
+    expect(reason).toBeInstanceOf(ReconnectError);
+    expect((reason as ReconnectError).cause).toBeInstanceOf(ConnectError);
+    expect(client.isClosed()).toBe(true);
   });
 
   test('reconnects though a reconnect listener throws, the throw reported, the next listener told', async () => {

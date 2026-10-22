@@ -32,6 +32,7 @@ import {
   allClosed,
   closedPort,
   createTestClock,
+  delaysOn,
   host,
   IMPLEMENTATIONS,
   portOf,
@@ -283,16 +284,72 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
             pendingHandshakes.push(done);
           },
         });
+        // its timeout on the test clock, which alone moves it
+        const clock = createTestClock();
+        const timed = createWSTransportClient({ clock, WebSocket: TrackedWebSocket });
 
         try {
-          await expect(
-            client.connect({ host, port: portOf(gatedServer), timeout: 100 })
-          ).rejects.toBeInstanceOf(TimeoutError);
-          expect(client.isClosed()).toBe(true);
-          expect(client.socket).toBeNull();
+          const connecting = timed.connect({ host, port: portOf(gatedServer), timeout: 100 });
+          const refused = expect(connecting).rejects.toThrow(new TimeoutError(100));
+
+          // its handshake held at the server
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(1);
+          await clock.tickAsync(100);
+          await refused;
+
+          expect(timed.isClosed()).toBe(true);
+          expect(timed.socket).toBeNull();
 
           // the socket closes on its own, with the server still holding its handshake
           await allClosed();
+        } finally {
+          for (const done of pendingHandshakes) {
+            done(false);
+          }
+          await stopServer(gatedServer);
+        }
+      });
+
+      test('waits on its handshake without end with an infinite timeout until its signal aborts', async () => {
+        const pendingHandshakes: ((result: boolean) => void)[] = [];
+        const gatedServer = await startServer({
+          verifyClient: (_info, done) => {
+            pendingHandshakes.push(done);
+          },
+        });
+        const clock = createTestClock();
+        const waiting = createWSTransportClient({ clock, WebSocket: TrackedWebSocket });
+
+        try {
+          const controller = new AbortController();
+          const connecting = waiting.connect({
+            host,
+            port: portOf(gatedServer),
+            signal: controller.signal,
+            timeout: Infinity,
+          });
+          const cancelled = expect(connecting).rejects.toBeInstanceOf(CancelError);
+
+          await expect
+            .poll(() => {
+              return pendingHandshakes.length;
+            })
+            .toBe(1);
+
+          // a day, where the 30 seconds a timeout left at its default would have passed: no timer
+          // armed, and still connecting
+          await clock.tickAsync(86_400_000);
+
+          expect([waiting.isConnecting(), delaysOn(clock)]).toEqual([true, []]);
+
+          controller.abort('why');
+          await cancelled;
+
+          expect(waiting.isClosed()).toBe(true);
         } finally {
           for (const done of pendingHandshakes) {
             done(false);
@@ -626,12 +683,19 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
       test('emits "close" with wasClean=true and wasQuick=false when the client disconnects', async () => {
         const closed = nextEvent(client, 'close');
+        const connection = nextConnection(server);
 
         await client.connect({ host, port });
+
+        const { socket } = await connection;
+        const serverClosed = once(socket, 'close');
+
         await client.disconnect();
 
         expect(await closed).toEqual([true, false]);
         expect(client.isClosed()).toBe(true);
+        // its 1000, at the server's end too
+        expect((await serverClosed)[0]).toBe(1000);
       });
 
       test('emits "close" with wasClean=true and wasQuick=true when the client quickly disconnects', async () => {
@@ -645,7 +709,7 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
         expect(client.socket).toBeNull();
       });
 
-      test('emits "close" with wasClean=false and wasQuick=false when the server disconnects', async () => {
+      test('emits "close" with wasClean=false and wasQuick=false when the server disconnects, and refuses a send after it', async () => {
         const closed = nextEvent(client, 'close');
 
         await client.connect({ host, port });
@@ -655,6 +719,9 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
 
         expect(await closed).toEqual([false, false]);
         expect(client.isClosed()).toBe(true);
+        await expect(client.send({ data: Uint8Array.of(1) })).rejects.toBeInstanceOf(
+          ReadyStateError
+        );
       });
 
       test('"[dispose]" during a disconnect settles it without a close, and the client can connect again', async () => {
