@@ -800,8 +800,10 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         // its client declares no resolver: a command its server sends is answered SERVICE_UNKNOWN
-        // (transcoding 2.6)
-        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock });
+        // (transcoding 2.6). Its notifications' callbacks run on a scheduler of the exchange's own,
+        // which a stream's end follows
+        var callbacks = new SerialScheduler();
+        using var router = new RouterClient(transport, new RouterClientOptions { Clock = _clock, ResolverScheduler = callbacks });
 
         using var aborted = context.RequestAborted.Register(() =>
         {
@@ -811,7 +813,7 @@ public sealed class HttpGateway : IAsyncDisposable
 
         if (isStream)
         {
-            await Stream(context, (route, router, payload, options, problems));
+            await Stream(context, (route, router, payload, options, problems, callbacks));
 
             return;
         }
@@ -983,11 +985,16 @@ public sealed class HttpGateway : IAsyncDisposable
 
     // ── A stream, transcoding 8 ─────────────────────────────────────────────────────────────────
 
-    private async Task Stream(HttpContext context, (HttpRoute Route, RouterClient Router, ReadOnlyMemory<byte> Payload, ResolvedRequestOptions Options, ProblemContext Problems) call)
+    private async Task Stream(HttpContext context, (HttpRoute Route, RouterClient Router, ReadOnlyMemory<byte> Payload, ResolvedRequestOptions Options, ProblemContext Problems, SerialScheduler Callbacks) call)
     {
-        var (route, router, payload, options, problems) = call;
+        var (route, router, payload, options, problems, callbacks) = call;
         var response = context.Response;
         var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // ! its call settled: its result handed to its events, or its failure answered; a failure that
+        // ends its subscription waits on it, since the router tells a drop right behind the result
+        // before this exchange has written that result
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         long unsent = 0;
 
         // each write after the one before it, once its response took it, the response's head with the first
@@ -1013,7 +1020,22 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         var events = new HttpEvents(Write);
-        var notification = new StreamNotification(route, (events, this, problems, ended));
+        var notification = new StreamNotification(route, (events, this, problems, (settled.Task, callbacks), ended));
+
+        try
+        {
+            await Streaming(call, (context, events, notification, settled, ended));
+        }
+        finally
+        {
+            settled.TrySetResult();
+        }
+    }
+
+    private async Task Streaming((HttpRoute Route, RouterClient Router, ReadOnlyMemory<byte> Payload, ResolvedRequestOptions Options, ProblemContext Problems, SerialScheduler Callbacks) call, (HttpContext Context, HttpEvents Events, StreamNotification Notification, TaskCompletionSource Settled, TaskCompletionSource Ended) stream)
+    {
+        var (route, router, payload, options, problems, _) = call;
+        var (context, events, notification, settled, ended) = stream;
 
         await router.RegisterNotification(notification);
 
@@ -1052,7 +1074,11 @@ public sealed class HttpGateway : IAsyncDisposable
             return;
         }
 
-        await events.Result(data);
+        // * the result and the notifications held enqueued at once, the failure that ends them after
+        var written = events.Result(data);
+
+        settled.TrySetResult();
+        await written;
 
         using var heartbeat = _heartbeat == System.Threading.Timeout.InfiniteTimeSpan
             ? null
@@ -1472,8 +1498,11 @@ public sealed class HttpGateway : IAsyncDisposable
 
     // the notification of one stream's subscription, paced: each credited once the event before it
     // was taken by its response (8.8), and the failure that ends it written as its last event
-    private sealed class StreamNotification(HttpRoute route, (HttpEvents Events, HttpGateway Gateway, ProblemContext Problems, TaskCompletionSource Ended) stream) : INotificationLike
+    private sealed class StreamNotification(HttpRoute route, (HttpEvents Events, HttpGateway Gateway, ProblemContext Problems, (Task Settled, SerialScheduler Callbacks) After, TaskCompletionSource Ended) stream) : INotificationLike
     {
+        // whether its end began: what comes after it is written no more, touched on the callbacks' scheduler alone
+        private bool _isEnding;
+
         public Procedure Procedure
         {
             get
@@ -1492,6 +1521,11 @@ public sealed class HttpGateway : IAsyncDisposable
 
         public async Task<IReadOnlyList<Exception>> Trigger(ReadOnlyMemory<byte> payload)
         {
+            if (_isEnding)
+            {
+                return [];
+            }
+
             ReadOnlyMemory<byte> data;
 
             try
@@ -1511,14 +1545,44 @@ public sealed class HttpGateway : IAsyncDisposable
             return [];
         }
 
+        // ! told on the router's own loop, which runs ahead of the callbacks of the notifications
+        // that came before it: ended after them, on their scheduler
         public void Drop(Failure? failure)
         {
-            End(failure is null
+            var problem = failure is null
                 ? HttpProblems.Own(OwnFailure.Closed, ("the connection closed", stream.Gateway._options.Challenge)).Body
-                : HttpProblems.Of(failure, stream.Problems with { Arose = FailureArising.Server }).Body);
+                : HttpProblems.Of(failure, stream.Problems with { Arose = FailureArising.Server }).Body;
+
+            stream.After.Callbacks.Post(() =>
+            {
+                End(problem);
+            });
         }
 
+        // ! once its call settled, after its result and the notifications held, never before them;
+        // one that waits on it waits on the callbacks' scheduler, so the first of two ends is written
         private void End(ReadOnlyMemory<byte> problem)
+        {
+            _isEnding = true;
+
+            if (stream.After.Settled.IsCompleted)
+            {
+                Ending(problem);
+
+                return;
+            }
+
+            stream.After.Settled.ContinueWith(
+                (_) =>
+                {
+                    Ending(problem);
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.DenyChildAttach,
+                stream.After.Callbacks);
+        }
+
+        private void Ending(ReadOnlyMemory<byte> problem)
         {
             if (!stream.Events.Failure(problem, out var written))
             {

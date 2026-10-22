@@ -234,6 +234,115 @@ public sealed class MemoryTransportServerTests
     }
 
     [Fact]
+    public async Task Draws_no_connection_for_a_connect_cancelled_as_it_held_it_and_reports_what_a_listener_throws()
+    {
+        var scheduler = new SerialScheduler();
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var isCancelling = false;
+
+        // * a connect whose token is cancelled as its server holds it: no connection drawn
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Scheduler = scheduler,
+            Accepting = async (_) =>
+            {
+                if (isCancelling)
+                {
+                    await cancelling.CancelAsync();
+                }
+            },
+        });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+        var reported = new List<string>();
+
+        server.Message += (message, _) =>
+        {
+            heard.Add($"heard {message.Bytes.Span[0]}");
+
+            throw new InvalidOperationException("a listener broke");
+        };
+        server.Error += (reason, handle) =>
+        {
+            reported.Add($"{reason.Message} {handle}");
+        };
+        await server.Start();
+
+        isCancelling = true;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Connect(new MemoryConnectOptions { Server = server }, cancelling.Token);
+        });
+        Assert.Empty(server.ConnectionHandles);
+        isCancelling = false;
+
+        // a listener's throw reported with its connection, the transport going on
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        var handle = Assert.Single(server.ConnectionHandles);
+
+        await client.Send(new TransportMessage(new byte[] { 1 }, false));
+        await client.Send(new TransportMessage(new byte[] { 2 }, false));
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["heard 1", "heard 2"], heard);
+        Assert.Equal([$"a listener broke {handle}", $"a listener broke {handle}"], reported);
+    }
+
+    [Fact]
+    public async Task Drops_what_an_end_it_no_longer_holds_receives_and_refuses_to_send_what_is_no_bytes()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+        var told = new List<bool>();
+
+        server.Message += (message, _) =>
+        {
+            heard.Add($"heard {message.Bytes.Span[0]}");
+        };
+        server.Close += (isClean, _) =>
+        {
+            told.Add(isClean);
+        };
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        var handle = Assert.Single(server.ConnectionHandles);
+
+        // * a text message is no envelope: refused before it goes
+        Assert.StartsWith("an in-memory connection carries envelopes, as bytes", (await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return server.Send(new TransportMessage("text"u8.ToArray(), true), handle);
+        })).Message, StringComparison.Ordinal);
+
+        await client.Send(new TransportMessage(new byte[] { 1 }, false));
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        // ended twice, then a send its client made before it heard so, every turn held behind a gate:
+        // neither heard nor ended again
+        using var gate = new ManualResetEventSlim();
+
+        scheduler.Post(() =>
+        {
+            gate.Wait(Patience);
+        });
+
+        var ending = server.CloseConnection(handle);
+        var again = server.CloseConnection(handle);
+
+        await client.Send(new TransportMessage(new byte[] { 2 }, false));
+        gate.Set();
+        Assert.Equal((true, true), (await ending.WaitAsync(Patience, Cancelled), await again.WaitAsync(Patience, Cancelled)));
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["heard 1"], heard);
+        Assert.Equal([true], told);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(server.ConnectionHandles);
+    }
+
+    [Fact]
     public async Task Carries_a_transfer_under_its_routers_credit()
     {
         // * a chunk of 1 KiB and a window of two: a payload of 20 of them crosses only as the

@@ -378,7 +378,7 @@ public sealed partial class JsonForm
 
             if (exact < int.MinValue || exact > int.MaxValue)
             {
-                throw new JsonFormException("an enum number past the 32-bit range");
+                throw new JsonFormException("an enum number past its range");
             }
 
             // * an open enum takes a number no value numbers, as every enum of proto3 is
@@ -538,7 +538,7 @@ public sealed partial class JsonForm
 
         if (!double.IsFinite(read))
         {
-            throw new JsonFormException("a number past a double");
+            throw new JsonFormException($"a {name} past its range");
         }
 
         return read;
@@ -852,9 +852,14 @@ public sealed partial class JsonForm
 
     private static Timestamp ReadTimestamp(JsonNode value)
     {
-        var found = value.Kind == JsonNodeKind.String ? TimestampForm().Match(value.Text) : null;
+        if (value.Kind != JsonNodeKind.String)
+        {
+            throw new JsonFormException("a Timestamp that is no string");
+        }
 
-        if (found is not { Success: true })
+        var found = TimestampForm().Match(value.Text);
+
+        if (!found.Success)
         {
             throw new JsonFormException("a Timestamp off RFC 3339");
         }

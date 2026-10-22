@@ -391,7 +391,8 @@ public static partial class HttpProblems
         }
     }
 
-    // a violation's field path's elements (18.4): each name and its subscript, or none
+    // a violation's field path's elements (18.4): each name and its subscript, joined by `.`; none
+    // for a path off that grammar, whatever of it reads
     private static List<(string Name, string? Subscript)> ElementsOf(string fieldPath)
     {
         var elements = new List<(string Name, string? Subscript)>();
@@ -403,16 +404,24 @@ public static partial class HttpProblems
 
             if (!found.Success || found.Index != at || found.Length == 0)
             {
-                break;
+                return [];
             }
 
             elements.Add((found.Groups[1].Value, found.Groups[2].Success ? found.Groups[2].Value : null));
             at = found.Index + found.Length;
 
-            if (at < fieldPath.Length && fieldPath[at] == '.')
+            if (at == fieldPath.Length)
             {
-                at += 1;
+                break;
             }
+
+            // ! an element is followed by `.` and another, or by nothing
+            if (fieldPath[at] != '.' || at + 1 == fieldPath.Length)
+            {
+                return [];
+            }
+
+            at += 1;
         }
 
         return elements;

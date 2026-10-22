@@ -117,6 +117,270 @@ public sealed class JsonFormTests
     }
 
     [Fact]
+    public void Refuses_a_value_its_field_s_type_holds_none_of_each_by_its_reason()
+    {
+        var parted = new List<string>();
+
+        foreach (var (descriptor, body, words) in new (Google.Protobuf.Reflection.MessageDescriptor Descriptor, string Body, string Words)[]
+        {
+            (Edges.Descriptor, "{\"labels\":[]}", "a map that is no object"),
+            (Edges.Descriptor, "{\"labels\":1}", "a map that is no object"),
+            (Edges.Descriptor, "{\"anInt32\":\"0.5\"}", "an int32 that is no integer"),
+            (Edges.Descriptor, "{\"anInt32\":1e30}", "an int32 past its range"),
+            (Edges.Descriptor, "{\"extra\":1}", "a Struct that is no object"),
+            (Edges.Descriptor, "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.ListValue\",\"value\":1}}", "a ListValue that is no array"),
+            (Edges.Descriptor, "{\"ints\":1}", "a repeated field that is no array"),
+            (Edges.Descriptor, "{\"ints\":[null]}", "a null item"),
+            (Edges.Descriptor, "{\"labels\":{\"a\":null}}", "a null value in a map"),
+            (Edges.Descriptor, "{\"aliased\":1.5}", "an enum number that is no integer"),
+            (Edges.Descriptor, "{\"aliased\":2147483648}", "an enum number past its range"),
+            (Edges.Descriptor, "{\"aliased\":true}", "no Aliased"),
+            (Edges.Descriptor, "{\"aliased\":\"NOPE\"}", "no value of Aliased of that name"),
+            (Edges.Descriptor, "{\"aDouble\":\"abc\"}", "no double"),
+            (Edges.Descriptor, "{\"aDouble\":true}", "no double"),
+            (Edges.Descriptor, "{\"aDouble\":\"1e400\"}", "a double past its range"),
+            (Edges.Descriptor, "{\"aFloat\":\"1e400\"}", "a float past its range"),
+            (Edges.Descriptor, "{\"someBytes\":1}", "no bytes"),
+            (Edges.Descriptor, "{\"someBytes\":\"AAAAA\"}", "bytes padded wrongly"),
+            (Edges.Descriptor, "{\"byUint32\":{\"4294967296\":\"a\"}}", "a uint32 key past its range"),
+            (Edges.Descriptor, "{\"byInt64\":{\"1\":\"a\",\"01\":\"b\"}}", "an int64 key off -?(0|[1-9][0-9]*)"),
+            (Everything.Descriptor, "{\"flags\":{\"maybe\":\"a\"}}", "a bool key that is neither true nor false"),
+            (Edges.Descriptor, "{\"anInt32\":1e41}", "an int32 past its range"),
+            (Edges.Descriptor, "{\"anInt32\":1e-41}", "an int32 that is no integer"),
+            (Edges.Descriptor, "{\"anInt32\":true}", "no int32"),
+            (Everything.Descriptor, "{\"aUint64\":\"18446744073709551616\"}", "a uint64 past its range"),
+            (Everything.Descriptor, "{\"aFixed64\":-1}", "a fixed64 past its range"),
+            (Everything.Descriptor, "{\"aSint64\":\"1.5\"}", "an sint64 string off -?(0|[1-9][0-9]*)"),
+            (Everything.Descriptor, "{\"aString\":1}", "no string"),
+            (Edges.Descriptor, "{\"extra\":[]}", "a Struct that is no object"),
+            (Everything.Descriptor, "{\"list\":{}}", "a ListValue that is no array"),
+            (Edges.Descriptor, "{\"any\":1}", "an Any that is no object"),
+            (Edges.Descriptor, "{\"any\":{\"@type\":1}}", "an Any whose @type is no URL"),
+            (Edges.Descriptor, "{\"any\":{\"@type\":\"type.googleapis.com/bead.transcoding.v1.Nope\"}}", "an Any of a type its definitions do not hold"),
+            (Edges.Descriptor, "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Duration\",\"seconds\":1}}", "an Any of a well-known type whose members are not its value alone"),
+            (Edges.Descriptor, "{\"child\":1}", "a Edges that is no object"),
+            (Edges.Descriptor, "{\"at\":1}", "a Timestamp that is no string"),
+            (Edges.Descriptor, "{\"at\":\"yesterday\"}", "a Timestamp off RFC 3339"),
+            (Edges.Descriptor, "{\"at\":\"2026-01-01T24:00:00Z\"}", "a Timestamp of no instant"),
+            (Edges.Descriptor, "{\"at\":\"2026-04-31T00:00:00Z\"}", "a Timestamp of no instant"),
+            (Edges.Descriptor, "{\"at\":\"1900-02-29T00:00:00Z\"}", "a Timestamp of no instant"),
+            (Edges.Descriptor, "{\"at\":\"2026-01-01T00:00:00+24:00\"}", "a Timestamp of no offset"),
+            (Edges.Descriptor, "{\"at\":\"0000-01-01T00:00:00Z\"}", "a Timestamp past its range"),
+            (Edges.Descriptor, "{\"took\":1}", "a Duration off its form"),
+            (Edges.Descriptor, "{\"took\":\"315576000001s\"}", "a Duration past its range"),
+            (Edges.Descriptor, "{\"mask\":1}", "a FieldMask that is no string"),
+        })
+        {
+            try
+            {
+                Form.Read(descriptor, Encoding.UTF8.GetBytes(body));
+                parted.Add($"{body}: taken, where {words}");
+            }
+            catch (JsonFormException refused) when (refused.Message != words)
+            {
+                parted.Add($"{body}: {refused.Message}, where {words}");
+            }
+            catch (JsonFormException)
+            {
+                // refused in its own words
+            }
+        }
+
+        Assert.Empty(parted);
+    }
+
+    [Fact]
+    public void Refuses_a_text_that_is_no_JSON_a_string_left_open_or_wrongly_escaped_a_comma_or_a_colon_missing()
+    {
+        foreach (var text in new[] { "{\"a", "{\"a\":\"\\q\"}", "[1 2]", "{\"a\" 1}", "{\"a\":1 \"b\":2}" })
+        {
+            Assert.Equal("not JSON", Assert.Throws<JsonFormException>(() =>
+            {
+                JsonText.Read(Encoding.UTF8.GetBytes(text));
+            }).Message);
+        }
+
+        Assert.Equal(JsonNodeKind.Object, JsonText.Read("{\"a\":[1,2],\"b\":{}}"u8).Kind);
+    }
+
+    [Fact]
+    public void Reads_each_well_known_form_at_its_edges()
+    {
+        // * a leap day of a year that 400 divides, the earliest instant, an Empty, a Value of each kind
+        Assert.Equal(new Edges { At = new Timestamp { Seconds = 951_782_400 } }, Read<Edges>("{\"at\":\"2000-02-29T00:00:00Z\"}"));
+        Assert.Equal(new Edges { At = new Timestamp { Seconds = -62_135_596_800 } }, Read<Edges>("{\"at\":\"0001-01-01T00:00:00Z\"}"));
+        Assert.Equal(new Edges { Nothing = new Empty() }, Read<Edges>("{\"nothing\":{}}"));
+        Assert.Equal(new Edges { Value = Value.ForBool(false) }, Read<Edges>("{\"value\":false}"));
+        Assert.Equal(new Edges { Value = Value.ForStruct(new Struct { Fields = { ["a"] = Value.ForList(Value.ForNull(), Value.ForString("b")) } }) }, Read<Edges>("{\"value\":{\"a\":[null,\"b\"]}}"));
+        Assert.Equal(new Everything { List = new ListValue { Values = { Value.ForNumber(1) } }, WrappedBool = true, WrappedString = "" }, Read<Everything>("{\"list\":[1],\"wrappedBool\":true,\"wrappedString\":\"\"}"));
+
+        // a map of each key's form, bytes of the URL-safe alphabet, the empty Any
+        Assert.Equal(
+            new Everything { Flags = { [true] = "t", [false] = "f" }, ById = { [-1] = "a" }, SomeBytes = ByteString.CopyFrom(0xFB, 0xFF) },
+            Read<Everything>("{\"flags\":{\"true\":\"t\",\"false\":\"f\"},\"byId\":{\"-1\":\"a\"},\"someBytes\":\"-_8\"}"));
+        Assert.Equal(new Edges { ByUint32 = { [4_294_967_295] = "a" } }, Read<Edges>("{\"byUint32\":{\"4294967295\":\"a\"}}"));
+        Assert.Equal(new Edges { Any = new Any() }, Read<Edges>("{\"any\":{}}"));
+    }
+
+    [Fact]
+    public void Reads_and_writes_an_Any_of_a_wrapper_by_its_value_and_a_wrapper_alone_as_its_scalar()
+    {
+        const string Packed = "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Int32Value\",\"value\":3}}";
+
+        // * a wrapper in an Any under value, as its scalar
+        Assert.Equal(new Edges { Any = Any.Pack(new Int32Value { Value = 3 }) }, Read<Edges>(Packed));
+        Assert.Equal(Packed, Written(new Edges { Any = Any.Pack(new Int32Value { Value = 3 }) }));
+
+        // a wrapper alone, read and written as its scalar, at its default too
+        Assert.Equal(new Int32Value { Value = 3 }, Form.Read(Int32Value.Descriptor, "3"u8));
+        Assert.Equal("3", Written(new Int32Value { Value = 3 }));
+        Assert.Equal("\"a\"", Written(new StringValue { Value = "a" }));
+        Assert.Equal("0", Written(new Int32Value()));
+    }
+
+    [Fact]
+    public void Writes_each_kind_of_Value_and_a_Struct_within_a_Struct_in_its_own_form()
+    {
+        var inner = new Struct { Fields = { ["b"] = Value.ForNumber(1.5), ["a"] = Value.ForNull() } };
+        var outer = new Struct
+        {
+            Fields =
+            {
+                ["s"] = Value.ForStruct(inner),
+                ["l"] = Value.ForList(Value.ForString("x"), Value.ForBool(true), Value.ForBool(false)),
+            },
+        };
+
+        // * each kind, a Struct's members sorted, one within another
+        Assert.Equal("{\"value\":false}", Written(new Edges { Value = Value.ForBool(false) }));
+        Assert.Equal("{\"value\":null}", Written(new Edges { Value = Value.ForNull() }));
+        Assert.Equal("{\"extra\":{\"l\":[\"x\",true,false],\"s\":{\"a\":null,\"b\":1.5}}}", Written(new Edges { Extra = outer }));
+        Assert.Equal("{\"value\":{\"a\":[null,\"b\",true]}}", Written(new Edges { Value = Value.ForStruct(new Struct { Fields = { ["a"] = Value.ForList(Value.ForNull(), Value.ForString("b"), Value.ForBool(true)) } }) }));
+
+        // a Value of no kind, which its form holds none of
+        Assert.Equal("a Value that holds no kind", Assert.Throws<JsonFormException>(() =>
+        {
+            Form.Write(new Edges { Value = new Value() });
+        }).Message);
+    }
+
+    [Fact]
+    public void Writes_a_message_nested_100_deep_and_refuses_one_nested_past_100()
+    {
+        static Edges Nested(int count)
+        {
+            var top = new Edges();
+            var deepest = top;
+
+            for (var depth = 0; depth < count; depth += 1)
+            {
+                deepest.Child = new Edges();
+                deepest = deepest.Child;
+            }
+
+            return top;
+        }
+
+        // * 100 below the result written; 101 refused, a Struct's members counted as a message's
+        Assert.StartsWith("{\"child\":{\"child\":", Written(Nested(100)), StringComparison.Ordinal);
+        Assert.Equal("a message nested past 100", Assert.Throws<JsonFormException>(() =>
+        {
+            Form.Write(Nested(101));
+        }).Message);
+
+        var structured = Nested(99);
+        var deepest = structured;
+
+        while (deepest.Child is { } child)
+        {
+            deepest = child;
+        }
+
+        deepest.Extra = new Struct { Fields = { ["a"] = Value.ForNumber(1) } };
+
+        Assert.Equal("a message nested past 100", Assert.Throws<JsonFormException>(() =>
+        {
+            Form.Write(structured);
+        }).Message);
+    }
+
+    [Fact]
+    public void Writes_each_well_known_form_at_its_edges_and_refuses_what_its_form_holds_none_of()
+    {
+        // * a second before the epoch, an Any of an Empty, the empty Any, a map of bool keys
+        Assert.Equal("{\"at\":\"1969-12-31T23:59:59.500Z\"}", Written(new Edges { At = new Timestamp { Seconds = -1, Nanos = 500_000_000 } }));
+        Assert.Equal("{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Empty\"}}", Written(new Edges { Any = Any.Pack(new Empty()) }));
+        Assert.Equal("{\"any\":{}}", Written(new Edges { Any = new Any() }));
+        Assert.Equal("{\"took\":\"-1.000000001s\"}", Written(new Edges { Took = new Duration { Seconds = -1, Nanos = -1 } }));
+        Assert.Equal("{\"took\":\"0.000001s\"}", Written(new Edges { Took = new Duration { Nanos = 1_000 } }));
+        Assert.Equal("{\"flags\":{\"false\":\"f\",\"true\":\"t\"}}", Written(new Everything { Flags = { [true] = "t", [false] = "f" } }));
+
+        var parted = new List<string>();
+
+        foreach (var (message, words) in new (IMessage Message, string Words)[]
+        {
+            (new Edges { At = new Timestamp { Nanos = -1 } }, "a Timestamp outside its range"),
+            (new Edges { At = new Timestamp { Seconds = 253_402_300_800 } }, "a Timestamp outside its range"),
+            (new Edges { Took = new Duration { Seconds = 1, Nanos = -1 } }, "a Duration outside its range"),
+            (new Edges { Took = new Duration { Seconds = 315_576_000_001 } }, "a Duration outside its range"),
+            (new Edges { Any = new Any { TypeUrl = "nope" } }, "an Any whose type its definitions do not hold"),
+            (new Edges { Any = new Any { TypeUrl = "type.googleapis.com/bead.transcoding.v1.Inner", Value = ByteString.CopyFrom(0xFF) } }, "an Any whose bytes do not read as its type"),
+        })
+        {
+            try
+            {
+                Form.Write(message);
+                parted.Add($"{message}: written, where {words}");
+            }
+            catch (JsonFormException refused) when (refused.Message != words)
+            {
+                parted.Add($"{message}: {refused.Message}, where {words}");
+            }
+            catch (JsonFormException)
+            {
+                // refused in its own words
+            }
+        }
+
+        Assert.Empty(parted);
+    }
+
+    [Fact]
+    public void Writes_a_response_body_s_field_at_its_default_where_its_oneof_holds_another_member_or_none()
+    {
+        static string Field(IMessage message, string name)
+        {
+            return Encoding.UTF8.GetString(Form.WriteField(message, name));
+        }
+
+        // * a message field unset is its empty message, a wrapper's its value's zero, a scalar its zero
+        Assert.Equal("{}", Field(new Edges(), "child"));
+        Assert.Equal("0", Field(new Edges(), "wrapped_float"));
+        Assert.Equal("\"0\"", Field(new Edges(), "wrapped_int64"));
+        Assert.Equal("false", Field(new Everything(), "wrapped_bool"));
+        Assert.Equal("\"\"", Field(new Everything(), "wrapped_string"));
+        Assert.Equal("[]", Field(new Edges(), "ints"));
+        Assert.Equal("{}", Field(new Edges(), "labels"));
+        Assert.Equal("0", Field(new Edges(), "an_int32"));
+        Assert.Equal("{\"name\":\"a\"}", Field(new Everything { Inner = new Inner { Name = "a" } }, "inner"));
+
+        // a oneof's member set, another of it at its default, and each of none at its default
+        var chosen = new Everything { ChoiceText = "x" };
+
+        Assert.Equal("\"x\"", Field(chosen, "choice_text"));
+        Assert.Equal("{}", Field(chosen, "choice_inner"));
+        Assert.Equal("\"\"", Field(new Everything(), "choice_text"));
+        Assert.Equal("{}", Field(new Everything(), "inner"));
+        Assert.Equal("null", Field(new Edges(), "null_member"));
+        Assert.Equal("0", Field(new Value(), "number_value"));
+        Assert.Equal("false", Field(new Value(), "bool_value"));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            Form.WriteField(new Edges(), "nope");
+        });
+    }
+
+    [Fact]
     public void Writes_an_aliased_enum_by_its_first_name_a_float_at_its_shortest_and_a_minus_0_left_out()
     {
         Assert.Equal("{\"aliased\":\"ALIASED_FIRST\"}", Written(new Edges { Aliased = Aliased.Second }));

@@ -38,6 +38,8 @@ public sealed class TemplatesTests
             ("/v1/**/books", "a ** that is not its last segment"),
             ("/v1/{a={b}}", "a variable within a variable"),
             ("/v1/{name=*", "a variable that does not close"),
+            ("/v1/{1a}", "a variable that names no field path"),
+            ("/v1/{}", "a variable that names no field path"),
             ("/v1/bo%6Fks", "a literal that is no segment"),
             ("/v1//books", "a literal that is no segment"),
             ("/v1/books:", "a verb that is no literal"),
@@ -121,5 +123,14 @@ public sealed class TemplatesTests
         Assert.Equal(1, HttpTemplate.Answering(templates, PathOf("/v1/shelves/1/books/2")));
         Assert.Null(HttpTemplate.Answering(templates, PathOf("/v1/shelves/1/books/2:frobnicate")));
         Assert.Null(PathOf("/v1/books/a%3Ab").Verb);
+    }
+
+    [Fact]
+    public void Answers_a_path_two_tying_templates_match_by_the_first_of_them()
+    {
+        HttpTemplate[] templates = [HttpTemplate.Parse("/v1/{a}/x"), HttpTemplate.Parse("/v1/{b=*}/x")];
+
+        Assert.Equal(0, HttpTemplate.Answering(templates, PathOf("/v1/q/x")));
+        Assert.Equal(0, HttpTemplate.Answering([.. templates.Reverse()], PathOf("/v1/q/x")));
     }
 }

@@ -83,6 +83,63 @@ public sealed class BindingTests
     }
 
     [Fact]
+    public void Reads_a_parameter_without_its_equals_as_an_empty_value_and_an_enum_s_by_its_name_or_its_number()
+    {
+        var get = new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{name}" };
+
+        // * an empty sequence skipped, a name with no `=` an empty value, false a bool, a character
+        // beyond the BMP as it came or percent-encoded
+        Assert.Equal(
+            new GetBookRequest { Name = "2", Tags = { "", "😀", "😀" }, Sub = new Inner { Name = "a=b" } },
+            Bind(("getBook", get), ("/v1/books/2?&flag=false&&tags&tags=😀&tags=%F0%9F%98%80&sub.name=a=b&", null)));
+        Assert.Equal(
+            new GetBookRequest { Name = "2", Flag = true, Revision = -1 },
+            Bind(("getBook", get), ("/v1/books/2?flag=true&revision=-1", null)));
+
+        // an enum by its name or its number; a bool of no value is none
+        Assert.Equal(Color.Green, ((GetBookRequest)Bind(("getBook", get), ("/v1/books/2?color=COLOR_GREEN", null))).Color);
+        Assert.Equal(Color.Red, ((GetBookRequest)Bind(("getBook", get), ("/v1/books/2?color=1", null))).Color);
+        Assert.Equal("no bool", Assert.Throws<JsonFormException>(() =>
+        {
+            Bind(("getBook", get), ("/v1/books/2?flag", null));
+        }).Message);
+    }
+
+    [Fact]
+    public void Refuses_a_body_that_is_no_object_as_the_request_whole_or_under_a_field_a_variable_sets_inside()
+    {
+        var whole = new HttpRouteTemplate { Method = "POST", Template = "/v1/{name=shelves/*/books/*}:archive", Body = "*" };
+        var sub = new HttpRouteTemplate { Method = "POST", Template = "/v1/books/{sub.name}", Body = "sub" };
+
+        // * the request whole read as its message, in the mapping's words, whatever the path binds
+        Assert.Equal("a GetBookRequest that is no object", Assert.Throws<JsonFormException>(() =>
+        {
+            Bind(("archiveBook", whole), ("/v1/shelves/1/books/2:archive", "1"));
+        }).Message);
+        Assert.Equal("a field that two of the request set", Assert.Throws<JsonFormException>(() =>
+        {
+            Bind(("getBook", sub), ("/v1/books/x", "1"));
+        }).Message);
+    }
+
+    [Fact]
+    public void Throws_a_programmer_s_error_for_a_variable_that_names_no_field()
+    {
+        var crooked = new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{sub.nope}" };
+
+        Assert.Throws<ArgumentException>(() =>
+        {
+            Bind(("getBook", crooked), ("/v1/books/x", null));
+        });
+
+        // and for a target its route's template does not match
+        Assert.Throws<ArgumentException>(() =>
+        {
+            Bind(("getBook", new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{name}" }), ("/v2/other", null));
+        });
+    }
+
+    [Fact]
     public void Fills_a_PATCH_s_update_mask_with_the_keys_its_body_holds()
     {
         var patch = new HttpRouteTemplate { Method = "PATCH", Template = "/v1/{book.name=shelves/*/books/*}", Body = "book" };

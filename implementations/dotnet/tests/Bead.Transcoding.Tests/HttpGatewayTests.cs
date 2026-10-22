@@ -6,6 +6,14 @@ using System.Text;
 using System.Text.Json;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using static Bead.Transcoding.Tests.TranscodingFile;
 
 namespace Bead.Transcoding.Tests;
@@ -551,6 +559,12 @@ public sealed class HttpGatewayTests
                 (jwt, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, $"authorization: Bearer {new string('a', 1_005)}"], 431, "a token past 1004 bytes") { Body = "{}" }),
                 (small, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType], 413, "a body declared past maximumBodyBytes 16") { Body = Book, Reason = "too-large" }),
                 (small, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType, "transfer-encoding: chunked"], 413, "a body past maximumBodyBytes 16") { Body = $"18\r\n{Book}\r\n0\r\n\r\n", Reason = "too-large" }),
+                (plain, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType, JsonType], 415, "this route's body is application/json, unencoded") { Body = "{}", Reason = "type-refused" }),
+                (plain, new(["POST /api/Transcoding/echo HTTP/1.1", "content-type: application/json; boundary=x"], 415, "this route's body is application/json, unencoded") { Body = "{}", Reason = "type-refused" }),
+                (plain, new(["POST /api/Transcoding/echo HTTP/1.1", "content-type: application/json; charset"], 415, "this route's body is application/json, unencoded") { Body = "{}", Reason = "type-refused" }),
+                (plain, new(["POST /api/Transcoding/echo HTTP/1.1", "content-type: text/plain"], 415, "this route's body is application/json, unencoded") { Reason = "type-refused" }),
+                (plain, new(["POST /api/Transcoding/echo HTTP/1.1", JsonType, "sec-fetch-site: cross-site", "sec-fetch-mode: navigate"], 403, "a request from a page of another site that shows no origin") { Body = "{}", Reason = "origin-refused" }),
+                (jwt, new(["POST /api/Transcoding/whoAmI HTTP/1.1", JsonType, "authorization: Bearer"], 401, "an auth-scheme but Bearer") { Body = "{}" }),
             })
             {
                 parted.AddRange(PartsOf(await Exchanged(started.Port, OctetsOf(started.Port, expected)), expected));
@@ -668,6 +682,590 @@ public sealed class HttpGatewayTests
         }
 
         Assert.Empty(parted);
+    }
+
+    [Fact]
+    public async Task Takes_its_hosts_and_proxies_from_its_policy_or_beside_it_and_refuses_one_given_in_both()
+    {
+        var policy = HttpPolicy.Of(new HttpPolicyOptions { Hosts = ["api.example"], TrustedProxies = ["127.0.0.1"], UnnamedProxies = 0 });
+        var fromPolicy = await Started((options) =>
+        {
+            return options with { Policy = policy };
+        });
+        var beside = await Started((options) =>
+        {
+            return options with { Hosts = ["api.example"], TrustedProxies = ["127.0.0.1"], UnnamedProxies = 0 };
+        });
+
+        try
+        {
+            foreach (var started in new[] { fromPolicy, beside })
+            {
+                var drawn = new List<string>();
+
+                started.Service.Memory.Connection += (handle) =>
+                {
+                    lock (drawn)
+                    {
+                        drawn.Add(handle);
+                    }
+                };
+
+                // * a host it takes, and its caller's address as the proxy it trusts forwards it
+                var named = new HttpRequestMessage(HttpMethod.Get, "/v1/books/2");
+
+                named.Headers.Host = "api.example";
+                named.Headers.TryAddWithoutValidation("x-forwarded-for", "203.0.113.9");
+
+                using var taken = await started.Client.SendAsync(named, Cancelled);
+                var other = new HttpRequestMessage(HttpMethod.Get, "/v1/books/2");
+
+                other.Headers.Host = "evil.example";
+
+                using var refused = await started.Client.SendAsync(other, Cancelled);
+
+                Assert.Equal((HttpStatusCode.OK, HttpStatusCode.Forbidden), (taken.StatusCode, refused.StatusCode));
+                Assert.StartsWith("type=MEMORY;ip=203.0.113.9;", Assert.Single(drawn), StringComparison.Ordinal);
+            }
+
+            // a member given in its policy and beside it, whatever its value
+            var options = Exchanges.OptionsOf(fromPolicy.Service.Memory, null);
+
+            Assert.Equal(
+                "Hosts is given in the policy and beside it: give it once (Parameter 'Hosts')",
+                Assert.Throws<ArgumentException>(() =>
+                {
+                    _ = new HttpGateway(options with { Hosts = ["api.example"], Policy = policy });
+                }).Message);
+            Assert.Equal(
+                "UnnamedProxies is given in the policy and beside it: give it once (Parameter 'UnnamedProxies')",
+                Assert.Throws<ArgumentException>(() =>
+                {
+                    _ = new HttpGateway(options with { UnnamedProxies = 0, Policy = HttpPolicy.Of(new HttpPolicyOptions { UnnamedProxies = 1 }) });
+                }).Message);
+        }
+        finally
+        {
+            await Stopped(fromPolicy);
+            await Stopped(beside);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_route_off_its_template_s_grammar_and_listens_once()
+    {
+        await using var service = await TranscodingService.Start();
+        var options = Exchanges.OptionsOf(service.Memory, null);
+        var echo = RouteOf("echo");
+        var crooked = echo with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/v1/{name" }] };
+
+        // * a template off http.proto's grammar is refused as the gateway is built, naming its route
+        Assert.StartsWith(
+            "echo's route GET /v1/{name: ",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                _ = new HttpGateway(options with { Routes = [crooked] });
+            }).Message,
+            StringComparison.Ordinal);
+
+        // one that listens on localhost, its loopbacks, listens once; one that listens on none stops at once
+        await using var gateway = new HttpGateway(options);
+        var address = await gateway.Start(new HttpGatewayStartOptions { FindOpenPort = true }, Cancelled);
+
+        Assert.Equal("localhost", address.Address);
+        Assert.Equal(
+            "a gateway listens once",
+            (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return gateway.Start(new HttpGatewayStartOptions { FindOpenPort = true }, Cancelled);
+            })).Message);
+
+        using (var client = new HttpClient { BaseAddress = new Uri($"http://localhost:{address.Port}") })
+        {
+            using var book = await client.GetAsync(new Uri("/v1/books/2", UriKind.Relative), Cancelled);
+
+            Assert.Equal(HttpStatusCode.OK, book.StatusCode);
+        }
+
+        // a port another listener holds: its listen fails, and it listens on none
+        await using var held = new HttpGateway(options);
+        var port = (await held.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled)).Port;
+        await using var second = new HttpGateway(options);
+
+        await Assert.ThrowsAnyAsync<IOException>(() =>
+        {
+            return second.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", Port = port }, Cancelled);
+        });
+        await second.Stop();
+        await using var never = new HttpGateway(options);
+
+        await never.Stop();
+    }
+
+    [Fact]
+    public async Task Answers_as_the_endpoint_an_application_maps_and_a_caller_of_no_address_as_local()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var drawn = new List<string>();
+
+        service.Memory.Connection += (handle) =>
+        {
+            lock (drawn)
+            {
+                drawn.Add(handle);
+            }
+        };
+
+        // * mapped as the application's fallback: what no other endpoint answers
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseKestrel((kestrel) =>
+        {
+            kestrel.Listen(IPAddress.Loopback, 0);
+        });
+
+        await using var application = builder.Build();
+
+        application.MapGet("/own", () =>
+        {
+            return "its own";
+        });
+        application.MapBeadGateway(gateway);
+        await application.StartAsync(Cancelled);
+
+        var port = new Uri(application.Urls.First()).Port;
+
+        using (var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") })
+        {
+            using var own = await client.GetAsync(new Uri("/own", UriKind.Relative), Cancelled);
+            using var book = await client.GetAsync(new Uri("/v1/books/2", UriKind.Relative), Cancelled);
+            using var none = await client.GetAsync(new Uri("/nope", UriKind.Relative), Cancelled);
+
+            Assert.Equal("its own", await own.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", await book.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(("path-unknown", HttpStatusCode.NotFound), (none.Headers.GetValues("bead-refusal").Single(), none.StatusCode));
+        }
+
+        await application.StopAsync(Cancelled);
+
+        // an exchange handed on with no remote address, as a test host's: its caller is local
+        var context = new DefaultHttpContext();
+        var body = new MemoryStream();
+
+        context.Request.Method = "GET";
+        context.Request.Protocol = "HTTP/1.1";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/v1/books/2";
+        context.Response.Body = body;
+
+        await gateway.Answer(context);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("{\"name\":\"2\",\"title\":\"A tale\"}", Encoding.UTF8.GetString(body.ToArray()));
+        Assert.StartsWith("type=MEMORY;ip=local;", drawn[^1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Answers_each_request_at_the_edges_of_its_gates()
+    {
+        var started = await Started();
+
+        try
+        {
+            // * a field of a control character: what HTTP refuses of its own, unmarked, its body empty
+            var bell = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase(["GET /v1/books/2 HTTP/1.1", "x-other: a\u0007b"], 400, "")));
+
+            Assert.Equal((400, false, ""), (bell.Status, bell.Fields.ContainsKey("bead-refusal"), bell.Body));
+
+            // an absolute-form target: its path and query, its authority aside
+            var absolute = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase([$"GET http://127.0.0.1:{started.Port}/v1/books/2?revision=3 HTTP/1.1"], 200, "")));
+
+            Assert.Equal((200, "{\"name\":\"2\",\"title\":\"A tale\",\"pages\":\"3\"}"), (absolute.Status, absolute.Body));
+
+            // a range of application/* weighed below text/event-stream: a stream; a weight it cannot read is 1
+            foreach (var accept in new[] { "application/*;q=0.5, text/event-stream", "text/event-stream;q=x;level, application/json" })
+            {
+                using var stream = await Opened(started.Port, OctetsOf(started.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", $"accept: {accept}"], 200, "") { Body = "{}" }));
+
+                Assert.Contains("event: result\nid: 1\ndata: {}\n\n", await ReadUntil(stream, "data: {}\n\n"), StringComparison.Ordinal);
+            }
+
+            // a raw route's query of empty parameters alone binds nothing, a charset quoted and an identity encoding are taken
+            foreach (var lines in new[]
+            {
+                new[] { "POST /api/Transcoding/raw?& HTTP/1.1", "content-type: application/octet-stream" },
+                ["POST /api/Transcoding/raw HTTP/1.1", "content-type: application/octet-stream; charset=\"UTF-8\"", "content-encoding: identity"],
+            })
+            {
+                var raw = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase(lines, 200, "") { Body = "hi" }));
+
+                Assert.Equal((200, "hi"), (raw.Status, raw.Body));
+            }
+
+            // a call that hangs and one beside it of the same address: each held, then each let go
+            var hanging = started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+
+            await Until(() =>
+            {
+                return started.Service.Hanging == 1;
+            });
+
+            using var echoed = await started.Client.SendAsync(Json("/api/Transcoding/echo", "{\"anInt32\":2}"), Cancelled);
+
+            Assert.Equal("{\"anInt32\":2}", await echoed.Content.ReadAsStringAsync(Cancelled));
+            _ = hanging;
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_304_a_request_for_the_document_under_an_if_none_match_of_any_entity_tag()
+    {
+        var started = await Started();
+
+        try
+        {
+            using var served = await started.Client.GetAsync(new Uri("/openapi.json", UriKind.Relative), Cancelled);
+            var etag = served.Headers.ETag!.Tag;
+
+            // * any tag, among others or alone, and a weak tag of its own compared as its strong one
+            foreach (var asked in new[] { " * ", "\"other\", *", $"W/{etag}" })
+            {
+                var again = new HttpRequestMessage(HttpMethod.Get, "/openapi.json");
+
+                again.Headers.TryAddWithoutValidation("if-none-match", asked);
+
+                using var held = await started.Client.SendAsync(again, Cancelled);
+
+                Assert.Equal(HttpStatusCode.NotModified, held.StatusCode);
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Serves_its_document_to_a_HEAD_and_to_a_preflight_that_asks_for_no_field()
+    {
+        var started = await Started();
+
+        try
+        {
+            using var head = await started.Client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/openapi.json"), Cancelled);
+
+            Assert.Equal((HttpStatusCode.OK, Document.Length), (head.StatusCode, (int)head.Content.Headers.ContentLength!));
+            Assert.Empty(await head.Content.ReadAsByteArrayAsync(Cancelled));
+
+            // a preflight from an origin it lists that asks for no field: GET and HEAD, authorization and any other
+            var preflight = new HttpRequestMessage(HttpMethod.Options, "/openapi.json");
+
+            preflight.Headers.TryAddWithoutValidation("origin", Origin);
+            preflight.Headers.TryAddWithoutValidation("access-control-request-method", "GET");
+
+            using var answered = await started.Client.SendAsync(preflight, Cancelled);
+
+            Assert.Equal(HttpStatusCode.NoContent, answered.StatusCode);
+            Assert.Equal("GET, HEAD", answered.Headers.GetValues("access-control-allow-methods").Single());
+            Assert.Equal("authorization, *", answered.Headers.GetValues("access-control-allow-headers").Single());
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Writes_a_text_or_a_raw_stream_s_data_as_a_JSON_string_and_a_result_it_cannot_read_as_a_call_s_failure()
+    {
+        // * ticks served thrice more, its result and its notifications told they are raw, text, or an Edges
+        HttpRoute Streamed(string template, (HttpPayload Result, HttpPayload Notification) told)
+        {
+            return RouteOf("ticks") with
+            {
+                Result = told.Result,
+                Notification = told.Notification,
+                Routes = [new HttpRouteTemplate { Method = "POST", Template = template, Body = "*" }],
+            };
+        }
+
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes =
+                [
+                    .. options.Routes,
+                    Streamed("/raw-ticks", (HttpPayload.Raw, HttpPayload.Raw)),
+                    Streamed("/text-ticks", (HttpPayload.Text, HttpPayload.Text)),
+                    Streamed("/edges-ticks", (HttpPayload.Of(Edges.Descriptor), HttpPayload.Of(Tick.Descriptor))),
+                ],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        // a listener that throws: the exchange answers on
+        started.Gateway.Error += (_) =>
+        {
+            throw new InvalidOperationException("a listener broke");
+        };
+
+        async Task<(int Status, string Body)> Ticks(string path, int from)
+        {
+            var answered = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase([$"POST {path} HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 200, "") { Body = $"{{\"from\":{from}}}" }));
+
+            return (answered.Status, answered.Fields.ContainsKey("transfer-encoding") ? Dechunked(answered.Body) : answered.Body);
+        }
+
+        try
+        {
+            // a TicksResponse and each Tick, 08 02, 08 01 and none, as raw and as text
+            Assert.StartsWith("event: result\nid: 1\ndata: \"CAI=\"\n\nid: 2\ndata: \"CAE=\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n", (await Ticks("/raw-ticks", 2)).Body, StringComparison.Ordinal);
+            Assert.StartsWith("event: result\nid: 1\ndata: \"\\b\\u0002\"\n\nid: 2\ndata: \"\\b\\u0001\"\n\nid: 3\ndata: \"\"\n\nevent: failure\nid: 4\n", (await Ticks("/text-ticks", 2)).Body, StringComparison.Ordinal);
+            Assert.Empty(reported);
+
+            // a result its stock library refuses, or a text one not UTF-8: 502, nothing of the stream written, reported
+            const string Undecodable = "{\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}";
+
+            Assert.Equal((502, Undecodable), await Ticks("/edges-ticks", 2));
+            Assert.Equal((502, Undecodable), await Ticks("/text-ticks", -1));
+            Assert.Equal(2, reported.Count);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Answers_500_a_result_its_mapping_holds_no_form_of_reported_in_the_mapping_s_words()
+    {
+        // * raw's route told its result is an Edges: the bytes its server echoes, a Value of NaN, a mask of foo_
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.Raw.Procedure ? route with { Result = HttpPayload.Of(Edges.Descriptor) } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            var nan = new Edges { Value = Value.ForNumber(double.NaN) }.ToByteArray();
+            var raw = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/raw") { Content = new ByteArrayContent(nan) };
+
+            raw.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            using var answered = await started.Client.SendAsync(raw, Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, answered.StatusCode);
+            Assert.Equal("{\"detail\":\"a Value whose number is not finite\",\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(["a Value whose number is not finite"], reported);
+
+            var mask = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/raw") { Content = new ByteArrayContent(new Edges { Mask = new FieldMask { Paths = { "foo_" } } }.ToByteArray()) };
+
+            mask.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+
+            using var unwritable = await started.Client.SendAsync(mask, Cancelled);
+
+            Assert.Equal(HttpStatusCode.InternalServerError, unwritable.StatusCode);
+            Assert.Equal("{\"detail\":\"a FieldMask path whose lowerCamelCase does not read back\",\"status\":500,\"title\":\"Internal Server Error\",\"type\":\"about:blank\"}", await unwritable.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(["a Value whose number is not finite", "a FieldMask path whose lowerCamelCase does not read back"], reported);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_query_beside_a_body_of_a_json_text_or_raw_route_and_a_variable_that_does_not_decode_400()
+    {
+        var started = await Started();
+
+        static string Undecodable(string detail)
+        {
+            return $"{{\"code\":50,\"detail\":\"{detail}\",\"scope\":\"protocol\",\"status\":400,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}}";
+        }
+
+        try
+        {
+            foreach (var (path, type, body) in new[] { ("raw", "application/octet-stream", "x"), ("text", "text/plain", "x"), ("json", "application/json", "1") })
+            {
+                var queried = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase([$"POST /api/Transcoding/{path}?a=1 HTTP/1.1", $"content-type: {type}"], 400, "") { Body = body }));
+
+                Assert.Equal((400, Undecodable("a query beside a body of the whole request")), (queried.Status, queried.Body));
+            }
+
+            var undecoded = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase(["GET /v1/shelves/%FF/books/2 HTTP/1.1"], 400, "")));
+
+            Assert.Equal((400, Undecodable("a value whose bytes are not UTF-8")), (undecoded.Status, undecoded.Body));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Ends_a_stream_whose_notification_its_stock_library_refuses_with_502_as_its_last_event()
+    {
+        // * ticks' notification told it is an Edges: a Tick's remaining, field 1 a varint, where an Edges' at is a message
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.Ticks.Procedure ? route with { Notification = HttpPayload.Of(Edges.Descriptor) } : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+
+        try
+        {
+            var ticks = await Exchanged(started.Port, OctetsOf(started.Port, new OwnCase(["POST /api/Transcoding/ticks HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 200, "") { Body = "{\"from\":2}" }));
+
+            Assert.Equal(200, ticks.Status);
+            Assert.StartsWith(
+                "event: result\nid: 1\ndata: {\"ticks\":2}\n\nevent: failure\nid: 2\ndata: {\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}\n\n",
+                Dechunked(ticks.Body),
+                StringComparison.Ordinal);
+            Assert.Single(reported);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
+    public async Task Writes_a_comment_on_a_quiet_stream_each_heartbeat_on_its_clock_and_drops_one_past_maximumUnsentBytes()
+    {
+        var clock = new FakeTimeProvider();
+        var started = await Started((options) =>
+        {
+            return options with { Clock = clock, Heartbeat = TimeSpan.FromSeconds(1) };
+        });
+
+        try
+        {
+            using var stream = await Opened(started.Port, OctetsOf(started.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 200, "") { Body = "{}" }));
+
+            await ReadUntil(stream, "data: {}\n\n");
+
+            // * nothing written for a heartbeat: a comment, which no EventSource dispatches
+            clock.Advance(TimeSpan.FromSeconds(1));
+
+            Assert.EndsWith(":\n\r\n", await ReadUntil(stream, ":\n\r\n"), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+
+        // a stream's write past what its response may hold unsent: dropped, its socket aborted, nothing written
+        var bounded = await Started((options) =>
+        {
+            return options with { MaximumUnsentBytes = 1 };
+        });
+
+        try
+        {
+            var dropped = await Received(bounded.Port, OctetsOf(bounded.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 0, "") { Body = "{}" }));
+
+            Assert.Empty(dropped);
+        }
+        finally
+        {
+            await Stopped(bounded);
+        }
+    }
+
+    // a socket's bytes, read until they hold `end`
+    private static async Task<string> ReadUntil(Socket socket, string end)
+    {
+        var came = new List<byte>();
+        var buffer = new byte[65_536];
+
+        while (!Encoding.UTF8.GetString([.. came]).Contains(end, StringComparison.Ordinal))
+        {
+            var count = await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+
+            if (count == 0)
+            {
+                throw new IOException($"the socket ended before {end}: {Encoding.UTF8.GetString([.. came])}");
+            }
+
+            came.AddRange(buffer.AsSpan(0, count));
+        }
+
+        return Encoding.UTF8.GetString([.. came]);
+    }
+
+    // `octets` written on a socket of its own, and every byte that came back to its end, or its reset
+    private static async Task<byte[]> Received(int port, byte[] octets)
+    {
+        using var socket = await Opened(port, octets);
+        var came = new List<byte>();
+        var buffer = new byte[65_536];
+
+        while (true)
+        {
+            int count;
+
+            try
+            {
+                count = await socket.ReceiveAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled);
+            }
+            catch (SocketException)
+            {
+                break;
+            }
+
+            if (count == 0)
+            {
+                break;
+            }
+
+            came.AddRange(buffer.AsSpan(0, count));
+        }
+
+        return [.. came];
+    }
+
+    // a chunked body of ASCII, its chunks joined
+    private static string Dechunked(string body)
+    {
+        var joined = new StringBuilder();
+        var at = 0;
+
+        while (at < body.Length)
+        {
+            var end = body.IndexOf("\r\n", at, StringComparison.Ordinal);
+            var size = int.Parse(body[at..end], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+
+            if (size == 0)
+            {
+                break;
+            }
+
+            joined.Append(body, end + 2, size);
+            at = end + 2 + size + 2;
+        }
+
+        return joined.ToString();
     }
 
     // a request's octets as a socket of the test's own writes them: its lines, a host of the

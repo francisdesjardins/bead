@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Bead.Interop;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Bead.Tests;
 
@@ -276,6 +277,339 @@ public sealed class MemoryTransportClientTests
             atTold.Writer.TryWrite("settled");
 
             Assert.Equal(["closed False True", "settled"], await TakeAll(atTold, 2));
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_send_or_a_disconnect_unless_open_and_a_send_of_what_is_no_bytes()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+
+        // * never connected: nothing to send on, nor to close
+        Assert.Equal("the transport client is uninitialized, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return client.Send(new TransportMessage(new byte[] { 1 }, false));
+        })).Message);
+        Assert.Equal("the transport client is uninitialized, not open", (await Assert.ThrowsAsync<DisconnectException>(() =>
+        {
+            return client.CloseConnection();
+        })).Message);
+
+        // open: a text message refused before it goes, the connection kept
+        server.Message += (message, _) =>
+        {
+            heard.Add(Convert.ToHexString(message.Bytes.Span));
+        };
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        Assert.StartsWith("an in-memory connection carries envelopes, as bytes", (await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return client.Send(new TransportMessage("text"u8.ToArray(), true));
+        })).Message, StringComparison.Ordinal);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Empty(heard);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Refuses_a_reconnect_never_connected_and_a_connect_unless_closed_nothing_changed()
+    {
+        await using var server = new MemoryTransportServer();
+        await using var client = new MemoryTransportClient();
+
+        // * never connected: nothing to connect again to
+        Assert.Equal("the transport client was never connected", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Reconnect();
+        })).Message);
+
+        // a token cancelled already, and a server not started: refused, the first leaving its state as it was
+        using var cancelled = new CancellationTokenSource();
+
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Connect(new MemoryConnectOptions { Server = server }, cancelled.Token);
+        });
+        Assert.Equal(ReadyState.Uninitialized, client.ReadyState);
+        Assert.Equal("the in-memory transport server is uninitialized, not open", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        })).Message);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+
+        // open: a second connect refused, and a reconnection whose token is cancelled already leaves it open
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        Assert.Equal("the transport client is already open", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        })).Message);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelled.Token });
+        });
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Single(server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Reconnects_with_its_last_connect_s_options_replacing_its_connection_without_a_close()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var drawn = new List<string>();
+        var closedAtServer = new List<string>();
+        var closedAtClient = new List<string>();
+        var reported = new List<string>();
+        var starts = 0;
+
+        server.Connection += drawn.Add;
+        server.Close += (isClean, handle) =>
+        {
+            closedAtServer.Add($"{handle} {isClean}");
+        };
+        client.Close += (isClean, isQuick) =>
+        {
+            closedAtClient.Add($"{isClean} {isQuick}");
+        };
+        client.Error += (reason) =>
+        {
+            reported.Add(reason.Message);
+        };
+
+        // * each listener of its start told, the one that throws reported, and the reconnection goes on
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            starts += 1;
+        };
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            throw new InvalidOperationException("a listener broke");
+        };
+
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server, Address = "10.0.0.1", Port = 4_000 }, Cancelled);
+        await client.Reconnect(new TransportReconnectOptions { CancellationToken = Cancelled });
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+        Assert.Equal(["type=MEMORY;ip=10.0.0.1;ordinal=1", "type=MEMORY;ip=10.0.0.1;ordinal=2"], drawn);
+        Assert.Equal(["type=MEMORY;ip=10.0.0.1;ordinal=1 False"], closedAtServer);
+        Assert.Empty(closedAtClient);
+        Assert.Equal(1, starts);
+        Assert.Equal(["a listener broke"], reported);
+
+        // its server gone: each attempt refused, until they run out, Closed with no close of its own
+        await server.Stop();
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal(["False False"], closedAtClient);
+
+        var gaveUp = await Assert.ThrowsAsync<ReconnectException>(() =>
+        {
+            return client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = Cancelled });
+        });
+
+        Assert.IsType<ConnectException>(gaveUp.InnerException);
+        Assert.Equal((ReadyState.Closed, 1), (client.ReadyState, closedAtClient.Count));
+    }
+
+    [Fact]
+    public async Task Closes_what_its_last_attempt_opened_as_its_reconnection_was_cancelled()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var closedAtClient = new List<string>();
+
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        client.Close += (isClean, isQuick) =>
+        {
+            closedAtClient.Add($"{isClean} {isQuick}");
+        };
+
+        // * the reconnection cancelled in the very turn its server draws the connection
+        server.Connection += (_) =>
+        {
+            cancelling.Cancel();
+        };
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelling.Token });
+        });
+
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Equal(["True False"], closedAtClient);
+        Assert.Empty(server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_server_drew_it()
+    {
+        var clock = new FakeTimeProvider();
+        var held = 0;
+
+        // * a server that holds each connect until its token is cancelled, as a peer that never answers
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions
+        {
+            Accepting = async (token) =>
+            {
+                Interlocked.Increment(ref held);
+                await Task.Delay(System.Threading.Timeout.InfiniteTimeSpan, TimeProvider.System, token);
+            },
+        });
+
+        await server.Start();
+
+        async Task Holding(Func<Task> connect, int count)
+        {
+            var since = TimeProvider.System.GetTimestamp();
+
+            while (Volatile.Read(ref held) < count)
+            {
+                Assert.True(TimeProvider.System.GetElapsedTime(since) < Patience, "the connect was never held");
+                await Task.Delay(TimeSpan.FromMilliseconds(5), TimeProvider.System, Cancelled);
+            }
+
+            await connect();
+        }
+
+        // its clock past its timeout
+        await using var timed = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock });
+        var timing = timed.Connect(new MemoryConnectOptions { Server = server, Timeout = TimeSpan.FromSeconds(1) }, Cancelled);
+
+        await Holding(
+            () =>
+            {
+                clock.Advance(TimeSpan.FromSeconds(1));
+
+                return Task.CompletedTask;
+            },
+            1);
+        Assert.Equal("timed out after 1000ms", (await Assert.ThrowsAsync<TimeoutException>(() =>
+        {
+            return timing;
+        })).Message);
+        Assert.Equal(ReadyState.Closed, timed.ReadyState);
+
+        // its token cancelled
+        await using var asked = new MemoryTransportClient();
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var asking = asked.Connect(new MemoryConnectOptions { Server = server }, cancelling.Token);
+
+        await Holding(
+            () =>
+            {
+                return cancelling.CancelAsync();
+            },
+            2);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return asking;
+        });
+
+        // its dispose
+        var disposed = new MemoryTransportClient();
+        var disposing = disposed.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+
+        await Holding(
+            () =>
+            {
+                return disposed.DisposeAsync().AsTask();
+            },
+            3);
+        Assert.StartsWith("the transport client was disposed as it connected: ", (await Assert.ThrowsAsync<ConnectException>(() =>
+        {
+            return disposing;
+        })).Message, StringComparison.Ordinal);
+        Assert.Equal(ReadyState.Closed, disposed.ReadyState);
+        Assert.Empty(server.ConnectionHandles);
+    }
+
+    [Fact]
+    public async Task Hears_what_its_server_sent_before_the_connection_opened_once_it_has_in_its_order()
+    {
+        var scheduler = new SerialScheduler();
+        await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+        await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Scheduler = scheduler });
+        var heard = new List<string>();
+
+        // * sent in the turn its server draws it, before its client opened: heard once it has, in order
+        server.Connection += (handle) =>
+        {
+            _ = server.Send(new TransportMessage(new byte[] { 1 }, false), handle);
+            _ = server.Send(new TransportMessage(new byte[] { 2 }, false), handle);
+        };
+        client.Message += (message) =>
+        {
+            heard.Add($"heard {message.Bytes.Span[0]}");
+        };
+
+        await server.Start();
+        await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(["heard 1", "heard 2"], heard);
+        Assert.Equal(ReadyState.Open, client.ReadyState);
+    }
+
+    [Fact]
+    public async Task Hears_nothing_once_it_let_go_of_its_connection_and_tells_one_close_at_each_end()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, handle) = await Connected(scheduler);
+        var heard = new List<string>();
+        var closedAtClient = new List<string>();
+        var closedAtServer = new List<string>();
+
+        await using (server)
+        await using (client)
+        {
+            server.Close += (isClean, _) =>
+            {
+                closedAtServer.Add($"{isClean}");
+            };
+            client.Message += (message) =>
+            {
+                heard.Add($"heard {message.Bytes.Span[0]}");
+            };
+            client.Close += (isClean, isQuick) =>
+            {
+                closedAtClient.Add($"{isClean} {isQuick}");
+            };
+
+            // * its server sends and ends it as its client closes it, every turn held behind a gate:
+            // none of it heard, one close told at each end
+            using var gate = new ManualResetEventSlim();
+
+            scheduler.Post(() =>
+            {
+                gate.Wait(Patience);
+            });
+            await server.Send(new TransportMessage(new byte[] { 8 }, false), handle);
+
+            var ending = server.CloseConnection(handle);
+
+            await client.CloseConnection();
+            gate.Set();
+            Assert.True(await ending.WaitAsync(Patience, Cancelled));
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+            Assert.Empty(heard);
+            Assert.Equal(["True False"], closedAtClient);
+            Assert.Equal(["True"], closedAtServer);
         }
     }
 

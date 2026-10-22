@@ -191,7 +191,8 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
     /// Hands a copy of the bytes of <paramref name="message"/> to its server, with the credential
     /// beside them, in a later turn, after what went before; refused with a
     /// <see cref="DisconnectException"/> unless Open, and with an <see cref="ArgumentException"/>,
-    /// its connection kept, for a credential no field carries.
+    /// its connection kept, for a text message, which is no envelope, or a credential no field
+    /// carries.
     /// </summary>
     public Task Send(TransportMessage message)
     {
@@ -207,6 +208,11 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
         if (readyState != ReadyState.Open || connection is null)
         {
             return Task.FromException(new DisconnectException($"the transport client is {NameOf(readyState)}, not open"));
+        }
+
+        if (message.IsText)
+        {
+            return Task.FromException(new ArgumentException(MemoryTransportServer.TextRefused, nameof(message)));
         }
 
         // refused before it goes, the connection kept, as over HTTP: a field could not carry it as

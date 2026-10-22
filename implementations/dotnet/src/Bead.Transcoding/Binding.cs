@@ -87,6 +87,12 @@ public sealed class HttpBinding
         if (body == Whole)
         {
             root = JsonText.Read(request.Body.Span);
+
+            // * not an object: the reading refuses it as the message's, with nothing bound beside it
+            if (root.Kind != JsonNodeKind.Object)
+            {
+                return _form.ReadNode(route.Request, root);
+            }
         }
         else if (body is not null)
         {
@@ -286,12 +292,6 @@ public sealed class HttpBinding
     private static void SetAlong(JsonNode root, (List<FieldDescriptor> Fields, JsonNode Value) set)
     {
         var (fields, value) = set;
-
-        if (root.Kind != JsonNodeKind.Object)
-        {
-            throw new JsonFormException("a body that is no object");
-        }
-
         var members = root.Members;
 
         foreach (var field in fields.Take(fields.Count - 1))
