@@ -604,7 +604,8 @@ against each server.
 - `node tools/check-links.mjs`: every relative link of the repository's Markdown resolves, to a file
   or a folder git keeps, and its anchor to a heading of the file it names. Given files, those alone.
 - `node tools/check-details.mjs`: no exception's message goes into a failure's detail but at the few
-  sites that report alone (spec 9.0), on either side. Given files, those alone.
+  sites that report alone (spec 9.0), on either side, each marked where it stands by
+  `// ! a detail of the side's own words: <why>`. Given files, those alone.
 - `node tools/check-versions.mjs`: on every ref, each version agrees with itself — the TypeScript
   package's and the builder's, the C# side's and the project ranges of the C# lock files, an
   example's among them, and each conformance file's with its document's — and each released section

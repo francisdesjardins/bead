@@ -84,6 +84,7 @@ public sealed partial class ServiceManager
             catch (Exception reason)
             {
                 throw new FailureException(
+                    // ! a detail of the side's own words: the decoder's, for this side's caller alone
                     Failure.OfProtocol(ProtocolCode.PayloadUndecodable, reason.Message),
                     (new FailureException.Raised(FailureOrigin.Local, _router.Side), reason))
                 {

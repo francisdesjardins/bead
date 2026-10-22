@@ -193,6 +193,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it takes its words beside its `timeout`, which it keeps. A call on an ask unsettled at its
   deadline fails with that `TimeoutError`, as the C# side's with its `TimeoutException`, and one on
   an ask that failed with `the key set's ask for <issuer> failed`, its issuer unquoted.
+- `tools/check-details.mjs` holds each allowed site itself: each carries its marker, `// ! a detail
+  of the side's own words: <why>`, on its line or right above it, and its file counts its marked
+  sites, so a new site beside an allowed one fails by its line and a site moved holds.
 
 ### Fixed
 

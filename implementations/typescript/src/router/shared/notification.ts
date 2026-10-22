@@ -234,6 +234,7 @@ export const createNotification = <RequestPayload, ResponsePayload, Notification
           notificationPayload = serializer.decodeNotification(payload);
         } catch (reason) {
           const error = new FailureError(
+            // ! a detail of the side's own words: the decoder's, for the side's report alone
             { ...router.failures.payloadUndecodable, detail: toError(reason).message },
             { cause: reason, procedureAddress: procedure }
           );
