@@ -37,7 +37,7 @@ export interface IChecked {
 /**
  * Checks the `.proto` files of `roots`, or only `files` among them by their import paths; `image`
  * compiles buf's image, for `beadc breaking`, which reads as a set. Throws an {@link InputError} for
- * a root that is no folder or a set buf does not compile.
+ * a root that is no folder or a set buf does not compile. `folder` names the project's work area.
  */
 export const checkRoots = (
   roots: readonly string[],

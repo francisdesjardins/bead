@@ -1,4 +1,12 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmdirSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +16,7 @@ import { BinaryReader } from '@bufbuild/protobuf/wire';
 import { type FileDescriptorProto, FileDescriptorSetSchema } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 
-import { compile, lintRules } from '../compile.ts';
+import { compile, lintRules, OPTIONS_ROOT } from '../compile.ts';
 import { InputError } from '../diagnostics.ts';
 import { blueprintOf } from '../front-end/blueprint-of.ts';
 import { readSet } from '../front-end/input.ts';
@@ -32,8 +40,12 @@ test('compiles a project with its options on the project’s drive and removes t
       expect(compile([root], { folder, image })).toEqual(compile([FIXTURES], { image }));
     }
 
-    // * a root at the project folder also contains the temporary options module.
+    // * a root at the project folder also contains the temporary module and an editor's copy.
+    cpSync(OPTIONS_ROOT, join(root, '.beadc/include'), { recursive: true });
     expect(compile([root], { folder: root })).toEqual(compile([FIXTURES]));
+    expect(readdirSync(join(root, '.beadc'))).toEqual(['include']);
+    rmSync(join(root, '.beadc/include'), { recursive: true });
+    rmdirSync(join(root, '.beadc'));
     expect(compile([root])).toEqual(compile([FIXTURES]));
     expect(
       lintRules([root], { folder, files: [join(root, 'bead/interop/v1/interop.proto')] })
@@ -41,9 +53,11 @@ test('compiles a project with its options on the project’s drive and removes t
     expect(() => {
       return compile([root], { folder, files: [join(root, 'absent.proto')] });
     }).toThrow(InputError);
-    expect(existsSync(join(folder, '.beadc'))).toBe(true);
-    expect(readdirSync(join(folder, '.beadc'))).toEqual([]);
-    expect(readdirSync(join(root, '.beadc'))).toEqual([]);
+    expect(() => {
+      return lintRules([root], { folder, files: [join(root, 'absent.proto')] });
+    }).toThrow(InputError);
+    expect(existsSync(join(folder, '.beadc'))).toBe(false);
+    expect(existsSync(join(root, '.beadc'))).toBe(false);
   } finally {
     expect(dirname(folder)).toBe(resolve(tmpdir()));
     rmSync(folder, { recursive: true, force: true });

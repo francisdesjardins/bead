@@ -11,13 +11,13 @@
 // dependencies
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { bufDiagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
 import { temporaryFolderOf } from './config.ts';
+import { bufDiagnosticOf, type IDiagnostic, InputError } from './diagnostics.ts';
 import { BEADC_FILES, displayOf } from './roots.ts';
 
 // constants
@@ -37,6 +37,21 @@ const BUF_FINDINGS = 100;
 // helpers
 
 const require = createRequire(import.meta.url);
+
+// * leave no empty work area among a standalone root's siblings; another run or an editor keeps it.
+const removeWorkspace = (folder: string): void => {
+  rmSync(folder, { recursive: true, force: true });
+
+  try {
+    rmdirSync(dirname(folder));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY' && code !== 'EEXIST') {
+      throw error;
+    }
+  }
+};
 
 // the folder that holds every one of `folders`: buf takes no module outside the folder it builds
 const ancestorOf = (folders: readonly string[]): string => {
@@ -119,7 +134,7 @@ const workspaceOf = (
       }),
     };
   } catch (error) {
-    rmSync(folder, { recursive: true, force: true });
+    removeWorkspace(folder);
     throw error;
   }
 };
@@ -131,7 +146,7 @@ const workspaceOf = (
  * FileDescriptorSet with its imports and its source info; `files`, when given, the files of the
  * roots to build, by path; `image`, into buf's image instead, a set whose files mark the imports,
  * which the front end reads as a set. Throws an {@link InputError} holding buf's messages when it
- * refuses.
+ * refuses. `folder` places the temporary options under the project's `.beadc/`.
  */
 export const compile = (
   roots: readonly string[],
@@ -169,7 +184,7 @@ export const compile = (
 
     throw new InputError(stderr === '' ? `buf did not compile ${roots.join(', ')}` : stderr);
   } finally {
-    rmSync(folder, { recursive: true, force: true });
+    removeWorkspace(folder);
   }
 };
 
@@ -177,7 +192,7 @@ export const compile = (
  * buf's `PROTOVALIDATE` lint rule over `files`, the project's among `roots` by their paths on disk,
  * as `buf lint` runs it with `use: [PROTOVALIDATE]` alone: each finding an error,
  * `buf:PROTOVALIDATE`, buf's message at buf's line and column. Throws an {@link InputError} holding
- * buf's messages when it refuses.
+ * buf's messages when it refuses. `folder` places the temporary options under the project's `.beadc/`.
  */
 export const lintRules = (
   roots: readonly string[],
@@ -236,6 +251,6 @@ export const lintRules = (
         });
       });
   } finally {
-    rmSync(folder, { recursive: true, force: true });
+    removeWorkspace(folder);
   }
 };
