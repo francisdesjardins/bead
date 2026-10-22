@@ -362,21 +362,38 @@ public sealed class ServiceClientTests
             steps.Add((error, step));
         };
 
-        await Assert.ThrowsAsync<FailureException>(() =>
+        // * every turn of its router held behind a gate, the call queued, then a read queued right
+        // behind it: what the call did in its own turn is counted by then, and nothing after
+        var loop = link.Client.Router.Core.Loop;
+        string? inItsTurn = null;
+        Task refusing;
+
+        using (var gate = new ManualResetEventSlim())
         {
-            return validating.RequesterOf(CheckedProcedures.Echo)("")().WaitAsync(Patience, Cancelled);
-        });
+            loop.Post(() =>
+            {
+                gate.Wait(Patience);
+            });
+            refusing = validating.RequesterOf(CheckedProcedures.Echo)("")();
+            loop.Post(() =>
+            {
+                inItsTurn = registry.Exposition().Text;
+            });
+            gate.Set();
+        }
 
-        // ! read once its failure is heard, not as the call returns: the call is failed in its
-        // router's turn, on the router's scheduler, which the caller's thread does not run
-        var exposition = registry.Exposition().Text;
+        Assert.Equal((ushort)ProtocolCode.PayloadInvalid, (await Assert.ThrowsAsync<FailureException>(() =>
+        {
+            return refusing.WaitAsync(Patience, Cancelled);
+        })).Code);
+        await loop.WhenIdle().WaitAsync(Patience, Cancelled);
 
-        Assert.Contains("bead_client_call_started_total{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", exposition, StringComparison.Ordinal);
+        Assert.Contains("bead_client_call_started_total{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", inItsTurn, StringComparison.Ordinal);
         Assert.Contains(
             "bead_client_call_handled_total{service=\"8\",procedure=\"echo\",type=\"request\",outcome=\"failure\",code=\"PAYLOAD_INVALID\"} 1\n",
-            exposition,
+            inItsTurn,
             StringComparison.Ordinal);
-        Assert.Contains("bead_client_call_duration_seconds_count{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", exposition, StringComparison.Ordinal);
+        Assert.Contains("bead_client_call_duration_seconds_count{service=\"8\",procedure=\"echo\",type=\"request\"} 1\n", inItsTurn, StringComparison.Ordinal);
 
         // * its tx step told as it was refused, naming no call, then its failure
         Assert.Equal(2, steps.Count);

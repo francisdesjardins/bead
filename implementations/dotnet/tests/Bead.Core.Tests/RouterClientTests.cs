@@ -233,9 +233,8 @@ public sealed partial class RouterClientTests
             }).Order(StringComparer.Ordinal);
         }
 
-        // * checked alone is answered by a server side of its own, which holds it with its rules: its
-        // resolver is registered all the same
-        Assert.Equal([InteropProcedures.Checked.Procedure], interop.ProceduresWithoutResolver());
+        // * one service offered whole: checked, with its rules, among the procedures it answers
+        Assert.Empty(interop.ProceduresWithoutResolver());
         Assert.Equal(NamesOf(false), ResolversOf(server.Intercepted));
         Assert.Equal(NamesOf(true), ResolversOf(client.Intercepted));
     }
