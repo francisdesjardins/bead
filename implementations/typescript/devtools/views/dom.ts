@@ -1,8 +1,9 @@
 // ── The panel's elements ──────────────────────────────────────────────────────
 
 // How the panel's views make what they show: an element of HTML or of SVG, its attributes and its
-// text set as text, never as markup, since every word the page sent is the page's own; and the
-// icons that tell a call's status by a shape as well as a colour.
+// text set as text, never as markup, since every word the page sent is the page's own; the icons
+// that tell a call's status by a shape as well as a colour; and a redraw that keeps where its reader
+// left what it redraws.
 
 // dependencies
 
@@ -18,9 +19,92 @@ export interface IMade {
   text?: string | undefined;
 }
 
+/** Where a reader left an element: how far it scrolled, and whether it was opened, a details. */
+interface IPlace {
+  left: number;
+  open: boolean | undefined;
+  path: readonly string[];
+  top: number;
+}
+
 // constants
 
 const SVG = 'http://www.w3.org/2000/svg';
+
+/** What names an element among its siblings, first found first, before its tag and its rank. */
+const KEYS: readonly string[] = Object.freeze([
+  'id',
+  'data-key',
+  'data-source',
+  'data-procedure',
+  'data-room',
+]);
+
+// helpers
+
+const keyOf = (element: Element): string | undefined => {
+  for (const name of KEYS) {
+    const value = element.getAttribute(name);
+
+    if (value !== null) {
+      return `${element.tagName}[${name}=${value}]`;
+    }
+  }
+
+  return undefined;
+};
+
+// an element's step from its parent: its key where it has one, else its tag and its rank among the
+// siblings of its tag that have none
+const stepOf = (element: Element): string => {
+  const key = keyOf(element);
+
+  if (key !== undefined) {
+    return key;
+  }
+
+  let rank = 0;
+
+  for (
+    let sibling = element.previousElementSibling;
+    sibling !== null;
+    sibling = sibling.previousElementSibling
+  ) {
+    if (sibling.tagName === element.tagName && keyOf(sibling) === undefined) {
+      rank += 1;
+    }
+  }
+
+  return `${element.tagName}:${String(rank)}`;
+};
+
+const pathOf = (element: Element, root: Element): string[] => {
+  const path: string[] = [];
+
+  for (let at: Element | null = element; at !== null && at !== root; at = at.parentElement) {
+    path.unshift(stepOf(at));
+  }
+
+  return path;
+};
+
+const elementAt = (root: Element, path: readonly string[]): Element | undefined => {
+  let at = root;
+
+  for (const step of path) {
+    const next = [...at.children].find((child) => {
+      return stepOf(child) === step;
+    });
+
+    if (next === undefined) {
+      return undefined;
+    }
+
+    at = next;
+  }
+
+  return at;
+};
 
 // definition
 
@@ -74,6 +158,54 @@ export const svgOf = (
   element.append(...(made.children ?? []));
 
   return element;
+};
+
+/**
+ * Replaces what `parent` holds with `nodes`, each element that scrolled scrolled as far and each
+ * details opened or closed as its reader left it, where the redraw holds the same element: one of
+ * the same key, or of the same tag and rank, on the same path. A redraw of what a second's reading
+ * changes leaves alone what its reader did.
+ */
+export const replaceKeeping = (parent: Element, nodes: readonly Node[]): void => {
+  const places: IPlace[] = [];
+
+  for (const element of parent.querySelectorAll('*')) {
+    const open = element instanceof HTMLDetailsElement ? element.open : undefined;
+
+    if (element.scrollTop !== 0 || element.scrollLeft !== 0 || open !== undefined) {
+      places.push({
+        left: element.scrollLeft,
+        open,
+        path: pathOf(element, parent),
+        top: element.scrollTop,
+      });
+    }
+  }
+
+  const { scrollLeft, scrollTop } = parent;
+
+  parent.replaceChildren(...nodes);
+
+  const found = places.flatMap((place) => {
+    const element = elementAt(parent, place.path);
+
+    return element === undefined ? [] : [{ element, place }];
+  });
+
+  // * a details opens first: what it holds scrolls only once it is laid out
+  for (const { element, place } of found) {
+    if (element instanceof HTMLDetailsElement && place.open !== undefined) {
+      element.open = place.open;
+    }
+  }
+
+  parent.scrollTop = scrollTop;
+  parent.scrollLeft = scrollLeft;
+
+  for (const { element, place } of found) {
+    element.scrollTop = place.top;
+    element.scrollLeft = place.left;
+  }
 };
 
 /** A paragraph of a note. */
