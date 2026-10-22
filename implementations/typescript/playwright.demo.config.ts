@@ -15,12 +15,12 @@ export default defineConfig({
   projects: [
     {
       name: 'unit',
-      testIgnore: ['**/__tests__/sign-up.test.ts'],
+      testIgnore: ['**/__tests__/sign-up.test.ts', '**/__tests__/sides.test.ts'],
       testMatch: ['**/__tests__/*.test.ts'],
     },
     {
       name: 'page',
-      testMatch: ['**/__tests__/sign-up.test.ts'],
+      testMatch: ['**/__tests__/sign-up.test.ts', '**/__tests__/sides.test.ts'],
       timeout: COMPONENT_TIMEOUT,
       use: { browserName: 'chromium' },
     },

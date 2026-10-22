@@ -539,6 +539,58 @@
         font: 11px/1.5 var(--mono);
       }
 
+      /* ── the two sides: one role a tab, its two files one under the other ── */
+
+      .sides-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .sides-tabs [role='tab'] {
+        padding: 4px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--raised);
+        color: var(--muted);
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .sides-tabs [role='tab'][aria-selected='true'] {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .sides {
+        display: grid;
+        gap: 8px;
+      }
+
+      .sides figure {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+        margin: 0;
+      }
+
+      .sides figcaption {
+        color: var(--muted);
+        font: 11px/1.4 var(--mono);
+      }
+
+      .sides pre {
+        max-height: 40vh;
+        margin: 0;
+        padding: 8px 10px;
+        overflow: auto;
+        border-radius: 8px;
+        background: var(--raised);
+        box-shadow: 0 0 0 1px var(--line);
+        font: 11px/1.5 var(--mono);
+      }
+
       /* ── the logs: newest first, each line by the way it went ───────────── */
 
       .log ol {
@@ -885,6 +937,53 @@
             <summary>The client's exposition</summary>
             <pre></pre>
           </details>
+        </section>
+
+        <section id="sides" class="card" aria-labelledby="sides-h">
+          <h2 id="sides-h">The same service, in TypeScript and in C#</h2>
+          <p class="note">
+            <code>examples/hello</code>'s HelloService, both sides as the repository builds and runs
+            them: one surface, name for name, each in its language's own idiom.
+          </p>
+          <div id="sides-tabs" class="sides-tabs" role="tablist" aria-label="What to read of it">
+            <button
+              id="sides-resolvers"
+              type="button"
+              role="tab"
+              aria-controls="sides-panel"
+              data-role="resolvers"
+            >
+              Its resolvers
+            </button>
+            <button
+              id="sides-serving"
+              type="button"
+              role="tab"
+              aria-controls="sides-panel"
+              data-role="serving"
+            >
+              Its server
+            </button>
+            <button
+              id="sides-calling"
+              type="button"
+              role="tab"
+              aria-controls="sides-panel"
+              data-role="calling"
+            >
+              Its client
+            </button>
+          </div>
+          <div id="sides-panel" class="sides" role="tabpanel">
+            <figure>
+              <figcaption id="side-typescript-file"></figcaption>
+              <pre id="side-typescript" tabindex="0" aria-labelledby="side-typescript-file"></pre>
+            </figure>
+            <figure>
+              <figcaption id="side-csharp-file"></figcaption>
+              <pre id="side-csharp" tabindex="0" aria-labelledby="side-csharp-file"></pre>
+            </figure>
+          </div>
         </section>
       </div>
 
