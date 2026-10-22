@@ -182,6 +182,20 @@ test('reads a parameter without its = as an empty value, and an enum’s by its 
   });
   expect(getBook({ query: 'color=1', variables: {} }).color).toBe(1);
   expect(refusalOf('flag')).toBe('no bool');
+
+  // * an empty sequence skipped, a name with no `=` an empty value, false a bool, a character
+  // beyond the BMP as it came or percent-encoded
+  expect(
+    getBook({
+      query: '&flag=false&&tags&tags=😀&tags=%F0%9F%98%80&sub.name=a=b&',
+      variables: { name: '2' },
+    })
+  ).toMatchObject({ flag: false, name: '2', sub: { name: 'a=b' }, tags: ['', '😀', '😀'] });
+  expect(getBook({ query: 'flag=true&revision=-1', variables: { name: '2' } })).toMatchObject({
+    flag: true,
+    name: '2',
+    revision: -1n,
+  });
 });
 
 test('refuses a body that is no object as the request whole, or under a field a variable sets inside', () => {

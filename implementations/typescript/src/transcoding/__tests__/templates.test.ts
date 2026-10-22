@@ -62,6 +62,9 @@ test('parses a template as http.proto’s grammar states it, and refuses any oth
   expect(parseTemplate('/v1/**/x').reason).toBe('a ** that is not its last segment');
   expect(parseTemplate('/v1/{a={b}}').reason).toBe('a variable within a variable');
   expect(parseTemplate('/v1/{a=*').reason).toBe('a variable that does not close');
+  expect(parseTemplate('/v1/{1a}').reason).toBe('a variable that names no field path');
+  expect(parseTemplate('/v1/{}').reason).toBe('a variable that names no field path');
+  expect(parseTemplate('/v1/bo%6Fks').reason).toBe('a literal that is no segment');
   expect(parseTemplate('/v1/a%20b').reason).toBe('a literal that is no segment');
   expect(parseTemplate('/v1//b').reason).toBe('a literal that is no segment');
   expect(parseTemplate('/v1:').reason).toBe('a verb that is no literal');

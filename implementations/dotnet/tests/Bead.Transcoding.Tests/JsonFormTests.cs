@@ -226,8 +226,11 @@ public sealed class JsonFormTests
     public void Reads_and_writes_an_Any_of_a_wrapper_by_its_value_and_a_wrapper_alone_as_its_scalar()
     {
         const string Packed = "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Int32Value\",\"value\":3}}";
+        const string Packed64 = "{\"any\":{\"@type\":\"type.googleapis.com/google.protobuf.Int64Value\",\"value\":\"7\"}}";
 
         // * a wrapper in an Any under value, as its scalar
+        Assert.Equal(new Edges { Any = Any.Pack(new Int64Value { Value = 7 }) }, Read<Edges>(Packed64));
+        Assert.Equal(Packed64, Written(new Edges { Any = Any.Pack(new Int64Value { Value = 7 }) }));
         Assert.Equal(new Edges { Any = Any.Pack(new Int32Value { Value = 3 }) }, Read<Edges>(Packed));
         Assert.Equal(Packed, Written(new Edges { Any = Any.Pack(new Int32Value { Value = 3 }) }));
 
@@ -236,6 +239,7 @@ public sealed class JsonFormTests
         Assert.Equal("3", Written(new Int32Value { Value = 3 }));
         Assert.Equal("\"a\"", Written(new StringValue { Value = "a" }));
         Assert.Equal("0", Written(new Int32Value()));
+        Assert.Equal("\"-3\"", Written(new Int64Value { Value = -3 }));
     }
 
     [Fact]
@@ -256,6 +260,8 @@ public sealed class JsonFormTests
         Assert.Equal("{\"value\":null}", Written(new Edges { Value = Value.ForNull() }));
         Assert.Equal("{\"extra\":{\"l\":[\"x\",true,false],\"s\":{\"a\":null,\"b\":1.5}}}", Written(new Edges { Extra = outer }));
         Assert.Equal("{\"value\":{\"a\":[null,\"b\",true]}}", Written(new Edges { Value = Value.ForStruct(new Struct { Fields = { ["a"] = Value.ForList(Value.ForNull(), Value.ForString("b"), Value.ForBool(true)) } }) }));
+        Assert.Equal("{\"value\":{\"b\":\"x\"}}", Written(new Edges { Value = Value.ForStruct(new Struct { Fields = { ["b"] = Value.ForString("x") } }) }));
+        Assert.Equal("{\"extra\":{\"a\":{\"b\":1,\"c\":[]}}}", Written(new Edges { Extra = new Struct { Fields = { ["a"] = Value.ForStruct(new Struct { Fields = { ["b"] = Value.ForNumber(1), ["c"] = Value.ForList() } }) } } }));
 
         // a Value of no kind, which its form holds none of
         Assert.Equal("a Value that holds no kind", Assert.Throws<JsonFormException>(() =>
@@ -363,6 +369,7 @@ public sealed class JsonFormTests
         Assert.Equal("{}", Field(new Edges(), "labels"));
         Assert.Equal("0", Field(new Edges(), "an_int32"));
         Assert.Equal("{\"name\":\"a\"}", Field(new Everything { Inner = new Inner { Name = "a" } }, "inner"));
+        Assert.Equal("[]", Field(new ListBooksResponse(), "books"));
 
         // a oneof's member set, another of it at its default, and each of none at its default
         var chosen = new Everything { ChoiceText = "x" };
@@ -374,10 +381,23 @@ public sealed class JsonFormTests
         Assert.Equal("null", Field(new Edges(), "null_member"));
         Assert.Equal("0", Field(new Value(), "number_value"));
         Assert.Equal("false", Field(new Value(), "bool_value"));
-        Assert.Throws<ArgumentException>(() =>
+
+        // * a response_body names its field by its proto name, as http.proto does: a JSON name, or none,
+        // is its caller's bug, which a route's builder refuses
+        foreach (var name in new[] { "choiceText", "nope" })
         {
-            Form.WriteField(new Edges(), "nope");
-        });
+            Assert.Throws<ArgumentException>(() =>
+            {
+                Form.WriteField(new Everything(), name);
+            });
+        }
+    }
+
+    [Fact]
+    public void Writes_a_field_of_its_own_presence_where_it_is_set_at_its_default_too_and_leaves_it_out_unset()
+    {
+        Assert.Equal("{}", Written(new Everything()));
+        Assert.Equal("{\"maybe\":0}", Written(new Everything { AString = "", Maybe = 0 }));
     }
 
     [Fact]
@@ -385,8 +405,12 @@ public sealed class JsonFormTests
     {
         Assert.Equal("{\"aliased\":\"ALIASED_FIRST\"}", Written(new Edges { Aliased = Aliased.Second }));
         Assert.Equal("{\"aliased\":7}", Written(new Edges { Aliased = (Aliased)7 }));
+        Assert.Equal("{\"aFloat\":0.1}", Written(new Edges { AFloat = 0.1F }));
         Assert.Equal("{\"wrappedFloat\":0.1,\"aFloat\":3.4028235e+38}", Written(new Edges { WrappedFloat = 0.1F, AFloat = float.MaxValue }));
+        Assert.Equal("{\"aFloat\":1e-45}", Written(new Edges { AFloat = float.Epsilon }));
+        Assert.Equal("{\"aFloat\":\"Infinity\"}", Written(new Edges { AFloat = float.PositiveInfinity }));
         Assert.Equal("{}", Written(new Edges { ADouble = -0.0, AFloat = -0.0F }));
+        Assert.Equal("{\"someBytes\":\"AP/+\"}", Written(new Edges { SomeBytes = ByteString.CopyFrom(0x00, 0xFF, 0xFE) }));
 
         // a field of its own presence at -0 is written, 0
         Assert.Equal("{\"maybeDouble\":0}", Written(new Edges { MaybeDouble = -0.0 }));

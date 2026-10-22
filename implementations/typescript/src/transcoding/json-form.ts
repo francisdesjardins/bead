@@ -42,6 +42,7 @@ import {
   ValueSchema,
 } from '@bufbuild/protobuf/wkt';
 import { STRICT_UTF8 } from '../router/shared/payloads';
+import { ProgrammerError } from '../transport/shared/errors';
 
 // types
 
@@ -169,7 +170,8 @@ const NON_FINITE: Readonly<Record<string, number>> = Object.freeze({
 
 /**
  * A token of a place in a JSON value: a field's JSON name, an item's index, or a member's name or a
- * key the request carried, which a place cuts (transcoding 7.4).
+ * key the request carried, which a parameter cuts and a pointer stops before past 64 bytes of UTF-8
+ * (transcoding 7.4).
  */
 export interface IJsonToken {
   readonly isGiven: boolean;
@@ -236,15 +238,22 @@ export const pointerTokenOf = (text: string): string => {
 };
 
 /**
- * A place's JSON Pointer, as a URI's fragment (RFC 6901 §6): `#`, then each token after a `/`, a
- * name or a key the request carried cut (7.4, item 2).
+ * A place's JSON Pointer, as a URI's fragment (RFC 6901 §6): `#`, then each token after a `/`, up to
+ * the value that holds a name or a key the request carried past 64 bytes of UTF-8, which a pointer
+ * never cuts (7.4).
  */
 export const pointerOf = (tokens: readonly IJsonToken[]): string => {
-  return `#${tokens
-    .map(({ isGiven, text }) => {
-      return `/${fragmentOf(pointerTokenOf(isGiven ? cutOf(text) : text))}`;
-    })
-    .join('')}`;
+  let pointer = '#';
+
+  for (const { isGiven, text } of tokens) {
+    if (isGiven && new TextEncoder().encode(text).length > KEY_BYTES) {
+      break;
+    }
+
+    pointer += `/${fragmentOf(pointerTokenOf(text))}`;
+  }
+
+  return pointer;
 };
 
 /** A place's tokens, from the value read. */
@@ -2017,17 +2026,21 @@ export const writeProtoJson = (
 };
 
 /**
- * The JSON of `message`'s top-level field `name`, its default written where it is at its default
- * too, so that a body is always there: a `response_body`'s (transcoding 5.8).
+ * The JSON of `message`'s top-level field `name`, by its proto name as `http.proto`'s
+ * `response_body` names it, its default written where it is at its default too, so that a body is
+ * always there (transcoding 5.8). A name of no field is its caller's bug, which a route's builder
+ * refuses (3.9).
  */
 export const writeFieldJson = (
   schema: DescMessage,
   { message, name, registry }: IJsonFormOptions & { message: Message; name: string }
 ): string => {
-  const field = fieldsOf(schema).byName.get(name);
+  const field = schema.fields.find((each) => {
+    return each.name === name;
+  });
 
   if (field === undefined) {
-    throw new JsonFormError('a response body that names no field of its result');
+    throw new ProgrammerError(`${schema.typeName} has no field ${name}`);
   }
 
   const record = message as Message & Record<string, unknown>;

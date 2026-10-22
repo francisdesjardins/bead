@@ -43,8 +43,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   protobuf's JSON mapping read and written by Bead's own mapping, one form on both sides, the binary
   payload its stock library's; failures as `application/problem+json`, a status by where its code
   arose, `PAYLOAD_INVALID` 422 with its violations, a body, a query or a variable its reading
-  refuses 400 in the mapping's words, where the request carried it in a `pointer` or a
-  `parameter`, cut; a refusal of its own in the companion's words, which `spec/transcoding.json`
+  refuses 400 in the mapping's words, where the request carried it in a `pointer`, a JSON Pointer
+  into the body as written that names what holds a key past 64 bytes, or a `parameter`, its name
+  cut; a refusal of its own in the companion's words, which `spec/transcoding.json`
   holds, naming its gate or its bound and nothing its request carried, a request of no type to a
   route that takes a body 415 and a body HTTP cannot frame refused as HTTP refuses it; each failure
   it answers 500 or above but `PROCEDURE_FAILED` reported on the gateway's `error`, an error of its

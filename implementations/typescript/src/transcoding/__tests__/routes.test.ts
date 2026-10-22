@@ -33,6 +33,8 @@ const refusalOf = (init: IHttpRouteInit): string | undefined => {
 
 // tests
 
+// TypeScript alone: the C# side's route is a record of init-only members, which its type keeps as
+// its table writes it
 test('freezes a route, its routes and each of them, as the table writes it', () => {
   const route = routeOf({ ...GET_BOOK, request: 'json', result: 'raw' });
 

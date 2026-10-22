@@ -77,7 +77,8 @@ public sealed record JsonFormExceptionOptions
 
 /// <summary>
 /// A token of a place in a JSON value: a field's JSON name, an item's index, or a member's name or a
-/// key the request carried, <see cref="IsGiven"/>, which a place cuts (transcoding 7.4).
+/// key the request carried, <see cref="IsGiven"/>, which a parameter cuts and a pointer stops
+/// before past 64 bytes of UTF-8 (transcoding 7.4).
 /// </summary>
 public sealed record JsonToken(string Text, bool IsGiven);
 
@@ -178,14 +179,20 @@ internal static class JsonPlaces
         return kept.Append("...").ToString();
     }
 
-    // `#`, then each token after a `/`, escaped (RFC 6901 §6), a name or a key the request carried cut
+    // `#`, then each token after a `/`, escaped (RFC 6901 §6), up to the value that holds a name or a
+    // key the request carried past 64 bytes of UTF-8, which a pointer never cuts (7.4)
     public static string PointerOf(IEnumerable<JsonToken> tokens)
     {
         var pointer = new StringBuilder("#");
 
         foreach (var token in tokens)
         {
-            pointer.Append('/').Append(FragmentOf(TokenOf(token.IsGiven ? CutOf(token.Text) : token.Text)));
+            if (token.IsGiven && Encoding.UTF8.GetByteCount(token.Text) > KeyBytes)
+            {
+                break;
+            }
+
+            pointer.Append('/').Append(FragmentOf(TokenOf(token.Text)));
         }
 
         return pointer.ToString();

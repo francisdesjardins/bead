@@ -100,7 +100,11 @@ Ahead besides, each by a decision of its own that meets the Tenth Man:
   transport, which a pool of connections would spare a handshake an exchange; a `raw` body streamed
   as a transfer as it comes; OpenAPI 3.2.0, whose `itemSchema` describes a stream's events;
   `google.api.field_behavior` read into `readOnly`, `writeOnly` and `required`; and an application
-  failure's own status, an option of its enum value's, at the options' v1 freeze.
+  failure's own status, an option of its enum value's, at the options' v1 freeze;
+- what [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)
+  keeps ahead of a gateway's problems, each a round of its own: a report's context, the exchange and
+  the route it came of; an event for each refusal of the gateway's own; and an occurrence's id in a
+  problem, [RFC 9457 §3.1.5](https://www.rfc-editor.org/rfc/rfc9457#section-3.1.5)'s `instance`.
 
 A part that lands leaves this list, and brings its gates to [0006](0006-a-rule-has-its-gate.md)'s
 table.

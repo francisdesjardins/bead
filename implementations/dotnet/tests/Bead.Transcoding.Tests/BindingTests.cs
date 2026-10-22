@@ -16,8 +16,14 @@ public sealed class BindingTests
 
     private static Google.Protobuf.IMessage Bind((string Procedure, HttpRouteTemplate Rule) route, (string Target, string? Body) request)
     {
+        return BindOf((RouteOf(route.Procedure).Request.Descriptor!, route.Rule), request);
+    }
+
+    // a request of `route`'s message, whatever procedure takes it
+    private static Google.Protobuf.IMessage BindOf((Google.Protobuf.Reflection.MessageDescriptor Request, HttpRouteTemplate Rule) route, (string Target, string? Body) request)
+    {
         return Binding.Bind(
-            new BindingRoute { Request = RouteOf(route.Procedure).Request.Descriptor!, Rule = route.Rule, Template = HttpTemplate.Parse(route.Rule.Template) },
+            new BindingRoute { Request = route.Request, Rule = route.Rule, Template = HttpTemplate.Parse(route.Rule.Template) },
             new BindingRequest { Target = request.Target, Body = request.Body is null ? ReadOnlyMemory<byte>.Empty : Encoding.UTF8.GetBytes(request.Body) });
     }
 
@@ -103,6 +109,29 @@ public sealed class BindingTests
         {
             Bind(("getBook", get), ("/v1/books/2?flag", null));
         }).Message);
+
+        // a name of no `=` that the path does not bind, an empty value
+        Assert.Equal(
+            new GetBookRequest { Revision = 2, Color = Color.Green },
+            Bind(("getBook", new HttpRouteTemplate { Method = "GET", Template = "/v1/books" }), ("/v1/books?name&revision=2&color=COLOR_GREEN", null)));
+    }
+
+    [Fact]
+    public void Binds_a_wrapper_and_a_well_known_type_of_a_string_form_from_a_variable_or_a_parameter_never_a_Struct_a_Value_or_a_ListValue()
+    {
+        var route = (Everything.Descriptor, new HttpRouteTemplate { Method = "GET", Template = "/v1/{at}/{wrapped_string}" });
+
+        Assert.Equal(
+            new Everything { At = new Timestamp { Seconds = 1 }, WrappedString = "x", WrappedInt64 = 7, WrappedBool = true, Took = new Duration { Seconds = 1, Nanos = 500_000_000 } },
+            BindOf(route, ("/v1/1970-01-01T00:00:01Z/x?wrappedInt64=7&wrappedBool=true&took=1.5s", null)));
+
+        foreach (var parameter in new[] { "extra", "anyValue", "list" })
+        {
+            Assert.Equal("a parameter of a message", Assert.Throws<JsonFormException>(() =>
+            {
+                BindOf((Everything.Descriptor, new HttpRouteTemplate { Method = "GET", Template = "/v1/everything" }), ($"/v1/everything?{parameter}=x", null));
+            }).Message);
+        }
     }
 
     [Fact]
@@ -132,7 +161,8 @@ public sealed class BindingTests
             Bind(("getBook", crooked), ("/v1/books/x", null));
         });
 
-        // and for a target its route's template does not match
+        // and for a target its route's template does not match: the C# side alone, whose binding
+        // matches its target, where the TypeScript side's is given the variables its gateway matched
         Assert.Throws<ArgumentException>(() =>
         {
             Bind(("getBook", new HttpRouteTemplate { Method = "GET", Template = "/v1/books/{name}" }), ("/v2/other", null));
@@ -156,5 +186,17 @@ public sealed class BindingTests
         Assert.Equal(
             new FieldMask { Paths = { "pages" } },
             ((UpdateBookRequest)Bind(("updateBook", patch), ("/v1/shelves/1/books/2?updateMask=pages", "{\"title\":\"New\"}"))).UpdateMask);
+    }
+
+    [Fact]
+    public void Fills_no_update_mask_path_of_a_PATCH_s_body_that_is_no_object_and_refuses_a_member_of_it_that_names_no_field()
+    {
+        var patch = new HttpRouteTemplate { Method = "PATCH", Template = "/v1/books", Body = "book" };
+
+        Assert.Equal(new UpdateBookRequest { UpdateMask = new FieldMask() }, Bind(("updateBook", patch), ("/v1/books", "null")));
+        Assert.Equal("a key no field names", Assert.Throws<JsonFormException>(() =>
+        {
+            Bind(("updateBook", patch), ("/v1/books", "{\"title\":\"t\",\"nope\":1}"));
+        }).Message);
     }
 }

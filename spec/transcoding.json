@@ -825,6 +825,45 @@
       "pointer": "#/aBool"
     },
     {
+      "name": "a key no field names past 64 bytes, its pointer the message that holds it",
+      "clauses": [
+        "5.2",
+        "5.2.2",
+        "7.4",
+        "7.4.2"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"child\":{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}}",
+      "refused": "a key no field names",
+      "pointer": "#/child"
+    },
+    {
+      "name": "a map's value refused under a key past 64 bytes, its pointer the map that holds it",
+      "clauses": [
+        "5.2",
+        "5.2.2",
+        "7.4",
+        "7.4.2"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"labels\":{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkké\":\"x\"}}",
+      "refused": "no int32",
+      "pointer": "#/labels"
+    },
+    {
+      "name": "a key no field names of 64 bytes, its pointer whole",
+      "clauses": [
+        "5.2",
+        "5.2.2",
+        "7.4",
+        "7.4.2"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"child\":{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkké\":1}}",
+      "refused": "a key no field names",
+      "pointer": "#/child/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk%C3%A9"
+    },
+    {
       "name": "a field of a JSON name of its own, by it",
       "clauses": [
         "5.2",
@@ -2102,6 +2141,31 @@
       "pointer": "#/at"
     },
     {
+      "name": "a Timestamp of February 29 in a year 400 divides",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.4",
+        "5.4.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"at\":\"2000-02-29T00:00:00Z\"}",
+      "payload": "0A 06 08 80 98 EC C5 03"
+    },
+    {
+      "name": "a Timestamp of February 29 in a century 400 does not divide",
+      "clauses": [
+        "5.2",
+        "5.2.3",
+        "5.4",
+        "5.4.1"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "body": "{\"at\":\"1900-02-29T00:00:00Z\"}",
+      "refused": "a Timestamp of no instant",
+      "pointer": "#/at"
+    },
+    {
       "name": "a Timestamp of the hour 24",
       "clauses": [
         "5.2",
@@ -3183,6 +3247,16 @@
       "body": "{\"at\":\"0001-01-01T00:00:00Z\"}"
     },
     {
+      "name": "a Timestamp half a second before the epoch",
+      "clauses": [
+        "5.6",
+        "5.6.7"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "payload": "0A 11 08 FF FF FF FF FF FF FF FF FF 01 10 80 CA B5 EE 01",
+      "body": "{\"at\":\"1969-12-31T23:59:59.500Z\"}"
+    },
+    {
       "name": "a Timestamp past its latest",
       "clauses": [
         "5.7"
@@ -3229,6 +3303,16 @@
       "message": "bead.transcoding.v1.Edges",
       "payload": "12 16 08 FF FF FF FF FF FF FF FF FF 01 10 80 B6 CA 91 FE FF FF FF FF 01",
       "body": "{\"took\":\"-1.500s\"}"
+    },
+    {
+      "name": "a Duration of -1.000000001 seconds",
+      "clauses": [
+        "5.6",
+        "5.6.7"
+      ],
+      "message": "bead.transcoding.v1.Edges",
+      "payload": "12 16 08 FF FF FF FF FF FF FF FF FF 01 10 FF FF FF FF FF FF FF FF FF 01",
+      "body": "{\"took\":\"-1.000000001s\"}"
     },
     {
       "name": "a Duration whose signs part",
@@ -4160,7 +4244,7 @@
       "parameter": "sub.count"
     },
     {
-      "name": "a key the body holds no field of, cut as spec 18.4 cuts a key",
+      "name": "a key the body holds no field of past 64 bytes, its pointer the value that holds it",
       "clauses": [
         "5.2.2",
         "7.4",
@@ -4175,7 +4259,7 @@
       "target": "/api/Transcoding/echo",
       "body": "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkéé\":1}",
       "refused": "a key no field names",
-      "pointer": "#/kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk..."
+      "pointer": "#"
     }
   ],
   "failures": [

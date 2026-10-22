@@ -41,6 +41,7 @@ public sealed class TemplatesTests
             ("/v1/{1a}", "a variable that names no field path"),
             ("/v1/{}", "a variable that names no field path"),
             ("/v1/bo%6Fks", "a literal that is no segment"),
+            ("/v1/a%20b", "a literal that is no segment"),
             ("/v1//books", "a literal that is no segment"),
             ("/v1/books:", "a verb that is no literal"),
         })

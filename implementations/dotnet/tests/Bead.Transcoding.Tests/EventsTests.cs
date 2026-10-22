@@ -168,7 +168,9 @@ public sealed class EventsTests
         Assert.Equal("{\"remaining\":1}", Data(HttpPayload.Of(Bead.Transcoding.V1.Tick.Descriptor), [0x08, 0x01]));
         Assert.Equal("[1, 2]", Data(HttpPayload.Json, Encoding.UTF8.GetBytes("[1, 2]")));
         Assert.Equal("\"h\\\"é\"", Data(HttpPayload.Text, Encoding.UTF8.GetBytes("h\"é")));
+        Assert.Equal("\"h\\n\\r\"", Data(HttpPayload.Text, Encoding.UTF8.GetBytes("h\n\r")));
         Assert.Equal("\"AQL/\"", Data(HttpPayload.Raw, [0x01, 0x02, 0xFF]));
+        Assert.Equal("\"AP/+\"", Data(HttpPayload.Raw, [0x00, 0xFF, 0xFE]));
     }
 
     private static async Task WaitFor(List<TaskCompletionSource> taking, int count)

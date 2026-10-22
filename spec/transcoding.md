@@ -429,8 +429,8 @@ words section 18.8.6 gives its rule where it went without one; `ruleId`; `fieldP
    `body` names its root, as [RFC 6901 §6](https://www.rfc-editor.org/rfc/rfc6901#section-6)
    writes a fragment — `#`, then each name or index after a `/`, `~` and `/` escaped `~0` and `~1`,
    a character a fragment does not take percent-encoded from its UTF-8; a map's key as its string,
-   one cut short (section 18.4) and a `oneof` pointing at what holds them; `#` for a rule of the
-   message itself where the body is the request whole;
+   and a `oneof` pointing at the message that holds it; `#` for a rule of the message itself where
+   the body is the request whole;
 3. neither, for a rule of the message itself where the body is not the request whole, and for a
    field path that names no field of the request.
 
@@ -439,10 +439,16 @@ met what it refuses: `parameter`, a variable's field path, or a query's by JSON 
 a parameter that names no field; `pointer`, the value of its body it met, by the JSON name of each
 field, and each member that names none, each map's key and each `Struct`'s member as its body wrote
 it, `#` the body itself; neither for its text, its query whole, or a query whose bytes are not UTF-8.
-A name or a key the request carried is cut as section 18.4 of `spec.md` cuts a key past 64 bytes of
-UTF-8, `...` after it. Its `detail` is its mapping's own words, which name no member or key of the
-request: a problem's `detail` never repeats what its request carried, and where its place helps, it
-goes in its `parameter` or its `pointer`, cut.
+Its `detail` is its mapping's own words, which name no member or key of the request: a problem's
+`detail` never repeats what its request carried, and where its place helps, it goes in its
+`parameter` or its `pointer`.
+
+A `pointer`, of a violation or of a reading, is always a JSON Pointer into the body as its request
+wrote it, which resolves there ([RFC 6901 §4](https://www.rfc-editor.org/rfc/rfc6901#section-4)):
+a name or a key past 64 bytes of UTF-8 is never written into it, and it points at the value that
+holds that name or key, a violation's key cut short (section 18.4 of `spec.md`) alike. A `parameter`, which is no pointer, writes such a name as section
+18.4 cuts a key, its first 64 bytes, back to the start of the character the cut fell in, then
+`...`.
 
 7.5. A gateway answers each failure by where it arose, since it is a requester, and raises some
 codes of its server's answer, which its HTTP client cannot mend:

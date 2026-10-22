@@ -1,3 +1,4 @@
+import { fromBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
 import { createTestClock } from '../../transport/shared/__tests__/fixtures';
 import { ProgrammerError } from '../../transport/shared/errors';
@@ -9,6 +10,8 @@ import {
   HEARTBEAT_COMMENT,
   type IEventSink,
 } from '../events';
+import { typeRegistryOf, writeProtoJson } from '../json-form';
+import { TickSchema } from './generated/transcoding_pb';
 
 // helpers
 
@@ -183,4 +186,19 @@ test('settles a held notification whose event its response could not take, its c
   stream.result('{}');
   await expect(held).resolves.toBeUndefined();
   await expect(stream.notification('{"remaining":0}')).resolves.toBeUndefined();
+});
+
+test('writes each payload’s data as its encoding reads it', () => {
+  // * a proto one in Bead's proto JSON form, a text one a JSON string, a raw one its base64; a json
+  // one's bytes are its data as they are, which the TypeScript side's gateway hands on unread
+  expect(
+    writeProtoJson(TickSchema, {
+      message: fromBinary(TickSchema, Uint8Array.of(0x08, 0x01)),
+      registry: typeRegistryOf([TickSchema]),
+    })
+  ).toBe('{"remaining":1}');
+  expect(eventDataOf({ encoding: 'text', text: 'h"é' })).toBe('"h\\"é"');
+  expect(eventDataOf({ encoding: 'text', text: 'h\n\r' })).toBe('"h\\n\\r"');
+  expect(eventDataOf({ bytes: Uint8Array.of(0x01, 0x02, 0xff), encoding: 'raw' })).toBe('"AQL/"');
+  expect(eventDataOf({ bytes: Uint8Array.of(0, 0xff, 0xfe), encoding: 'raw' })).toBe('"AP/+"');
 });

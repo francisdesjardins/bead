@@ -707,8 +707,17 @@ def cut(text):
 
 
 def pointer_text(at):
-    """A place's pointer (7.4, item 2): each token, a name or a key the request carried cut."""
-    return fragment([cut(token) if given else token for token, given in at])
+    """A place's pointer (7.4, item 2): each token, up to the value that holds a name or a key the
+    request carried past 64 bytes of UTF-8, which a pointer never cuts."""
+    tokens = []
+
+    for token, given in at:
+        if given and len(token.encode('utf-8')) > 64:
+            break
+
+        tokens.append(token)
+
+    return fragment(tokens)
 
 
 class Num:
@@ -2520,6 +2529,12 @@ READINGS = [
     reading('a field by its proto name', FIELDS, '{"an_int32":5}'),
     reading('a field by its JSON name and its proto name', FIELDS, '{"anInt32":1,"an_int32":2}', parts='D6: it takes the last of a field given by its two names'),
     reading('a key no field names', FIELDS, '{"aBool":true}'),
+    reading('a key no field names past 64 bytes, its pointer the message that holds it', FIELDS + ['7.4', '7.4.2'],
+            '{"child":{"' + 'k' * 65 + '":1}}'),
+    reading("a map's value refused under a key past 64 bytes, its pointer the map that holds it",
+            FIELDS + ['7.4', '7.4.2'], '{"labels":{"' + 'k' * 63 + chr(0xE9) + '":"x"}}'),
+    reading('a key no field names of 64 bytes, its pointer whole', FIELDS + ['7.4', '7.4.2'],
+            '{"child":{"' + 'k' * 62 + chr(0xE9) + '":1}}'),
     reading('a field of a JSON name of its own, by it', FIELDS, '{"renamed":"x"}', message=EVERYTHING),
     reading('a field of a JSON name of its own, by its proto name', FIELDS, '{"custom_named":"x"}', message=EVERYTHING),
     reading('a field of a JSON name of its own, by the name it would have', FIELDS, '{"customNamed":"x"}',
@@ -2634,6 +2649,9 @@ READINGS = [
     reading('a Timestamp of February 30', FORM + ['5.4', '5.4.1'], '{"at":"2026-02-30T00:00:00Z"}'),
     reading('a Timestamp of February 29 in a leap year', FORM + ['5.4', '5.4.1'], '{"at":"2024-02-29T00:00:00Z"}'),
     reading('a Timestamp of February 29 in another', FORM + ['5.4', '5.4.1'], '{"at":"2025-02-29T00:00:00Z"}'),
+    reading('a Timestamp of February 29 in a year 400 divides', FORM + ['5.4', '5.4.1'], '{"at":"2000-02-29T00:00:00Z"}'),
+    reading('a Timestamp of February 29 in a century 400 does not divide', FORM + ['5.4', '5.4.1'],
+            '{"at":"1900-02-29T00:00:00Z"}'),
     reading('a Timestamp of the hour 24', FORM + ['5.4', '5.4.1'], '{"at":"2026-10-21T24:00:00Z"}'),
     reading('a Timestamp its offset takes past its latest', FORM + ['5.4', '5.4.1'], '{"at":"9999-12-31T23:59:59-01:00"}'),
     reading('a Timestamp its offset takes before its earliest', FORM + ['5.4', '5.4.1'],
@@ -2811,11 +2829,13 @@ WRITINGS = [
     writing('a Timestamp at the epoch', FORM_7, {'at': {}}),
     writing('a Timestamp at its latest', FORM_7, {'at': {'seconds': LATEST, 'nanos': 999_999_999}}),
     writing('a Timestamp at its earliest', FORM_7, {'at': {'seconds': EARLIEST}}),
+    writing('a Timestamp half a second before the epoch', FORM_7, {'at': {'seconds': -1, 'nanos': 500_000_000}}),
     writing('a Timestamp past its latest', REFUSED, {'at': {'seconds': LATEST + 1}}),
     writing('a Timestamp of negative nanoseconds', REFUSED, {'at': {'seconds': 5000, 'nanos': -1}}),
     writing('a Duration of 1.01 seconds', FORM_7, {'took': {'seconds': 1, 'nanos': 10_000_000}}),
     writing('a Duration of -1 nanosecond', FORM_7, {'took': {'nanos': -1}}),
     writing('a Duration of -1.5 seconds', FORM_7, {'took': {'seconds': -1, 'nanos': -500_000_000}}),
+    writing('a Duration of -1.000000001 seconds', FORM_7, {'took': {'seconds': -1, 'nanos': -1}}),
     writing('a Duration whose signs part', REFUSED, {'took': {'seconds': 1, 'nanos': -1}}),
     writing('a Duration past its longest', REFUSED, {'took': {'seconds': LONGEST + 1}}),
     writing('a Duration of nanoseconds past a second', REFUSED, {'took': {'nanos': 1_000_000_000}}),
@@ -2964,7 +2984,7 @@ BINDINGS = [
             ARCHIVE.rules[0], '/v1/shelves/1/books/2:archive', '{"sub":{"count":"x"}}'),
     binding("a refusal of a parameter within a message, its parameter by JSON names", ['4.3', '7.4', '7.4.1'],
             GET_BOOK_PROCEDURE, BOOK_RULE, '/v1/shelves/1/books/2?sub.count=x'),
-    binding("a key the body holds no field of, cut as spec 18.4 cuts a key", ['5.2.2', '7.4', '7.4.2'], ECHO, ECHO_POST,
+    binding("a key the body holds no field of past 64 bytes, its pointer the value that holds it", ['5.2.2', '7.4', '7.4.2'], ECHO, ECHO_POST,
             '/api/Transcoding/echo', '{"' + 'k' * 63 + chr(0xE9) + chr(0xE9) + '":1}'),
 ]
 
