@@ -690,8 +690,11 @@ test('answers 500 a connection its server failed to draw but by refusing it, rep
 });
 
 test('reports each failure it answers a call with 500 or above, and none below', async () => {
-  // * a route of a procedure its server does not offer, 501; a call past its timeout, 504
+  // * a route of a procedure its server does not offer, 501; a call past its timeout, 504, on a
+  // clock that moves only as the test moves it, so no call races its deadline
+  const clock = createTestClock();
   await using fixture = await startTranscoding({
+    clock,
     routes: HTTP_ROUTES.map((init) => {
       return init.procedure === TranscodingProcedures.raw
         ? {
@@ -715,7 +718,15 @@ test('reports each failure it answers a call with 500 or above, and none below',
   expect(unknown.status).toBe(501);
   expect(reported).toHaveLength(1);
 
-  const hung = await send(fixture.port, { body: '{}', path: '/api/Transcoding/hang' });
+  // its resolver holds it: its timeout passes as the clock moves
+  const hanging = send(fixture.port, { body: '{}', path: '/api/Transcoding/hang' });
+
+  await until(() => {
+    return fixture.counts.hanging === 1;
+  });
+  await clock.tickAsync(50);
+
+  const hung = await hanging;
 
   expect(hung.status).toBe(504);
   expect(reported).toHaveLength(2);
