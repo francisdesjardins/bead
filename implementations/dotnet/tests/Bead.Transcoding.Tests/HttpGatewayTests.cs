@@ -673,11 +673,14 @@ public sealed class HttpGatewayTests
     [Fact]
     public async Task Reports_each_failure_it_answers_a_call_with_500_or_above_and_none_below()
     {
-        // * a route of a procedure its server does not offer, 501; a call past its timeout, 504
+        // * a route of a procedure its server does not offer, 501; a call past its timeout, 504, on a
+        // clock that moves only as the test moves it, so no call races its deadline
+        var clock = new FakeTimeProvider();
         var started = await Started((options) =>
         {
             return options with
             {
+                Clock = clock,
                 Timeout = TimeSpan.FromMilliseconds(50),
                 Routes = [.. options.Routes.Select((route) =>
                 {
@@ -698,7 +701,16 @@ public sealed class HttpGatewayTests
             Assert.Equal(HttpStatusCode.NotImplemented, unknown.StatusCode);
             Assert.Single(reported);
 
-            using var hung = await started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+            // its resolver holds it: its timeout passes as the clock moves
+            var hanging = started.Client.SendAsync(Json("/api/Transcoding/hang", "{}"), Cancelled);
+
+            await Until(() =>
+            {
+                return started.Service.Hanging == 1;
+            });
+            clock.Advance(TimeSpan.FromMilliseconds(50));
+
+            using var hung = await hanging.WaitAsync(Patience, Cancelled);
 
             Assert.Equal(HttpStatusCode.GatewayTimeout, hung.StatusCode);
             Assert.Equal(2, reported.Count);
