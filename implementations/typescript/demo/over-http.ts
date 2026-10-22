@@ -14,6 +14,7 @@ import { FailureScope } from '../src/router/shared/constants';
 import type { FailureError } from '../src/router/shared/errors';
 import { problemOfFailure } from '../src/transcoding/problems';
 import { typeRegistryOf, writeProtoJson } from '../src/transcoding/json-form';
+import { OPENAPI_DOCUMENT } from './gen/typescript/bead_http';
 import { SignUpRequestSchema, SignUpResponseSchema } from './gen/typescript/demo/v1/sign_up_pb';
 
 // constants
@@ -93,4 +94,9 @@ export const refusedOf = (failure: FailureError): string => {
   );
 
   return `${headOf(problem.status, 'application/problem+json')}\n\n${indented(problem.body)}`;
+};
+
+/** The OpenAPI document beadc wrote of the sign-up, which a gateway serves at `/openapi.json`. */
+export const openApiDocument = (): string => {
+  return OPENAPI_DOCUMENT;
 };

@@ -160,7 +160,7 @@ test.describe('mountSignUp', () => {
     const request = page.locator('#sign-up-http-request');
     const answer = page.locator('#sign-up-http-answer');
 
-    await page.locator('#sign-up-http summary').click();
+    await page.locator('#sign-up-http > summary').click();
 
     // * the internal demo's origin, as this page's server is a worker, the body in Bead's JSON form
     await expect(request).toContainText('curl -X POST http://localhost:8080/api/SignUp/signUp');
@@ -181,5 +181,10 @@ test.describe('mountSignUp', () => {
     }
 
     await expect(answer).toContainText('"title": "PAYLOAD_INVALID"');
+
+    // its OpenAPI document, beadc's, its one path the sign-up's route
+    await page.locator('#sign-up-openapi summary').click();
+    await expect(page.locator('#sign-up-openapi-document')).toContainText('"openapi": "3.1.1"');
+    await expect(page.locator('#sign-up-openapi-document')).toContainText('"/api/SignUp/signUp"');
   });
 });

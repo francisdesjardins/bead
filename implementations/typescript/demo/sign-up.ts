@@ -12,7 +12,7 @@ import type { IClient } from '../src/client/types';
 import { CredentialScheme, FailureError } from '../src/client/ws-client';
 import { type IReadViolations, type IViolation, violationsOf } from '../src/service/service';
 import { SignUpClient } from './gen/typescript/demo/v1/sign_up_bead';
-import { curlOf, refusedOf, welcomedOf } from './over-http';
+import { curlOf, openApiDocument, refusedOf, welcomedOf } from './over-http';
 
 // interfaces
 
@@ -171,6 +171,8 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   const origin = document.body.dataset['beadTransport'] === 'worker' ? undefined : location.origin;
   const httpRequest = elementOf('sign-up-http-request');
   const httpAnswer = elementOf('sign-up-http-answer');
+
+  elementOf('sign-up-openapi-document').textContent = openApiDocument();
 
   const requestOf = () => {
     return {
