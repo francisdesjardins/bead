@@ -56,7 +56,7 @@ test.describe.configure({ retries: 0 });
 
 test.describe('readEnvelope and writeEnvelope', () => {
   for (const { bytes, envelope, name } of VECTORS.envelopes) {
-    test(`read ${name}, and write it back`, () => {
+    test(`reads ${name}, and writes it back`, () => {
       const expected = envelopeOf(envelope);
 
       expect(readEnvelope(fromHexadecimal(bytes), limits)).toEqual(expected);
@@ -65,7 +65,7 @@ test.describe('readEnvelope and writeEnvelope', () => {
   }
 
   for (const { bytes, code, detail, maximumEnvelopeBytes, name } of VECTORS.envelopeRefusals) {
-    test(`refuse ${name}`, () => {
+    test(`refuses ${name}`, () => {
       expect(
         failureOf(() => {
           return readEnvelope(fromHexadecimal(bytes), {

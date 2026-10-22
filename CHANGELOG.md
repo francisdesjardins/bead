@@ -187,6 +187,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
+- The TypeScript side's json and text payloads refuse in the C# side's words, naming their encoding:
+  `a json payload is not UTF-8`, `a text payload is not UTF-8`, `a json payload is not one JSON
+  text`, `a json value holds a surrogate alone`, and the rest alike.
 - A metrics registry that refuses a name says it alike on both sides, `the metrics registry holds
   1/1 as "echo", and is given "other": another name at its address`, as the TypeScript side wrote
   it, its ceiling naming the families it passes; and limits too small for a JWT say on both sides that `a side that takes or presents a JWT

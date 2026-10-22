@@ -36,7 +36,7 @@ test.describe.configure({ retries: 0 });
 
 test.describe('writeHeader and readHeader', () => {
   for (const { bytes, header, name } of VECTORS.headers) {
-    test(`lay ${name} out byte by byte, and read it back`, () => {
+    test(`reads ${name}, and writes it back`, () => {
       const expected = fromHexadecimal(bytes);
       const written = new Uint8Array(expected.length);
 

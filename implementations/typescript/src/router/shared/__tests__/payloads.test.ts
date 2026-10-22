@@ -38,13 +38,13 @@ class Thing {
 test.describe('the json codec', () => {
   test('refuses what it does not read, each in its own words, with a SyntaxError', () => {
     const refusals: [bytes: Uint8Array, words: string][] = [
-      [new Uint8Array([0x22, 0xff, 0x22]), 'the payload is not UTF-8'],
-      [new Uint8Array([0xef, 0xbb, 0xbf, 0x31]), 'the payload starts with a byte order mark'],
-      [utf8(`${'['.repeat(65)}${']'.repeat(65)}`), 'the payload is nested deeper than 64'],
-      [utf8('{"a":1,"a":2}'), 'the payload names a member twice'],
-      [utf8(`"${BACKSLASH}ud800"`), 'the payload holds a surrogate alone'],
-      [utf8(`{"${BACKSLASH}udc00":1}`), 'the payload holds a surrogate alone'],
-      [utf8('1E400'), 'the payload holds a number past the largest double'],
+      [new Uint8Array([0x22, 0xff, 0x22]), 'a json payload is not UTF-8'],
+      [new Uint8Array([0xef, 0xbb, 0xbf, 0x31]), 'a json payload starts with a byte order mark'],
+      [utf8(`${'['.repeat(65)}${']'.repeat(65)}`), 'a json payload nests deeper than 64'],
+      [utf8('{"a":1,"a":2}'), 'a json payload names a member twice'],
+      [utf8(`"${BACKSLASH}ud800"`), 'a json payload holds a surrogate alone'],
+      [utf8(`{"${BACKSLASH}udc00":1}`), 'a json payload holds a surrogate alone'],
+      [utf8('1E400'), 'a json payload holds a number past the largest double'],
     ];
 
     for (const [bytes, words] of refusals) {
@@ -63,7 +63,7 @@ test.describe('the json codec', () => {
           return PAYLOAD_CODECS.json.decode(utf8(text));
         }),
         text
-      ).toEqual(['SyntaxError', expect.stringMatching(/^the payload is not JSON: /)]);
+      ).toEqual(['SyntaxError', 'a json payload is not one JSON text']);
     }
   });
 
@@ -72,10 +72,10 @@ test.describe('the json codec', () => {
       refusalOf(() => {
         return PAYLOAD_CODECS.json.decode(utf8(`"${'x'.repeat(1_000)}`));
       })?.[1]
-    ).toMatch(/^the payload is not JSON: /);
+    ).toBe('a json payload is not one JSON text');
   });
 
-  test('refuses 16 MiB of nested arrays before it parses them, within a second', () => {
+  test('refuses 16 MiB of nested arrays within a second, building nothing past 64', () => {
     const half = 8 * 1024 * 1024;
     const bytes = utf8(`${'['.repeat(half)}${']'.repeat(half)}`);
     const started = performance.now();
@@ -84,7 +84,7 @@ test.describe('the json codec', () => {
       refusalOf(() => {
         return PAYLOAD_CODECS.json.decode(bytes);
       })
-    ).toEqual(['SyntaxError', 'the payload is nested deeper than 64']);
+    ).toEqual(['SyntaxError', 'a json payload nests deeper than 64']);
     expect(performance.now() - started).toBeLessThan(1_000);
   });
 
@@ -136,19 +136,19 @@ test.describe('the json codec', () => {
     holed[1] = 2;
 
     const refusals: [value: unknown, words: string][] = [
-      [undefined, 'the value holds what JSON has no value for, undefined'],
-      [{ a: undefined }, 'the value holds what JSON has no value for, undefined'],
-      [() => {}, 'the value holds what JSON has no value for, function'],
-      [1n, 'the value holds what JSON has no value for, bigint'],
-      [Symbol('a'), 'the value holds what JSON has no value for, symbol'],
-      [new Date(0), 'the value holds what JSON has no value for, an object of Date'],
-      [new Map(), 'the value holds what JSON has no value for, an object of Map'],
-      [new Thing(), 'the value holds what JSON has no value for, an object of Thing'],
-      [holed, 'the value holds what JSON has no value for, an array with a hole'],
-      [Number.NaN, 'the value holds a number that is not finite, NaN'],
-      [[-Infinity], 'the value holds a number that is not finite, -Infinity'],
-      [`a${String.fromCharCode(0xdc00)}`, 'the value holds a surrogate alone'],
-      [{ [String.fromCharCode(0xd800)]: 1 }, 'the value holds a surrogate alone'],
+      [undefined, 'a json value holds what JSON has no value for, undefined'],
+      [{ a: undefined }, 'a json value holds what JSON has no value for, undefined'],
+      [() => {}, 'a json value holds what JSON has no value for, function'],
+      [1n, 'a json value holds what JSON has no value for, bigint'],
+      [Symbol('a'), 'a json value holds what JSON has no value for, symbol'],
+      [new Date(0), 'a json value holds what JSON has no value for, an object of Date'],
+      [new Map(), 'a json value holds what JSON has no value for, an object of Map'],
+      [new Thing(), 'a json value holds what JSON has no value for, an object of Thing'],
+      [holed, 'a json value holds what JSON has no value for, an array with a hole'],
+      [Number.NaN, 'a json value holds a number that is not finite'],
+      [[-Infinity], 'a json value holds a number that is not finite'],
+      [`a${String.fromCharCode(0xdc00)}`, 'a json value holds a surrogate alone'],
+      [{ [String.fromCharCode(0xd800)]: 1 }, 'a json value holds a surrogate alone'],
     ];
 
     for (const [value, words] of refusals) {
@@ -170,7 +170,7 @@ test.describe('the json codec', () => {
       refusalOf(() => {
         return PAYLOAD_CODECS.json.encode(cycle);
       })
-    ).toEqual(['TypeError', 'the value is nested deeper than 64']);
+    ).toEqual(['TypeError', 'a json value nests deeper than 64']);
   });
 
   test('refuses what does not write within an object one of whose names may be an array index', () => {
@@ -205,7 +205,7 @@ test.describe('the text codec', () => {
       refusalOf(() => {
         return PAYLOAD_CODECS.text.decode(new Uint8Array([0xc3]));
       })
-    ).toEqual(['SyntaxError', 'the payload is not UTF-8']);
+    ).toEqual(['SyntaxError', 'a text payload is not UTF-8']);
     expect(PAYLOAD_CODECS.text.decode(new Uint8Array([0xef, 0xbb, 0xbf, 0x31]))).toBe(
       `${String.fromCharCode(0xfeff)}1`
     );
@@ -217,7 +217,7 @@ test.describe('the text codec', () => {
       refusalOf(() => {
         return PAYLOAD_CODECS.text.encode(String.fromCharCode(0xd800));
       })
-    ).toEqual(['TypeError', 'the text holds a surrogate alone']);
+    ).toEqual(['TypeError', 'a text value holds a surrogate alone']);
     expect(
       refusalOf(() => {
         return PAYLOAD_CODECS.text.encode(1 as unknown as string);

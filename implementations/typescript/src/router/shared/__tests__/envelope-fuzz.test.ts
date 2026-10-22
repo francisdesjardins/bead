@@ -170,7 +170,7 @@ test.describe('the envelope readers, fed mutations of the vectors', () => {
     });
   }
 
-  test('report an error that is no failure', () => {
+  test('reports an exception that is no failure', () => {
     const defect = defectOf(() => {
       throw new TypeError('boom');
     }, Uint8Array.of(1));
