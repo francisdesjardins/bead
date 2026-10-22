@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import { DisconnectError } from '../../shared/errors';
@@ -8,6 +7,7 @@ import {
   createSessionManager,
   createTimers,
   DEFAULTS,
+  PLATFORM_CLOCK,
   ProgrammerError,
   SESSION_TOKEN_BYTES,
   type ISessionManager,
@@ -24,16 +24,6 @@ interface IUser {
 
 const first: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50001;ordinal=1';
 const second: TransportServerConnectionHandle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=1';
-
-/** The next `event` within `ms`, or `undefined` when none came. */
-const nextEvent = async <K extends SESSION_MANAGER_EVENTS>(
-  sessions: ISessionManager<IUser>,
-  { event, ms }: { event: K; ms: number }
-) => {
-  const { value } = await sessions.events(event, { signal: AbortSignal.timeout(ms) }).next();
-
-  return value;
-};
 
 /** The session tokens of `first` and `second`. */
 const sessionTokenOfBoth = (sessions: ISessionManager<IUser>) => {
@@ -182,9 +172,13 @@ test.describe('createSessionManager', () => {
 
     test('a new session on a connection gets a token of its own', () => {
       using sessions = createSessionManager<IUser>();
+      const created = record(sessions, 'created');
+      const updated = record(sessions, 'updated');
       const before = sessions.set(sessions.create(first));
       const after = sessions.set(sessions.create(first));
 
+      // the one over it told as an update, not a session created
+      expect([created, updated]).toEqual([[[before]], [[after]]]);
       expect(after.sessionToken).not.toBe(before.sessionToken);
       expect(sessionTokenOfBoth(sessions)).toEqual([after.sessionToken, undefined]);
       expect(sessions.connectionHandles()).toEqual([first]);
@@ -389,8 +383,9 @@ test.describe('createSessionManager', () => {
       expect(sessions.get('type=WS;ip=127.0.0.1;port=1;ordinal=1')).toBeUndefined();
     });
 
-    test('delete emits "deleted" and stops the timers; an unknown connection is false', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('delete emits "deleted" and stops the timers; an unknown connection is false', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const deleted = record(sessions, 'deleted');
       const reached = record(sessions, 'connectionInactivityTimeoutReached');
       const session = sessions.getOrElseSet(first);
@@ -402,8 +397,9 @@ test.describe('createSessionManager', () => {
       expect(deleted).toEqual([[{ ...session, connectionInactivityTimeout: 20 }]]);
       // the timer itself is gone, not only the session it would have reached
       expect(sessions.timers.delete(first)).toBe(false);
+      expect(delaysOn(clock)).toEqual([]);
 
-      await sleep(80);
+      clock.tick(20);
 
       expect(reached).toEqual([]);
     });
@@ -449,8 +445,9 @@ test.describe('createSessionManager', () => {
   });
 
   test.describe('timers', () => {
-    test('updateConnectionInactivityTimeout stores the timeout, emits its change, and arms the timer', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('updateConnectionInactivityTimeout stores the timeout, emits its change, and arms the timer', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const changed = record(sessions, 'connectionInactivityTimeoutChanged');
       const session = sessions.getOrElseSet(first);
 
@@ -464,16 +461,22 @@ test.describe('createSessionManager', () => {
       expect(changed).toEqual([[stored, 30, Infinity]]);
       expect(stored?.sessionInactivityTimeout).toBe(Infinity);
 
-      const reached = await nextEvent(sessions, {
-        event: 'connectionInactivityTimeoutReached',
-        ms: 1_000,
-      });
+      const reached = record(sessions, 'connectionInactivityTimeoutReached');
 
-      expect(reached?.[0].sessionToken).toBe(session.sessionToken);
+      clock.tick(29);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(1);
+
+      expect(reached).toHaveLength(1);
+
+      expect(reached[0]?.[0]).toMatchObject({ sessionToken: session.sessionToken });
     });
 
-    test('updateSessionInactivityTimeout stores the timeout, emits its change, and arms the timer', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('updateSessionInactivityTimeout stores the timeout, emits its change, and arms the timer', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const changed = record(sessions, 'sessionInactivityTimeoutChanged');
       const session = sessions.getOrElseSet(first);
 
@@ -485,12 +488,49 @@ test.describe('createSessionManager', () => {
       expect(changed).toEqual([[stored, 30, Infinity]]);
       expect(stored?.connectionInactivityTimeout).toBe(Infinity);
 
-      const reached = await nextEvent(sessions, {
-        event: 'sessionInactivityTimeoutReached',
-        ms: 1_000,
+      const reached = record(sessions, 'sessionInactivityTimeoutReached');
+
+      clock.tick(29);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(1);
+
+      expect(reached).toHaveLength(1);
+
+      expect(reached[0]?.[0]).toMatchObject({ sessionToken: session.sessionToken });
+    });
+
+    test('gives a timeout left out the default', () => {
+      using sessions = createSessionManager<IUser>({ sessionInactivityTimeout: 7_000 });
+      const session = sessions.set({
+        ...sessions.create(first),
+        sessionInactivityTimeout: undefined,
       });
 
-      expect(reached?.[0].sessionToken).toBe(session.sessionToken);
+      expect([session.sessionInactivityTimeout, session.connectionInactivityTimeout]).toEqual([
+        7_000,
+        Infinity,
+      ]);
+    });
+
+    test('says nothing of a session timeout given the one it has', () => {
+      using sessions = createSessionManager<IUser>();
+      const changed = record(sessions, 'sessionInactivityTimeoutChanged');
+      const session = sessions.set({ ...sessions.create(first), sessionInactivityTimeout: 2_000 });
+
+      expect(sessions.updateSessionInactivityTimeout(session)).toEqual(session);
+      expect(changed).toEqual([]);
+    });
+
+    test('runs on the clock its options give, the system’s when none', () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      using given = createSessionManager<IUser>({ clock });
+      using none = createSessionManager<IUser>();
+
+      expect(given.clock).toBe(clock);
+      expect(none.clock).toBe(PLATFORM_CLOCK);
+      expect(given.create(first).lastActivity).toBe(Date.UTC(2026, 0, 1));
     });
 
     test('a timeout left out takes the default, the manager’s own or its options’', () => {
@@ -615,23 +655,30 @@ test.describe('createSessionManager', () => {
       });
     });
 
-    test('the session a timer reaches is the one stored when it fires', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('the session a timer reaches is the one stored when it fires', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const session = sessions.getOrElseSet(first);
 
       sessions.updateSessionInactivityTimeout({ ...session, sessionInactivityTimeout: 30 });
       sessions.updateData({ ...session, data: { roles: [], username: 'later' } });
 
-      const reached = await nextEvent(sessions, {
-        event: 'sessionInactivityTimeoutReached',
-        ms: 1_000,
-      });
+      const reached = record(sessions, 'sessionInactivityTimeoutReached');
 
-      expect(reached?.[0].data?.username).toBe('later');
+      clock.tick(29);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(1);
+
+      expect(reached).toHaveLength(1);
+
+      expect(reached[0]?.[0]).toMatchObject({ data: { username: 'later' } });
     });
 
-    test('Infinity stops a running timer', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('Infinity stops a running timer', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const reached = record(sessions, 'connectionInactivityTimeoutReached');
       const session = sessions.getOrElseSet(first);
 
@@ -641,7 +688,9 @@ test.describe('createSessionManager', () => {
         connectionInactivityTimeout: Infinity,
       });
 
-      await sleep(80);
+      expect(delaysOn(clock)).toEqual([]);
+
+      clock.tick(20);
 
       expect(reached).toEqual([]);
     });
@@ -701,17 +750,23 @@ test.describe('createSessionManager', () => {
       expect(delaysOn(clock)).toEqual([2 ** 31 - 1]);
     });
 
-    test('removing every listener does not unhook the timers', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('removing every listener does not unhook the timers', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const session = sessions.getOrElseSet(first);
 
       sessions.removeAllListeners();
       sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 20 });
 
-      const reached = await nextEvent(sessions, {
-        event: 'connectionInactivityTimeoutReached',
-        ms: 1_000,
-      });
+      const reached = record(sessions, 'connectionInactivityTimeoutReached');
+
+      clock.tick(19);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(1);
+
+      expect(reached).toHaveLength(1);
 
       expect(reached).toBeDefined();
     });
@@ -842,35 +897,45 @@ test.describe('createSessionManager', () => {
       expect(sessionTokenOfBoth(sessions)).toEqual([undefined, undefined]);
     });
 
-    test('a session stored with a token of its own gets its timers all the same', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('a session stored with a token of its own gets its timers all the same', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const session = sessions.set({ ...sessions.create(second), sessionToken: tokenOf(7) });
 
       sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 20 });
 
-      const reached = await nextEvent(sessions, {
-        event: 'connectionInactivityTimeoutReached',
-        ms: 1_000,
-      });
+      const reached = record(sessions, 'connectionInactivityTimeoutReached');
 
-      expect(reached?.[0].sessionToken).toBe(tokenOf(7));
+      clock.tick(19);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(1);
+
+      expect(reached).toHaveLength(1);
+
+      expect(reached[0]?.[0]).toMatchObject({ sessionToken: tokenOf(7) });
     });
 
-    test('a new session set on a connection stops the timers of the one it replaces', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('a new session set on a connection stops the timers of the one it replaces', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const reached = record(sessions, 'connectionInactivityTimeoutReached');
       const session = sessions.getOrElseSet(first);
 
       sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 20 });
       sessions.set(sessions.create(first));
 
-      await sleep(80);
+      expect(delaysOn(clock)).toEqual([]);
+
+      clock.tick(20);
 
       expect(reached).toEqual([]);
     });
 
-    test('set keeps the timers in step with the timeouts it stores', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('set keeps the timers in step with the timeouts it stores', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
       const reached = record(sessions, 'connectionInactivityTimeoutReached');
       const running = sessions.getOrElseSet(first);
 
@@ -884,51 +949,61 @@ test.describe('createSessionManager', () => {
         connectionInactivityTimeout: 20,
       });
 
-      // the timer stopped would come first, armed before: what the poll settles on proves it gone
-      await expect
-        .poll(() => {
-          return reached;
-        })
-        .toEqual([[armed]]);
+      // the timer stopped is gone: the one armed alone runs
+      expect(delaysOn(clock)).toEqual([20]);
+
+      clock.tick(19);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(1);
+
+      expect(reached).toEqual([[armed]]);
     });
 
-    test('a new session with the timeout of the one it replaces is armed anew', async () => {
-      using sessions = createSessionManager<IUser>();
+    test('a new session with the timeout of the one it replaces is armed anew', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
+      const reached = record(sessions, 'connectionInactivityTimeoutReached');
       const session = sessions.getOrElseSet(first);
 
       sessions.updateConnectionInactivityTimeout({ ...session, connectionInactivityTimeout: 30 });
+      clock.tick(20);
 
       const replacing = sessions.set({
         ...sessions.create(first),
         connectionInactivityTimeout: 30,
       });
-      const reached = await nextEvent(sessions, {
-        event: 'connectionInactivityTimeoutReached',
-        ms: 1_000,
-      });
 
-      expect(reached?.[0].sessionToken).toBe(replacing.sessionToken);
+      // nothing at the first one's due: its timer went with it
+      clock.tick(10);
+
+      expect(reached).toEqual([]);
+
+      clock.tick(20);
+
+      expect(reached).toEqual([[replacing]]);
     });
 
-    test('a reset for a connection with no session arms nothing', async () => {
-      using sessions = createSessionManager<IUser>();
-      const reached = record(sessions, 'connectionInactivityTimeoutReached');
+    test('a reset for a connection with no session arms nothing', () => {
+      const clock = createTestClock();
+      using sessions = createSessionManager<IUser>({ clock });
 
       sessions.resetConnectionInactivityTimeout(sessions.create(first), 10);
       sessions.resetSessionInactivityTimeout(sessions.create(first), 10);
 
-      await sleep(40);
-
-      expect(reached).toEqual([]);
+      expect(delaysOn(clock)).toEqual([]);
+      expect(sessions.gauges().counts).toEqual({ sessions: 0, timedConnections: 0 });
       expect(sessions.timers.delete(first)).toBe(false);
     });
 
-    test('dispose stops every timer and forgets every session, without events', async () => {
+    test('dispose stops every timer and forgets every session, without events', () => {
+      const clock = createTestClock();
       const deleted: unknown[] = [];
       const reached: unknown[] = [];
 
       {
-        using sessions = createSessionManager<IUser>();
+        using sessions = createSessionManager<IUser>({ clock });
         const session = sessions.getOrElseSet(first);
 
         sessions.on('deleted', (...params) => {
@@ -944,7 +1019,9 @@ test.describe('createSessionManager', () => {
         expect(sessions.timers.delete(first)).toBe(false);
       }
 
-      await sleep(80);
+      expect(delaysOn(clock)).toEqual([]);
+
+      clock.tick(20);
 
       expect(deleted).toEqual([]);
       expect(reached).toEqual([]);
@@ -983,6 +1060,13 @@ test.describe('createSessionManager', () => {
         anomalies: [],
         connectionHandles: new Set(),
         counts: { sessions: 0, timedConnections: 0 },
+      });
+
+      // one stored with a token of its own, and no timeout, is timed as one drawn is
+      sessions.set({ ...sessions.create(second), sessionToken: tokenOf(7) });
+
+      expect(sessions.gauges()).toMatchObject({
+        counts: { sessions: 1, timedConnections: 1 },
       });
     });
   });

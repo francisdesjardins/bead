@@ -48,6 +48,9 @@ internal sealed class NotificationManager(PacingLimits limits)
     private readonly Dictionary<ProcedureAddress, OrderedDictionary<Subscriber, uint>> _candidates = [];
     private readonly Dictionary<string, OrderedDictionary<uint, Target>> _targets = [];
 
+    // the limits each pacing queues to, refused as it is made when one is none
+    private readonly PacingLimits _limits = limits.Validate();
+
     /// <summary>What hears each subscription as it goes, however it goes.</summary>
     public Action<Subscription>? OnRemove { get; set; }
 
@@ -139,8 +142,8 @@ internal sealed class NotificationManager(PacingLimits limits)
         {
             Ceilings = new Dictionary<string, long>
             {
-                ["largestQueuedNotificationBytes"] = limits.MaximumQueuedNotificationBytes,
-                ["largestQueuedNotifications"] = limits.MaximumQueuedNotifications,
+                ["largestQueuedNotificationBytes"] = _limits.MaximumQueuedNotificationBytes,
+                ["largestQueuedNotifications"] = _limits.MaximumQueuedNotifications,
             },
         };
     }
@@ -180,7 +183,7 @@ internal sealed class NotificationManager(PacingLimits limits)
         if (SubscriptionOf(procedure, call.Subscriber) is { } holder)
         {
             throw new InvalidOperationException(
-                $"{call.ConnectionHandle} is subscribed to {procedure.ServiceId}/{procedure.ProcedureId} under call {holder} already, in that session");
+                $"{call.ConnectionHandle} is subscribed to {procedure.ServiceId}/{procedure.ProcedureId} in that session under call {holder} already");
         }
 
         if (Has(call.CallId, call.ConnectionHandle))
@@ -203,7 +206,7 @@ internal sealed class NotificationManager(PacingLimits limits)
         candidates[call.Subscriber] = call.CallId;
         targets[call.CallId] = new Target(
             new Subscription(call.CallId, call.ConnectionHandle, procedure) { Session = call.Session?.Identifier },
-            call.Paced ? new NotificationPacing(limits) : null)
+            call.Paced ? new NotificationPacing(_limits) : null)
         {
             Series = SeriesOf?.Invoke(procedure),
         };

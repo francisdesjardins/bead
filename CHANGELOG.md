@@ -196,6 +196,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A relay words alike, on both sides, the `DESTINATION_UNREACHABLE` it answers a call whose
+  credential leg B cannot carry: `it verifies another audience than the one the token names, or
+  none`, `it was registered with no audience`, and `its transport leaves the machine in the clear,
+  which a bearer credential never crosses`, where the TypeScript side said each its own way and the
+  C# side the last another.
+- The C# server's gauges count the credentials' sessions it keeps and those of them timed,
+  `credentialSessions` and `timedCredentialSessions`, as the TypeScript server's do.
+- The TypeScript session manager times a session stored with a token of its own on a connection
+  that held none as one whose token it draws, as the C# side does: its gauges count it among
+  `timedConnections`.
 - The C# HTTP server tells nothing of a connection after its close: an envelope whose connection a
   `DELETE` closes as it is handed on is answered the 404 marked `connection-unknown`, as the
   TypeScript side answers it, where the router could hear it after the close and hold the

@@ -236,7 +236,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
         var clock = Clocks.Of((options?.Clock, transport.Clock), ("a server's router", "its transport"));
 
         Transport = transport;
-        _notifications = new NotificationManager((options?.Pacing ?? PacingLimits.Default).Validate());
+        _notifications = new NotificationManager(options?.Pacing ?? PacingLimits.Default);
         _places = new SubscriptionPlaces(
             _notifications,
             (connectionHandle) =>
@@ -540,13 +540,28 @@ public sealed class RouterServer : IRouterLike, IDisposable
     }
 
     /// <summary>
-    /// What it and its parts hold — its core, its subscriptions' places, its notifications, its relay
-    /// — for the connections it follows, which it forgets as each closes; taken on its scheduler.
+    /// What it and its parts hold — its core, its subscriptions' places, its notifications, its relay,
+    /// the credentials' sessions it keeps and those of them timed — for the connections it follows,
+    /// which it forgets as each closes; taken on its scheduler.
     /// </summary>
     public Task<Gauges> Gauges()
     {
         return _core.Loop.Run(() =>
         {
+            var kept = Bead.Gauges.Of(
+                new Dictionary<string, long>
+                {
+                    ["credentialSessions"] = _kept.Count,
+                    ["timedCredentialSessions"] = _kept.Values.Count((each) =>
+                    {
+                        return each.Timer is not null;
+                    }),
+                },
+                _kept.Keys.Select((place) =>
+                {
+                    return place.ConnectionHandle;
+                }));
+
             return Task.FromResult(Bead.Gauges.Merge(
             [
                 Bead.Gauges.Of(new Dictionary<string, long> { ["connections"] = _connections.Count }, _connections),
@@ -554,6 +569,7 @@ public sealed class RouterServer : IRouterLike, IDisposable
                 _places.Gauges(),
                 _notifications.Gauges(),
                 _relay.Gauges(),
+                kept,
             ]));
         });
     }

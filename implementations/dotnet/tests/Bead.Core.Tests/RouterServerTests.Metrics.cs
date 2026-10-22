@@ -24,6 +24,18 @@ public sealed partial class RouterServerTests
         })];
     }
 
+    // what a registry counted of the subscriptions to news it dropped, its labels left out
+    private static List<string> DroppedOf(MetricsRegistry registry)
+    {
+        return [.. CountedOf((registry, "news")).Where((line) =>
+        {
+            return line.StartsWith("bead_subscriptions_dropped_total", StringComparison.Ordinal);
+        }).Select((line) =>
+        {
+            return line.Replace("{}", "", StringComparison.Ordinal);
+        })];
+    }
+
     // definition
 
     // debugging 9.2
@@ -64,7 +76,7 @@ public sealed partial class RouterServerTests
 
     // spec 17.2.6
     [Fact]
-    public async Task Counts_a_notification_whose_value_does_not_write_failed_for_each_subscription_it_was_for_reports_it_once_and_fails_no_caller()
+    public async Task Counts_a_notification_whose_value_does_not_write_as_failed_for_each_subscription_it_was_for_sends_it_to_none_reports_why_once_and_fails_no_caller()
     {
         var registry = new MetricsRegistry();
         var told = new List<(Exception? Error, DebugDirection Direction)>();
@@ -146,6 +158,7 @@ public sealed partial class RouterServerTests
         await Settle();
 
         Assert.Equal(["first failure 1 ProcedureFailed", "second failure 1 SubscriptionUnsupported"], SentSince());
+        Assert.Equal(["this admission fails, on purpose first"], Reported());
         Assert.Contains(
             "bead_server_call_handled_total{type=\"request\",outcome=\"failure\",code=\"PROCEDURE_FAILED\"} 1",
             CountedOf((registry, "echo")));
@@ -192,24 +205,12 @@ public sealed partial class RouterServerTests
         Start(new RouterServerOptions { MetricsRegistry = registry });
         _transport.Open(First);
         Router.RegisterResolver(new Breaking(Other));
-        Services.GetRequestResolver(
-            Echo,
-            new RequestResolverDependencies<string, string>
-            {
-                Serializer = Text,
-                BeforeRequest = new BeforeRequest((_) =>
-                {
-                    throw new InvalidOperationException("this admission fails, on purpose");
-                }),
-            })((_, response) =>
-            {
-                return response.Answer("never");
-            });
 
         Deliver(First, RequestOf(1, Other));
         await Settle();
 
         Assert.Equal(["first failure 1 ProcedureFailed"], SentSince());
+        Assert.Equal(["this handler breaks, on purpose first"], Reported());
         Assert.Equal(
             [
                 "bead_server_call_duration_seconds_bucket{type=\"request\",le=\"0.0\"} 1",
@@ -275,24 +276,15 @@ public sealed partial class RouterServerTests
         // a cancel ends a subscription its client asked to end: no drop
         Deliver(Third, CancelOf(1));
         await Settle();
-        Assert.DoesNotContain(CountedOf((registry, "news")), (line) =>
-        {
-            return line.StartsWith("bead_subscriptions_dropped_total", StringComparison.Ordinal);
-        });
+        Assert.Empty(DroppedOf(registry));
 
         _transport.Closed(First);
         await Settle();
-        Assert.Contains("bead_subscriptions_dropped_total 1", CountedOf((registry, "news")).Select((line) =>
-        {
-            return line.Replace("{}", "", StringComparison.Ordinal);
-        }));
+        Assert.Equal(["bead_subscriptions_dropped_total 1"], DroppedOf(registry));
 
         Router.Dispose();
         await Settle();
-        Assert.Contains("bead_subscriptions_dropped_total 2", CountedOf((registry, "news")).Select((line) =>
-        {
-            return line.Replace("{}", "", StringComparison.Ordinal);
-        }));
+        Assert.Equal(["bead_subscriptions_dropped_total 2"], DroppedOf(registry));
     }
 
     [Fact]
