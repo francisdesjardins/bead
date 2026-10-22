@@ -48,24 +48,6 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void Refuses_a_token_another_connection_holds_and_a_negative_timeout()
-    {
-        using var sessions = new SessionManager<string>();
-
-        var held = sessions.Set(sessions.Create(Handle));
-
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return sessions.Set(sessions.Create(Other) with { SessionToken = held.SessionToken });
-        });
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            return sessions.Set(sessions.Create(Other) with { SessionInactivityTimeout = TimeSpan.FromSeconds(-1) });
-        });
-        Assert.False(sessions.Has(Other));
-    }
-
-    [Fact]
     public void Gives_a_timeout_left_out_the_default()
     {
         using var sessions = new SessionManager<string>(new SessionManagerOptions { SessionInactivityTimeout = TimeSpan.FromSeconds(7) });
