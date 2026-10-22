@@ -36,7 +36,7 @@ test.describe.configure({ retries: 0 });
 
 test.describe('writeHeader and readHeader', () => {
   for (const { bytes, header, name } of VECTORS.headers) {
-    test(`lay ${name} out byte by byte, and read it back`, () => {
+    test(`reads ${name}, and writes it back`, () => {
       const expected = fromHexadecimal(bytes);
       const written = new Uint8Array(expected.length);
 
@@ -455,7 +455,7 @@ test.describe('writeHeader', () => {
 test.describe('readPrefix', () => {
   for (const { bytes, name, prefix } of VECTORS.prefixes) {
     test(`reads ${name}`, () => {
-      expect(readPrefix(fromHexadecimal(bytes), SERVER_FAILURES)).toEqual(prefix);
+      expect(readPrefix(fromHexadecimal(bytes), CLIENT_FAILURES)).toEqual(prefix);
     });
   }
 
@@ -480,7 +480,8 @@ test.describe('readHeader', () => {
       );
 
       expect(read).toEqual(
-        header === null ? undefined : { header, headerBytes: headerBytesOf(header) }
+        // * the bytes the header took as it was read, which a writer may write fewer of
+        header === null ? undefined : { header, headerBytes: fromHexadecimal(bytes).length }
       );
     });
   }
