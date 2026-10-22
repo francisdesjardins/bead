@@ -606,16 +606,16 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             ReleaseBody = ReleaseBody,
             Classify = Classify,
             FinishBody = FinishBody,
-            BeginHandOff = BeginHandOff,
+            Handing = (connection) =>
+            {
+                return Handing?.Invoke(connection.ConnectionHandle) ?? Task.CompletedTask;
+            },
+            HandOn = HandOn,
             WaitAfterHandOff = WaitAfterHandOff,
             Finish = Finish,
             EndEarly = EndEarly,
             Lose = Lose,
             Cancel = Cancel,
-            Message = (message, connection) =>
-            {
-                _listeners.Tell(Message, (message, connection.ConnectionHandle));
-            },
             AddressOf = AddressOf,
             Drop = Drop,
             Answering = () =>
@@ -684,6 +684,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// its connection in between.
     /// </summary>
     internal event Action<string>? Holding;
+
+    /// <summary>
+    /// Each envelope read whole, before it is handed on, with its connection's handle: the tests' way
+    /// to close its connection in between, by a <c>DELETE</c> as its client sends one.
+    /// </summary>
+    internal Func<string, Task>? Handing { get; set; }
 
     /// <summary>
     /// Each answer, before it is written, with its exchange's abort: the tests' way to drop its
@@ -1298,19 +1304,32 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     private void Drop((Drawn Connection, string Why) dropped)
     {
         var (connection, why) = dropped;
-
-        if (!Take(connection))
-        {
-            return;
-        }
+        List<PipeReader>? interrupted = null;
 
         try
         {
-            Error?.Invoke(ServerBounds.DroppedOf(connection.ConnectionHandle, why), connection.ConnectionHandle);
+            lock (connection.Telling)
+            {
+                interrupted = Take(connection);
+
+                if (interrupted is null)
+                {
+                    return;
+                }
+
+                try
+                {
+                    Error?.Invoke(ServerBounds.DroppedOf(connection.ConnectionHandle, why), connection.ConnectionHandle);
+                }
+                finally
+                {
+                    _listeners.Tell(Close, (false, connection.ConnectionHandle));
+                }
+            }
         }
         finally
         {
-            _listeners.Tell(Close, (false, connection.ConnectionHandle));
+            Interrupt(interrupted);
         }
     }
 
@@ -1499,6 +1518,12 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 _byToken[connection.ConnectionToken] = connection;
                 _perAddress[address] = _perAddress.GetValueOrDefault(address) + 1;
                 Rest(connection);
+
+                // ! its telling lock taken as it is registered, under the transport's lock here
+                // alone, since no other thread holds the lock of a connection it cannot find yet:
+                // its opening is told before anything else of it, a close a stop or its idle timer
+                // begins at once among it; released before the first await, a lock being its thread's
+                connection.Telling.Enter();
             }
         }
 
@@ -1509,7 +1534,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             return;
         }
 
-        _listeners.Tell(Connection, connection.ConnectionHandle);
+        try
+        {
+            _listeners.Tell(Connection, connection.ConnectionHandle);
+        }
+        finally
+        {
+            connection.Telling.Exit();
+        }
 
         // the listen taken, said back, so a client whose header something on the way dropped never
         // listens where it would be refused
@@ -1595,18 +1627,40 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         return (false, false);
     }
 
-    // a request about to go on to the router: whether it was answered first, and handed on when not
-    private bool BeginHandOff(Waiting waiting)
+    // ! an envelope read whole, told to the router as one with what the registry holds, so never
+    // after its connection's close: its connection gone, it ends untold, its client learning it is
+    // gone; a request answered as it came is never handed on, and one handed on is owed its answer
+    private HandOff HandOn((Drawn Connection, Waiting Waiting, TransportMessage Message) call)
     {
-        bool isAnswered;
+        var (connection, waiting, message) = call;
 
-        lock (_gate)
+        lock (connection.Telling)
         {
-            isAnswered = waiting.IsEnded;
-            waiting.IsDelivered = !isAnswered;
+            lock (_gate)
+            {
+                if (_drawn.GetValueOrDefault(connection.ConnectionHandle) != connection)
+                {
+                    waiting.IsEnded = true;
+                    waiting.Ended.TrySetResult(new Ending { IsGone = true });
+
+                    return HandOff.Gone;
+                }
+
+                if (waiting.Prefix is { Kind: EnvelopeKind.Request })
+                {
+                    if (waiting.IsEnded)
+                    {
+                        return HandOff.Answered;
+                    }
+
+                    waiting.IsDelivered = true;
+                }
+            }
+
+            _listeners.Tell(Message, (message, connection.ConnectionHandle));
         }
 
-        return isAnswered;
+        return HandOff.Told;
     }
 
     // a request handed on: whether it still waits for its answer, its timer armed when it does
@@ -1879,7 +1933,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         try
         {
-            _listeners.Tell(Listen, (true, connection.ConnectionHandle));
+            TellListen((true, connection));
             listening.Told.TrySetResult();
 
             var ending = await listening.Ended.Task.WaitAsync(context.RequestAborted);
@@ -1917,8 +1971,6 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
         }
         finally
         {
-            bool isDrawn;
-
             lock (_gate)
             {
                 listening.Timer?.Dispose();
@@ -1929,9 +1981,8 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 }
 
                 connection.Open -= 1;
-                isDrawn = _drawn.GetValueOrDefault(connection.ConnectionHandle) == connection;
 
-                if (isDrawn)
+                if (_drawn.GetValueOrDefault(connection.ConnectionHandle) == connection)
                 {
                     Rest(connection);
                 }
@@ -1944,9 +1995,27 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 await replacer.Told.Task;
             }
 
+            TellListen((false, connection));
+        }
+    }
+
+    // a listen held, or ended, told while its connection stands, as one with its close: never after
+    private void TellListen((bool IsHeld, Drawn Connection) listen)
+    {
+        var (isHeld, connection) = listen;
+
+        lock (connection.Telling)
+        {
+            bool isDrawn;
+
+            lock (_gate)
+            {
+                isDrawn = _drawn.GetValueOrDefault(connection.ConnectionHandle) == connection;
+            }
+
             if (isDrawn)
             {
-                _listeners.Tell(Listen, (false, connection.ConnectionHandle));
+                _listeners.Tell(Listen, (isHeld, connection.ConnectionHandle));
             }
         }
     }
@@ -2036,26 +2105,49 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
     private void CloseDrawn(Drawn connection, bool isClean)
     {
-        if (Take(connection))
+        List<PipeReader>? interrupted = null;
+
+        try
         {
-            _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
+            lock (connection.Telling)
+            {
+                interrupted = Take(connection);
+
+                if (interrupted is not null)
+                {
+                    _listeners.Tell(Close, (isClean, connection.ConnectionHandle));
+                }
+            }
+        }
+        finally
+        {
+            Interrupt(interrupted);
         }
     }
 
-    // a connection's end begun, false once begun already: out of the registry, each exchange still
-    // waiting told by the marked 404 until its request is handed on, then by its exchange cut after
-    // its head, as a lost one is: a request handed on ran, which no refusal may deny
-    private bool Take(Drawn connection)
+    // the bodies still coming of the requests a close ended, their reads ended so each is answered
+    // the marked 404 now, its head not out: once its close is told, nothing held
+    private static void Interrupt(List<PipeReader>? interrupted)
     {
-        // the bodies still coming of the requests waiting, whose reads are ended, so each is answered
-        // the marked 404 now, its head not out
+        foreach (var reading in interrupted ?? [])
+        {
+            reading.CancelPendingRead();
+        }
+    }
+
+    // a connection's end begun, under its telling lock: out of the registry, each exchange still
+    // waiting told by the marked 404 until its request is handed on, then by its exchange cut after
+    // its head, as a lost one is: a request handed on ran, which no refusal may deny. What reads the
+    // bodies of those still coming, for its caller to end; none once its end began already
+    private List<PipeReader>? Take(Drawn connection)
+    {
         var interrupted = new List<PipeReader>();
 
         lock (_gate)
         {
             if (_drawn.GetValueOrDefault(connection.ConnectionHandle) != connection)
             {
-                return false;
+                return null;
             }
 
             _drawn.Remove(connection.ConnectionHandle);
@@ -2105,12 +2197,7 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
             }
         }
 
-        foreach (var reading in interrupted)
-        {
-            reading.CancelPendingRead();
-        }
-
-        return true;
+        return interrupted;
     }
 
     // a listen held until something comes for it, or its wait is over; touched under the lock
@@ -2140,6 +2227,14 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
         // its client said at connect that it listens: the server may send of its own
         public bool IsListening { get; } = isListening;
+
+        // ! what is told of it — its opening, an envelope, a listen, its close — told one at a time,
+        // each as one with what the registry holds as it is told, as the TypeScript side's one thread
+        // tells them: it leaves the registry only under this lock, its close told with it, so nothing
+        // of it is told after its close. Taken before the transport's lock, never under it but as
+        // it is drawn; its listeners are told under it, the router's posting to its scheduler and
+        // returning, so a listener that waits on another exchange of its connection waits for ever
+        public Lock Telling { get; } = new();
 
         // the rank it was drawn at, which its handle ends with
         public required long Ordinal { get; init; }

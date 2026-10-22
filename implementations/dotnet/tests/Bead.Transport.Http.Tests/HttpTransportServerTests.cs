@@ -3268,6 +3268,72 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Empty(_messages);
     }
 
+    // ! an envelope read whole and its connection's DELETE, on two threads: the envelope told
+    // before the close, or never, so the router never holds a connection closed
+    [Fact]
+    public async Task Answers_the_marked_404_an_envelope_whose_connection_a_DELETE_closes_as_it_is_handed_on_and_tells_nothing_of_it_after_its_close()
+    {
+        await Start();
+
+        using var router = new RouterServer(_server);
+        var deleted = new List<int>();
+        var handles = new List<string>();
+
+        foreach (var kind in (EnvelopeKind[])[EnvelopeKind.Cancel, EnvelopeKind.Request])
+        {
+            var (connectionToken, connectionHandle) = await Connect();
+
+            // its body read whole, before it is handed on: its client's DELETE comes, and is answered
+            _server.Handing = async (_) =>
+            {
+                _server.Handing = null;
+
+                using var response = await Fetch(RequestOf(HttpMethod.Delete, connectionToken));
+
+                deleted.Add((int)response.StatusCode);
+            };
+            handles.Add(connectionHandle);
+
+            Assert.Equal((404, HttpRefusals.ConnectionUnknown), await RefusalOf(PostOf(connectionToken, EnvelopeOf(kind, 1))));
+        }
+
+        Assert.Equal([204, 204], deleted);
+        Assert.Empty(_messages);
+        Assert.Equal([(true, handles[0]), (true, handles[1])], _closes);
+        // the 404 that ends an exchange as its connection closes is no refusal its server judged
+        Assert.Empty(_refusals);
+        Assert.Equal((0L, 0L), (Count("connections"), Count("waitingExchanges")));
+        Assert.Equal(0L, (await router.Gauges().WaitAsync(Patience, Cancelled)).Counts["connections"]);
+    }
+
+    // an answer between a request's body read whole and its hand-on, on another thread, which the
+    // TypeScript side's one turn leaves no room for: written, its request never handed on
+    [Fact]
+    public async Task Answers_a_request_an_answer_comes_for_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
+    {
+        await Start();
+
+        var (connectionToken, _) = await Connect();
+        var result = EnvelopeOf(EnvelopeKind.Result, (1, 4));
+        Task? sent = null;
+
+        _server.Handing = (connectionHandle) =>
+        {
+            _server.Handing = null;
+            sent = _server.Send(new TransportMessage(result, false), connectionHandle);
+
+            return Task.CompletedTask;
+        };
+
+        using var answered = await Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        Assert.Equal(200, (int)answered.StatusCode);
+        Assert.Equal(result, await BytesOf(answered));
+        await sent!.WaitAsync(Patience, Cancelled);
+        Assert.Empty(_messages);
+        Assert.Equal(0L, Count("waitingExchanges"));
+    }
+
     [Fact]
     public async Task Rests_a_connection_once_none_of_its_exchanges_is_under_way_and_arms_no_timer_that_is_Infinity()
     {

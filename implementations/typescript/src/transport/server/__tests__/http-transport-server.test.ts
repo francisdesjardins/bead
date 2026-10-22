@@ -11,6 +11,7 @@ import { request as requestHTTPS } from 'node:https';
 import { connect as connectTcp } from 'node:net';
 import { expect, test } from '@playwright/test';
 import { WebSocketServer } from 'ws';
+import { createRouterServer } from '../../../router/server/router-server';
 import {
   EnvelopeKind,
   LIMIT_DEFAULTS,
@@ -2503,6 +2504,53 @@ test.describe('createHTTPTransportServer, its edges', () => {
     } finally {
       socket.destroy();
     }
+  });
+
+  // ! an envelope read whole and its connection's DELETE: the envelope told before the close, or
+  // never, so the router never holds a connection closed; one turn hands it on as its body ends
+  test('answers the marked 404 an envelope whose connection a DELETE closes as it is handed on, and tells nothing of it after its close', async () => {
+    const { connectScripted, events, exchangeOf, fake, server } = await startScripted();
+    using router = createRouterServer(server);
+    const refusals = refusalsOf(server);
+    const deleted: number[] = [];
+    const handles: TransportServerConnectionHandle[] = [];
+
+    for (const kind of [ENVELOPE_KINDS.CANCEL, ENVELOPE_KINDS.REQUEST]) {
+      const { connectionHandle, connectionToken } = connectScripted();
+      const coming = exchangeOf(connectionToken);
+
+      // its body read whole, before it is handed on: its client's DELETE comes, and is answered
+      coming.request.emit('data', envelopeOf(kind, { callId: 1 }));
+
+      const { response } = fake.exchange({
+        headers: { [CONNECTION_TOKEN_HEADER]: connectionToken },
+        method: 'DELETE',
+      });
+
+      deleted.push(response.status ?? 0);
+      handles.push(connectionHandle);
+      coming.request.emit('end');
+
+      expect([coming.response.status, coming.response.headers?.[REFUSAL_HEADER]]).toEqual([
+        404,
+        REFUSALS.CONNECTION_UNKNOWN,
+      ]);
+    }
+
+    expect(deleted).toEqual([204, 204]);
+    expect(namesOf(events, 'message')).toEqual([]);
+    expect(namesOf(events, 'close')).toEqual([
+      ['close', true, handles[0]],
+      ['close', true, handles[1]],
+    ]);
+    // the 404 that ends an exchange as its connection closes is no refusal its server judged
+    expect(refusals).toEqual([]);
+    expect([
+      server.gauges().counts['connections'],
+      server.gauges().counts['waitingExchanges'],
+    ]).toEqual([0, 0]);
+    expect(router.gauges().counts['connections']).toBe(0);
+    await server.stop();
   });
 
   test('rests a connection once none of its exchanges is under way, and arms no timer that is Infinity', async () => {

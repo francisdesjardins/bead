@@ -62,7 +62,9 @@ public sealed partial class HttpTransportServer
 
             internal required Func<(TConnection Connection, Waiting Waiting), (bool IsGone, bool IsEnded)> FinishBody { get; init; }
 
-            internal required Func<Waiting, bool> BeginHandOff { get; init; }
+            internal required Func<TConnection, Task> Handing { get; init; }
+
+            internal required Func<(TConnection Connection, Waiting Waiting, TransportMessage Message), HandOff> HandOn { get; init; }
 
             internal required Func<(TConnection Connection, Waiting Waiting, uint CallId), bool> WaitAfterHandOff { get; init; }
 
@@ -73,8 +75,6 @@ public sealed partial class HttpTransportServer
             internal required Action<(TConnection Connection, Waiting Waiting)> Lose { get; init; }
 
             internal required Action<(TConnection Connection, uint CallId)> Cancel { get; init; }
-
-            internal required Action<TransportMessage, TConnection> Message { get; init; }
 
             internal required Func<HttpContext, string?> AddressOf { get; init; }
 
@@ -336,9 +336,24 @@ public sealed partial class HttpTransportServer
             // them, which may differ from its connect's (spec 15.1)
             var handed = new TransportMessage(envelope, false) { Address = _port.AddressOf(context), Port = context.Connection.RemotePort };
 
+            // a request is handed on with the credential its exchange carried; no other envelope is
+            if (kind == EnvelopeKind.Request)
+            {
+                handed = handed with { Credential = HostsAndOrigins.CredentialOf(context.Request.Headers.Authorization) };
+            }
+
+            await _port.Handing(connection);
+
+            // ! told as one with its connection's close, never after it: its connection gone, its
+            // client learns it, nothing handed on
+            var handOff = _port.HandOn((connection, waiting, handed));
+
             if (kind != EnvelopeKind.Request)
             {
-                _port.Message(handed, connection);
+                if (handOff == HandOff.Gone)
+                {
+                    return Unknown;
+                }
 
                 if (kind == EnvelopeKind.Cancel)
                 {
@@ -348,15 +363,11 @@ public sealed partial class HttpTransportServer
                 return Nothing;
             }
 
-            var isAnswered = _port.BeginHandOff(waiting);
-
-            if (isAnswered)
+            // answered first, or its connection gone, which its exchange ended with
+            if (handOff != HandOff.Told)
             {
                 return await Reply(context, (connection, waiting));
             }
-
-            // a request is handed on with the credential its exchange carried; no other envelope is
-            _port.Message(handed with { Credential = HostsAndOrigins.CredentialOf(context.Request.Headers.Authorization) }, connection);
 
             var isWaiting = _port.WaitAfterHandOff((connection, waiting, callId));
 
@@ -445,6 +456,15 @@ public sealed partial class HttpTransportServer
 
             return null;
         }
+    }
+
+    // what a hand-on came to: told to the router; or not, its request answered as it came, or its
+    // connection gone
+    private enum HandOff
+    {
+        Told,
+        Answered,
+        Gone,
     }
 
     // what an exchange waiting on the transport ends with: an answer's envelope or a listen's batch,
