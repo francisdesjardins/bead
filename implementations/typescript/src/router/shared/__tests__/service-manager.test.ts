@@ -1039,10 +1039,10 @@ test.describe('createServiceManager', () => {
 
       expect(() => {
         manager.getNotification({ ...echo, procedureName: 'Echo' }, { serializer });
-      }).toThrow(/: off its form$/);
+      }).toThrow(/ is off its form: /);
       expect(() => {
         manager.getNotification({ ...echo, serviceRevision: 0 }, { serializer });
-      }).toThrow(/: out of its range$/);
+      }).toThrow(/ is out of its range: /);
     });
 
     test('a trigger the router never registered is a programmer error', () => {
