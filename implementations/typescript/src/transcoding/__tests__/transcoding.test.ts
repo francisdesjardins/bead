@@ -148,7 +148,7 @@ interface ITranscodingFile {
   bindings: IBindingEntry[];
   exchanges: IExchangeEntry[];
   events: IEventsEntry[];
-  defaults: Record<string, unknown> & { problemTypes: string | null };
+  defaults: Record<string, unknown> & { challenge: string; problemTypes: string | null };
   failures: IFailureEntry[];
   readings: IReadingEntry[];
   templates: ITemplatesEntry[];
@@ -365,7 +365,12 @@ const readOn = async (peer: IPeer, { stream }: { stream?: string | undefined }):
       for (const line of lines) {
         const colon = line.indexOf(':');
 
-        fields.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
+        // * a field given twice is one, its values joined (RFC 9110 5.3), as the C# side reads it
+        const name = line.slice(0, colon).trim().toLowerCase();
+        const value = line.slice(colon + 1).trim();
+        const before = fields.get(name);
+
+        fields.set(name, before === undefined ? value : `${before}, ${value}`);
       }
 
       const rest = bytes.subarray(at + HEAD_END.length);
@@ -501,6 +506,9 @@ test.describe('plays transcoding.json', () => {
         throw new Error(`${entry.target} matches no route`);
       }
 
+      // * a target its template matches, as the C# side requires it
+      expect(routeIndexOf([template], path), entry.target).toBe(0);
+
       const decoded = variablesOf(template, path);
       const bind = (): Message => {
         // * as its gateway binds it: a value that does not decode refused at its own variable
@@ -561,12 +569,15 @@ test.describe('plays transcoding.json', () => {
               },
               {
                 catalogue: CATALOGUE,
-                challenge: failure.challenge,
+                challenge: failure.challenge ?? FILE.defaults.challenge,
                 problemTypes: problemTypes ?? undefined,
                 route,
               }
             )
-          : problemOfOwn(failure.own, { detail: failure.detail ?? '' });
+          : problemOfOwn(failure.own, {
+              challenge: failure.challenge ?? FILE.defaults.challenge,
+              detail: failure.detail ?? '',
+            });
 
       expect(problem.status).toBe(entry.status);
       expect(problem.fields).toEqual(entry.fields);

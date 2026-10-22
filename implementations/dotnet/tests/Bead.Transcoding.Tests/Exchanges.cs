@@ -57,16 +57,27 @@ internal static partial class Exchanges
             return given is { } case_ && case_.TryGetProperty(name, out var value) ? value.GetString()! : defaults.GetProperty(name).GetString()!;
         }
 
-        return new HttpGatewayOptions
+        // * every member the TypeScript side hands its gateway, the entry's own over the defaults
+        JsonElement Member(string name)
+        {
+            return given is { } case_ && case_.TryGetProperty(name, out var value) ? value : defaults.GetProperty(name);
+        }
+
+        IReadOnlyList<string> List(string name)
+        {
+            return [.. Member(name).EnumerateArray().Select((item) =>
+            {
+                return item.GetString()!;
+            })];
+        }
+
+        var options = new HttpGatewayOptions
         {
             Transport = memory,
             Routes = HttpRoutes.All,
-            Document = Document,
-            ProblemTypes = HttpRoutes.ProblemTypes,
-            Origins = [.. defaults.GetProperty("origins").EnumerateArray().Select((origin) =>
-            {
-                return origin.GetString()!;
-            })],
+            Document = Member("document").GetBoolean() ? Document : null,
+            ProblemTypes = Member("problemTypes").ValueKind == JsonValueKind.Null ? null : Member("problemTypes").GetString(),
+            Origins = List("origins"),
             Authorization = Text("authorization") == "bearer-jwt" ? GatewayAuthorization.BearerJwt : GatewayAuthorization.Elsewhere,
             Challenge = Text("challenge"),
             Timeout = Time("timeout"),
@@ -85,6 +96,30 @@ internal static partial class Exchanges
             SendGracePeriod = Time("sendGracePeriod"),
             MaximumUnsentBytes = Count("maximumUnsentBytes"),
         };
+
+        // ! the hosts and the proxies the gateway's own defaults hold, given only where an entry names
+        // them, so that a policy beside these options stays the one place they are given
+        bool IsNamed(string name)
+        {
+            return given is { } case_ && case_.TryGetProperty(name, out _);
+        }
+
+        if (IsNamed("hosts"))
+        {
+            options = options with { Hosts = List("hosts") };
+        }
+
+        if (IsNamed("trustedProxies"))
+        {
+            options = options with { TrustedProxies = List("trustedProxies") };
+        }
+
+        if (IsNamed("unnamedProxies"))
+        {
+            options = options with { UnnamedProxies = (int)Count("unnamedProxies") };
+        }
+
+        return options;
     }
 
     private static async Task PlayOne(JsonElement entry, List<string> parted)
@@ -139,17 +174,31 @@ internal static partial class Exchanges
                 }
                 else
                 {
-                    var until = step.GetProperty("until").GetProperty("hanging").GetInt32();
-                    var since = TimeProvider.System.GetTimestamp();
-
-                    while (service.Hanging < until)
+                    // * each count it names, waited on until it is that count, as the TypeScript side waits
+                    foreach (var count in step.GetProperty("until").EnumerateObject())
                     {
-                        if (TimeProvider.System.GetElapsedTime(since) > Patience)
+                        var until = count.Value.GetInt32();
+                        var since = TimeProvider.System.GetTimestamp();
+
+                        int Held()
                         {
-                            throw new TimeoutException($"hanging never reached {until}");
+                            return count.Name switch
+                            {
+                                "hanging" => service.Hanging,
+                                "cancelled" => service.Cancelled,
+                                _ => throw new InvalidOperationException($"no count {count.Name}"),
+                            };
                         }
 
-                        await Task.Delay(TimeSpan.FromMilliseconds(10), TimeProvider.System);
+                        while (Held() != until)
+                        {
+                            if (TimeProvider.System.GetElapsedTime(since) > Patience)
+                            {
+                                throw new TimeoutException($"{count.Name} never reached {until}");
+                            }
+
+                            await Task.Delay(TimeSpan.FromMilliseconds(10), TimeProvider.System);
+                        }
                     }
                 }
             }
