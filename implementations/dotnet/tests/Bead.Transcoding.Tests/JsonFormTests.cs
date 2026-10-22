@@ -85,6 +85,12 @@ public sealed class JsonFormTests
 
         // a repeated field's array counts nothing
         Assert.IsType<Edges>(Read<Edges>(string.Concat(Enumerable.Repeat("{\"children\":[", 80)) + "{}" + string.Concat(Enumerable.Repeat("]}", 80))));
+
+        // a text past what any message nests is refused before its message is read, its nodes bounded
+        Assert.Equal("nested past 100", Assert.Throws<JsonFormException>(() =>
+        {
+            JsonText.Read(Encoding.UTF8.GetBytes(new string('[', 300) + new string(']', 300)));
+        }).Message);
     }
 
     [Fact]

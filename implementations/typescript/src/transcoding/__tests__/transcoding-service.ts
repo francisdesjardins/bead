@@ -30,6 +30,8 @@ export interface ITranscodingFixture extends AsyncDisposable {
   /** The detail of each command of `ask` that failed, in their order. */
   readonly refused: string[];
   readonly server: ReturnType<typeof createServer>;
+  /** Notifies each subscriber of `watch` with `remaining`, as its server's service does. */
+  readonly watched: (remaining: number) => Promise<void>;
 }
 
 // constants
@@ -200,6 +202,9 @@ export const startTranscoding = async (
     port,
     refused,
     server,
+    watched: async (remaining) => {
+      await service.notify.watch({ remaining });
+    },
     [Symbol.asyncDispose]: async () => {
       await gateway.stop();
       await server[Symbol.asyncDispose]();

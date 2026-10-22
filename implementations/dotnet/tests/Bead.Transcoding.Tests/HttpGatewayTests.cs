@@ -1615,6 +1615,38 @@ public sealed class HttpGatewayTests
         }
     }
 
+    [Fact]
+    public async Task Writes_its_comment_a_heartbeat_after_its_last_write_and_none_while_writes_go()
+    {
+        var clock = new FakeTimeProvider();
+        var started = await Started((options) =>
+        {
+            return options with { Clock = clock, Heartbeat = TimeSpan.FromSeconds(1) };
+        });
+
+        try
+        {
+            using var stream = await Opened(started.Port, OctetsOf(started.Port, new OwnCase(["POST /api/Transcoding/watch HTTP/1.1", "content-type: application/json", "accept: text/event-stream"], 200, "") { Body = "{}" }));
+
+            await ReadUntil(stream, "data: {}\n\n");
+            clock.Advance(TimeSpan.FromMilliseconds(600));
+            await started.Service.Watched(2);
+            await ReadUntil(stream, "\"remaining\":2");
+            clock.Advance(TimeSpan.FromMilliseconds(600));
+
+            // * 1.2 s after the result, 0.6 s after the notification: no comment came before this one
+            await started.Service.Watched(1);
+            Assert.DoesNotContain(":\n\r\n", await ReadUntil(stream, "\"remaining\":1"), StringComparison.Ordinal);
+
+            clock.Advance(TimeSpan.FromSeconds(1));
+            Assert.EndsWith(":\n\r\n", await ReadUntil(stream, ":\n\r\n"), StringComparison.Ordinal);
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
     // a socket's bytes, read until they hold `end`
     private static async Task<string> ReadUntil(Socket socket, string end)
     {
