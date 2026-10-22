@@ -131,9 +131,16 @@ test.describe('violationsOf', () => {
   });
 
   test('reads no violations from a detail empty, cut or of another form', () => {
+    const whole = violationsDetailOf(
+      { more: 0, stopped: false, violations: [FROM] },
+      { maximumBytes: 1_024 }
+    );
+
     expect(readOf('')).toEqual({ violations: [] });
     expect(readOf('{"bounds":{"lte"')).toEqual({ violations: [] });
     expect(readOf('the request is invalid')).toEqual({ violations: [] });
+    expect(readOf(whole.slice(0, 10))).toEqual({ violations: [] });
+    expect(readOf(`{"error":"invalid"}\n${whole}`)).toEqual({ violations: [] });
     expect(readOf('{"error":"invalid"}\n{"more":0}')).toEqual({ violations: [] });
     // a line of another form first: the lines after it are not read
     expect(readOf('{"error":"invalid"}\n{"ruleId":"required"}\n{"more":0}')).toEqual({
@@ -173,6 +180,8 @@ test.describe('violationsOf', () => {
       more: 0,
       violations: [{ ruleId: 'required' }],
     });
+    // and PAYLOAD_INVALID's, of the protocol, its violations
+    expect(readOf(whole)).toEqual({ more: 0, violations: [FROM] });
   });
 
   test('reads forKey on the violation of a map key, its other members beside it', () => {

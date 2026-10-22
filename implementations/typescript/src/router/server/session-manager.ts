@@ -463,9 +463,9 @@ export const createSessionManager = <Data>(
       sessions.set(sessionToken, nextSession);
       tokens.set(connectionHandle, sessionToken);
 
-      // the timers follow what is stored: a new session starts over with no timer, and a timeout
-      // that changed restarts its own
-      if (isNew) {
+      // the timers follow what is stored: a new session, or one where none was, starts over with no
+      // timer, and a timeout that changed restarts its own
+      if (isNew || storedSession === undefined) {
         timers.create(connectionHandle);
       }
 

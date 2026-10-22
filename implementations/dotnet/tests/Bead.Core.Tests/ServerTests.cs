@@ -392,6 +392,49 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_session_is_made_by_a_request_and_its_connection_learns_the_token_once()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+        await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\"}"));
+        await Deliver(RequestOf(3, ("echo", false)));
+
+        var token = Server.Sessions.SessionTokenOf(Handle);
+
+        Assert.NotNull(token);
+        Assert.Equal(new ResultHeader { CallId = 1, Credential = token }, _transport.Read(0).Header);
+        Assert.Equal(new ResultHeader { CallId = 3 }, _transport.Read(1).Header);
+    }
+
+    [Fact]
+    public async Task The_end_of_a_session_is_announced_on_the_next_answer_and_a_session_replaced_is_announced()
+    {
+        Start(Timeout.InfiniteTimeSpan);
+        _transport.Open(Handle);
+        await Deliver(RequestOf(1, ("login", false), "{\"name\":\"ada\"}"));
+
+        var opened = Server.Sessions.SessionTokenOf(Handle);
+
+        await Deliver(RequestOf(3, ("login", false), "{\"name\":\"bob\"}"));
+
+        var replaced = Server.Sessions.SessionTokenOf(Handle);
+
+        // logout ends its session before it answers, so its answer announces the end
+        await Deliver(RequestOf(5, ("logout", false)));
+        await Deliver(RequestOf(7, ("echo", false)));
+
+        Assert.NotEqual(opened, replaced);
+        Assert.Equal(
+            [
+                new ResultHeader { CallId = 1, Credential = opened },
+                new ResultHeader { CallId = 3, Credential = replaced },
+                new ResultHeader { CallId = 5, Credential = Credential.None },
+                new ResultHeader { CallId = 7 },
+            ],
+            [_transport.Read(0).Header, _transport.Read(1).Header, _transport.Read(2).Header, _transport.Read(3).Header]);
+    }
+
+    [Fact]
     public async Task Builds_each_layer_on_the_one_under_it_the_router_with_the_sessions_tokens()
     {
         // the TypeScript side builds each layer by a factory a test may give, which this side does
@@ -567,19 +610,24 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
+    public void RequireSession_admits_a_call_with_a_session_its_call_s_whatever_its_header_presents_and_refuses_one_in_none_SESSION_REQUIRED()
     {
         Start(new ServerOptions());
 
         var requireSession = Server.RequireSession;
         var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
-        var inSession = new AdmissionRequest(Handle, header) { Session = new CallSession() };
+        var opaque = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        Credential?[] credentials = [null, Credential.None, opaque, Credential.Jwt("a.b.c"), Credential.Elsewhere()];
 
-        Assert.True(requireSession.Admits(inSession));
-        Assert.True(requireSession.Admits(inSession with { Header = header with { Credential = Credential.Jwt("a.b.c") } }));
-        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header)));
-        Assert.False(requireSession.Admits(new AdmissionRequest(Handle, header with { Credential = Credential.Jwt("a.b.c") })));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, requireSession.Refusal!.Code);
+        Assert.Equal(
+            [[true, false], [true, false], [true, false], [true, false], [true, false]],
+            credentials.Select((credential) =>
+            {
+                var request = new AdmissionRequest(Handle, header with { Credential = credential });
+
+                return new[] { requireSession.Admits(request with { Session = new CallSession() }), requireSession.Admits(request) };
+            }));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), requireSession.Refusal);
     }
 
     // spec 14.3.1
@@ -676,14 +724,18 @@ public sealed class ServerTests : IAsyncLifetime
 
         var shareLegBSession = Server.ShareLegBSession;
         var header = new RequestHeader { CallId = 1, ServiceId = 1, ProcedureId = 1 };
-        var inNone = new AdmissionRequest(Handle, header);
+        var opaque = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }));
+        Credential?[] credentials = [null, Credential.None, opaque, Credential.Jwt("not even a token"), Credential.Elsewhere()];
 
-        Assert.True(shareLegBSession.Admits(inNone with { Session = new CallSession() }));
-        Assert.True(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Jwt("not even a token") } }));
-        Assert.True(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Elsewhere() } }));
-        Assert.False(shareLegBSession.Admits(inNone));
-        Assert.False(shareLegBSession.Admits(inNone with { Header = header with { Credential = Credential.Opaque(SessionToken.FromBytes(new byte[16] { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 })) } }));
-        Assert.Equal((ushort)ProtocolCode.SessionRequired, shareLegBSession.Refusal!.Code);
+        Assert.Equal(
+            [[true, false], [true, false], [true, false], [true, true], [true, true]],
+            credentials.Select((credential) =>
+            {
+                var request = new AdmissionRequest(Handle, header with { Credential = credential });
+
+                return new[] { shareLegBSession.Admits(request with { Session = new CallSession() }), shareLegBSession.Admits(request) };
+            }));
+        Assert.Equal(Failure.OfProtocol(ProtocolCode.SessionRequired), shareLegBSession.Refusal);
     }
 
     [Fact]

@@ -176,6 +176,7 @@ const heldTimeoutOf = (timeout: number): number => {
 export const createRelay = ({
   carriageOf,
   failures,
+  fill,
   isOpen,
   isTwoWay,
   limits,
@@ -190,6 +191,8 @@ export const createRelay = ({
    */
   carriageOf?: ((connectionHandle: Handle) => ICarriage) | undefined;
   failures: IRouterFailures;
+  /** What fills the bytes a destination is drawn from: the system's random source, without it. */
+  fill?: ((bytes: Uint8Array<ArrayBuffer>) => unknown) | undefined;
   /**
    * Whether the relay's router holds a connection of its own, open: a destination registered on
    * one it does not is closed from its registration. Every one, without it.
@@ -288,11 +291,14 @@ export const createRelay = ({
       const claims = readJwt(credential.token)?.claims;
 
       if (audience === undefined || !audiencesOf(claims?.['aud']).includes(audience)) {
-        return unreachableOf(destinationId, "it verifies no audience the JWT's aud names");
+        return unreachableOf(
+          destinationId,
+          'it verifies another audience than the one the token names, or none'
+        );
       }
     } else if (credential?.scheme === CredentialScheme.ELSEWHERE) {
       if (audience === undefined) {
-        return unreachableOf(destinationId, 'it verifies no audience, which ELSEWHERE crosses to');
+        return unreachableOf(destinationId, 'it was registered with no audience');
       }
 
       if (
@@ -310,7 +316,10 @@ export const createRelay = ({
 
     return carriageOfTarget(target).isSecure
       ? undefined
-      : unreachableOf(destinationId, 'its transport leaves the machine in the clear');
+      : unreachableOf(
+          destinationId,
+          'its transport leaves the machine in the clear, which a bearer credential never crosses'
+        );
   };
 
   // what leg B presents: a JWT, as leg A does; an ELSEWHERE, with what leg A's transport carried;
@@ -498,7 +507,7 @@ export const createRelay = ({
       given ??
       drawDestinationId((candidate) => {
         return registrations.has(candidate);
-      });
+      }, fill);
     // the relay's timeout is the longest any leg B waits: a destination's own stays under it
     // a connection its router no longer holds closed before it was registered: it is unreachable
     // from now on, and nothing is forwarded to it (spec 14.4)

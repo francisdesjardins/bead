@@ -25,6 +25,8 @@ const NOW = Date.parse('2026-01-01T00:00:00Z');
 const ISSUER = 'https://issuer.example';
 const SET_ISSUER = 'https://keys.example';
 const OTHER_SET_ISSUER = 'https://other-keys.example';
+const TOO_SMALL_FOR_A_JWT =
+  "the router's limits do not hold together: a side that takes or presents a JWT holds a chunk's envelope and an envelope of 1,024 bytes at least";
 const AUDIENCE = 'https://bead.example';
 
 // keys of these tests' own, 32 bytes each, in base64url
@@ -1625,10 +1627,10 @@ test.describe('assertLimitsHoldJwt', () => {
     expect(JWT_LIMIT_BYTES).toBe(1_024);
     expect(() => {
       assertLimitsHoldJwt({ chunkBytes: 1_023, maximumEnvelopeBytes: 4_096 });
-    }).toThrow(/limits do not hold together/);
+    }).toThrow(new ProgrammerError(TOO_SMALL_FOR_A_JWT));
     expect(() => {
       assertLimitsHoldJwt({ chunkBytes: 1_024, maximumEnvelopeBytes: 1_023 });
-    }).toThrow(/limits do not hold together/);
+    }).toThrow(new ProgrammerError(TOO_SMALL_FOR_A_JWT));
     expect(() => {
       assertLimitsHoldJwt({ chunkBytes: 1_024, maximumEnvelopeBytes: 1_024 });
     }).not.toThrow();

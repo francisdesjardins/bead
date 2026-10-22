@@ -1,8 +1,8 @@
 // ── Identities ────────────────────────────────────────────────────────────────
 
-// Bead's identities, `spec/identities.json`, played against the TypeScript side: each name, id and
-// kind declared by each way the file lists, a refused one declaring nothing, and each fold through
-// `areOneName`, both ways. The C# side plays the same file.
+// Bead's identities, `spec/identities.json`, played against the TypeScript side: each name, each id
+// and each procedure's kind declared by each of the ways the file lists, on a router of its own
+// given no registry, and each fold through `areOneName`. The C# side plays the same file.
 
 // dependencies
 
@@ -31,12 +31,6 @@ interface IEntry {
   differs?: IDiffers[];
   name: string;
   refused?: string;
-}
-
-/** A client's router and a server's, each of its own, which a way declares on. */
-interface IRouters {
-  client: ReturnType<typeof createRouterClient>;
-  server: ReturnType<typeof createRouterServer>;
 }
 
 /** A procedure's name, declared at 1/1, revision 1. */
@@ -71,8 +65,11 @@ interface IFoldEntry extends IEntry {
 
 // types
 
-/** Declares `procedure` one way, on `routers`, and settles as the declaration does. */
-type Way = (routers: IRouters, procedure: IProcedure) => Promise<unknown>;
+/** Declares a procedure one way and settles as the declaration does. */
+type Declare = (procedure: IProcedure) => Promise<unknown>;
+
+/** A router of its own, and a way of declaring on it. */
+type Way = () => Disposable & { declare: Declare };
 
 // constants
 
@@ -88,8 +85,7 @@ const IDENTITIES = JSON.parse(
 
 const LANGUAGE = 'TypeScript';
 
-// what a refused declaration leaves the router able to take: the procedure every ids entry is named
-// under, at the address every names entry is declared at
+// what every way takes, declared after a refusal to show the refusal declared nothing
 const ECHO: IProcedure = Object.freeze({
   procedureId: 1,
   procedureName: 'echo',
@@ -146,7 +142,10 @@ const isExcused = (entry: IEntry): boolean => {
   });
 };
 
-/** The reason `thrown` refuses for, read back from this side's sentence; none for no refusal. */
+/**
+ * The reason `thrown` refuses for, read back from this side's sentence; none for no refusal, and
+ * its whole message for a sentence that gives none, so it never reads as taken.
+ */
 const reasonOf = (thrown: unknown): string | undefined => {
   if (thrown === undefined) {
     return undefined;
@@ -154,18 +153,29 @@ const reasonOf = (thrown: unknown): string | undefined => {
 
   expect(thrown).toBeInstanceOf(ProgrammerError);
 
-  return REASONS.find((reason) => {
-    return (thrown as Error).message.endsWith(`: ${reason}`);
-  });
+  const { message } = thrown as Error;
+
+  return (
+    REASONS.find((reason) => {
+      return message.endsWith(`: ${reason}`);
+    }) ?? message
+  );
 };
 
-/** What `way` throws or rejects with as it declares `procedure` on `routers`; none when it is taken. */
-const thrownBy = async (
-  way: Way,
-  { procedure, routers }: { procedure: IProcedure; routers: IRouters }
-): Promise<unknown> => {
+/** A way of declaring on `router`, disposed with it. */
+const wayOn = (router: Disposable, declare: Declare): Disposable & { declare: Declare } => {
+  return {
+    [Symbol.dispose]: () => {
+      router[Symbol.dispose]();
+    },
+    declare,
+  };
+};
+
+/** What `declare` throws or rejects with as it declares `procedure`; none when it is taken. */
+const thrownBy = async (declare: Declare, procedure: IProcedure): Promise<unknown> => {
   try {
-    await way(routers, procedure);
+    await declare(procedure);
   } catch (error) {
     return error;
   }
@@ -175,74 +185,88 @@ const thrownBy = async (
 
 // the ways a side declares, by the file's ids
 const WAYS: Readonly<Record<string, Way>> = Object.freeze({
-  'client-notification': async ({ client }: IRouters, procedure: IProcedure) => {
-    await client.registerNotification({
-      ...procedure,
-      trigger: () => {
-        return Promise.resolve([]);
-      },
+  'client-notification': () => {
+    const router = createRouterClient(clientTransport());
+
+    return wayOn(router, async (procedure) => {
+      await router.registerNotification({
+        ...procedure,
+        trigger: () => {
+          return Promise.resolve([]);
+        },
+      });
     });
   },
-  'client-requester': ({ client }: IRouters, procedure: IProcedure) => {
-    return Promise.resolve(client.declareRequester(procedure));
-  },
-  'client-resolver': ({ client }: IRouters, procedure: IProcedure) => {
-    client.registerResolver(resolverOf(procedure));
+  'client-requester': () => {
+    const router = createRouterClient(clientTransport());
 
-    return Promise.resolve();
+    return wayOn(router, (procedure) => {
+      return Promise.resolve(router.declareRequester(procedure));
+    });
   },
-  'server-requester': ({ server }: IRouters, procedure: IProcedure) => {
-    return Promise.resolve(server.declareRequester(procedure));
-  },
-  'server-notification-resolver': ({ server }: IRouters, procedure: IProcedure) => {
-    // a resolver that notifies, as a router tells one: its `notify` a function
-    server.registerResolver(
-      Object.assign(resolverOf(procedure), {
-        notify: () => {
-          return Promise.resolve();
-        },
-      })
-    );
+  'client-resolver': () => {
+    const router = createRouterClient(clientTransport());
 
-    return Promise.resolve();
-  },
-  'server-resolver': ({ server }: IRouters, procedure: IProcedure) => {
-    server.registerResolver(resolverOf(procedure));
+    return wayOn(router, (procedure) => {
+      router.registerResolver(resolverOf(procedure));
 
-    return Promise.resolve();
+      return Promise.resolve();
+    });
+  },
+  'server-requester': () => {
+    const router = createRouterServer(serverTransport());
+
+    return wayOn(router, (procedure) => {
+      return Promise.resolve(router.declareRequester(procedure));
+    });
+  },
+  'server-notification-resolver': () => {
+    const router = createRouterServer(serverTransport());
+
+    return wayOn(router, (procedure) => {
+      // a resolver that notifies, as a router tells one: its `notify` a function
+      router.registerResolver(
+        Object.assign(resolverOf(procedure), {
+          notify: () => {
+            return Promise.resolve();
+          },
+        })
+      );
+
+      return Promise.resolve();
+    });
+  },
+  'server-resolver': () => {
+    const router = createRouterServer(serverTransport());
+
+    return wayOn(router, (procedure) => {
+      router.registerResolver(resolverOf(procedure));
+
+      return Promise.resolve();
+    });
   },
 });
 
 /**
- * Declares `procedure` each way the file lists, each on routers of its own, and holds each to
+ * Declares `procedure` each way the file lists, each on a router of its own, and holds each to
  * `entry`'s outcome: refused at the ways its `refusedAt` lists, or at every way without one, and
- * then declaring nothing, the same way taking {@link ECHO}; taken at every other.
+ * taken at every other; a refused one declaring nothing, as `ECHO` taken after it shows.
  */
 const expectEachWay = async (
   entry: IEntry & Pick<IProcedureKindEntry, 'refusedAt'>,
   procedure: IProcedure
 ): Promise<void> => {
   for (const id of IDENTITIES.ways) {
-    const way = WAYS[id] as Way;
-
-    using client = createRouterClient(clientTransport());
-    using server = createRouterServer(serverTransport());
-
-    const routers = { client, server };
-    const thrown = await thrownBy(way, { procedure, routers });
-    const isRefused =
-      entry.refused !== undefined &&
-      (entry.refusedAt === undefined || entry.refusedAt.includes(id));
+    using way = (WAYS[id] as Way)();
+    const thrown = await thrownBy(way.declare, procedure);
+    const isRefused = entry.refusedAt === undefined || entry.refusedAt.includes(id);
 
     expect(reasonOf(thrown), `${id}: ${String(thrown)}`).toBe(
       isRefused ? entry.refused : undefined
     );
 
-    if (isRefused) {
-      expect(
-        await thrownBy(way, { procedure: ECHO, routers }),
-        `${id}: ${ECHO.procedureName}`
-      ).toBeUndefined();
+    if (thrown !== undefined) {
+      expect(await thrownBy(way.declare, ECHO), `${id}: echo, after its refusal`).toBeUndefined();
     }
   }
 };
@@ -252,12 +276,23 @@ const expectEachWay = async (
 test.describe('the identities', () => {
   test.describe.configure({ retries: 0 });
 
-  test('its table declares every way the file names, and no other', () => {
+  test('its table plays the ways the file lists, and no other', () => {
     expect(Object.keys(WAYS).toSorted()).toEqual(IDENTITIES.ways.toSorted());
   });
 
+  test('plays every entry, none excused by a row of the matrix', () => {
+    expect(
+      [
+        ...IDENTITIES.names,
+        ...IDENTITIES.ids,
+        ...IDENTITIES.procedureKinds,
+        ...IDENTITIES.folds,
+      ].filter(isExcused)
+    ).toEqual([]);
+  });
+
   for (const entry of IDENTITIES.names) {
-    test(`declares each name each way, taken or refused off its form, declaring nothing: ${entry.name}`, async () => {
+    test(`names: ${entry.name}`, async () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       await expectEachWay(entry, {
@@ -270,7 +305,7 @@ test.describe('the identities', () => {
   }
 
   for (const entry of IDENTITIES.ids) {
-    test(`declares each address and revision each way, taken or refused out of its range before off its form: ${entry.name}`, async () => {
+    test(`ids: ${entry.name}`, async () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       // as a value read from JSON may be: any, typed as the numbers a procedure's are
@@ -284,7 +319,7 @@ test.describe('the identities', () => {
   }
 
   for (const entry of IDENTITIES.procedureKinds) {
-    test(`declares each procedure kind each way, taken or refused against its kind at the ways that do not take it, after its range and its form: ${entry.name}`, async () => {
+    test(`procedureKinds: ${entry.name}`, async () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       await expectEachWay(entry, {
@@ -298,7 +333,7 @@ test.describe('the identities', () => {
   }
 
   for (const entry of IDENTITIES.folds) {
-    test(`reads two names as one when they are equal but for the case of their ASCII letters: ${entry.name}`, () => {
+    test(`folds: ${entry.name}`, () => {
       test.skip(isExcused(entry), 'a row of the matrix excuses this side');
 
       const [one, other] = entry.names;

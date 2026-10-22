@@ -598,7 +598,7 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     [Fact]
     public async Task Waits_on_its_handshake_without_end_with_an_infinite_timeout_until_its_token_is_cancelled()
     {
-        var time = new FakeTimeProvider();
+        var time = new SteppingClock(DateTimeOffset.UnixEpoch);
         using var listener = new Listener(IPAddress.Loopback);
         using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
         await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
@@ -607,10 +607,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
 
         using (peer)
         {
-            // a day, where the 30 seconds a timeout left at its default would have passed
-            time.Advance(TimeSpan.FromDays(1));
-            await Task.Delay(100, Cancelled);
+            // a day, where the 30 seconds a timeout left at its default would have passed: no timer
+            // armed, and still connecting
+            await time.Advance(TimeSpan.FromDays(1));
 
+            Assert.Empty(time.Dues());
             Assert.False(connecting.IsCompleted);
             Assert.Equal(ReadyState.Connecting, client.ReadyState);
 
@@ -1848,10 +1849,11 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Passes_on_what_its_tap_throws_ending_closed_with_no_attempt_after_it()
+    public async Task Passes_on_what_its_tap_throws_ending_closed_with_no_attempt_after_it_and_no_wait_left_armed()
     {
+        var time = new SteppingClock(DateTimeOffset.UnixEpoch);
         using var listener = new Listener(IPAddress.Loopback);
-        await using var client = new WebSocketTransportClient();
+        await using var client = new WebSocketTransportClient(new WebSocketTransportClientOptions { Clock = time });
         var failure = new FormatException("tap_error");
 
         await ConnectRefused(client, listener);
@@ -1873,8 +1875,8 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
         }));
         Assert.Equal(ReadyState.Closed, client.ReadyState);
 
-        // its wait cancelled with it: no attempt comes after
-        await Task.Delay(100, Cancelled);
+        // its wait disposed with it: no timer left to bring an attempt after
+        Assert.Empty(time.Dues());
         Assert.False(listener.IsPending);
     }
 

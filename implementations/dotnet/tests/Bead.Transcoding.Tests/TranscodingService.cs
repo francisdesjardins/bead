@@ -15,6 +15,7 @@ internal sealed class TranscodingService : IAsyncDisposable
     private readonly List<string> _refused = [];
     private int _hanging;
     private int _cancelled;
+    private TranscodingServer<string>? _transcoding;
 
     private TranscodingService(MemoryTransportServer memory, Server<string> server)
     {
@@ -27,6 +28,12 @@ internal sealed class TranscodingService : IAsyncDisposable
 
     /// <summary>The server, its one router.</summary>
     public Server<string> Server { get; }
+
+    /// <summary>Notifies each subscriber of watch with <paramref name="remaining"/>, as the server's service does.</summary>
+    public Task Watched(int remaining)
+    {
+        return _transcoding!.Notify.Watch(new Tick { Remaining = remaining }, null);
+    }
 
     /// <summary>The calls of hang its resolver took.</summary>
     public int Hanging
@@ -95,6 +102,9 @@ internal sealed class TranscodingService : IAsyncDisposable
     private void Offer()
     {
         var transcoding = new TranscodingServer<string>();
+
+        _transcoding = transcoding;
+
         var sent = new Dictionary<string, int>(StringComparer.Ordinal);
 
         // * the notifications the server sent, by connection, which ticks waits on before it ends

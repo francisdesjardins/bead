@@ -301,14 +301,17 @@ public sealed class CredentialResolverTests
     {
         var held = RouterLimits.Default with { ChunkBytes = 1_024, MaximumEnvelopeBytes = 1_024, WindowBytes = 2_048 };
 
-        Assert.Throws<ArgumentException>(() =>
+        const string TooSmall =
+            "the router's limits do not hold together: a side that takes or presents a JWT holds a chunk's envelope and an envelope of 1,024 bytes at least";
+
+        Assert.Equal(TooSmall, Assert.Throws<ArgumentException>(() =>
         {
             CredentialResolver.AssertLimits(held with { ChunkBytes = 1_023 }, true);
-        });
-        Assert.Throws<ArgumentException>(() =>
+        }).Message);
+        Assert.Equal(TooSmall, Assert.Throws<ArgumentException>(() =>
         {
             CredentialResolver.AssertLimits(held with { MaximumEnvelopeBytes = 1_023 }, true);
-        });
+        }).Message);
         CredentialResolver.AssertLimits(held, true);
 
         // a side that takes no JWT holds what limits it holds

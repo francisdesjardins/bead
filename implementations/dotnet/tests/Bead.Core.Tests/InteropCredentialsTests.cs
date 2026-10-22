@@ -127,6 +127,7 @@ public sealed class InteropCredentialsTests
 
         await ended.CancelAsync();
         Assert.Equal([KeysIssuer, RotatedIssuer, StalledIssuer, KidlessIssuer], keySet.Issuers);
+        Assert.Equal(Load().GetProperty("credentials").GetProperty("jwt").GetProperty("keySet").GetProperty("maximumWaitingCalls").GetInt32(), keySet.MaximumWaitingCalls);
         Assert.Equal(2, keySet.MaximumWaitingCalls);
 
         // the rotated issuer's keys at its first ask alone; the stalled one's never, no timer
@@ -176,7 +177,11 @@ public sealed class InteropCredentialsTests
         await clock.Advance(second);
         Assert.Single(await another.WaitAsync(Patience, Cancelled));
 
-        // asked for an issuer it does not name, it fails at once
-        Assert.True(keySet.Ask("https://unnamed.interop.bead.example", ended.Token).AsTask().IsFaulted);
+        // asked for an issuer it does not name, it fails at once, its clock unmoved and no timer armed
+        var unnamed = keySet.Ask("https://unnamed.interop.bead.example", ended.Token).AsTask();
+
+        Assert.True(unnamed.IsFaulted);
+        Assert.Empty(clock.Dues());
+        Assert.Equal("the interop key set names no issuer https://unnamed.interop.bead.example", unnamed.Exception!.InnerException!.Message);
     }
 }

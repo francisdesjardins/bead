@@ -139,7 +139,11 @@ public sealed class SessionManagerTests
         Assert.Empty(reached);
         time.Advance(TimeSpan.FromSeconds(0.5));
         Assert.Equal(["session"], reached);
-        time.Advance(TimeSpan.FromSeconds(3));
+
+        // past the connection's first due, nothing more: its timer started anew too
+        time.Advance(TimeSpan.FromSeconds(2.5));
+        Assert.Equal(["session"], reached);
+        time.Advance(TimeSpan.FromSeconds(0.5));
         Assert.Equal(["session", "connection"], reached);
         Assert.False(sessions.Touch(Other));
     }
@@ -775,6 +779,30 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
+    public void The_activity_it_reports_reads_the_wall_clock_which_a_clock_set_by_hand_moves_alone()
+    {
+        var start = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var time = new SteppingClock(start);
+
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
+
+        var changed = new List<(DateTimeOffset LastActivity, DateTimeOffset Old)>();
+
+        sessions.LastActivityChanged += (_, lastActivity, old) =>
+        {
+            changed.Add((lastActivity, old));
+        };
+        sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(200) });
+        time.Wall(TimeSpan.FromDays(-1));
+        Assert.True(sessions.Touch(Handle));
+
+        // back a day, the instant reported with it; the timer counts its 200 ms all the same
+        Assert.Equal([(start - TimeSpan.FromDays(1), start)], changed);
+        Assert.Equal([TimeSpan.FromMilliseconds(200)], time.Dues());
+        Assert.Same(time, sessions.Clock);
+    }
+
+    [Fact]
     public void SessionTokenOf_gives_the_token_the_router_announces_to_a_connection_none_without_a_session()
     {
         using var sessions = new SessionManager<string>();
@@ -912,8 +940,9 @@ public sealed class SessionManagerTests
     [Fact]
     public void Draws_a_token_again_when_all_zero_or_in_use()
     {
-        // its TypeScript twin, identifiers.test.ts:220, draws through the shared identifiers, a module
-        // this side does not have: its draw is the session manager's own
+        // its TypeScript twin, identifiers.test.ts's "are drawn again when all zero, or in use", draws
+        // through the shared identifiers, a module this side does not have: its draw is the session
+        // manager's own
         var fills = new Queue<byte>([0, 0, 1, 1, 2]);
 
         using var sessions = new SessionManager<string>(new SessionManagerOptions
@@ -947,6 +976,10 @@ public sealed class SessionManagerTests
         sessions.Delete(Handle);
         Assert.Empty(sessions.Gauges().ConnectionHandles);
         Assert.Equal(new Dictionary<string, long> { ["sessions"] = 0, ["timedConnections"] = 0 }, sessions.Gauges().Counts);
+
+        // one stored with a token of its own, and no timeout, is timed as one drawn is
+        sessions.Set(sessions.Create(Handle) with { SessionToken = TokenOf(7) });
+        Assert.Equal(new Dictionary<string, long> { ["sessions"] = 1, ["timedConnections"] = 1 }, sessions.Gauges().Counts);
     }
 
     // two lists of names alike when their names are, in order, as the TypeScript side's structure

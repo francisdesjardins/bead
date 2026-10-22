@@ -864,6 +864,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             // * the mapping's own words of the client's own request, fixed in transcoding.json, and
             // where the request carried what it refuses, cut, never in its words (7.4)
+            // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
             await Answer(context, HttpProblems.Of(Failure.OfProtocol(ProtocolCode.PayloadUndecodable, refused.Message), problems with { Place = refused.Place }));
 
             return;
@@ -1100,6 +1101,7 @@ public sealed class HttpGateway : IAsyncDisposable
         {
             Report(unwritable);
 
+            // ! a detail of the side's own words: the mapping's own, fixed in transcoding.json
             return HttpProblems.Own(OwnFailure.Unwritable, (unwritable.Message, _options.Challenge));
         }
 
@@ -1122,9 +1124,20 @@ public sealed class HttpGateway : IAsyncDisposable
         var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         long unsent = 0;
 
+        // ! one shot, armed again by every write: a comment goes a heartbeat after the last write,
+        // and none while writes go (transcoding 8.7)
+        ITimer? heartbeat = null;
+
+        void Beat()
+        {
+            heartbeat?.Change(_heartbeat, System.Threading.Timeout.InfiniteTimeSpan);
+        }
+
         // each write after the one before it, once its response took it, the response's head with the first
         async Task Write(ReadOnlyMemory<byte> bytes)
         {
+            Beat();
+
             if (!response.HasStarted)
             {
                 response.StatusCode = StatusCodes.Status200OK;
@@ -1145,6 +1158,21 @@ public sealed class HttpGateway : IAsyncDisposable
         }
 
         var events = new HttpEvents(Write);
+
+        using var beating = _heartbeat == System.Threading.Timeout.InfiniteTimeSpan
+            ? null
+            : _clock.CreateTimer(
+                (_) =>
+                {
+                    _ = Heartbeat(events);
+                    Beat();
+                },
+                null,
+                System.Threading.Timeout.InfiniteTimeSpan,
+                System.Threading.Timeout.InfiniteTimeSpan);
+
+        heartbeat = beating;
+
         var notification = new StreamNotification(route, (events, this, problems, (settled.Task, callbacks), ended));
 
         try
@@ -1205,16 +1233,6 @@ public sealed class HttpGateway : IAsyncDisposable
         settled.TrySetResult();
         await written;
 
-        using var heartbeat = _heartbeat == System.Threading.Timeout.InfiniteTimeSpan
-            ? null
-            : _clock.CreateTimer(
-                (_) =>
-                {
-                    _ = Heartbeat(events);
-                },
-                null,
-                _heartbeat,
-                _heartbeat);
         var gone = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         using var going = context.RequestAborted.Register(() =>

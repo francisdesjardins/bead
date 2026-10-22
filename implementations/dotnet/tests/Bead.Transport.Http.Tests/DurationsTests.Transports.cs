@@ -36,7 +36,8 @@ public sealed partial class DurationsTests
     // handed on, waiting its answer; never, none armed; refused, no server built
     private static Task<Observed> ExchangeTimeoutByOptions(TimeSpan? given)
     {
-        return HttpServerOf(given is { } timeout ? new HttpTransportServerOptions { ExchangeTimeout = timeout } : new HttpTransportServerOptions(), async (drive) =>
+        // its connection's own timer never armed, so the exchange's alone is read
+        return HttpServerOf(given is { } timeout ? new HttpTransportServerOptions { ExchangeTimeout = timeout, InactivityTimeout = Never } : new HttpTransportServerOptions { InactivityTimeout = Never }, async (drive) =>
         {
             using var asking = PostOf(drive.Url, (await drive.Connect(false), EnvelopeOf(EnvelopeKind.Request, 1)));
 
@@ -64,7 +65,8 @@ public sealed partial class DurationsTests
     // the due of the timer it arms for a listen that asks a longer wait, held to the bound
     private static Task<Observed> MaximumWaitByOptions(TimeSpan? given)
     {
-        return HttpServerOf(given is { } bound ? new HttpTransportServerOptions { MaximumWait = bound } : new HttpTransportServerOptions(), async (drive) =>
+        // the exchange's and its connection's own timers never armed, so the wait's alone is read
+        return HttpServerOf(given is { } bound ? new HttpTransportServerOptions { ExchangeTimeout = Never, InactivityTimeout = Never, MaximumWait = bound } : new HttpTransportServerOptions { ExchangeTimeout = Never, InactivityTimeout = Never }, async (drive) =>
         {
             var connectionToken = await drive.Connect(true);
             var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,7 +113,7 @@ public sealed partial class DurationsTests
             using var http = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
             var dues = await drive(new ServerDrive(server, (http, clock, new Uri($"http://{Host}:{port}{HttpTransport.Pathname}"))));
 
-            return HeldAt(dues is [var due] ? due : Never);
+            return HeldAt(DueOf(dues));
         }
     }
 
@@ -156,7 +158,7 @@ public sealed partial class DurationsTests
 
             Assert.Equal(HttpMethod.Get, again.Method);
 
-            return HeldAt(drive.Clock.Dues() is [var due] ? due : Never);
+            return HeldAt(DueOf(drive.Clock.Dues()));
         });
     }
 

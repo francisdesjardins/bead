@@ -187,15 +187,36 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A server's options name the form to write where an entry is refused for its form alone, on both
   sides: a hosts entry with a port names the host without it, a trusted proxy in brackets names
   its bare address, and the refused origins wildcard names `*`.
+- A metrics registry that refuses a name says it alike on both sides, `the metrics registry holds
+  1/1 as "echo", and is given "other": another name at its address`, as the TypeScript side wrote
+  it, its ceiling naming the families it passes; and limits too small for a JWT say on both sides that `a side that takes or presents a JWT
+  holds a chunk's envelope and an envelope of 1,024 bytes at least`, as the C# side wrote it.
 - The TypeScript side's `TimeoutError` says what the C# side says at each wait: a call past its
   timeout `no answer came in 10 milliseconds`, a key set's ask at its deadline `the key set's ask
   for <issuer> was unsettled as its deadline was reached`, and a connection `timed out after 10ms`;
   it takes its words beside its `timeout`, which it keeps. A call on an ask unsettled at its
   deadline fails with that `TimeoutError`, as the C# side's with its `TimeoutException`, and one on
   an ask that failed with `the key set's ask for <issuer> failed`, its issuer unquoted.
+- `tools/check-details.mjs` holds each allowed site itself: each carries its marker, `// ! a detail
+  of the side's own words: <why>`, on its line or right above it, and its file counts its marked
+  sites, so a new site beside an allowed one fails by its line and a site moved holds.
 
 ### Fixed
 
+- The C# gateway writes its heartbeat comment a heartbeat after its stream's last write, armed again
+  by each write, as the TypeScript side does, where it wrote one each heartbeat whatever went; and
+  it refuses a JSON text nested past 202 levels as `nested past 100` before its message is read,
+  where it answered `not JSON` past 256.
+- A relay words alike, on both sides, the `DESTINATION_UNREACHABLE` it answers a call whose
+  credential leg B cannot carry: `it verifies another audience than the one the token names, or
+  none`, `it was registered with no audience`, and `its transport leaves the machine in the clear,
+  which a bearer credential never crosses`, where the TypeScript side said each its own way and the
+  C# side the last another.
+- The C# server's gauges count the credentials' sessions it keeps and those of them timed,
+  `credentialSessions` and `timedCredentialSessions`, as the TypeScript server's do.
+- The TypeScript session manager times a session stored with a token of its own on a connection
+  that held none as one whose token it draws, as the C# side does: its gauges count it among
+  `timedConnections`.
 - The C# HTTP server tells nothing of a connection after its close: an envelope whose connection a
   `DELETE` closes as it is handed on is answered the 404 marked `connection-unknown`, as the
   TypeScript side answers it, where the router could hear it after the close and hold the
