@@ -44,6 +44,7 @@ public sealed class SessionManagerTests
         Assert.NotEqual(first.SessionToken, drawn.SessionToken);
         Assert.Equal(drawn.SessionToken, sessions.SessionTokenOf(Handle));
         Assert.Single(sessions.GetAll());
+        Assert.Equal([Handle], sessions.ConnectionHandles());
     }
 
     [Fact]
@@ -238,6 +239,44 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
+    public void Activity_within_the_same_millisecond_restarts_both_timers_and_emits_nothing()
+    {
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var clock = new RecordingClock(time);
+        using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = clock });
+        var changed = 0;
+        var connectionReached = 0;
+        var sessionReached = 0;
+
+        sessions.LastActivityChanged += (_, _, _) =>
+        {
+            changed += 1;
+        };
+        sessions.ConnectionInactivityTimeoutReached += (_) =>
+        {
+            connectionReached += 1;
+        };
+        sessions.SessionInactivityTimeoutReached += (_) =>
+        {
+            sessionReached += 1;
+        };
+        var session = sessions.GetOrElseSet(Handle);
+        var delay = TimeSpan.FromMilliseconds(200);
+
+        sessions.UpdateConnectionInactivityTimeout(session with { ConnectionInactivityTimeout = delay });
+        sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = delay });
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.True(sessions.Touch(Handle));
+        Assert.True(sessions.Touch(Handle));
+        Assert.Equal(Enumerable.Repeat(delay, 6), clock.Armed);
+        Assert.Equal(1, changed);
+        time.Advance(TimeSpan.FromMilliseconds(199));
+        Assert.Equal((0, 0), (connectionReached, sessionReached));
+        time.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal((1, 1), (connectionReached, sessionReached));
+    }
+
+    [Fact]
     public void Takes_an_infinite_default_for_never_and_finds_data_alike_by_the_comparer_given()
     {
         using var sessions = new SessionManager<List<string>>(new SessionManagerOptions
@@ -293,13 +332,22 @@ public sealed class SessionManagerTests
         var time = new FakeTimeProvider();
         var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
         var reached = 0;
+        var deleted = new List<Session<string>>();
+
+        sessions.Deleted += (session) =>
+        {
+            deleted.Add(session);
+        };
 
         sessions.SessionInactivityTimeoutReached += (_) =>
         {
             reached += 1;
         };
-        sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
-        sessions.Delete(Handle);
+        var stored = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromSeconds(1) });
+        Assert.True(sessions.Delete(Handle));
+        Assert.Equal([stored], deleted);
+        Assert.False(sessions.Delete(Other));
+        Assert.Equal(0, sessions.Gauges().Counts["timedConnections"]);
         time.Advance(TimeSpan.FromSeconds(2));
         Assert.Equal(0, reached);
         sessions.Dispose();
@@ -701,20 +749,20 @@ public sealed class SessionManagerTests
     }
 
     [Fact]
-    public void A_timeout_longer_than_a_timer_holds_is_refused_and_nothing_is_stored_the_longest_one_fires_at_its_due()
+    public async Task A_timeout_longer_than_a_timer_holds_is_refused_and_nothing_is_stored_the_longest_one_fires_at_its_due()
     {
-        var time = new FakeTimeProvider();
+        var time = new SteppingClock(DateTimeOffset.UnixEpoch);
 
         using var sessions = new SessionManager<string>(new SessionManagerOptions { Clock = time });
 
         var reached = 0;
 
-        sessions.SessionInactivityTimeoutReached += (_) =>
+        sessions.ConnectionInactivityTimeoutReached += (_) =>
         {
             reached += 1;
         };
 
-        var session = sessions.GetOrElseSet(Handle);
+        var session = sessions.Set(sessions.Create(Handle) with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(1_000) });
 
         // 2³¹ ms, one past what JavaScript's timers hold
         var longer = Clocks.LongestTimer + TimeSpan.FromMilliseconds(1);
@@ -743,11 +791,14 @@ public sealed class SessionManagerTests
             }).Message);
         Assert.False(sessions.Has(Other));
         Assert.Equal(session, sessions.Get(Handle));
+        Assert.Equal([TimeSpan.FromMilliseconds(1_000)], time.Dues());
 
-        sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = Clocks.LongestTimer });
-        time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
+        sessions.ResetConnectionInactivityTimeout(session, Clocks.LongestTimer);
+        sessions.ResetSessionInactivityTimeout(session, Timeout.InfiniteTimeSpan);
+        Assert.Equal([Clocks.LongestTimer], time.Dues());
+        await time.Advance(Clocks.LongestTimer - TimeSpan.FromMilliseconds(1));
         Assert.Equal(0, reached);
-        time.Advance(TimeSpan.FromMilliseconds(1));
+        await time.Advance(TimeSpan.FromMilliseconds(1));
         Assert.Equal(1, reached);
     }
 
@@ -933,6 +984,7 @@ public sealed class SessionManagerTests
         sessions.UpdateSessionInactivityTimeout(session with { SessionInactivityTimeout = TimeSpan.FromMilliseconds(20) });
         sessions.Dispose();
         Assert.Empty(sessions.ConnectionHandles());
+        Assert.Equal(0, sessions.Gauges().Counts["timedConnections"]);
         time.Advance(TimeSpan.FromMilliseconds(60));
         Assert.Empty(told);
     }
@@ -980,6 +1032,24 @@ public sealed class SessionManagerTests
         // one stored with a token of its own, and no timeout, is timed as one drawn is
         sessions.Set(sessions.Create(Handle) with { SessionToken = TokenOf(7) });
         Assert.Equal(new Dictionary<string, long> { ["sessions"] = 1, ["timedConnections"] = 1 }, sessions.Gauges().Counts);
+    }
+
+    // the fake's timer creations, including a re-arm on the same millisecond
+    private sealed class RecordingClock(FakeTimeProvider time) : TimeProvider
+    {
+        public List<TimeSpan> Armed { get; } = [];
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            return time.GetUtcNow();
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Armed.Add(dueTime);
+
+            return time.CreateTimer(callback, state, dueTime, period);
+        }
     }
 
     // two lists of names alike when their names are, in order, as the TypeScript side's structure
