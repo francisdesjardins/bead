@@ -255,12 +255,14 @@ public sealed class RelayTests
     }
 
     [Fact]
-    public void Answers_an_ELSEWHERE_DESTINATION_UNREACHABLE_over_a_leg_B_whose_upgrade_carried_the_relay_s_own_credential()
+    public async Task Answers_an_ELSEWHERE_DESTINATION_UNREACHABLE_over_a_leg_B_whose_upgrade_carried_the_relay_s_own_credential()
     {
-        var relay = new TestRelay().Relay;
+        var test = new TestRelay();
+        var relay = test.Relay;
+        var target = new RecordingTarget { CarriedByUpgrade = "Interop sub=relay" };
 
         // a WebSocket leg B, its upgrade carrying the relay's own credential
-        relay.Register(new RecordingTarget { CarriedByUpgrade = "Interop sub=relay" }, Seven with { Audience = "bead-interop" });
+        relay.Register(target, Seven with { Audience = "bead-interop" });
 
         Failure? RefusalOf(string carried)
         {
@@ -275,6 +277,13 @@ public sealed class RelayTests
         Assert.Equal(
             ((ushort)ProtocolCode.DestinationUnreachable, "destination 7 is unreachable: its transport does not carry the credential ELSEWHERE stands for beside an envelope: none, or another"),
             (refused?.Code, refused?.Detail));
+
+        var header = HeaderOf(1) with { Credential = Credential.Elsewhere() };
+
+        await Handled(relay.HandlerOf(header), PropsOf(header) with { IsAdmitted = false, TransportCredential = "Interop sub=ada" });
+        Assert.Equal<object>([refused!], FailuresOf(test.Answers));
+        Assert.Empty(target.Asked);
+        Assert.Empty(test.Own);
 
         // the very bytes its upgrade carried go
         Assert.Null(RefusalOf("Interop sub=relay"));

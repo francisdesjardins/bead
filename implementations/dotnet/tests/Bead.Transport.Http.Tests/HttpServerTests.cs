@@ -607,8 +607,9 @@ public sealed class HttpServerTests
         header = (RequestHeader)EnvelopeCodec.ReadEnvelope(body, new EnvelopeReadOptions { Side = RouterSide.Server, MaximumEnvelopeBytes = int.MaxValue })!.Header;
 
         Assert.Null(authorization);
-        Assert.Equal(Credential.Jwt(token), header.Credential);
+        Assert.Equal((Credential.Jwt(token), (uint?)null), (header.Credential!.Value, header.DestinationId));
         Assert.Equal("ho", await jwt.WaitAsync(Patience, Cancelled));
+        Assert.False(listener.Posted.Reader.TryRead(out _));
     }
 
     [Fact]
