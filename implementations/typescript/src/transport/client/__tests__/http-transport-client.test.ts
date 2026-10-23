@@ -142,6 +142,51 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 
 // definition
 
+test('releases a replacement opened by its close listener before dispose completes', async () => {
+  const { client, fake } = await connectFake((init) => {
+    return responseOf(
+      init.method === 'POST'
+        ? { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 }
+        : { status: 204 }
+    );
+  });
+  const closes: boolean[][] = [];
+  const errors: Error[] = [];
+  let replacement: Promise<unknown> | undefined;
+
+  client.on('close', (...flags) => {
+    closes.push(flags);
+    replacement = client.connect({ host, port: 8_080 }).catch((reason: unknown) => {
+      return reason;
+    });
+  });
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+
+  try {
+    await client[Symbol.asyncDispose]();
+    expect(client.isClosed()).toBe(true);
+    expect(replacement).toBeDefined();
+    const outcome = await replacement;
+
+    expect(outcome === undefined || outcome instanceof ConnectError).toBe(true);
+    expect([client.isClosed(), client.socket, closes, errors]).toEqual([
+      true,
+      null,
+      [[true, false]],
+      [],
+    ]);
+    expect(
+      fake.calls.map(({ init }) => {
+        return init.method;
+      })
+    ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
+  } finally {
+    (client as ITransportClientInternal<object, never>)[dispose]();
+  }
+});
+
 test.describe('createHTTPTransportClient, what it carries', () => {
   test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {
     expect(createHTTPTransportClient().isSecure).toBe(false);

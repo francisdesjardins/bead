@@ -140,6 +140,45 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       await allClosed();
     });
 
+    test('releases a replacement opened by its close listener before dispose completes', async () => {
+      const closes: boolean[][] = [];
+      const errors: Error[] = [];
+      let replacement: Promise<unknown> | undefined;
+
+      client.on('close', (...flags) => {
+        closes.push(flags);
+        replacement = client.connect({ host, port }).catch((reason: unknown) => {
+          return reason;
+        });
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      await client.connect({ host, port });
+
+      try {
+        await client[Symbol.asyncDispose]();
+        expect(client.isClosed()).toBe(true);
+        expect(replacement).toBeDefined();
+        const outcome = await replacement;
+
+        expect(outcome === undefined || outcome instanceof ConnectError).toBe(true);
+        expect([client.isClosed(), client.socket, closes, errors]).toEqual([
+          true,
+          null,
+          [[true, false]],
+          [],
+        ]);
+        await expect
+          .poll(() => {
+            return server.clients.size;
+          })
+          .toBe(0);
+      } finally {
+        drop(client);
+      }
+    });
+
     test.describe('WSTransportClient #connect', () => {
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });

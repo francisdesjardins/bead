@@ -232,7 +232,7 @@ test.describe('createTransportClient', () => {
       await using client = opened.client;
       await client.connect(target);
     }
-    expect(opened.calls).toEqual(['connect:1', 'disconnect']);
+    expect(opened.calls).toEqual(['connect:1', 'disconnect', 'dispose']);
     expect(opened.client.isClosed()).toBe(true);
 
     const fresh = createStubClient();
