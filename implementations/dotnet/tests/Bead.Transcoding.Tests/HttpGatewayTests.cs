@@ -1621,6 +1621,72 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Reads_a_held_body_past_its_grace_when_its_minimum_rate_is_zero()
+    {
+        await using var service = await TranscodingService.Start();
+        var clock = new FakeTimeProvider();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            BodyGracePeriod = TimeSpan.FromSeconds(1),
+            Clock = clock,
+            MinimumBodyBytesPerSecond = 0,
+        });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldRequestBody();
+        using var response = new MemoryStream();
+        var context = new DefaultHttpContext();
+        var reported = ReportedBy(gateway);
+
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.ContentLength = 2;
+        context.Request.Body = body;
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/echo";
+        context.Response.Body = response;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.Reading.Task.WaitAsync(Patience, Cancelled);
+            clock.Advance(TimeSpan.FromSeconds(2));
+
+            Assert.False(serving.IsCompleted);
+            Assert.Empty(service.Memory.ConnectionHandles);
+            body.Released.TrySetResult();
+            await serving.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+            Assert.Equal("application/json", context.Response.ContentType);
+            Assert.Equal("{}", Encoding.UTF8.GetString(response.ToArray()));
+            Assert.Empty(reported);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    private sealed class HeldRequestBody() : MemoryStream("{}"u8.ToArray())
+    {
+        public TaskCompletionSource Reading { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Reading.TrySetResult();
+            await Released.Task.WaitAsync(cancellationToken);
+
+            return await base.ReadAsync(buffer, cancellationToken);
+        }
+    }
+
+    [Fact]
     public async Task Leaves_a_response_whose_application_sends_its_headers_before_the_gateway_answers()
     {
         await using var service = await TranscodingService.Start();

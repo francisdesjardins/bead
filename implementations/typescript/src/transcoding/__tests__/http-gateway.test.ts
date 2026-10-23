@@ -1664,6 +1664,101 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+test('reads a held body past its grace when its minimum rate is zero', async () => {
+  const reading = Promise.withResolvers<void>();
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({
+    bodyGracePeriod: 1_000,
+    clock,
+    minimumBodyBytesPerSecond: 0,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        request.on('data', () => {
+          reading.resolve();
+        });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      lines: [
+        'POST /api/Transcoding/echo HTTP/1.1',
+        'content-type: application/json',
+        'content-length: 2',
+      ],
+    }) + '{'
+  );
+
+  try {
+    await reading.promise;
+    await clock.tickAsync(2_000);
+
+    expect(fixture.memory.clients).toHaveLength(0);
+    socket.write('}');
+    const answered = await readUntil(socket, '\r\n\r\n{}');
+
+    expect(answered).toMatch(/^HTTP\/1\.1 200 /u);
+    expect(answered).toContain('content-type: application/json\r\n');
+    expect(answered.endsWith('\r\n\r\n{}')).toBe(true);
+    expect(reported).toEqual([]);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+  } finally {
+    socket.destroy();
+  }
+});
+
+test('ignores request callbacks after its body settles', async () => {
+  let late = 0;
+  await using fixture = await startTranscoding({
+    bodyBytesBudget: 2,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        request.on('end', () => {
+          // * a mounted request can deliver callbacks after the body end.
+          queueMicrotask(() => {
+            if (late < 2) {
+              late += 1;
+              request.emit('data', Buffer.from('extra'));
+              request.emit('error', new Error('a body callback after settlement'));
+            }
+          });
+        });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+
+  for (let request = 0; request < 2; request += 1) {
+    const answered = await send(fixture.port, { body: '{}', path: '/api/Transcoding/echo' });
+
+    expect(answered.status).toBe(200);
+    expect(answered.body).toBe('{}');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+  }
+
+  const refused = await send(fixture.port, { body: ' {}', path: '/api/Transcoding/echo' });
+
+  expect(refused.status).toBe(503);
+  expect(refused.headers['bead-refusal']).toBe('busy');
+  expect(JSON.parse(refused.body)).toEqual({
+    detail: 'the bodies under way hold bodyBytesBudget',
+    status: 503,
+    title: 'Service Unavailable',
+    type: 'about:blank',
+  });
+  expect(late).toBe(2);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
 test('leaves a response whose application sends its headers before the gateway answers', async () => {
   await using fixture = await startTranscoding({
     createServer: (listener) => {
