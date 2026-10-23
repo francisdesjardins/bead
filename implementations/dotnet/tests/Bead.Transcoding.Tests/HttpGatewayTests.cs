@@ -1994,6 +1994,65 @@ public sealed class HttpGatewayTests
         }
     }
 
+    [Fact]
+    public async Task Aborts_a_unary_response_whose_held_write_passes_its_send_deadline()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            MinimumSendBytesPerSecond = 1_000_000,
+            SendGracePeriod = TimeSpan.FromMilliseconds(1),
+        });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldResponseBody();
+        var lifetime = new DeadlineLifetime(cancelling);
+        var context = new DefaultHttpContext();
+        var reported = ReportedBy(gateway);
+
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/echo";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            // * the write has no release: its pace aborts it, with no competing completion.
+            await body.Writing.Task.WaitAsync(Patience, Cancelled);
+            Assert.Equal(cancelling.Token, await body.Aborted.Task.WaitAsync(Patience, Cancelled));
+            await serving.WaitAsync(Patience, Cancelled);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+
+            Assert.Equal(1, lifetime.Aborts);
+            Assert.Equal(1, body.Writes);
+            Assert.Empty(body.ToArray());
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    private sealed class DeadlineLifetime(CancellationTokenSource cancelling) : IHttpRequestLifetimeFeature
+    {
+        public CancellationToken RequestAborted { get; set; } = cancelling.Token;
+
+        public int Aborts { get; private set; }
+
+        public void Abort()
+        {
+            Aborts += 1;
+            cancelling.Cancel();
+        }
+    }
+
     private sealed class HeldResponseBody : MemoryStream
     {
         public bool HoldFailure { get; init; }

@@ -2129,6 +2129,57 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
 });
 
+test('aborts a stream whose held write passes its send deadline', async () => {
+  const closed = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  await using fixture = await startTranscoding({
+    heartbeat: Infinity,
+    minimumSendBytesPerSecond: 1_000_000,
+    sendGracePeriod: 1,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        Object.defineProperty(response, 'writableLength', {
+          get: () => {
+            return chunks.length === 0 ? 0 : 1;
+          },
+        });
+        response.write = (chunk: Uint8Array): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+
+          return false;
+        };
+        response.once('close', () => {
+          closed.resolve();
+        });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  // * the write has no release: only its pace can close it, with no competing drain or timer.
+  const received = receivedOn(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  await closed.promise;
+  expect(await received).toBe(0);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+  await fixture.watched(2);
+
+  expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+  expect(reported).toEqual([]);
+});
+
 test('stops heartbeats after their write loses its response', async () => {
   const written = Promise.withResolvers<void>();
   const chunks: string[] = [];
