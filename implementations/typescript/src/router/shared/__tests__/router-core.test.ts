@@ -727,6 +727,47 @@ test.describe('createRouterCore', () => {
       expect(calls).toBe(3);
     });
 
+    test('keeps the replacement call when its report listener cancels a failed resolver’s call', async () => {
+      const { port, reported, sent } = createPort();
+      using core = createRouterCore(port);
+      const requests: IRequestResolverProps<Handle>[] = [];
+      const failure = new Error('the resolver failed');
+      const report = port.report;
+
+      core.registerResolver(
+        Object.assign((props: IRequestResolverProps<Handle>) => {
+          requests.push(props);
+
+          if (requests.length === 1) {
+            throw failure;
+          }
+
+          return Promise.resolve();
+        }, echo)
+      );
+      port.report = (reason, connectionHandle) => {
+        report(reason, connectionHandle);
+        core.receive(cancelOf(5), 'a');
+        core.receive(requestOf(5), 'a');
+      };
+      core.receive(requestOf(5), 'a');
+
+      expect(reported).toEqual([[failure, 'a']]);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.signal.aborted).toBe(true);
+      expect(requests[1]?.signal.aborted).toBe(false);
+      expect(core.gauges().counts['answeringCalls']).toBe(1);
+      expect(sent).toEqual([]);
+
+      await core.respond({ payload: Uint8Array.of(1) }, requests[0]!);
+      expect(sent).toEqual([]);
+      await core.respond({ payload: Uint8Array.of(2) }, requests[1]!);
+
+      expect(answersOf(sent)).toEqual([['a', 'result', 5, [2]]]);
+      expect(core.gauges().counts['answeringCalls']).toBe(0);
+      expect(reported).toEqual([[failure, 'a']]);
+    });
+
     test('lets go of the call id of a resolver that fails without answering, and of that one alone', async () => {
       const { port, reported, sent } = createPort();
       using core = createRouterCore(port);
