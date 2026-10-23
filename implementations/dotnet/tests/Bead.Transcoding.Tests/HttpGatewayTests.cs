@@ -1872,6 +1872,93 @@ public sealed class HttpGatewayTests
         }
     }
 
+    [Theory]
+    [InlineData("io")]
+    [InlineData("cancelled")]
+    [InlineData("state")]
+    public async Task Stops_heartbeats_after_their_write_loses_its_response(string kind)
+    {
+        await using var service = await TranscodingService.Start();
+        var clock = new FakeTimeProvider();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            Clock = clock,
+            Heartbeat = TimeSpan.FromSeconds(1),
+        });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        Exception failure = kind switch
+        {
+            "io" => new IOException("the heartbeat response is gone"),
+            "cancelled" => new OperationCanceledException("the heartbeat response is gone", cancelling.Token),
+            _ => new InvalidOperationException("the heartbeat response is gone"),
+        };
+        using var body = new HeartbeatResponseBody(failure);
+        var context = new DefaultHttpContext();
+        var reported = ReportedBy(gateway);
+
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.Headers.Accept = "text/event-stream";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/watch";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.FirstWritten.Task.WaitAsync(Patience, Cancelled);
+            clock.Advance(TimeSpan.FromSeconds(1));
+
+            Assert.Equal(1, body.Heartbeats);
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Empty(reported);
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+            clock.Advance(TimeSpan.FromSeconds(1));
+            await service.Watched(2);
+
+            Assert.Equal(1, body.Heartbeats);
+            Assert.Equal(2, body.Writes);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    private sealed class HeartbeatResponseBody(Exception failure) : MemoryStream
+    {
+        public TaskCompletionSource FirstWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Heartbeats { get; private set; }
+
+        public int Writes { get; private set; }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Writes += 1;
+
+            if (buffer.Span.SequenceEqual(":\n"u8))
+            {
+                Heartbeats += 1;
+                throw failure;
+            }
+
+            var written = base.WriteAsync(buffer, cancellationToken);
+
+            FirstWritten.TrySetResult();
+
+            return written;
+        }
+    }
+
     [Fact]
     public async Task Writes_its_comment_a_heartbeat_after_its_last_write_and_none_while_writes_go()
     {

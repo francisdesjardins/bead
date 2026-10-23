@@ -1886,6 +1886,67 @@ test('writes a comment on a quiet stream each heartbeat on its clock, and drops 
   expect(await receivedOn(bounded.port, octetsOf(bounded.port, watch))).toBe(0);
 });
 
+test('stops heartbeats after their write loses its response', async () => {
+  const written = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({
+    clock,
+    heartbeat: 1_000,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (chunk: Uint8Array): boolean => {
+          const text = new TextDecoder().decode(chunk);
+
+          chunks.push(text);
+
+          if (text === ':\n') {
+            response.destroy();
+
+            return false;
+          }
+
+          const taken = write(chunk);
+
+          written.resolve();
+
+          return taken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await written.promise;
+    await clock.tickAsync(1_000);
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await clock.tickAsync(1_000);
+    await fixture.watched(2);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n', ':\n']);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
 test('writes its comment a heartbeat after its last write, and none while writes go', async () => {
   const clock = createTestClock();
   await using fixture = await startTranscoding({ clock, heartbeat: 1_000 });
