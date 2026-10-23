@@ -587,6 +587,29 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
     });
 
     test.describe('WSTransportClient "message" event', () => {
+      test('delivers a fragmented message whole then the next message separately', async () => {
+        server.once('connection', (socket) => {
+          socket.send(Uint8Array.of(1, 2), { fin: false });
+          socket.send(Uint8Array.of(3), { fin: true });
+          socket.send(Uint8Array.of(4));
+        });
+        const messages: number[][] = [];
+        const both = new Promise<void>((resolve) => {
+          client.on('message', ({ data }) => {
+            expect(data).toBeInstanceOf(ArrayBuffer);
+            messages.push([...new Uint8Array(data as ArrayBuffer)]);
+            if (messages.length === 2) {
+              resolve();
+            }
+          });
+        });
+
+        await client.connect({ host, port });
+        await both;
+
+        expect(messages).toEqual([[1, 2, 3], [4]]);
+      });
+
       test('emits what the server sends — text as a string, binary as an ArrayBuffer', async () => {
         server.once('connection', (socket) => {
           socket.send('text');
