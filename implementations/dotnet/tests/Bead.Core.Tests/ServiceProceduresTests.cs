@@ -75,6 +75,23 @@ public sealed class ServiceProceduresTests
     }
 
     [Fact]
+    public void Refuses_a_descriptor_without_a_procedure()
+    {
+        Assert.Equal("procedure", Assert.Throws<ArgumentNullException>(() =>
+        {
+            return new RequestProcedure<GreeterProcedures, string, string, NoFailure>(null!, Bindings);
+        }).ParamName);
+        Assert.Equal("procedure", Assert.Throws<ArgumentNullException>(() =>
+        {
+            return new RequestProcedure<GreeterProcedures, string, string, string, NoFailure>(null!, NotifyingBindings);
+        }).ParamName);
+        Assert.Equal("procedure", Assert.Throws<ArgumentNullException>(() =>
+        {
+            return new CommandProcedure<GreeterProcedures, string, string, NoFailure>(null!, Bindings);
+        }).ParamName);
+    }
+
+    [Fact]
     public void Makes_a_rule_of_every_call_a_session_or_a_hook_by_its_name()
     {
         Assert.Equal((null, null, "loud"), (AdmissionRule.None.HookName, AdmissionRule.Session.HookName, AdmissionRule.Hook("loud").HookName));
