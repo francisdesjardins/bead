@@ -2470,6 +2470,51 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Cancels_a_reconnection_whose_last_attempt_closes_before_cancellation_is_checked()
+    {
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var closes = ClosesOf(_client);
+        var errors = new List<Exception>();
+
+        _client.Error += errors.Add;
+        await _client.Connect(Target, Cancelled);
+
+        var replaced = await Next(_connections);
+        Task? closing = null;
+        var attempts = 0;
+
+        _client.Opened += () =>
+        {
+            attempts += 1;
+            Assert.Equal(ReadyState.Open, _client.ReadyState);
+            closing = _client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            Assert.True(closing.IsCompletedSuccessfully);
+            source.Cancel();
+        };
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return _client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = source.Token }).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.NotNull(closing);
+        await closing;
+
+        var opened = await Next(_connections);
+        var ended = new HashSet<string> { (await Next(_closes)).ConnectionHandle, (await Next(_closes)).ConnectionHandle };
+
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(source.Token, cancelled.CancellationToken);
+        Assert.Equal(1, attempts);
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.Equal((true, true), await Next(closes));
+        Assert.Equal(0, closes.Reader.Count);
+        Assert.Equal(new HashSet<string> { replaced, opened }, ended);
+        Assert.Empty(_server.ConnectionHandles);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task Disconnects_and_throws_an_OperationCanceledException_when_cancelled_once_its_attempt_opened()
     {
         using var source = new CancellationTokenSource();

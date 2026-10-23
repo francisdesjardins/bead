@@ -9,6 +9,7 @@ import {
 } from '../../server/http-transport-server';
 import type { TransportServerConnectionHandle } from '../../server/types';
 import {
+  CancelError,
   ConnectError,
   GenericError,
   ProgrammerError,
@@ -141,6 +142,52 @@ const connectFake = async (respond?: Parameters<typeof createFakeFetch>[0]) => {
 };
 
 // definition
+
+test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
+  const { client: transport, fake } = await connectFake((init) => {
+    return responseOf(
+      init.method === 'POST'
+        ? { headers: { [CONNECTION_TOKEN_HEADER]: 'T'.repeat(22) }, status: 201 }
+        : { status: 204 }
+    );
+  });
+  await using client = transport;
+  const cancelling = new AbortController();
+  const reason = new Error('the attempt closes before the cancellation check');
+  const closes: boolean[][] = [];
+  const errors: Error[] = [];
+  const connect = client.connect;
+  let attempts = 0;
+
+  client.on('close', (...flags) => {
+    closes.push(flags);
+  });
+  client.on('error', (error) => {
+    errors.push(error);
+  });
+  client.connect = async (options) => {
+    await connect(options);
+    attempts += 1;
+    expect(client.isOpen()).toBe(true);
+    await client.disconnect({ isQuick: true });
+    cancelling.abort(reason);
+  };
+
+  const cancelled: unknown = await client
+    .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+    .catch((error: unknown) => {
+      return error;
+    });
+
+  expect(cancelled).toBeInstanceOf(CancelError);
+  expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+  expect([attempts, client.isClosed(), closes, errors]).toEqual([1, true, [[true, true]], []]);
+  expect(
+    fake.calls.map(({ init }) => {
+      return init.method;
+    })
+  ).toEqual(['POST', 'DELETE', 'POST', 'DELETE']);
+});
 
 test.describe('createHTTPTransportClient, what it carries', () => {
   test('carries a credential beside an envelope, in its POST’s Authorization, and is secure under https or to a loopback host, judged by the URL it was given', async () => {

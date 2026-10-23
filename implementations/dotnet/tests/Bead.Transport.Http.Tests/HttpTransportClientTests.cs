@@ -3431,6 +3431,88 @@ public sealed class HttpTransportClientTests
         Assert.Equal(2, failing.Fetch.Count);
     }
 
+    // a connect's timeout disposal runs after its state becomes Open and before its task settles.
+    private sealed class DisposingClock : TimeProvider
+    {
+        public Action? OnDisposed { get; set; }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return new DisposingTimer(TimeProvider.System.CreateTimer(callback, state, dueTime, period), () =>
+            {
+                var action = OnDisposed;
+
+                OnDisposed = null;
+                action?.Invoke();
+            });
+        }
+    }
+
+    private sealed class DisposingTimer(ITimer inner, Action disposed) : ITimer
+    {
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            return inner.Change(dueTime, period);
+        }
+
+        public void Dispose()
+        {
+            inner.Dispose();
+            disposed();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task Cancels_a_reconnection_whose_last_attempt_closes_before_cancellation_is_checked()
+    {
+        using var source = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var clock = new DisposingClock();
+        await using var faked = await ConnectFake(NotListening with { Clock = clock });
+        var told = EndOf(faked.Client);
+        Task? closing = null;
+        var attempts = 0;
+
+        clock.OnDisposed = () =>
+        {
+            attempts += 1;
+            Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
+            closing = faked.Client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            Assert.True(closing.IsCompletedSuccessfully);
+            source.Cancel();
+        };
+
+        var reconnecting = faked.Client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = source.Token });
+
+        (await faked.Fetch.CallOf(2)).Answer(DrawnOf(false));
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return reconnecting.WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.NotNull(closing);
+        await closing;
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(source.Token, cancelled.CancellationToken);
+        Assert.Equal(1, attempts);
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal((true, true), await faked.Closed());
+        Assert.Equal(0, faked.Closes.Reader.Count);
+        Assert.Equal(["close True True"], told);
+        Assert.Empty(faked.Heard);
+        Assert.Equal([HttpMethod.Post, HttpMethod.Delete, HttpMethod.Post, HttpMethod.Delete], faked.Fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
     // the WebSocket transport client's test cancels from a hook as its attempt opens; here the
     // attempt's answer comes after its token was cancelled, a handler deaf to it handing it on
     [Fact]

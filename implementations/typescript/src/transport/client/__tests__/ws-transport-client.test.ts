@@ -140,6 +140,54 @@ for (const [label, TrackedWebSocket] of IMPLEMENTATIONS satisfies readonly (read
       await allClosed();
     });
 
+    test('cancels a reconnection whose last attempt closes before cancellation is checked', async () => {
+      const cancelling = new AbortController();
+      const reason = new Error('the attempt closes before the cancellation check');
+      const closes: boolean[][] = [];
+      const errors: Error[] = [];
+      const closedAtServer: Promise<unknown>[] = [];
+
+      server.on('connection', (socket) => {
+        closedAtServer.push(once(socket, 'close'));
+      });
+      client.on('close', (...flags) => {
+        closes.push(flags);
+      });
+      client.on('error', (error) => {
+        errors.push(error);
+      });
+      await client.connect({ host, port });
+
+      const connect = client.connect;
+      let attempts = 0;
+
+      client.connect = async (options) => {
+        await connect(options);
+        attempts += 1;
+        expect(client.isOpen()).toBe(true);
+        await client.disconnect({ isQuick: true });
+        cancelling.abort(reason);
+      };
+
+      const cancelled: unknown = await client
+        .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+        .catch((error: unknown) => {
+          return error;
+        });
+
+      await Promise.all(closedAtServer);
+      expect(cancelled).toBeInstanceOf(CancelError);
+      expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+      expect([attempts, client.isClosed(), closes, errors, server.clients.size]).toEqual([
+        1,
+        true,
+        [[true, true]],
+        [],
+        0,
+      ]);
+      expect(closedAtServer).toHaveLength(2);
+    });
+
     test.describe('WSTransportClient #connect', () => {
       test('resolves when connecting to a valid endpoint', async () => {
         await client.connect({ host, port });
