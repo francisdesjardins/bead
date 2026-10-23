@@ -214,6 +214,26 @@ public sealed class WebSocketConnectionTests
     }
 
     [Fact]
+    public async Task Discards_more_data_after_a_message_passes_its_bound_before_the_peer_answers_its_close()
+    {
+        using var socket = new HeldWebSocket();
+        var connection = ConnectionOf(socket, false);
+        var messages = new List<TransportMessage>();
+
+        socket.Incoming.Enqueue((new byte[65], true));
+        socket.Incoming.Enqueue(([1], true));
+
+        await connection.Read(messages.Add).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Empty(messages);
+        Assert.True(connection.IsTooBig);
+        Assert.True(connection.IsEndedHere);
+        Assert.Null(connection.Dropped);
+        Assert.Equal(0, socket.Aborts);
+        Assert.Equal(0, connection.UnsentBytes);
+    }
+
+    [Fact]
     public async Task Settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_twice()
     {
         using var socket = new HeldWebSocket();
