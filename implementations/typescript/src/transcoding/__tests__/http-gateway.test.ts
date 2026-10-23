@@ -394,6 +394,54 @@ test('refuses a request with no Origin from a page of another site, and a naviga
   ).toBe(200);
 });
 
+test('answers a failed stream request as a problem before writing any event', async () => {
+  await using fixture = await startTranscoding({
+    maximumConnections: 1,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            procedure: {
+              ...init.procedure,
+              procedure: { ...init.procedure.procedure, procedureId: 99 },
+            },
+          }
+        : init;
+    }),
+  });
+  const reported = reportedBy(fixture.gateway);
+  const drawn: string[] = [];
+  const closed: string[] = [];
+
+  fixture.memory.on('connection', (...[, , handle]) => {
+    drawn.push(handle);
+  });
+  fixture.memory.on('close', (_wasClean, handle) => {
+    closed.push(handle);
+  });
+
+  for (let count = 1; count <= 2; count += 1) {
+    const answered = await send(fixture.port, {
+      body: '{}',
+      headers: { accept: 'text/event-stream' },
+      path: '/api/Transcoding/watch',
+    });
+
+    expect(answered).toMatchObject({
+      body: '{"code":19,"detail":"no procedure 99 in service 1","scope":"protocol","status":501,"title":"PROCEDURE_UNKNOWN","type":"tag:francisdesjardins.ca,2026:bead/PROCEDURE_UNKNOWN"}',
+      status: 501,
+    });
+    expect(answered.headers['content-type']).toBe('application/problem+json');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    await until(() => {
+      return closed.length === count;
+    });
+    expect(drawn).toHaveLength(count);
+    expect(closed.toSorted()).toEqual(drawn.toSorted());
+    expect(reported).toHaveLength(count);
+  }
+});
+
 test('answers a stream’s request that carries Last-Event-ID with 204 and no call', async () => {
   await using fixture = await startTranscoding();
   let connections = 0;

@@ -320,6 +320,54 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Answers_a_failed_stream_request_as_a_problem_before_writing_any_event()
+    {
+        var started = await Started((options) =>
+        {
+            return options with
+            {
+                MaximumConnections = 1,
+                Routes = [.. options.Routes.Select((route) =>
+                {
+                    return route.Procedure == TranscodingProcedures.Watch.Procedure
+                        ? route with { Procedure = route.Procedure with { ProcedureId = 99 } }
+                        : route;
+                })],
+            };
+        });
+        var reported = ReportedBy(started.Gateway);
+        var drawn = 0;
+        var closed = 0;
+
+        started.Service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+        started.Service.Memory.Close += (_, _) => { Interlocked.Increment(ref closed); };
+
+        try
+        {
+            for (var count = 1; count <= 2; count += 1)
+            {
+                using var request = Json("/api/Transcoding/watch", "{}");
+
+                request.Headers.TryAddWithoutValidation("accept", "text/event-stream");
+
+                using var answered = await started.Client.SendAsync(request, Cancelled);
+
+                Assert.Equal(HttpStatusCode.NotImplemented, answered.StatusCode);
+                Assert.Equal("application/problem+json", answered.Content.Headers.ContentType!.MediaType);
+                Assert.Equal("{\"code\":19,\"detail\":\"no procedure 99 in service 1\",\"scope\":\"protocol\",\"status\":501,\"title\":\"PROCEDURE_UNKNOWN\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PROCEDURE_UNKNOWN\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+                Assert.False(answered.Headers.Contains("bead-refusal"));
+                await Until(() => { return Volatile.Read(ref closed) == count; });
+                Assert.Equal(count, Volatile.Read(ref drawn));
+                Assert.Equal(count, reported.Count);
+            }
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    [Fact]
     public async Task Answers_a_preflight_with_the_methods_its_URL_s_routes_take()
     {
         var started = await Started();
