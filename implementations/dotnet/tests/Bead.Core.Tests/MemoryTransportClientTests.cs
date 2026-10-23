@@ -550,6 +550,57 @@ public sealed class MemoryTransportClientTests
     }
 
     [Fact]
+    public async Task Cancels_a_reconnection_before_its_first_attempt_when_its_start_listener_cancels()
+    {
+        var scheduler = new SerialScheduler();
+        var (server, client, handle) = await Connected(scheduler);
+        await using var ownedServer = server;
+        await using var ownedClient = client;
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var drawn = new List<string>();
+        var clientCloses = new List<(bool, bool)>();
+        var serverCloses = new List<(bool, string)>();
+        var errors = new List<Exception>();
+        var starts = 0;
+
+        server.Connection += drawn.Add;
+        server.Close += (isClean, connectionHandle) =>
+        {
+            serverCloses.Add((isClean, connectionHandle));
+        };
+        server.Error += (error, _) =>
+        {
+            errors.Add(error);
+        };
+        client.Close += (isClean, isQuick) =>
+        {
+            clientCloses.Add((isClean, isQuick));
+        };
+        client.Error += errors.Add;
+        ((IRouterClientTransport)client).Reconnect += cancelling.Cancel;
+        ((IRouterClientTransport)client).Reconnect += () =>
+        {
+            starts += 1;
+        };
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return client.Reconnect(new TransportReconnectOptions { MaximumAttempts = 1, CancellationToken = cancelling.Token });
+        });
+
+        await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+        Assert.Equal("the reconnection was cancelled", cancelled.Message);
+        Assert.Equal(cancelling.Token, cancelled.CancellationToken);
+        Assert.Equal(1, starts);
+        Assert.Equal(ReadyState.Closed, client.ReadyState);
+        Assert.Empty(server.ConnectionHandles);
+        Assert.Empty(drawn);
+        Assert.Empty(clientCloses);
+        Assert.Equal([(false, handle)], serverCloses);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task Closes_what_its_last_attempt_opened_as_its_reconnection_was_cancelled()
     {
         var scheduler = new SerialScheduler();

@@ -435,6 +435,39 @@ test.describe('createMemoryTransportClient', () => {
   test('closes at once, unclean, a connection its server draws once a dispose gave up on its connect', async () => {
     {
       const held = createHeldServer();
+      await using client = createMemoryTransportClient({ server: held.server });
+      const heard: unknown[] = [];
+
+      client.on('message', (message) => {
+        heard.push(message);
+      });
+      client.on('close', (...flags) => {
+        heard.push(flags);
+      });
+
+      const connecting = client.connect({});
+      const refused = expect(connecting).rejects.toThrow(
+        new ConnectError('the transport client was disposed as it connected')
+      );
+
+      // * accept settles first; its callback queues the connect behind this dispose.
+      held.accepts[0]?.resolve(held.end);
+      queueMicrotask(() => {
+        (client as unknown as ITransportClientInternal)[dispose]();
+      });
+      await refused;
+      await turn();
+
+      expect([client.isClosed(), client.socket, held.closes, heard]).toEqual([
+        true,
+        null,
+        [false],
+        [],
+      ]);
+    }
+
+    {
+      const held = createHeldServer();
       const client = createMemoryTransportClient({ server: held.server });
       const heard: unknown[] = [];
 
@@ -718,6 +751,49 @@ test.describe('createMemoryTransportClient', () => {
   });
 
   // spec 15.13
+  test('cancels a reconnection before its first attempt when its start listener cancels', async () => {
+    await using pair = await connected();
+    const { atClient, atServer, client, connectionHandle, server } = pair;
+    const cancelling = new AbortController();
+    const reason = new Error('the caller cancels at the start');
+    const drawn: string[] = [];
+    const errors: Error[] = [];
+    let starts = 0;
+
+    server.on('connection', (...[, , handle]) => {
+      drawn.push(handle);
+    });
+    server.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('reconnect', () => {
+      starts += 1;
+      cancelling.abort(reason);
+    });
+
+    const cancelled: unknown = await client
+      .reconnect({ maxAttempts: 1, signal: cancelling.signal })
+      .catch((error: unknown) => {
+        return error;
+      });
+
+    await turn();
+    expect(cancelled).toBeInstanceOf(CancelError);
+    expect(cancelled).toMatchObject({ cause: reason, message: 'the reconnection was cancelled' });
+    expect([starts, client.isClosed(), server.clients, drawn, atClient, atServer, errors]).toEqual([
+      1,
+      true,
+      [],
+      [],
+      [],
+      [['close', false, connectionHandle]],
+      [],
+    ]);
+  });
+
   test('closes what its last attempt opened as its reconnection was cancelled', async () => {
     await using server = createMemoryTransportServer();
     await using client = createMemoryTransportClient({ server });
