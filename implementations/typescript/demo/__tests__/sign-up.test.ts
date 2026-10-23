@@ -141,6 +141,81 @@ test.describe('mountSignUp', () => {
     await expect(requestsOf(page)).toHaveCount(1);
   });
 
+  test('counts the violations its short detail leaves out when the client judges the sign-up', async ({
+    page,
+  }) => {
+    await page.getByRole('link', { name: 'Use a 256-byte client detail' }).click();
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+    await page.getByLabel('Validate before sending').check();
+    await page.getByRole('button', { name: 'Break several fields' }).click();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      'refused by the client before it went, nothing on the wire: PAYLOAD_INVALID, 2 violations, and 3 more'
+    );
+    await expect(requestsOf(page)).toHaveCount(0);
+    await expect(page.locator('[aria-invalid]')).toHaveCount(2);
+
+    for (const name of ['name', 'seats']) {
+      await expect(page.locator(`#sign-up-${name}`)).toHaveAttribute('aria-invalid', 'true');
+      await expect(page.locator(`#sign-up-${name}`)).toHaveAttribute(
+        'aria-describedby',
+        `sign-up-${name}-messages sign-up-${name}-hint`
+      );
+      await expect(page.locator(`#sign-up-${name}-messages`)).toBeVisible();
+    }
+
+    await expect(page.locator('#sign-up-name-messages')).toHaveText(MESSAGES.name);
+    await expect(page.locator('#sign-up-seats-messages')).toHaveText(MESSAGES.seats);
+    await expect(page.locator('#sign-up-name')).toBeFocused();
+    await expect(page.locator('#sign-up-email-messages')).toBeHidden();
+    await expect(page.locator('#sign-up-phone-messages')).toBeHidden();
+    await expect(page.locator('#sign-up-unbound')).toBeHidden();
+
+    // * the default detail holds all five, through the same form and judging
+    await page.getByRole('link', { name: 'Use the default detail' }).click();
+    await expect(page.locator('#connection')).toHaveAttribute('data-state', 'open');
+    await page.getByLabel('Validate before sending').check();
+    await page.getByRole('button', { name: 'Break several fields' }).click();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      'refused by the client before it went, nothing on the wire: PAYLOAD_INVALID, 5 violations'
+    );
+    await expectBound(page);
+    await expect(requestsOf(page)).toHaveCount(0);
+  });
+
+  test('says it stops at the first violation when the client judges only that one', async ({
+    page,
+  }) => {
+    await expect(page.getByLabel('Stop at the first violation')).toBeDisabled();
+    await page.getByLabel('Validate before sending').check();
+    await page.getByLabel('Stop at the first violation').check();
+    await page.getByRole('button', { name: 'Break several fields' }).click();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+
+    await expect(page.locator('#sign-up-status')).toHaveText(
+      'refused by the client before it went, nothing on the wire: PAYLOAD_INVALID, 1 violation, stopped at the first'
+    );
+    await expect(requestsOf(page)).toHaveCount(0);
+    await expect(page.locator('[aria-invalid]')).toHaveCount(1);
+    await expect(page.locator('#sign-up-name')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.locator('#sign-up-name')).toHaveAttribute(
+      'aria-describedby',
+      'sign-up-name-messages sign-up-name-hint'
+    );
+    await expect(page.locator('#sign-up-name-messages')).toHaveText(MESSAGES.name);
+    await expect(page.locator('#sign-up-name')).toBeFocused();
+    await expect(page.locator('#sign-up-unbound')).toBeHidden();
+
+    // * stopping at a violation still lets a valid request go
+    await page.getByRole('button', { name: 'Fill a valid one' }).click();
+    await page.getByRole('button', { name: 'Sign up' }).click();
+    await expect(page.locator('#sign-up-status')).toHaveText(/^signed up: /u);
+    await expect(page.locator('[aria-invalid]')).toHaveCount(0);
+    await expect(requestsOf(page)).toHaveCount(1);
+  });
+
   test('shows a violation of no field above the form, and focuses it', async ({ page }) => {
     await page.locator('#sign-up-phone').fill('+15550100123');
     await page.getByRole('button', { name: 'Sign up' }).click();

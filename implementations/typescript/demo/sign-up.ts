@@ -127,9 +127,10 @@ const closingOf = ({ more, stopped }: IReadViolations): string => {
  * which judges it first when "Validate before sending" is checked.
  */
 export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void => {
-  // a form and a checkbox, as the page declares them
+  // a form and its judging options, as the page declares them
   const form = elementOf('sign-up') as HTMLFormElement;
   const validates = elementOf('sign-up-validates') as HTMLInputElement;
+  const failFast = elementOf('sign-up-fail-fast') as HTMLInputElement;
   // * an alert holding a list, so the list keeps its semantics
   const unbound = elementOf('sign-up-unbound');
   const unboundList = elementOf('sign-up-unbound-list');
@@ -149,6 +150,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
   // * one client side a way of sending: `validates` is each's, as it is built
   const sent = new SignUpClient(client);
   const judged = new SignUpClient(client, { validates: true });
+  const firstJudged = new SignUpClient(client, { failFast: true, validates: true });
 
   // a field as it was before any refusal: described by its hint alone
   const clearField = ({ hint, input, messages }: IField): void => {
@@ -256,7 +258,7 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
 
   const send = async (): Promise<void> => {
     const isJudged = validates.checked;
-    const requester = isJudged ? judged : sent;
+    const requester = isJudged ? (failFast.checked ? firstJudged : judged) : sent;
 
     clearAll();
     status.textContent = isJudged ? 'judging, then sending…' : 'sending…';
@@ -301,6 +303,10 @@ export const mountSignUp = (client: IClient, { reasonOf }: ISignUpOptions): void
       showRequest();
     });
   }
+
+  validates.addEventListener('change', () => {
+    failFast.disabled = !validates.checked;
+  });
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
