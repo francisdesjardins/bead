@@ -1664,6 +1664,57 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+test('drops a late notification after an unreadable notification starts ending its stream', async () => {
+  const firstWritten = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  await using fixture = await startTranscoding({
+    window: 1,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            notification: EdgesSchema,
+            procedure: { ...init.procedure, notification: TranscodingProcedures.echoEdges.result },
+          }
+        : init;
+    }),
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+
+        response.write = (chunk: Uint8Array): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          firstWritten.resolve();
+
+          return write(chunk);
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const answering = send(fixture.port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+
+  await firstWritten.promise;
+  await fixture.watched(1);
+  const answered = await answering;
+
+  await fixture.watched(0);
+  expect(answered.status).toBe(200);
+  expect(answered.body).toBe(
+    'event: result\nid: 1\ndata: {}\n\nevent: failure\nid: 2\ndata: {"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}\n\n'
+  );
+  expect(chunks).toHaveLength(2);
+  expect(reported).toHaveLength(1);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
 test('waits for a stream response to drain before writing its next event', async () => {
   const waiting = Promise.withResolvers<void>();
   const chunks: string[] = [];

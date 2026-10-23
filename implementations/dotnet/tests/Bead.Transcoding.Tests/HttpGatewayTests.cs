@@ -1621,6 +1621,72 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Drops_a_late_notification_after_an_unreadable_notification_starts_ending_its_stream()
+    {
+        await using var service = await TranscodingService.Start();
+        var options = Exchanges.OptionsOf(service.Memory, null);
+        await using var gateway = new HttpGateway(options with
+        {
+            Window = 1,
+            Routes = [.. options.Routes.Select((route) =>
+            {
+                return route.Procedure == TranscodingProcedures.Watch.Procedure
+                    ? route with { Notification = HttpPayload.Of(Edges.Descriptor) }
+                    : route;
+            })],
+        });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldResponseBody { HoldFailure = true };
+        var context = new DefaultHttpContext();
+        var reported = ReportedBy(gateway);
+        var firstCredited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextCredited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        service.Server.Router.Debug += (direction, envelope) =>
+        {
+            if (direction == DebugDirection.Rx && envelope.Header is CreditHeader { Paced: true } credit)
+            {
+                if (credit.CreditEnd >= 2) { firstCredited.TrySetResult(); }
+                if (credit.CreditEnd >= 3) { nextCredited.TrySetResult(); }
+            }
+        };
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.Headers.Accept = "text/event-stream";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/watch";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.FirstWritten.Task.WaitAsync(Patience, Cancelled);
+            await service.Watched(1);
+            await body.Writing.Task.WaitAsync(Patience, Cancelled);
+            await firstCredited.Task.WaitAsync(Patience, Cancelled);
+            await service.Watched(0);
+            await nextCredited.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(2, body.Writes);
+            Assert.Single(reported);
+            body.Released.TrySetResult();
+            await serving.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\nevent: failure\nid: 2\ndata: {\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    [Fact]
     public async Task Waits_for_a_stream_response_to_drain_before_writing_its_next_event()
     {
         await using var service = await TranscodingService.Start();
@@ -1665,7 +1731,11 @@ public sealed class HttpGatewayTests
 
     private sealed class HeldResponseBody : MemoryStream
     {
+        public bool HoldFailure { get; init; }
+
         public TaskCompletionSource Writing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource FirstWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1677,13 +1747,20 @@ public sealed class HttpGatewayTests
         {
             Writes += 1;
 
-            if (Writes == 1)
+            if (HoldFailure
+                ? Encoding.UTF8.GetString(buffer.Span).StartsWith("event: failure", StringComparison.Ordinal)
+                : Writes == 1)
             {
                 Writing.TrySetResult();
                 await Released.Task.WaitAsync(cancellationToken);
             }
 
             await base.WriteAsync(buffer, cancellationToken);
+
+            if (Writes == 1)
+            {
+                FirstWritten.TrySetResult();
+            }
 
             if (Writes == 2)
             {
