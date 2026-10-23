@@ -1733,6 +1733,68 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Drops_a_notification_while_an_unreadable_notification_holds_its_streams_end_before_the_result()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        var options = Exchanges.OptionsOf(memory, null);
+        await using var gateway = new HttpGateway(options with
+        {
+            Window = 2,
+            Routes = [.. options.Routes.Select((route) =>
+            {
+                return route.Procedure == TranscodingProcedures.Watch.Procedure
+                    ? route with { Notification = HttpPayload.Of(Edges.Descriptor) }
+                    : route;
+            })],
+        });
+        var reported = ReportedBy(gateway);
+        var requests = 0;
+
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+
+            if (envelope?.Header is not RequestHeader header)
+            {
+                return;
+            }
+
+            Interlocked.Increment(ref requests);
+
+            // * both callbacks precede the result: the first holds the end, the second must drop.
+            foreach (var payload in new byte[][] { [8, 1], [] })
+            {
+                _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope
+                {
+                    Header = new NotificationHeader { CallId = header.CallId },
+                    Payload = payload,
+                }), false), connectionHandle);
+            }
+
+            _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(new Envelope
+            {
+                Header = new ResultHeader { CallId = header.CallId },
+            }), false), connectionHandle);
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/Transcoding/watch")
+        {
+            Content = new StringContent("{}", Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        using var answered = await client.SendAsync(request, Cancelled);
+
+        Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
+        Assert.Equal("text/event-stream", answered.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("event: result\nid: 1\ndata: {}\n\nevent: failure\nid: 2\ndata: {\"code\":50,\"scope\":\"protocol\",\"status\":502,\"title\":\"PAYLOAD_UNDECODABLE\",\"type\":\"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE\"}\n\n", await answered.Content.ReadAsStringAsync(Cancelled));
+        Assert.Equal(1, requests);
+        Assert.Single(reported);
+        await Until(() => { return memory.ConnectionHandles.Count == 0; });
+    }
+
+    [Fact]
     public async Task Drops_a_late_notification_after_an_unreadable_notification_starts_ending_its_stream()
     {
         await using var service = await TranscodingService.Start();

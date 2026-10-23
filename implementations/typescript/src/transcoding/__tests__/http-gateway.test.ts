@@ -13,6 +13,8 @@ import { connect, type Socket } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { create, toBinary } from '@bufbuild/protobuf';
 import { expect, test } from '@playwright/test';
+import { EnvelopeKind, LIMIT_DEFAULTS, SERVER_FAILURES } from '../../router/shared/constants';
+import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { httpPolicyOf } from '../../transport/server/http-policy';
 import { createMemoryTransportServer } from '../../transport/server/memory-transport-server';
 import type { IHTTPRequestLike, IHTTPResponseLike } from '../../transport/server/types';
@@ -1784,6 +1786,82 @@ test('leaves a response whose application sends its headers before the gateway a
   expect(reported).toEqual([]);
   await until(() => {
     return fixture.memory.clients.length === 0;
+  });
+});
+
+test('drops a notification while an unreadable notification holds its stream’s end before the result', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    routes: HTTP_ROUTES.map((init) => {
+      return init.procedure === TranscodingProcedures.watch
+        ? {
+            ...init,
+            notification: EdgesSchema,
+            procedure: { ...init.procedure, notification: TranscodingProcedures.echoEdges.result },
+          }
+        : init;
+    }),
+    transport: memory,
+    window: 2,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind !== EnvelopeKind.REQUEST) {
+      return;
+    }
+
+    requests += 1;
+    const { callId } = envelope.header;
+
+    // * both callbacks precede the result: the first holds the end, the second must drop.
+    for (const payload of [new Uint8Array([8, 1]), new Uint8Array()]) {
+      void memory.send(
+        {
+          data: writeEnvelope({
+            header: { callId, kind: EnvelopeKind.NOTIFICATION },
+            kind: EnvelopeKind.NOTIFICATION,
+            payload,
+          }),
+        },
+        connectionHandle
+      );
+    }
+    void memory.send(
+      {
+        data: writeEnvelope({
+          header: { callId, kind: EnvelopeKind.RESULT },
+          kind: EnvelopeKind.RESULT,
+          payload: new Uint8Array(),
+        }),
+      },
+      connectionHandle
+    );
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  const answered = await send(port, {
+    body: '{}',
+    headers: { accept: 'text/event-stream' },
+    path: '/api/Transcoding/watch',
+  });
+
+  expect(answered.status).toBe(200);
+  expect(answered.headers['content-type']).toBe('text/event-stream');
+  expect(answered.body).toBe(
+    'event: result\nid: 1\ndata: {}\n\nevent: failure\nid: 2\ndata: {"code":50,"scope":"protocol","status":502,"title":"PAYLOAD_UNDECODABLE","type":"tag:francisdesjardins.ca,2026:bead/PAYLOAD_UNDECODABLE"}\n\n'
+  );
+  expect(requests).toBe(1);
+  expect(reported).toHaveLength(1);
+  await until(() => {
+    return memory.clients.length === 0;
   });
 });
 
