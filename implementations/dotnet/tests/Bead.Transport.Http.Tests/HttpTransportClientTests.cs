@@ -3516,6 +3516,34 @@ public sealed class HttpTransportClientTests
     // the WebSocket transport client's test cancels from a hook as its attempt opens; here the
     // attempt's answer comes after its token was cancelled, a handler deaf to it handing it on
     [Fact]
+    public async Task Propagates_an_unexpected_send_failure_without_leaving_the_send_pending()
+    {
+        await using var faked = await ConnectFake(NotListening);
+        var failure = new InvalidOperationException("the handler cannot carry the request");
+        var told = EndOf(faked.Client);
+        var sending = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (1, 0)), false));
+
+        (await faked.Fetch.CallOf(1)).Fail(failure);
+
+        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return sending.WaitAsync(Patience, Cancelled);
+        }));
+        Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
+        Assert.Empty(told);
+        Assert.Empty(faked.Heard);
+
+        var next = faked.Client.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Request, (2, 0)), false));
+
+        (await faked.Fetch.CallOf(2)).Answer(new Answer { Status = 204 });
+        await next.WaitAsync(Patience, Cancelled);
+
+        Assert.Equal(ReadyState.Open, faked.Client.ReadyState);
+        Assert.Empty(told);
+        Assert.Equal(3, faked.Fetch.Count);
+    }
+
+    [Fact]
     public async Task Disconnects_and_throws_an_OperationCanceledException_when_cancelled_once_its_attempt_opened()
     {
         using var source = new CancellationTokenSource();
