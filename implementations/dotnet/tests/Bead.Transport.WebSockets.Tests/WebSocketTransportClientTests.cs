@@ -1169,6 +1169,57 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Opens_no_connection_when_its_credential_provider_settles_after_cancellation()
+    {
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var errors = new List<Exception>();
+        var closes = ClosesOf(_client);
+        var opened = 0;
+
+        _client.Error += errors.Add;
+        _client.Opened += () =>
+        {
+            opened += 1;
+        };
+
+        var connecting = _client.Connect(Target with
+        {
+            CredentialProvider = (token) =>
+            {
+                entered.TrySetResult(token);
+
+                return new ValueTask<string>(answer.Task);
+            },
+        }, cancelling.Token);
+        var providerToken = await entered.Task.WaitAsync(Patience, Cancelled);
+
+        try
+        {
+            await cancelling.CancelAsync();
+            Assert.True(providerToken.IsCancellationRequested);
+        }
+        finally
+        {
+            // .NET awaits the provider itself; its cancelled handshake follows that answer.
+            answer.TrySetResult(Bearer);
+        }
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return connecting.WaitAsync(Patience, Cancelled);
+        });
+        Assert.Equal(ReadyState.Closed, _client.ReadyState);
+        Assert.False(_client.Carries(Bearer));
+        Assert.Equal(0, opened);
+        Assert.Empty(_server.ConnectionHandles);
+        Assert.Equal(0, _connections.Reader.Count);
+        Assert.Equal(0, closes.Reader.Count);
+        Assert.Empty(errors);
+    }
+
+    [Fact]
     public async Task Refuses_a_credential_and_a_credential_provider_given_together()
     {
         var both = Target with

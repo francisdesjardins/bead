@@ -1381,6 +1381,58 @@ test.describe('WSTransportClient, what it carries', () => {
     expect([called, provided.isClosed(), heard]).toEqual([2, true, [[BEARER]]]);
   });
 
+  test('opens no connection when its credential provider settles after cancellation', async () => {
+    await using hearing = await startRefusing();
+    const heard = upgradesOf(hearing);
+    const entered = Promise.withResolvers<AbortSignal>();
+    const answer = Promise.withResolvers<string>();
+    const cancelling = new AbortController();
+    const errors: Error[] = [];
+    const closes: boolean[][] = [];
+    const before = sockets.size;
+    await using client = createWSTransportClient({ WebSocket: Ws });
+
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+    client.on('close', (...flags) => {
+      closes.push(flags);
+    });
+
+    const connecting = client.connect({
+      credentialProvider: ({ signal }) => {
+        entered.resolve(signal);
+
+        return answer.promise;
+      },
+      host,
+      port: hearing.port,
+      signal: cancelling.signal,
+    });
+    const cancelled = expect(connecting).rejects.toBeInstanceOf(CancelError);
+    const providerSignal = await entered.promise;
+
+    try {
+      cancelling.abort();
+      await cancelled;
+      expect(providerSignal.aborted).toBe(true);
+    } finally {
+      answer.resolve(BEARER);
+    }
+
+    // * past the provider's continuation: a cancelled attempt never constructs its socket.
+    await new Promise(setImmediate);
+
+    expect([client.isClosed(), client.carries(BEARER), heard, errors, closes]).toEqual([
+      true,
+      false,
+      [],
+      [],
+      [],
+    ]);
+    expect(sockets.size).toBe(before);
+  });
+
   test('refuses a credential and a credential provider given together', async () => {
     const client = createWSTransportClient({ WebSocket: Ws });
 
