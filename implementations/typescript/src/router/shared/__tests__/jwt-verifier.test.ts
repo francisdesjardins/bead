@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 import { ProgrammerError } from '../../../transport/shared/errors';
-import { type IJwtKey, type JwtAlgorithm, verifyJwt } from '../jwt-verifier';
+import { type IJwtKey, type JwtAlgorithm, readJwt, verifyJwt } from '../jwt-verifier';
 import { VECTORS } from './vectors';
 
 // helpers
@@ -79,6 +79,63 @@ const readingOf = (instant: number | string): (() => number) => {
 test.describe.configure({ retries: 0 });
 
 test.describe('verifyJwt', () => {
+  test('refuses an HS256 signature of the wrong byte length before reading the clock', async () => {
+    const { audience, keys, now, token } = HOLDING;
+    const [header = '', claims = '', encoded = ''] = token.split('.');
+    const signature = Buffer.from(encoded, 'base64url');
+    let reads = 0;
+    const reading = (): number => {
+      reads += 1;
+
+      return readingOf(now)();
+    };
+
+    expect(signature).toHaveLength(32);
+
+    for (const length of [31, 33]) {
+      const bytes = Buffer.alloc(length);
+
+      signature.copy(bytes);
+
+      const malformed = `${header}.${claims}.${bytes.toString('base64url')}`;
+
+      expect(await verifyJwt(malformed, { audience, keys, now: reading })).toEqual({
+        holds: false,
+        reason: 'signature',
+      });
+      expect(reads).toBe(0);
+    }
+
+    expect(await verifyJwt(token, { audience, keys, now: reading })).toMatchObject({ holds: true });
+    expect(reads).toBe(1);
+  });
+
+  test('reads unverified JWTs only when all three parts decode', () => {
+    const [header = '', claims = ''] = HOLDING.token.split('.');
+    const encode = (text: string): string => {
+      return Buffer.from(text).toString('base64url');
+    };
+
+    for (const token of [
+      '',
+      'a.b',
+      `${header}.${claims}.AA.extra`,
+      `${encode('[]')}.${claims}.AA`,
+      `${encode('no JSON')}.${claims}.AA`,
+      `${header}.${encode('[]')}.AA`,
+      `${header}.${encode('no JSON')}.AA`,
+      `${header}.${claims}.*`,
+    ]) {
+      expect(readJwt(token), token).toBeUndefined();
+    }
+
+    // * a one-byte signature is readable here: only the verifier judges its signature.
+    expect(readJwt(`${header}.${claims}.AA`)).toEqual({
+      claims: JSON.parse(Buffer.from(claims, 'base64url').toString()) as unknown,
+      header: JSON.parse(Buffer.from(header, 'base64url').toString()) as unknown,
+    });
+  });
+
   for (const { audience, keys, name, now, token, verdict } of VECTORS.jwtVerdicts) {
     test(`gives each JWT its verdict: ${name}`, async () => {
       expect(await verifyJwt(token, { audience, keys, now: readingOf(now) })).toEqual(verdict);
