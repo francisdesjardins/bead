@@ -18,7 +18,11 @@ import {
   ValueSchema,
 } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
-import { PresenceSchema } from '../../proto/__tests__/generated/validations_pb';
+import {
+  MapsSchema,
+  PresenceSchema,
+  type Maps,
+} from '../../proto/__tests__/generated/validations_pb';
 import { ProgrammerError } from '../../transport/shared/errors';
 import {
   base64Of,
@@ -166,6 +170,47 @@ test('refuses an Empty value that is not an object', () => {
 
     expect(refused).toBeInstanceOf(JsonFormError);
     expect(refused).toMatchObject({ pointer: '#', reason: 'an Empty that is no object' });
+  }
+});
+
+test('reads unsigned 64-bit map keys exactly and refuses keys outside their bounds', () => {
+  for (const [field, kind] of [
+    ['byUint64', 'uint64'],
+    ['byFixed64', 'fixed64'],
+  ] as const) {
+    const read = (body: string) => {
+      return readProtoJson(MapsSchema, { bytes: ENCODER.encode(body), registry: REGISTRY }) as Maps;
+    };
+    const message = read(
+      `{"${field}":{"9007199254740993":"large","18446744073709551615":"max","0":"zero"}}`
+    );
+    const expected = create(MapsSchema, {
+      [field]: { '0': 'zero', '9007199254740993': 'large', '18446744073709551615': 'max' },
+    });
+
+    expect(message).toEqual(expected);
+    expect(fromBinary(MapsSchema, toBinary(MapsSchema, message))).toEqual(expected);
+    expect(writeProtoJson(MapsSchema, { message, registry: REGISTRY })).toBe(
+      `{"${field}":{"0":"zero","18446744073709551615":"max","9007199254740993":"large"}}`
+    );
+
+    for (const [key, reason] of [
+      ['-1', `a ${kind} key past its range`],
+      ['18446744073709551616', `a ${kind} key past its range`],
+      ['01', `a ${kind} key off -?(0|[1-9][0-9]*)`],
+      ['1e3', `a ${kind} key off -?(0|[1-9][0-9]*)`],
+    ]) {
+      let refused: unknown;
+
+      try {
+        read(`{"${field}":{"${key}":"x"}}`);
+      } catch (error) {
+        refused = error;
+      }
+
+      expect(refused).toBeInstanceOf(JsonFormError);
+      expect(refused).toMatchObject({ pointer: `#/${field}/${key}`, reason });
+    }
   }
 });
 

@@ -93,6 +93,41 @@ public sealed class JsonFormTests
     }
 
     [Fact]
+    public void Reads_unsigned_64_bit_map_keys_exactly_and_refuses_keys_outside_their_bounds()
+    {
+        foreach (var (field, kind) in new[] { ("byUint64", "uint64"), ("byFixed64", "fixed64") })
+        {
+            var message = Assert.IsType<Bead.Validations.V1.Maps>(Read<Bead.Validations.V1.Maps>($"{{\"{field}\":{{\"9007199254740993\":\"large\",\"18446744073709551615\":\"max\",\"0\":\"zero\"}}}}"));
+            var expected = new Bead.Validations.V1.Maps();
+            var entries = field == "byUint64" ? expected.ByUint64 : expected.ByFixed64;
+
+            entries.Add(0, "zero");
+            entries.Add(9_007_199_254_740_993, "large");
+            entries.Add(ulong.MaxValue, "max");
+            Assert.Equal(expected, message);
+            Assert.Equal(expected, Bead.Validations.V1.Maps.Parser.ParseFrom(message.ToByteArray()));
+            Assert.Equal($"{{\"{field}\":{{\"0\":\"zero\",\"18446744073709551615\":\"max\",\"9007199254740993\":\"large\"}}}}", Written(message));
+
+            foreach (var (key, reason) in new[]
+            {
+                ("-1", $"a {kind} key past its range"),
+                ("18446744073709551616", $"a {kind} key past its range"),
+                ("01", $"a {kind} key off -?(0|[1-9][0-9]*)"),
+                ("1e3", $"a {kind} key off -?(0|[1-9][0-9]*)"),
+            })
+            {
+                var refused = Assert.Throws<JsonFormException>(() =>
+                {
+                    Read<Bead.Validations.V1.Maps>($"{{\"{field}\":{{\"{key}\":\"x\"}}}}");
+                });
+
+                Assert.Equal(reason, refused.Message);
+                Assert.Equal($"#/{field}/{key}", refused.Pointer);
+            }
+        }
+    }
+
+    [Fact]
     public void Reads_a_proto_body_by_Bead_s_mapping_each_scalar_and_well_known_form_as_pinned()
     {
         // * a field by either name, a 64-bit integer exactly from its digits, base64 of either alphabet
