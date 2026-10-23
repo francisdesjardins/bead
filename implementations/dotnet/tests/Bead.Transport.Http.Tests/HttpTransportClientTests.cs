@@ -3516,6 +3516,35 @@ public sealed class HttpTransportClientTests
     // the WebSocket transport client's test cancels from a hook as its attempt opens; here the
     // attempt's answer comes after its token was cancelled, a handler deaf to it handing it on
     [Fact]
+    public async Task Releases_a_replacement_opened_by_its_close_listener_before_dispose_completes()
+    {
+        var fetch = new Fetch((call) =>
+        {
+            return call.Method == HttpMethod.Post ? DrawnOf(false) : new Answer { Status = 204 };
+        });
+        await using var faked = await ConnectFake(NotListening, fetch);
+        var told = EndOf(faked.Client);
+        Task? replacement = null;
+
+        faked.Client.Close += (_, _) =>
+        {
+            replacement = faked.Client.Connect(new HttpConnectOptions { Host = Host, Port = 8_080 }, Cancelled);
+        };
+
+        await faked.Client.DisposeAsync().AsTask().WaitAsync(Patience, Cancelled);
+
+        Assert.NotNull(replacement);
+        await replacement.WaitAsync(Patience, Cancelled);
+        Assert.Equal(ReadyState.Closed, faked.Client.ReadyState);
+        Assert.Equal(["close True False"], told);
+        Assert.Empty(faked.Heard);
+        Assert.Equal([HttpMethod.Post, HttpMethod.Delete, HttpMethod.Post, HttpMethod.Delete], fetch.Calls.Select((call) =>
+        {
+            return call.Method;
+        }));
+    }
+
+    [Fact]
     public async Task Propagates_an_unexpected_send_failure_without_leaving_the_send_pending()
     {
         await using var faked = await ConnectFake(NotListening);
