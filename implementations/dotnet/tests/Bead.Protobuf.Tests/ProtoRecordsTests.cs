@@ -10,6 +10,20 @@ namespace Bead.Protobuf.Tests;
 /// </summary>
 public sealed class ProtoRecordsTests
 {
+    [Fact]
+    public void Refuses_reserved_wire_types_on_unknown_fields_as_well_as_known_fields()
+    {
+        foreach (var hexadecimal in new[] { "A0 06 01", "1A 03 A0 06 01" })
+        {
+            ProtoRecords.Check(BytesOf(hexadecimal), Probe.Descriptor);
+        }
+
+        foreach (var hexadecimal in new[] { "0E", "0F", "A6 06", "A7 06", "1A 02 A6 06", "1A 02 A7 06" })
+        {
+            Refuses(hexadecimal);
+        }
+    }
+
     // helpers
 
     // bytes as the conformance files write them, in hexadecimal, a space between two
