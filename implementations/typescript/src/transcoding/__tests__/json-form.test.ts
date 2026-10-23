@@ -10,6 +10,7 @@ import {
 import {
   AnySchema,
   EmptySchema,
+  FieldDescriptorProtoSchema,
   Int32ValueSchema,
   Int64ValueSchema,
   ListValueSchema,
@@ -115,6 +116,72 @@ const writeEdges = (init: Parameters<typeof create<typeof EdgesSchema>>[1]): str
 };
 
 // tests
+
+test('refuses unknown numbers of a closed enum and keeps open enum numbers', () => {
+  const read = (body: string) => {
+    return readProtoJson(FieldDescriptorProtoSchema, {
+      bytes: ENCODER.encode(body),
+      registry: REGISTRY,
+    });
+  };
+
+  for (const body of ['{"type":1}', '{"type":"TYPE_DOUBLE"}']) {
+    const message = read(body);
+
+    expect(message).toEqual(create(FieldDescriptorProtoSchema, { type: 1 }));
+    expect(writeProtoJson(FieldDescriptorProtoSchema, { message, registry: REGISTRY })).toBe(
+      '{"type":"TYPE_DOUBLE"}'
+    );
+  }
+
+  for (const body of ['{"type":0}', '{"type":999}']) {
+    let refused: unknown;
+
+    try {
+      read(body);
+    } catch (error) {
+      refused = error;
+    }
+
+    expect(refused).toBeInstanceOf(JsonFormError);
+    expect(refused).toMatchObject({
+      pointer: '#/type',
+      reason: 'no value of Type of that number',
+    });
+  }
+
+  expect(readEdges('{"aliased":7}').aliased).toBe(7);
+  expect(writeEdges({ aliased: 7 as Aliased })).toBe('{"aliased":7}');
+});
+
+test('refuses an Empty value that is not an object', () => {
+  for (const body of ['1', '[]']) {
+    let refused: unknown;
+
+    try {
+      readProtoJson(EmptySchema, { bytes: ENCODER.encode(body), registry: REGISTRY });
+    } catch (error) {
+      refused = error;
+    }
+
+    expect(refused).toBeInstanceOf(JsonFormError);
+    expect(refused).toMatchObject({ pointer: '#', reason: 'an Empty that is no object' });
+  }
+});
+
+test('reads the limits of unsigned 64-bit numbers without rounding', () => {
+  for (const digits of ['0', '9007199254740993', '18446744073709551615']) {
+    for (const value of [digits, `"${digits}"`]) {
+      expect(readEverything(`{"aUint64":${value}}`).aUint64).toBe(BigInt(digits));
+    }
+  }
+
+  for (const value of ['-1', '18446744073709551616']) {
+    expect(() => {
+      return readEverything(`{"aUint64":${value}}`);
+    }).toThrow('a uint64 past its range');
+  }
+});
 
 test('reads a proto body by Bead’s mapping, each scalar and well-known form as pinned', () => {
   const everything = readEverything(

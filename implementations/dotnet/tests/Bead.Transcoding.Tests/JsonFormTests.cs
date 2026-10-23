@@ -1,6 +1,7 @@
 using System.Text;
 using Bead.Transcoding.V1;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 using Google.Protobuf.WellKnownTypes;
 using static Bead.Transcoding.Tests.TranscodingFile;
 
@@ -31,6 +32,64 @@ public sealed class JsonFormTests
         {
             Read<TMessage>(body);
         }).Message);
+    }
+
+    [Fact]
+    public void Refuses_unknown_numbers_of_a_closed_enum_and_keeps_open_enum_numbers()
+    {
+        foreach (var body in new[] { "{\"type\":1}", "{\"type\":\"TYPE_DOUBLE\"}" })
+        {
+            var message = Read<FieldDescriptorProto>(body);
+
+            Assert.Equal(new FieldDescriptorProto { Type = FieldDescriptorProto.Types.Type.Double }, message);
+            Assert.Equal("{\"type\":\"TYPE_DOUBLE\"}", Written(message));
+        }
+
+        foreach (var body in new[] { "{\"type\":0}", "{\"type\":999}" })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                Read<FieldDescriptorProto>(body);
+            });
+
+            Assert.Equal("no value of Type of that number", refused.Message);
+            Assert.Equal("#/type", refused.Pointer);
+        }
+
+        Assert.Equal((Aliased)7, Assert.IsType<Edges>(Read<Edges>("{\"aliased\":7}")).Aliased);
+        Assert.Equal("{\"aliased\":7}", Written(new Edges { Aliased = (Aliased)7 }));
+    }
+
+    [Fact]
+    public void Refuses_an_Empty_value_that_is_not_an_object()
+    {
+        foreach (var body in new[] { "1", "[]" })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                Read<Empty>(body);
+            });
+
+            Assert.Equal("an Empty that is no object", refused.Message);
+            Assert.Equal("#", refused.Pointer);
+        }
+    }
+
+    [Fact]
+    public void Reads_the_limits_of_unsigned_64_bit_numbers_without_rounding()
+    {
+        foreach (var digits in new[] { "0", "9007199254740993", "18446744073709551615" })
+        {
+            foreach (var value in new[] { digits, $"\"{digits}\"" })
+            {
+                Assert.Equal(ulong.Parse(digits, System.Globalization.CultureInfo.InvariantCulture), Assert.IsType<Everything>(Read<Everything>($"{{\"aUint64\":{value}}}")).AUint64);
+            }
+        }
+
+        foreach (var value in new[] { "-1", "18446744073709551616" })
+        {
+            Refused<Everything>($"{{\"aUint64\":{value}}}", "a uint64 past its range");
+        }
     }
 
     [Fact]
