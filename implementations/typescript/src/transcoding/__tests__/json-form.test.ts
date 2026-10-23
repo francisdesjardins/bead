@@ -11,11 +11,13 @@ import {
   AnySchema,
   EmptySchema,
   FieldDescriptorProtoSchema,
+  FieldOptionsSchema,
   Int32ValueSchema,
   Int64ValueSchema,
   ListValueSchema,
   StringValueSchema,
   ValueSchema,
+  type FieldOptions,
 } from '@bufbuild/protobuf/wkt';
 import { expect, test } from '@playwright/test';
 import {
@@ -120,6 +122,39 @@ const writeEdges = (init: Parameters<typeof create<typeof EdgesSchema>>[1]): str
 };
 
 // tests
+
+test('reads enum lists by name or number and refuses an invalid member at its index', () => {
+  const expected = create(FieldOptionsSchema, { targets: [1, 4] });
+
+  for (const body of [
+    '{"targets":[1,4]}',
+    '{"targets":["TARGET_TYPE_FILE","TARGET_TYPE_FIELD"]}',
+  ]) {
+    const message = readProtoJson(FieldOptionsSchema, {
+      bytes: ENCODER.encode(body),
+      registry: REGISTRY,
+    }) as FieldOptions;
+
+    expect(message).toEqual(expected);
+    expect(fromBinary(FieldOptionsSchema, toBinary(FieldOptionsSchema, message))).toEqual(expected);
+    expect(writeProtoJson(FieldOptionsSchema, { message, registry: REGISTRY })).toBe(
+      '{"targets":["TARGET_TYPE_FILE","TARGET_TYPE_FIELD"]}'
+    );
+  }
+
+  for (const [member, reason] of [
+    ['999', 'no value of OptionTargetType of that number'],
+    ['"NOPE"', 'no value of OptionTargetType of that name'],
+    ['true', 'no OptionTargetType'],
+  ]) {
+    expect(() => {
+      readProtoJson(FieldOptionsSchema, {
+        bytes: ENCODER.encode(`{"targets":[1,${member}]}`),
+        registry: REGISTRY,
+      });
+    }).toThrow(expect.objectContaining({ pointer: '#/targets/1', reason }));
+  }
+});
 
 test('refuses unknown numbers of a closed enum and keeps open enum numbers', () => {
   const read = (body: string) => {

@@ -35,6 +35,40 @@ public sealed class JsonFormTests
     }
 
     [Fact]
+    public void Reads_enum_lists_by_name_or_number_and_refuses_an_invalid_member_at_its_index()
+    {
+        var expected = new FieldOptions
+        {
+            Targets = { (FieldOptions.Types.OptionTargetType)1, (FieldOptions.Types.OptionTargetType)4 },
+        };
+
+        foreach (var body in new[] { "{\"targets\":[1,4]}", "{\"targets\":[\"TARGET_TYPE_FILE\",\"TARGET_TYPE_FIELD\"]}" })
+        {
+            var message = Assert.IsType<FieldOptions>(Read<FieldOptions>(body));
+
+            Assert.Equal(expected, message);
+            Assert.Equal(expected, FieldOptions.Parser.ParseFrom(message.ToByteArray()));
+            Assert.Equal("{\"targets\":[\"TARGET_TYPE_FILE\",\"TARGET_TYPE_FIELD\"]}", Written(message));
+        }
+
+        foreach (var (member, reason) in new[]
+        {
+            ("999", "no value of OptionTargetType of that number"),
+            ("\"NOPE\"", "no value of OptionTargetType of that name"),
+            ("true", "no OptionTargetType"),
+        })
+        {
+            var refused = Assert.Throws<JsonFormException>(() =>
+            {
+                Read<FieldOptions>($"{{\"targets\":[1,{member}]}}");
+            });
+
+            Assert.Equal(reason, refused.Message);
+            Assert.Equal("#/targets/1", refused.Pointer);
+        }
+    }
+
+    [Fact]
     public void Refuses_unknown_numbers_of_a_closed_enum_and_keeps_open_enum_numbers()
     {
         foreach (var body in new[] { "{\"type\":1}", "{\"type\":\"TYPE_DOUBLE\"}" })
