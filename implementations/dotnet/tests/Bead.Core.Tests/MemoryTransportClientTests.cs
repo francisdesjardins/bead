@@ -491,6 +491,67 @@ public sealed class MemoryTransportClientTests
     }
 
     [Fact]
+    public async Task Closes_a_successful_last_attempt_when_its_reconnection_is_cancelled_after_it_opens()
+    {
+        foreach (var closedBeforeCancel in new[] { false, true })
+        {
+            var scheduler = new SerialScheduler();
+            var clock = new CompletingClock();
+            await using var server = new MemoryTransportServer(new MemoryTransportServerOptions { Scheduler = scheduler });
+            await using var client = new MemoryTransportClient(new MemoryTransportClientOptions { Clock = clock, Scheduler = scheduler });
+            using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+            var closedAtClient = new List<(bool IsClean, bool IsQuick)>();
+            var closedAtServer = new List<bool>();
+            var errors = new List<Exception>();
+            var opened = 0;
+
+            await server.Start();
+            await client.Connect(new MemoryConnectOptions { Server = server }, Cancelled);
+            client.Close += (isClean, isQuick) =>
+            {
+                closedAtClient.Add((isClean, isQuick));
+            };
+            server.Close += (isClean, _) =>
+            {
+                closedAtServer.Add(isClean);
+            };
+            client.Error += errors.Add;
+            server.Error += (reason, _) =>
+            {
+                errors.Add(reason);
+            };
+
+            // ! the attempt disposes its timeout after publishing Open, before it returns to Reconnect
+            clock.OnTimerDisposed = () =>
+            {
+                Assert.Equal(ReadyState.Open, client.ReadyState);
+                opened += 1;
+
+                if (closedBeforeCancel)
+                {
+                    Assert.True(client.CloseConnection().IsCompletedSuccessfully);
+                }
+
+                cancelling.Cancel();
+            };
+            var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            {
+                return client.Reconnect(new TransportReconnectOptions { CancellationToken = cancelling.Token, MaximumAttempts = 1 });
+            });
+            await scheduler.WhenIdle().WaitAsync(Patience, Cancelled);
+
+            Assert.Equal("the reconnection was cancelled", cancelled.Message);
+            Assert.Equal(cancelling.Token, cancelled.CancellationToken);
+            Assert.Equal(1, opened);
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            Assert.Equal([(true, false)], closedAtClient);
+            Assert.Equal([false, true], closedAtServer);
+            Assert.Empty(server.ConnectionHandles);
+            Assert.Empty(errors);
+        }
+    }
+
+    [Fact]
     public async Task Gives_up_a_connect_its_dispose_its_token_or_its_clock_ends_before_its_server_drew_it()
     {
         var clock = new FakeTimeProvider();
@@ -741,6 +802,41 @@ public sealed class MemoryTransportClientTests
             Assert.Empty(heard);
             Assert.Equal(["True False"], closedAtClient);
             Assert.Equal(["True"], closedAtServer);
+        }
+    }
+
+    // a timeout's release, at a connect's return, is a deterministic seam after it publishes Open
+    private sealed class CompletingClock : TimeProvider
+    {
+        public Action? OnTimerDisposed { get; set; }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return new CompletingTimer(TimeProvider.System.CreateTimer(callback, state, dueTime, period), this);
+        }
+
+        private sealed class CompletingTimer(ITimer timer, CompletingClock clock) : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                return timer.Change(dueTime, period);
+            }
+
+            public void Dispose()
+            {
+                timer.Dispose();
+                var completing = clock.OnTimerDisposed;
+
+                clock.OnTimerDisposed = null;
+                completing?.Invoke();
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+
+                return ValueTask.CompletedTask;
+            }
         }
     }
 

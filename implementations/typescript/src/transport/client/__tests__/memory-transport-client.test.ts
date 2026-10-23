@@ -620,6 +620,70 @@ test.describe('createMemoryTransportClient', () => {
   });
 
   // spec 15.13
+  test('closes a successful last attempt when its reconnection is cancelled after it opens', async () => {
+    for (const closedBeforeCancel of [false, true]) {
+      await using server = createMemoryTransportServer();
+      await using client = createMemoryTransportClient({ server });
+      const cancelling = new AbortController();
+      const closedAtClient: [boolean, boolean][] = [];
+      const closedAtServer: boolean[] = [];
+      const errors: Error[] = [];
+      const sent: Promise<void>[] = [];
+      const closing: Promise<void>[] = [];
+      let opened = 0;
+
+      await server.start();
+      await client.connect({});
+      client.on('close', (isClean, isQuick) => {
+        closedAtClient.push([isClean, isQuick]);
+      });
+      server.on('close', (isClean) => {
+        closedAtServer.push(isClean);
+      });
+      client.on('error', (reason) => {
+        errors.push(reason);
+      });
+      server.on('error', (reason) => {
+        errors.push(reason);
+      });
+
+      // ! an early message is delivered after Open, within the successful connect's own turn
+      server.on('connection', (...[, , connectionHandle]) => {
+        sent.push(server.send({ data: Uint8Array.of(8) }, connectionHandle));
+      });
+      client.on('message', ({ data }) => {
+        expect([...new Uint8Array(data as ArrayBuffer)]).toEqual([8]);
+        expect(client.isOpen()).toBe(true);
+        opened += 1;
+
+        if (closedBeforeCancel) {
+          closing.push(client.disconnect());
+          expect(client.isClosed()).toBe(true);
+        }
+
+        cancelling.abort();
+      });
+      const cancelled: unknown = await client
+        .reconnect({ signal: cancelling.signal, maxAttempts: 1 })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+      await Promise.all([...sent, ...closing]);
+      await turn();
+
+      expect(cancelled).toBeInstanceOf(CancelError);
+      expect(cancelled).toHaveProperty('message', 'the reconnection was cancelled');
+      expect((cancelled as CancelError).cause).toBe(cancelling.signal.reason);
+      expect(opened).toBe(1);
+      expect(client.isClosed()).toBe(true);
+      expect(client.socket).toBeNull();
+      expect(closedAtClient).toEqual([[true, false]]);
+      expect(closedAtServer).toEqual([false, true]);
+      expect(server.clients).toEqual([]);
+      expect(errors).toEqual([]);
+    }
+  });
+
   test('closes what its last attempt opened as its reconnection was cancelled', async () => {
     await using server = createMemoryTransportServer();
     await using client = createMemoryTransportClient({ server });
