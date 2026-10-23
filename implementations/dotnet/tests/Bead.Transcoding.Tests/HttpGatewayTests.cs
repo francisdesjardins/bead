@@ -31,6 +31,47 @@ public sealed class HttpGatewayTests
 {
     private const string Origin = "https://app.example";
 
+    [Fact]
+    public async Task Answers_a_call_whose_peer_closes_before_its_result_with_502_and_releases_its_place()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(memory, null) with
+        {
+            MaximumExchanges = 1,
+        });
+        var reported = ReportedBy(gateway);
+        var requests = 0;
+
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+
+            if (envelope?.Header is RequestHeader)
+            {
+                Interlocked.Increment(ref requests);
+                _ = memory.CloseConnection(connectionHandle);
+            }
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true }, Cancelled);
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
+
+        for (var index = 0; index < 2; index++)
+        {
+            using var request = Json("/api/Transcoding/echo", "{}");
+            using var answered = await client.SendAsync(request, Cancelled);
+
+            Assert.Equal(HttpStatusCode.BadGateway, answered.StatusCode);
+            Assert.Equal("application/problem+json", answered.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("{\"detail\":\"the connection closed\",\"status\":502,\"title\":\"Bad Gateway\",\"type\":\"about:blank\"}", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.False(answered.Headers.Contains("bead-refusal"));
+            await Until(() => { return memory.ConnectionHandles.Count == 0; });
+        }
+
+        Assert.Equal(2, requests);
+        Assert.Equal(2, reported.Count);
+    }
+
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     private static CancellationToken Cancelled

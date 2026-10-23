@@ -396,6 +396,48 @@ test('refuses a request with no Origin from a page of another site, and a naviga
   ).toBe(200);
 });
 
+test('answers a call whose peer closes before its result with 502 and releases its place', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    maximumExchanges: 1,
+    routes: HTTP_ROUTES,
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+
+    if (envelope?.kind === EnvelopeKind.REQUEST) {
+      requests += 1;
+      void memory.close(connectionHandle);
+    }
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+
+  for (let index = 0; index < 2; index += 1) {
+    const answered = await send(port, { body: '{}', path: '/api/Transcoding/echo' });
+
+    expect(answered).toMatchObject({
+      body: '{"detail":"the connection closed","status":502,"title":"Bad Gateway","type":"about:blank"}',
+      headers: { 'content-type': 'application/problem+json' },
+      status: 502,
+    });
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    await until(() => {
+      return memory.clients.length === 0;
+    });
+  }
+  expect(requests).toBe(2);
+  expect(reported).toHaveLength(2);
+});
+
 test('answers a failed stream request as a problem before writing any event', async () => {
   await using fixture = await startTranscoding({
     maximumConnections: 1,
