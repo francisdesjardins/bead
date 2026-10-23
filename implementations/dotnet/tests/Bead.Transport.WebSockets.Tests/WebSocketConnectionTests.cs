@@ -21,6 +21,10 @@ public sealed class WebSocketConnectionTests
 
         public int Aborts { get; private set; }
 
+        public Exception? AbortFailure { get; init; }
+
+        public bool IsCloseSent { get; init; }
+
         public override WebSocketCloseStatus? CloseStatus
         {
             get { return null; }
@@ -33,7 +37,7 @@ public sealed class WebSocketConnectionTests
 
         public override WebSocketState State
         {
-            get { return _state; }
+            get { return IsCloseSent && _state == WebSocketState.Open ? WebSocketState.CloseSent : _state; }
         }
 
         public override string? SubProtocol
@@ -51,6 +55,11 @@ public sealed class WebSocketConnectionTests
         {
             Aborts += 1;
             _state = WebSocketState.Aborted;
+
+            if (AbortFailure is { } reason)
+            {
+                throw reason;
+            }
         }
 
         public override Task CloseAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken)
@@ -176,5 +185,91 @@ public sealed class WebSocketConnectionTests
         Assert.Equal(WebSocketState.CloseSent, socket.State);
         Assert.Equal(0, socket.Aborts);
         Assert.False(connection.IsEndedHere);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Ends_a_read_without_delivering_data_once_the_socket_is_closed_or_closing(bool isClosing)
+    {
+        using var socket = new HeldWebSocket { IsCloseSent = isClosing };
+        var connection = ConnectionOf(socket, false);
+        var messages = new List<TransportMessage>();
+
+        socket.Incoming.Enqueue(([1, 2], true));
+
+        if (!isClosing)
+        {
+            socket.Dispose();
+        }
+
+        await connection.Read(messages.Add).WaitAsync(Patience, TestContext.Current.CancellationToken);
+        await connection.Send(new byte[] { 3 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+        Assert.Empty(messages);
+        Assert.Empty(socket.Sent);
+        Assert.Equal(0, socket.Aborts);
+        Assert.Equal(0, connection.UnsentBytes);
+        Assert.False(connection.IsEndedHere);
+    }
+
+    [Fact]
+    public async Task Settles_a_send_after_its_queue_bound_drops_the_socket_without_aborting_twice()
+    {
+        using var socket = new HeldWebSocket();
+        var connection = ConnectionOf(socket, true);
+
+        try
+        {
+            await connection.Send(new byte[65]).WaitAsync(Patience, TestContext.Current.CancellationToken);
+            await connection.Send(new byte[] { 1 }).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+            Assert.Empty(socket.Sent);
+            Assert.Equal(1, socket.Aborts);
+            Assert.Equal(0, connection.UnsentBytes);
+            Assert.True(connection.IsEndedHere);
+            Assert.False(connection.IsTooBig);
+            Assert.Equal("what waits for its socket would pass maximumUnsentBytes, 64 bytes", connection.Dropped);
+        }
+        finally
+        {
+            connection.End();
+        }
+    }
+
+    [Theory]
+    [InlineData("websocket")]
+    [InlineData("disposed")]
+    [InlineData("invalid")]
+    [InlineData("io")]
+    public async Task Settles_a_quiet_close_when_its_socket_throws_during_abort(string kind)
+    {
+        var failure = kind switch
+        {
+            "websocket" => (Exception)new WebSocketException("the socket breaks during abort"),
+            "disposed" => new ObjectDisposedException("socket"),
+            "invalid" => new InvalidOperationException("the socket cannot abort"),
+            "io" => new IOException("the socket breaks during abort"),
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        using var socket = new HeldWebSocket { AbortFailure = failure };
+        var connection = new WebSocketConnection(socket, (64, TimeSpan.FromMilliseconds(1)));
+
+        try
+        {
+            // the peer never answers: the platform close timeout expires, without a competing end
+            await connection.CloseQuietly(WebSocketCloseStatus.NormalClosure).WaitAsync(Patience, TestContext.Current.CancellationToken);
+
+            Assert.Equal(WebSocketState.Aborted, socket.State);
+            Assert.Equal(1, socket.Aborts);
+            Assert.True(connection.IsEndedHere);
+            Assert.False(connection.IsTooBig);
+            Assert.Null(connection.Dropped);
+            Assert.Equal(0, connection.UnsentBytes);
+        }
+        finally
+        {
+            connection.End();
+        }
     }
 }
