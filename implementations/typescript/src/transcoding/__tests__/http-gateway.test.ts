@@ -1664,6 +1664,34 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+test('leaves a response whose application sends its headers before the gateway answers', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        response.writeHead(202, { 'x-mounted': 'yes' });
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  let drawn = 0;
+
+  fixture.memory.on('connection', () => {
+    drawn += 1;
+  });
+  const answered = await send(fixture.port, { method: 'GET', path: '/v1/books/2' });
+
+  expect(answered.status).toBe(202);
+  expect(answered.headers['x-mounted']).toBe('yes');
+  expect(answered.headers['content-type']).toBeUndefined();
+  expect(answered.body).toBe('');
+  expect(drawn).toBe(1);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return fixture.memory.clients.length === 0;
+  });
+});
+
 test('drops a late notification after an unreadable notification starts ending its stream', async () => {
   const firstWritten = Promise.withResolvers<void>();
   const chunks: string[] = [];

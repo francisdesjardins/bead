@@ -1621,6 +1621,52 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Leaves_a_response_whose_application_sends_its_headers_before_the_gateway_answers()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var reported = ReportedBy(gateway);
+        var drawn = 0;
+
+        service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
+        var builder = WebApplication.CreateSlimBuilder();
+
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseKestrel((kestrel) =>
+        {
+            kestrel.Listen(IPAddress.Loopback, 0);
+        });
+        await using var application = builder.Build();
+
+        application.Run(async (context) =>
+        {
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+            context.Response.Headers["x-mounted"] = "yes";
+            await context.Response.StartAsync(Cancelled);
+            await gateway.Answer(context);
+        });
+        await application.StartAsync(Cancelled);
+
+        try
+        {
+            using var client = new HttpClient { BaseAddress = new Uri(application.Urls.First()) };
+            using var answered = await client.GetAsync(new Uri("/v1/books/2", UriKind.Relative), Cancelled);
+
+            Assert.Equal(HttpStatusCode.Accepted, answered.StatusCode);
+            Assert.Equal("yes", answered.Headers.GetValues("x-mounted").Single());
+            Assert.Null(answered.Content.Headers.ContentType);
+            Assert.Equal("", await answered.Content.ReadAsStringAsync(Cancelled));
+            Assert.Equal(1, drawn);
+            Assert.Empty(reported);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+        }
+        finally
+        {
+            await application.StopAsync(Cancelled);
+        }
+    }
+
+    [Fact]
     public async Task Drops_a_late_notification_after_an_unreadable_notification_starts_ending_its_stream()
     {
         await using var service = await TranscodingService.Start();
@@ -1797,6 +1843,7 @@ public sealed class HttpGatewayTests
 
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Writes += 1;
 
             if (HoldFailure
