@@ -626,6 +626,60 @@ public sealed class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Drops_an_upgrade_disposed_by_its_provider_completion_callback_before_it_keeps_a_connection()
+    {
+        await using var client = new WebSocketTransportClient();
+        var closes = ClosesOf(client);
+        var errors = new List<Exception>();
+        Task? disposing = null;
+        ReadyState? stateAtCompletion = null;
+        CancellationTokenRegistration completing = default;
+
+        client.Error += errors.Add;
+
+        try
+        {
+            var failure = await Assert.ThrowsAsync<WebSocketException>(() =>
+            {
+                return client.Connect(Target with
+                {
+                    CredentialProvider = (token) =>
+                    {
+                        completing = token.Register(() =>
+                        {
+                            stateAtCompletion = client.ReadyState;
+                            disposing = client.DisposeAsync().AsTask();
+                        });
+
+                        return ValueTask.FromResult(Bearer);
+                    },
+                }, Cancelled).WaitAsync(Patience, Cancelled);
+            });
+
+            Assert.Equal("the transport client was disposed as it connected", failure.Message);
+            Assert.Equal(WebSocketError.InvalidState, failure.WebSocketErrorCode);
+            Assert.Equal(ReadyState.Connecting, stateAtCompletion);
+            Assert.NotNull(disposing);
+            await disposing.WaitAsync(Patience, Cancelled);
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+            var handle = await Next(_connections);
+            Assert.Equal((false, handle), await Next(_closes));
+            Assert.Empty(_server.Clients);
+            Assert.False(closes.Reader.TryRead(out _));
+            Assert.Empty(errors);
+
+            await client.Connect(Target, Cancelled);
+            await client.CloseConnection(new TransportDisconnectOptions { IsQuick = true });
+            Assert.Equal((true, true), await Next(closes));
+            Assert.Equal(ReadyState.Closed, client.ReadyState);
+        }
+        finally
+        {
+            await completing.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task DisposeAsync_while_connecting_fails_the_connect_ending_closed_and_closes_its_socket()
     {
         using var listener = new Listener(IPAddress.Loopback);
