@@ -633,7 +633,7 @@ export const createHTTPTransportClient = (
           const url = `${secured ? 'https' : 'http'}://${authority}:${String(port)}${pathname.replace(/^\/?(.*)/u, '/$1')}`;
 
           isSecure = isSecureUrl(url);
-          const attempt = new AbortController();
+          const attempt = { controller: new AbortController(), isDisposed: false };
           let connection: IDrawn | undefined;
           let opened: IDrawn;
 
@@ -644,7 +644,10 @@ export const createHTTPTransportClient = (
                   setReadyStateConnecting(client);
                 }
 
-                rejectConnect = reject;
+                rejectConnect = (reason) => {
+                  attempt.isDisposed = true;
+                  reject(reason);
+                };
 
                 fetchImpl(url, {
                   headers: {
@@ -653,7 +656,7 @@ export const createHTTPTransportClient = (
                   },
                   method: 'POST',
                   redirect: 'manual',
-                  signal: attempt.signal,
+                  signal: attempt.controller.signal,
                 }).then(
                   (response) => {
                     const connectionToken = response.headers.get(CONNECTION_TOKEN_HEADER);
@@ -709,10 +712,14 @@ export const createHTTPTransportClient = (
               },
               { clock: client.clock, signal, timeout }
             );
+
+            if (attempt.isDisposed) {
+              throw new ConnectError('the transport client was disposed as it connected');
+            }
           } catch (reason) {
             // given up — timed out, cancelled, disposed — as it came: the connection drawn meanwhile
             // is let go, and the server told
-            attempt.abort();
+            attempt.controller.abort();
 
             if (connection !== undefined) {
               release(connection);
