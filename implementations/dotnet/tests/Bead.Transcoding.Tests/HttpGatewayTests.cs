@@ -1621,6 +1621,78 @@ public sealed class HttpGatewayTests
     }
 
     [Fact]
+    public async Task Waits_for_a_stream_response_to_drain_before_writing_its_next_event()
+    {
+        await using var service = await TranscodingService.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldResponseBody();
+        var context = new DefaultHttpContext();
+        var reported = ReportedBy(gateway);
+
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.Headers.Accept = "text/event-stream";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/watch";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.Writing.Task.WaitAsync(Patience, Cancelled);
+            var notifying = service.Watched(2);
+
+            Assert.Equal(1, body.Writes);
+            body.Released.TrySetResult();
+            await notifying.WaitAsync(Patience, Cancelled);
+            await body.SecondWritten.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal("event: result\nid: 1\ndata: {}\n\nid: 2\ndata: {\"remaining\":2}\n\n", Encoding.UTF8.GetString(body.ToArray()));
+            Assert.Equal(2, body.Writes);
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
+    private sealed class HeldResponseBody : MemoryStream
+    {
+        public TaskCompletionSource Writing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource SecondWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Writes { get; private set; }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Writes += 1;
+
+            if (Writes == 1)
+            {
+                Writing.TrySetResult();
+                await Released.Task.WaitAsync(cancellationToken);
+            }
+
+            await base.WriteAsync(buffer, cancellationToken);
+
+            if (Writes == 2)
+            {
+                SecondWritten.TrySetResult();
+            }
+        }
+    }
+
+    [Fact]
     public async Task Writes_a_comment_on_a_quiet_stream_each_heartbeat_on_its_clock_and_drops_one_past_maximumUnsentBytes()
     {
         var clock = new FakeTimeProvider();

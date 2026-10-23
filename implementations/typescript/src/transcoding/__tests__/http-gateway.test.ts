@@ -1664,6 +1664,74 @@ test('ends a stream whose notification its stock library refuses with 502 as its
   expect(reported).toHaveLength(1);
 });
 
+test('waits for a stream response to drain before writing its next event', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  let drain: (() => void) | undefined;
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+        const on = response.on.bind(response);
+
+        response.on = (event, listener) => {
+          const listening = on(event, listener);
+
+          if (event === 'drain') {
+            waiting.resolve();
+          }
+
+          return listening;
+        };
+
+        response.write = (chunk: Uint8Array): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          const isTaken = write(chunk);
+
+          if (chunks.length === 1) {
+            drain = () => {
+              response.emit('drain');
+            };
+            return false;
+          }
+
+          return isTaken;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    const notifying = fixture.watched(2);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(drain).toBeDefined();
+    drain?.();
+    await notifying;
+    expect(chunks).toEqual([
+      'event: result\nid: 1\ndata: {}\n\n',
+      'id: 2\ndata: {"remaining":2}\n\n',
+    ]);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
 test('writes a comment on a quiet stream each heartbeat on its clock, and drops one past maximumUnsentBytes', async () => {
   const watch = {
     body: '{}',
