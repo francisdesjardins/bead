@@ -1783,6 +1783,78 @@ test('waits for a stream response to drain before writing its next event', async
   }
 });
 
+test('releases a stream closed while its response waits for drainage', async () => {
+  const waiting = Promise.withResolvers<void>();
+  const released = Promise.withResolvers<void>();
+  const chunks: string[] = [];
+  const clock = createTestClock();
+  await using fixture = await startTranscoding({
+    clock,
+    heartbeat: 1_000,
+    createServer: (listener) => {
+      return createNodeServer((request, response) => {
+        const write = response.write.bind(response);
+        const on = response.on.bind(response);
+        let isWaiting = false;
+
+        response.on = (event, listener) => {
+          if (event === 'drain') {
+            isWaiting = true;
+          }
+
+          if (event === 'close' && isWaiting) {
+            const listening = on(event, () => {
+              Reflect.apply(listener, response, []);
+              released.resolve();
+            });
+
+            waiting.resolve();
+
+            return listening;
+          }
+
+          return on(event, listener);
+        };
+        response.write = (chunk: Uint8Array): boolean => {
+          chunks.push(new TextDecoder().decode(chunk));
+          write(chunk);
+
+          return false;
+        };
+        listener(request, response);
+      });
+    },
+  });
+  const reported = reportedBy(fixture.gateway);
+  const socket = opened(
+    fixture.port,
+    octetsOf(fixture.port, {
+      body: '{}',
+      lines: [
+        'POST /api/Transcoding/watch HTTP/1.1',
+        'content-type: application/json',
+        'accept: text/event-stream',
+      ],
+    })
+  );
+
+  try {
+    await waiting.promise;
+    socket.destroy();
+    await released.promise;
+    await until(() => {
+      return fixture.memory.clients.length === 0;
+    });
+    await fixture.watched(2);
+    await clock.tickAsync(1_000);
+
+    expect(chunks).toEqual(['event: result\nid: 1\ndata: {}\n\n']);
+    expect(reported).toEqual([]);
+  } finally {
+    socket.destroy();
+  }
+});
+
 test('writes a comment on a quiet stream each heartbeat on its clock, and drops one past maximumUnsentBytes', async () => {
   const watch = {
     body: '{}',

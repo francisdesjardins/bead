@@ -1729,6 +1729,56 @@ public sealed class HttpGatewayTests
         }
     }
 
+    [Fact]
+    public async Task Releases_a_stream_closed_while_its_response_waits_for_drainage()
+    {
+        await using var service = await TranscodingService.Start();
+        var clock = new FakeTimeProvider();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null) with
+        {
+            Clock = clock,
+            Heartbeat = TimeSpan.FromSeconds(1),
+        });
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        using var body = new HeldResponseBody();
+        var context = new DefaultHttpContext();
+        var reported = ReportedBy(gateway);
+
+        context.Request.Method = "POST";
+        context.Request.Host = new HostString("127.0.0.1");
+        context.Request.ContentType = "application/json";
+        context.Request.Headers.Accept = "text/event-stream";
+        context.Request.ContentLength = 2;
+        context.Request.Body = new MemoryStream("{}"u8.ToArray());
+        context.RequestAborted = cancelling.Token;
+        context.Features.Get<IHttpRequestFeature>()!.RawTarget = "/api/Transcoding/watch";
+        context.Response.Body = body;
+        var serving = gateway.Answer(context);
+
+        try
+        {
+            await body.Writing.Task.WaitAsync(Patience, Cancelled);
+            await cancelling.CancelAsync();
+            var aborted = await body.Aborted.Task.WaitAsync(Patience, Cancelled);
+
+            Assert.Equal(cancelling.Token, aborted);
+            await serving.WaitAsync(Patience, Cancelled);
+            await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
+            await service.Watched(2);
+            clock.Advance(TimeSpan.FromSeconds(1));
+
+            Assert.Equal(1, body.Writes);
+            Assert.Empty(body.ToArray());
+            Assert.Empty(reported);
+        }
+        finally
+        {
+            body.Released.TrySetResult();
+            await cancelling.CancelAsync();
+            await serving.WaitAsync(Patience, Cancelled);
+        }
+    }
+
     private sealed class HeldResponseBody : MemoryStream
     {
         public bool HoldFailure { get; init; }
@@ -1738,6 +1788,8 @@ public sealed class HttpGatewayTests
         public TaskCompletionSource FirstWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource Released { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<CancellationToken> Aborted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public TaskCompletionSource SecondWritten { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -1752,7 +1804,15 @@ public sealed class HttpGatewayTests
                 : Writes == 1)
             {
                 Writing.TrySetResult();
-                await Released.Task.WaitAsync(cancellationToken);
+                try
+                {
+                    await Released.Task.WaitAsync(cancellationToken);
+                }
+                catch (OperationCanceledException reason)
+                {
+                    Aborted.TrySetResult(reason.CancellationToken);
+                    throw;
+                }
             }
 
             await base.WriteAsync(buffer, cancellationToken);
