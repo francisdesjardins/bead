@@ -382,6 +382,38 @@ public sealed class CredentialResolverTests
     }
 
     [Fact]
+    public async Task Starts_no_key_set_ask_for_a_call_whose_signal_is_cancelled_already()
+    {
+        var clock = new FakeTimeProvider(Start);
+        var keySet = new RecordingKeySet(SetIssuer);
+        var resolver = ResolverOf(new Credentials { Audience = Audience, KeySet = keySet.KeySet }, clock);
+        var named = Credential.Jwt(SignedOf((Second, "set-1"), ClaimsOf(SetIssuer)));
+        using var cancelling = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+
+        await cancelling.CancelAsync();
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        {
+            return ResolvedOn((resolver, named), cancelling.Token);
+        });
+
+        Assert.Equal(cancelling.Token, cancelled.CancellationToken);
+        Assert.Empty(keySet.Asks);
+
+        var next = ResolvedOf((resolver, named));
+        var ask = Assert.Single(keySet.Asks);
+
+        Assert.Equal(SetIssuer, ask.Issuer);
+        Assert.False(ask.Signal.IsCancellationRequested);
+        ask.Settle.SetResult([SetKeyOf((Second, "set-1"))]);
+
+        var session = await next;
+
+        Assert.Equal((SetIssuer, "grace"), (session?.Identifier?.Issuer, session?.Identifier?.Sub));
+        Assert.Single(keySet.Asks);
+    }
+
+    [Fact]
     public async Task Lets_a_call_s_cancel_end_its_own_wait_never_the_ask_the_others_wait_on()
     {
         var clock = new FakeTimeProvider(Start);
