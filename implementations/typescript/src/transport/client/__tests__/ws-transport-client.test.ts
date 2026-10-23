@@ -1130,6 +1130,76 @@ test.describe('WSTransportClient, what it carries', () => {
   const [[, TrackedGlobal], [, TrackedWs]] = IMPLEMENTATIONS;
   const Ws = TrackedWs as unknown as IWebSocketConstructor;
 
+  test('drops an upgrade disposed by its provider completion callback before it keeps a connection', async () => {
+    const server = await startServer();
+    const client = createWSTransportClient({ WebSocket: Ws });
+    const closes: boolean[][] = [];
+    const errors: Error[] = [];
+    const serverCloses: Promise<unknown[]>[] = [];
+    const completionStates: boolean[] = [];
+
+    server.on('connection', (socket) => {
+      serverCloses.push(once(socket, 'close'));
+    });
+    client.on('close', (...flags) => {
+      closes.push(flags);
+    });
+    client.on('error', (error) => {
+      errors.push(error);
+    });
+
+    try {
+      const failure: unknown = await client
+        .connect({
+          host,
+          port: portOf(server),
+          credentialProvider: ({ signal }) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                completionStates.push(client.isConnecting());
+                drop(client);
+              },
+              { once: true }
+            );
+
+            return BEARER;
+          },
+        })
+        .catch((reason: unknown) => {
+          return reason;
+        });
+
+      expect(failure).toBeInstanceOf(ConnectError);
+      expect(failure).toMatchObject({ message: 'closed as it opened' });
+      expect([completionStates, client.isClosed(), client.socket, closes, errors]).toEqual([
+        [true],
+        true,
+        null,
+        [],
+        [],
+      ]);
+      await Promise.all(serverCloses);
+      expect([serverCloses.length, server.clients.size]).toEqual([1, 0]);
+
+      await client.connect({ host, port: portOf(server) });
+      expect(client.isOpen()).toBe(true);
+      await client.disconnect({ isQuick: true });
+      await Promise.all(serverCloses);
+
+      expect([client.isClosed(), closes, errors, server.clients.size]).toEqual([
+        true,
+        [[true, true]],
+        [],
+        0,
+      ]);
+    } finally {
+      drop(client);
+      await stopServer(server);
+      await allClosed();
+    }
+  });
+
   // the Authorization lines of each upgrade `hearing` took, as they came
   const upgradesOf = (hearing: Awaited<ReturnType<typeof startRefusing>>) => {
     const heard: string[][] = [];
