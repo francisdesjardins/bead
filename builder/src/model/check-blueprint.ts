@@ -321,7 +321,13 @@ export const checkBlueprint = (
       } else if (
         C_SHARP_PROCEDURE_NAMES.has(rpcName) ||
         C_SHARP_OBJECT_MEMBERS.has(rpcName) ||
-        classNames.has(rpcName)
+        classNames.has(rpcName) ||
+        service.procedures.some((candidate) => {
+          return (
+            candidate.procedureKind === 'notifies' &&
+            rpcName === `Subscribe${upperFirst(candidate.procedureName)}`
+          );
+        })
       ) {
         report('NAME_TARGET', {
           at: `${procedurePlace}/procedureName`,
