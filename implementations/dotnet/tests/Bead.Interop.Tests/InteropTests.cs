@@ -141,7 +141,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     // the credential given
     private async Task<Connected> ConnectedOver(string transport, string? credential = null)
     {
-        var (port, httpPort) = await server.Ports();
+        var (port, httpPort, _) = await server.Ports();
 
         if (transport == WebSocket)
         {
@@ -692,10 +692,10 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
     {
         private readonly SemaphoreSlim _starting = new(1, 1);
         private Process? _process;
-        private (int Port, int HttpPort) _ports;
+        private (int Port, int HttpPort, int GatewayPort) _ports;
 
         /// <summary>The ports it listens on, over WebSocket and over HTTP, once started.</summary>
-        public async Task<(int Port, int HttpPort)> Ports()
+        public async Task<(int Port, int HttpPort, int GatewayPort)> Ports()
         {
             await _starting.WaitAsync(TestContext.Current.CancellationToken);
 
@@ -752,7 +752,7 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
             return Path.Combine(Root(), "implementations", "typescript");
         }
 
-        private static async Task<(Process Process, (int Port, int HttpPort) Ports)> Start()
+        private static async Task<(Process Process, (int Port, int HttpPort, int GatewayPort) Ports)> Start()
         {
             if (!CanStartTypeScript.Value)
             {
@@ -774,9 +774,9 @@ public sealed class InteropTests(InteropTests.TypeScriptServer server) : IClassF
                 {
                     using var document = JsonDocument.Parse(line);
 
-                    if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort))
+                    if (document.RootElement.TryGetProperty("port", out var port) && document.RootElement.TryGetProperty("httpPort", out var httpPort) && document.RootElement.TryGetProperty("gatewayPort", out var gatewayPort))
                     {
-                        return (process, (port.GetInt32(), httpPort.GetInt32()));
+                        return (process, (port.GetInt32(), httpPort.GetInt32(), gatewayPort.GetInt32()));
                     }
                 }
                 catch (JsonException)

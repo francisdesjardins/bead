@@ -143,6 +143,37 @@ gateway: a pair passes when its client exits 0 and what it writes, then the gate
 to its standard error, and the server only the line of its nameless gateway call. CI's `examples` job runs all of it, on Node 26 and on
 24.9, the floor the TypeScript half declares.
 
+## Calling with the generated HTTP client
+
+Use the `gateway` port the server prints, on either side. Every output has `http: true`, so its
+route table also exports `HelloHttpClient`. In the TypeScript project, a source file calls it with
+fetch:
+
+```ts
+import { HelloHttpClient } from '#hello/http';
+
+const hello = new HelloHttpClient({ url: 'http://127.0.0.1:8080' });
+const answer = await hello.sayHello.call({ name: 'Ada' });
+console.log(answer.greeting);
+```
+
+In the C# project, the same call uses HttpClient through `Bead.Transcoding`:
+
+```csharp
+using Hello.V1;
+
+using var hello = new HelloHttpClient(new Uri("http://127.0.0.1:8080"));
+var answer = await hello.SayHello(new SayHelloRequest { Name = "Ada" });
+Console.WriteLine(answer.Greeting);
+```
+
+Replace `8080` with that gateway port. Each call uses its default POST route, and a problem throws
+`FailureError` or `FailureException` with its Bead code and scope. A notifying procedure exposes
+`hello.countDown.subscribe({ from: 3 })` or `hello.SubscribeCountDown(new CountDownRequest { From = 3 })`,
+an async sequence of its result then notifications. This service's `greeted` hook refuses that
+HTTP subscription: each exchange has its own Bead connection, and a greeting on another exchange
+sets no session on it. A name must be given to `sayHello`, since HTTP answers no `askName` command.
+
 ## What a project outside this repository writes instead
 
 The example reaches each runtime from its source, as no runtime is published: the TypeScript half

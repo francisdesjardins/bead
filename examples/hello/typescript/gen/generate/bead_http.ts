@@ -2,7 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import { GENERATED_CODE_SUPPORTS_VERSION_5, routeOf } from "@francisdesjardins/bead/transcoding";
+import type { IHTTPCallerOptions, IHTTPRequester } from "@francisdesjardins/bead/transcoding";
+import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, routeOf } from "@francisdesjardins/bead/transcoding";
 import { HelloProcedures } from "./hello/v1/hello_bead.ts";
 import { CountDownRequestSchema, CountDownResponseSchema, SayHelloRequestSchema, SayHelloResponseSchema, TickSchema } from "./hello/v1/hello_pb.ts";
 
@@ -29,7 +30,29 @@ export const HTTP_ROUTES = Object.freeze([
       { method: 'POST', template: '/api/Hello/countDown', body: '*' },
     ],
   }),
-]);
+] as const);
+
+/**
+ * The HTTP client of Hello, over fetch, on its default routes.
+ */
+export class HelloHttpClient {
+  /**
+   * Calls sayHello; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly sayHello: IHTTPRequester<typeof HTTP_ROUTES[0]>;
+  /**
+   * Calls countDown; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly countDown: IHTTPRequester<typeof HTTP_ROUTES[1]>;
+  /**
+   * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
+   */
+  public constructor(options: IHTTPCallerOptions) {
+    const caller = createHTTPCaller(HTTP_ROUTES, options);
+    this.sayHello = httpRequesterOf(HTTP_ROUTES[0], caller);
+    this.countDown = httpRequesterOf(HTTP_ROUTES[1], caller);
+  }
+}
 
 /**
  * The OpenAPI document beadc wrote of the blueprint, byte for byte, which a gateway serves at /openapi.json (transcoding 11.1).

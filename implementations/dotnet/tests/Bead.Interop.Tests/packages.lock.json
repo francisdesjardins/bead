@@ -179,6 +179,20 @@
           "Google.Protobuf": "[3.36.2, )"
         }
       },
+      "bead.transcoding": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Core": "[0.6.0, )",
+          "Bead.Protobuf": "[0.6.0, )",
+          "Google.Protobuf": "[3.36.2, )"
+        }
+      },
+      "bead.transcoding.http": {
+        "type": "Project",
+        "dependencies": {
+          "Bead.Transcoding": "[0.6.0, )"
+        }
+      },
       "bead.transport.http": {
         "type": "Project",
         "dependencies": {

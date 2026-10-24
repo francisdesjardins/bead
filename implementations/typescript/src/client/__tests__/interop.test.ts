@@ -21,6 +21,8 @@ import { offerInteropClient } from '../../../interop/handlers';
 import { PAYLOAD_CODECS } from '../../router/shared/payloads';
 import type { FetchLike } from '../../transport/client/types';
 import { noop } from '../../transport/shared/noop';
+import { TranscodingHttpClient } from '../../transcoding/__tests__/generated/bead_http';
+import { startTranscoding } from '../../transcoding/__tests__/transcoding-service';
 import { createHTTPClient, type HTTPClient } from '../http-client';
 import {
   CancelError,
@@ -34,8 +36,9 @@ import {
 
 // interfaces
 
-/** Where the C# server listens: over WebSocket, and over HTTP. */
+/** Where the C# server listens: over WebSocket, HTTP and the HTTP/JSON gateway. */
 interface IPorts {
+  gatewayPort: number;
   httpPort: number;
   port: number;
 }
@@ -146,10 +149,16 @@ const fetchInOrder = (): FetchLike => {
 /** The ports a line of the server says it listens on: `{"port":n,"httpPort":m}`; none for any other line. */
 const portsOfLine = (line: string): IPorts | undefined => {
   try {
-    const { httpPort, port } = JSON.parse(line) as { httpPort?: unknown; port?: unknown };
+    const { gatewayPort, httpPort, port } = JSON.parse(line) as {
+      gatewayPort?: unknown;
+      httpPort?: unknown;
+      port?: unknown;
+    };
 
-    return typeof port === 'number' && typeof httpPort === 'number'
-      ? { httpPort, port }
+    return typeof port === 'number' &&
+      typeof httpPort === 'number' &&
+      typeof gatewayPort === 'number'
+      ? { gatewayPort, httpPort, port }
       : undefined;
   } catch {
     return undefined;
@@ -215,6 +224,74 @@ test.describe('the C# server of the interop service', () => {
 
     server.stdin.end();
     await exited;
+  });
+
+  test('calls the other gateway with protobuf JSON and every native encoding', async () => {
+    const client = new TranscodingHttpClient({
+      url: `http://${HOST}:${String(ports.gatewayPort)}`,
+    });
+
+    expect(await client.getBook.call({ name: 'shelves/a/books/b', revision: 7n })).toMatchObject({
+      name: 'shelves/a/books/b',
+      pages: 7n,
+      title: 'A tale',
+    });
+    expect(await client.text.call('Ada\r\nJosé')).toBe('Ada\r\nJosé');
+    expect(await client.raw.call(Uint8Array.of(0, 127, 255))).toEqual(Uint8Array.of(0, 127, 255));
+    expect(await client.json.call({ z: [true, null], a: 'José' })).toEqual({
+      a: 'José',
+      z: [true, null],
+    });
+  });
+
+  test('reads the other gateway problems and presents its authorization', async () => {
+    const client = new TranscodingHttpClient({
+      url: `http://${HOST}:${String(ports.gatewayPort)}`,
+    });
+
+    await expect(client.fail.call({ detail: 'by choice' })).rejects.toMatchObject({
+      code: 1,
+      scope: FailureScope.APPLICATION,
+      detail: 'by choice',
+    });
+    await expect(client.whoAmI.call({})).rejects.toMatchObject({
+      code: ProtocolCode.SESSION_REQUIRED,
+      scope: FailureScope.PROTOCOL,
+    });
+    expect(await client.whoAmI.call({}, { authorization: 'Bearer good' })).toMatchObject({
+      session: 'ada',
+    });
+  });
+
+  test('reads the other gateway result notifications and ending failure', async () => {
+    const client = new TranscodingHttpClient({
+      url: `http://${HOST}:${String(ports.gatewayPort)}`,
+    });
+    const received: { kind: string; value: number }[] = [];
+
+    await expect(async () => {
+      for await (const entry of client.ticks.subscribe({ from: 2 })) {
+        received.push({
+          kind: entry.kind,
+          value: entry.kind === 'result' ? entry.value.ticks : entry.value.remaining,
+        });
+      }
+    }).rejects.toMatchObject({ code: 2, scope: FailureScope.APPLICATION });
+    expect(received).toEqual([
+      { kind: 'result', value: 2 },
+      { kind: 'notification', value: 1 },
+      { kind: 'notification', value: 0 },
+    ]);
+  });
+
+  test('compares the gateways OpenAPI documents byte for byte', async () => {
+    await using local = await startTranscoding();
+    const remote = await fetch(`http://${HOST}:${String(ports.gatewayPort)}/openapi.json`);
+    const own = await fetch(`http://${HOST}:${String(local.port)}/openapi.json`);
+
+    expect(remote.status).toBe(200);
+    expect(own.status).toBe(200);
+    expect(Buffer.from(await remote.arrayBuffer())).toEqual(Buffer.from(await own.arrayBuffer()));
   });
 
   for (const { carriesTransfers, create, label, portOf } of TRANSPORTS) {
