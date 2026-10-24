@@ -2,7 +2,8 @@
 // Do not edit: regenerate with beadc.
 // Messages: protoc-gen-es 2.16.0, for @bufbuild/protobuf 2.13.0 or later.
 
-import { GENERATED_CODE_SUPPORTS_VERSION_5, routeOf } from "../../routes";
+import type { IHTTPCallerOptions, IHTTPRequester } from "../../transcoding";
+import { createHTTPCaller, GENERATED_CODE_SUPPORTS_VERSION_5, httpRequesterOf, routeOf } from "../../transcoding";
 import { TranscodingProcedures } from "./transcoding_bead";
 import { AskResponseSchema, BookSchema, CancelsRequestSchema, CancelsResponseSchema, EdgesSchema, EverythingSchema, FailRequestSchema, GetBookRequestSchema, GetOperationRequestSchema, ListBooksRequestSchema, ListBooksResponseSchema, ListOperationsRequestSchema, ListOperationsResponseSchema, OperationSchema, RuledSchema, TickSchema, TicksRequestSchema, TicksResponseSchema, UpdateBookRequestSchema, WhoAmIResponseSchema } from "./transcoding_pb";
 import { EmptySchema } from "@bufbuild/protobuf/wkt";
@@ -199,7 +200,114 @@ export const HTTP_ROUTES = Object.freeze([
       { method: 'GET', template: '/api/Transcoding/cancels' },
     ],
   }),
-]);
+] as const);
+
+/**
+ * The HTTP client of Transcoding, over fetch, on its default routes.
+ */
+export class TranscodingHttpClient {
+  /**
+   * Calls echo; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly echo: IHTTPRequester<typeof HTTP_ROUTES[0]>;
+  /**
+   * Calls echoEdges; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly echoEdges: IHTTPRequester<typeof HTTP_ROUTES[1]>;
+  /**
+   * Calls getBook; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly getBook: IHTTPRequester<typeof HTTP_ROUTES[2]>;
+  /**
+   * Calls listBooks; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly listBooks: IHTTPRequester<typeof HTTP_ROUTES[3]>;
+  /**
+   * Calls updateBook; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly updateBook: IHTTPRequester<typeof HTTP_ROUTES[4]>;
+  /**
+   * Calls archiveBook; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly archiveBook: IHTTPRequester<typeof HTTP_ROUTES[5]>;
+  /**
+   * Calls listOperations; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly listOperations: IHTTPRequester<typeof HTTP_ROUTES[6]>;
+  /**
+   * Calls getOperation; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly getOperation: IHTTPRequester<typeof HTTP_ROUTES[7]>;
+  /**
+   * Calls judge; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly judge: IHTTPRequester<typeof HTTP_ROUTES[8]>;
+  /**
+   * Calls ticks; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly ticks: IHTTPRequester<typeof HTTP_ROUTES[9]>;
+  /**
+   * Calls watch; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly watch: IHTTPRequester<typeof HTTP_ROUTES[10]>;
+  /**
+   * Calls raw; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly raw: IHTTPRequester<typeof HTTP_ROUTES[11]>;
+  /**
+   * Calls text; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly text: IHTTPRequester<typeof HTTP_ROUTES[12]>;
+  /**
+   * Calls json; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly json: IHTTPRequester<typeof HTTP_ROUTES[13]>;
+  /**
+   * Calls fail; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly fail: IHTTPRequester<typeof HTTP_ROUTES[14]>;
+  /**
+   * Calls whoAmI; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly whoAmI: IHTTPRequester<typeof HTTP_ROUTES[15]>;
+  /**
+   * Calls ask; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly ask: IHTTPRequester<typeof HTTP_ROUTES[16]>;
+  /**
+   * Calls hang; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly hang: IHTTPRequester<typeof HTTP_ROUTES[17]>;
+  /**
+   * Calls cancels; subscribe reads its result and notifications where it notifies.
+   */
+  public readonly cancels: IHTTPRequester<typeof HTTP_ROUTES[18]>;
+  /**
+   * Its gateway URL, fetch and default authorization; each call may give its own or omit it.
+   */
+  public constructor(options: IHTTPCallerOptions) {
+    const caller = createHTTPCaller(HTTP_ROUTES, options);
+    this.echo = httpRequesterOf(HTTP_ROUTES[0], caller);
+    this.echoEdges = httpRequesterOf(HTTP_ROUTES[1], caller);
+    this.getBook = httpRequesterOf(HTTP_ROUTES[2], caller);
+    this.listBooks = httpRequesterOf(HTTP_ROUTES[3], caller);
+    this.updateBook = httpRequesterOf(HTTP_ROUTES[4], caller);
+    this.archiveBook = httpRequesterOf(HTTP_ROUTES[5], caller);
+    this.listOperations = httpRequesterOf(HTTP_ROUTES[6], caller);
+    this.getOperation = httpRequesterOf(HTTP_ROUTES[7], caller);
+    this.judge = httpRequesterOf(HTTP_ROUTES[8], caller);
+    this.ticks = httpRequesterOf(HTTP_ROUTES[9], caller);
+    this.watch = httpRequesterOf(HTTP_ROUTES[10], caller);
+    this.raw = httpRequesterOf(HTTP_ROUTES[11], caller);
+    this.text = httpRequesterOf(HTTP_ROUTES[12], caller);
+    this.json = httpRequesterOf(HTTP_ROUTES[13], caller);
+    this.fail = httpRequesterOf(HTTP_ROUTES[14], caller);
+    this.whoAmI = httpRequesterOf(HTTP_ROUTES[15], caller);
+    this.ask = httpRequesterOf(HTTP_ROUTES[16], caller);
+    this.hang = httpRequesterOf(HTTP_ROUTES[17], caller);
+    this.cancels = httpRequesterOf(HTTP_ROUTES[18], caller);
+  }
+}
 
 /**
  * The OpenAPI document beadc wrote of the blueprint, byte for byte, which a gateway serves at /openapi.json (transcoding 11.1).

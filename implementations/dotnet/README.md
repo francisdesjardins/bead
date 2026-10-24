@@ -128,6 +128,20 @@ It listens on its own port, or answers in the application's own Kestrel pipeline
 comes from a proxy in front. It serves the document at `/openapi.json`, byte for byte, with its
 `etag`; Swagger UI is the application's to serve.
 
+The same `BeadHttp.cs` exports `<Service>HttpClient`, built with the gateway origin as a `Uri`
+and optional `HttpCallerOptions` from `Bead.Transcoding`: `Handler`, default `Authorization` and
+`MaximumBodyBytes` (16,778,240). Its typed `<Procedure>(request, options)` methods call only the default
+POST routes; `Subscribe<Procedure>(request, options)` returns an async sequence of `HttpEvent`
+for a notifying procedure, its `IsResult` entry carrying `Result` first, then `Notification`.
+A problem throws `FailureException` with its code, scope and detail. A stream's failure throws
+too; an incomplete stream fails and never reconnects. Ending its iteration releases its response.
+`HttpCallOptions` takes `CancellationToken`, an `Authorization` override and `WithoutAuthorization`
+to omit any default. A credential destined off the machine in the clear fails
+`DestinationUnreachable` before encoding or dispatch, by spec 13.4's URL rule. The client owns its
+`HttpClient` and is disposed with `using`; its handler follows no redirect, and one given with
+`AllowAutoRedirect` true is refused at construction. The body bound applies to each unary answer
+and each event.
+
 ### The parts of the core, the manager and the HTTP server
 
 `RouterCore`, `ServiceManager` and `HttpTransportServer` are each built of parts: a private nested

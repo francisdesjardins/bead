@@ -2,8 +2,8 @@
   <!--
     HTTP/JSON transcoding's layer (decision 0037, spec/transcoding.md): http.proto's templates,
     a request bound from its route, Bead's own mapping of protobuf's JSON over each message's
-    descriptor, the problems a failure is answered with and the events a stream is written as. Pure:
-    no socket, no listener, which Bead.Transcoding.Http holds. What a route table of an output with
+    descriptor, the problems a failure is answered with, the events a stream is written as and the
+    HTTP caller a generated client delegates to. Bead.Transcoding.Http holds the listener. What a route table of an output with
     `http: true` names, HttpRoute and HttpPayload, is here. The TypeScript side's twin is
     @francisdesjardins/bead/transcoding.
   -->

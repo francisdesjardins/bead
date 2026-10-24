@@ -9,6 +9,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Generated HTTP clients on both sides: an output with `http: true` writes a typed
+  `<Service>HttpClient` beside its route table, over fetch or HttpClient, calling the default
+  routes with Bead's JSON mapping, reading problems as Bead failures and notifications as an
+  asynchronous event stream; credentials destined off the machine in the clear fail before
+  dispatch, redirects are refused, and a stream never reconnects automatically.
+
 - The demo answers its sign-up over HTTP and JSON: the internal demo mounts a gateway of beadc's
   route table on its public port, `POST /api/SignUp/signUp` and `/openapi.json`, and the page shows
   the same sign-up as a `curl` and the gateway's answer, a refusal as RFC 9457's problem, written
